@@ -21,7 +21,7 @@ import { fieldErrorMessage } from '@/lib/forms';
 import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/')({
-  head: () => ({ meta: [{ title: 'General · Settings · Logbird' }] }),
+  head: () => ({ meta: [{ title: 'General · Project settings · Logbird' }] }),
   staticData: { crumb: 'General' },
   component: GeneralSettings,
 });

@@ -25,7 +25,8 @@ export const keys = {
   me: ['me'] as const,
   projects: ['projects'] as const,
   project: (projectId: string) => ['projects', projectId] as const,
-  workspaceActivity: (range: string, q: string) => ['workspace-activity', range, q] as const,
+  /** Keyed by workspace: the session's active workspace can change in another tab, and answers never cross workspaces. */
+  workspaceActivity: (workspaceId: string, range: string, q: string) => ['workspace-activity', workspaceId, range, q] as const,
   workspaceSetup: ['workspace-setup'] as const,
   organization: ['organization'] as const,
 };
@@ -82,6 +83,18 @@ export const meQuery = () =>
       return api.me();
     },
     staleTime: 60_000,
+    retry: shouldRetry,
+  });
+
+/**
+ * The projects of one workspace, keyed by its id: the session's active workspace can change in another tab, and a list
+ * cached for the previous workspace must never answer for this one. Under `projects`, so creating or deleting a project
+ * (which invalidates `keys.projects`) refreshes it too.
+ */
+export const workspaceProjectsQuery = (workspaceId: string) =>
+  queryOptions({
+    queryKey: [...keys.projects, 'workspace', workspaceId] as const,
+    queryFn: ({ signal }) => api.projects.list(signal),
     retry: shouldRetry,
   });
 
@@ -266,9 +279,9 @@ export const viewsQuery = (projectId: string) =>
     retry: shouldRetry,
   });
 
-export const workspaceActivityQuery = (range: string, q: string) =>
+export const workspaceActivityQuery = (workspaceId: string, range: string, q: string) =>
   infiniteQueryOptions({
-    queryKey: keys.workspaceActivity(range, q),
+    queryKey: keys.workspaceActivity(workspaceId, range, q),
     queryFn: ({ pageParam, signal }) => {
       const r = resolveRange(range);
       return api.workspaceActivity({ from: r.from, to: r.to, q: q || undefined, cursor: pageParam, limit: PAGE_SIZE }, signal);
