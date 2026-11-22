@@ -33,9 +33,9 @@ import { useTheme } from '@logbird/ui/theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
-  Building2Icon,
   BookOpenIcon,
   BracesIcon,
+  Building2Icon,
   CheckIcon,
   ChevronsUpDownIcon,
   FolderPlusIcon,

@@ -234,7 +234,7 @@ function StepBody({ id, setup, projectId }: { id: SetupStepId; setup: ProjectSet
     case 'read_key':
       return <ReadKeyStep projectId={projectId} />;
     case 'teammate':
-      return <TeammateStep projectId={projectId} />;
+      return <TeammateStep />;
     default:
       return null;
   }
@@ -376,7 +376,7 @@ function ReadKeyStep({ projectId }: { projectId: string }) {
   );
 }
 
-function TeammateStep({ projectId }: { projectId: string }) {
+function TeammateStep() {
   const { org, pending } = useOrganization();
   return (
     <div className="flex flex-col gap-3">

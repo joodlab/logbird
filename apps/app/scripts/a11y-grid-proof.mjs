@@ -284,7 +284,7 @@ try {
   await page.keyboard.press('Escape');
 
   /* ---------------- Workspace Activity ---------------- */
-  await page.goto(`${BASE}/p/${projectId}/settings/activity`);
+  await page.goto(`${BASE}/workspace/activity`);
   await settle(page);
   const activityRows = await page.$$eval('[role="row"][data-index]', (r) => r.length);
   note('activity rows rendered', activityRows);
@@ -850,7 +850,7 @@ try {
   await settle(page);
   await axe(page, 'explorer desktop-dark');
   await sheetAxe('event-sheet desktop-dark');
-  await page.goto(`${BASE}/p/${projectId}/settings/activity`);
+  await page.goto(`${BASE}/workspace/activity`);
   await settle(page);
   await axe(page, 'activity desktop-dark');
   await screenAxe(`${BASE}/p/${projectId}`, 'overview desktop-dark');
