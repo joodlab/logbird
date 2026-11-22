@@ -108,7 +108,13 @@ jobs:
       - name: Record platform digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: printf '%s\n' "$DIGEST" > "${{ matrix.arch }}.txt"
+        shell: bash
+        run: |
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "The build returned no valid image digest" >&2
+            exit 1
+          fi
+          printf '%s\n' "$DIGEST" > "${{ matrix.arch }}.txt"
       - uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.role }}-${{ matrix.arch }}
@@ -166,11 +172,9 @@ jobs:
             sources+=("$IMAGE@$digest")
           done
 
-          tag_args=()
-          while IFS= read -r tag; do
-            tag_args+=(--tag "$tag")
-          done <<< "$TAGS"
-          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+          # Publish the exact version first. The moving aliases (X.Y, latest) only follow once the
+          # published index is verified, so a wrong index never reaches users who pull an alias.
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" "${sources[@]}"
 
           docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' > index.json
           digest=$(jq -er '.digest' index.json)
@@ -182,6 +186,24 @@ jobs:
           if [[ "$platforms" != "amd64,arm64" ]]; then
             echo "Expected linux/amd64 and linux/arm64 in $IMAGE:$VERSION, found: $platforms" >&2
             exit 1
+          fi
+
+          alias_args=()
+          version_tagged=false
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] && continue
+            if [[ "$tag" == "$IMAGE:$VERSION" ]]; then
+              version_tagged=true
+            else
+              alias_args+=(--tag "$tag")
+            fi
+          done <<< "$TAGS"
+          if [[ "$version_tagged" != true ]]; then
+            echo "The tag list does not contain $IMAGE:$VERSION" >&2
+            exit 1
+          fi
+          if (( ${#alias_args[@]} > 0 )); then
+            docker buildx imagetools create "${alias_args[@]}" "$IMAGE@$digest"
           fi
           printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$digest" > "image-${{ matrix.role }}.txt"
       - uses: actions/upload-artifact@v7
