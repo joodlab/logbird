@@ -4,7 +4,7 @@
  * "<isoFrom>..<isoTo>" window (what drag-to-zoom and the custom picker produce).
  */
 
-import { formatClock, formatMonthDay, localDayKey } from './format';
+import { formatClock, formatDate, formatMonthDay, localDayKey } from './format';
 
 export const RANGE_PRESETS = [
   { value: '15m', label: 'Last 15 minutes', short: '15m' },
@@ -81,9 +81,13 @@ export function rangeLabel(range: string): string {
     return `Last ${rel[1]} ${unit}${rel[1] === '1' ? '' : 's'}`;
   }
   const r = resolveRange(range);
+  // Years appear whenever the span leaves the current year, so a ten-year search never reads as one day.
+  const year = (ms: number) => localDayKey(ms).slice(0, 4);
+  const withYear = year(r.fromMs) !== year(r.toMs) || year(r.fromMs) !== year(Date.now());
+  const day = (ms: number) => (withYear ? formatDate(new Date(ms).toISOString()) : formatMonthDay(ms));
   return localDayKey(r.fromMs) === localDayKey(r.toMs)
-    ? `${formatMonthDay(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}`
-    : `${formatMonthDay(r.fromMs)} ${formatClock(r.fromMs)} – ${formatMonthDay(r.toMs)} ${formatClock(r.toMs)}`;
+    ? `${day(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}`
+    : `${day(r.fromMs)} ${formatClock(r.fromMs)} – ${day(r.toMs)} ${formatClock(r.toMs)}`;
 }
 
 export function rangeShortLabel(range: string): string {
@@ -99,14 +103,11 @@ export function previousWindow(range: string): { from: string; to: string } {
   return { from: new Date(r.fromMs - len).toISOString(), to: r.from };
 }
 
-/** How far ahead of its arrival an event's `occurredAt` may be (the ingest admission limit). */
-const MAX_FUTURE_MS = UNIT_MS.d;
-
 /**
- * Every timestamp a stored event can have: the retention window (plus a day of slack for the hourly purge) up to a
- * day ahead. Without a known retention it falls back to the ingest limit of 3650 days.
+ * Every timestamp ingest can admit, as of now: from 3650 days before arrival to a day after it (packages/clickhouse
+ * timestamp admission), with a day of slack on each side for clocks and the time since arrival. Used where a search
+ * must find every stored match, such as all children of an event.
  */
-export function allStoredRange(retentionDays?: number, now = Date.now()): string {
-  const days = retentionDays && retentionDays > 0 ? retentionDays + 1 : 3650;
-  return absoluteRange(now - days * UNIT_MS.d, now + MAX_FUTURE_MS);
+export function admittedRange(now = Date.now()): string {
+  return absoluteRange(now - 3651 * UNIT_MS.d, now + 2 * UNIT_MS.d);
 }

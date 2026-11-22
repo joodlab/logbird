@@ -37,12 +37,12 @@ import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
-import { eventQuery, operationQuery, projectQuery } from '@/lib/api/queries';
+import { eventQuery, operationQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import { actorAttributeHint, causedCount, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
 import { andQuery, formatExactTerm, formatTerm } from '@/lib/query-language';
-import { allStoredRange } from '@/lib/range';
+import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
 
 interface EventSheetProps {
@@ -215,35 +215,46 @@ const CHILD_PREVIEW = 5;
 /** Above this many events the drawer does not load the whole operation just to list children. */
 const CHILD_LOOKUP_MAX_OPERATION = 1000;
 
+/** Indent per causation level, capped so a deep chain stays readable in a narrow drawer. */
+const causationIndent = (depth: number) => Math.min(depth, 6) * 14;
+
+interface Children {
+  /** How many events this event caused: the stored count, or more when a fresher operation already shows more. */
+  total: number;
+  /** Up to CHILD_PREVIEW direct children, oldest first (empty when they could not be read from the operation). */
+  shown: AuditEvent[];
+  loading: boolean;
+}
+
 /**
- * Direct children of an event (events whose `context.parentEventId` is this event), read from its operation so the
- * operation page opens from the same cache. Children outside the operation, or in a very large one, are reached
- * through an explorer `parent:` search over everything since the event instead.
+ * Direct children of an event (events whose `context.parentEventId` is this event). The list is read from the event's
+ * operation, which the operation page shares through the cache. The count comes from the event detail (all stored
+ * history, any operation); when a successful, settled operation read shows more, the larger number wins and the
+ * detail is refreshed.
  */
-function ChildEvents({ detail, event: e, projectId, indent }: { detail: EventDetail; event: AuditEvent; projectId: string; indent: number }) {
+function useChildren(detail: EventDetail | undefined, e: AuditEvent, projectId: string | undefined): Children {
   const operationId = e.context.operationId;
-  const counted = causedCount(detail, e);
-  const lookup = Boolean(operationId) && detail.operationSize <= CHILD_LOOKUP_MAX_OPERATION;
-  const op = useQuery({ ...operationQuery(projectId, operationId ?? ''), enabled: lookup });
-  const project = useQuery(projectQuery(projectId));
+  const lookup = Boolean(projectId && detail && operationId) && (detail?.operationSize ?? Number.POSITIVE_INFINITY) <= CHILD_LOOKUP_MAX_OPERATION;
+  const op = useQuery({ ...operationQuery(projectId ?? '', operationId ?? ''), enabled: lookup });
   const queryClient = useQueryClient();
-  // Only a lookup that ran and succeeded counts: a disabled or failed query may still hold older cached data.
-  const loaded = lookup && op.isSuccess;
-  const loading = lookup && op.isPending;
-  const children = loaded ? directChildren(op.data, e.id) : [];
-  // The detail (cached longer) can lag behind a fresher operation: trust the larger number and refresh the detail.
-  const total = Math.max(counted, children.length);
-  const stale = children.length > counted;
+  const counted = detail ? causedCount(detail, e) : 0;
+  // A disabled or failed query may still hold older cached data: only a successful lookup counts.
+  const children = lookup && op.isSuccess ? directChildren(op.data, e.id) : [];
+  // While the operation revalidates, do not draw conclusions from it.
+  const settled = lookup && op.isSuccess && !op.isFetching;
+  const stale = settled && children.length > counted;
   useEffect(() => {
-    if (stale) queryClient.invalidateQueries({ queryKey: eventQuery(projectId, e.id).queryKey });
+    if (stale && projectId) queryClient.invalidateQueries({ queryKey: eventQuery(projectId, e.id).queryKey });
   }, [stale, queryClient, projectId, e.id]);
-  const shown = children.slice(0, CHILD_PREVIEW);
-  const allInOperation = loaded && children.length === total;
-  // The count spans every stored child, whose timestamps may sit anywhere in the retention window (or up to a day
-  // ahead, the ingest limit). Search exactly that window, whatever range the explorer had.
-  const searchRange = allStoredRange(project.data?.retentionDays);
-  // An event that names itself as its parent matches its own `parent:` search; leave it out.
-  const childrenQuery = andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : '');
+  return {
+    total: settled ? Math.max(counted, children.length) : counted,
+    shown: children.slice(0, CHILD_PREVIEW),
+    loading: lookup && op.isPending,
+  };
+}
+
+function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Children; event: AuditEvent; projectId: string; indent: number }) {
+  const { total, shown, loading } = c;
   return (
     <>
       {loading ? (
@@ -257,45 +268,38 @@ function ChildEvents({ detail, event: e, projectId, indent }: { detail: EventDet
           </span>
         </li>
       ) : (
-        shown.map((c) => (
-          <li className="flex items-center gap-2 text-[13px]" key={c.id} style={{ paddingInlineStart: indent }}>
-            <OutcomeDot outcome={c.outcome} />
+        shown.map((child) => (
+          <li className="flex items-center gap-2 text-[13px]" key={child.id} style={{ paddingInlineStart: indent }}>
+            <OutcomeDot outcome={child.outcome} />
             <Link
               className="min-w-0 truncate py-[3px] hover:underline"
               params={{ projectId }}
-              search={(prev) => ({ ...prev, ev: c.id })}
+              search={(prev) => ({ ...prev, ev: child.id })}
               to="/p/$projectId/events"
             >
-              <span className="sr-only">{c.outcome}: </span>
-              <bdi dir="auto">{eventSentence(c)}</bdi>
+              <span className="sr-only">{child.outcome}: </span>
+              <bdi dir="auto">{eventSentence(child)}</bdi>
             </Link>
-            <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={c.timestamp} />
+            <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={child.timestamp} />
           </li>
         ))
       )}
       {total > shown.length && !loading ? (
         <li className="flex items-center gap-2 pt-1 text-xs" style={{ paddingInlineStart: indent }}>
-          {allInOperation && operationId ? (
-            <Link
-              className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
-              params={{ projectId, operationId }}
-              search={{ focus: e.id }}
-              to="/p/$projectId/operations/$operationId"
-            >
-              View all {total} in the operation
-              <ArrowRightIcon className="size-3" />
-            </Link>
-          ) : (
-            <Link
-              className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
-              params={{ projectId }}
-              search={{ range: searchRange, q: childrenQuery }}
-              to="/p/$projectId/events"
-            >
-              {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
-              <ArrowRightIcon className="size-3" />
-            </Link>
-          )}
+          <Link
+            className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
+            params={{ projectId }}
+            // Every child, whatever its operation or timestamp: an exact parent search over every timestamp ingest
+            // admits. A self-parented event matches its own search, so it is left out.
+            search={{
+              range: admittedRange(),
+              q: andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : ''),
+            }}
+            to="/p/$projectId/events"
+          >
+            {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
+            <ArrowRightIcon className="size-3" />
+          </Link>
         </li>
       ) : null}
     </>
@@ -473,6 +477,8 @@ function EventDetailBody({
         }`;
   const attributes = Object.entries(e.attributes).sort(([a], [b]) => a.localeCompare(b));
   const ctx = e.context;
+  const caused = useChildren(detail, e, projectId);
+  const depth = detail?.parents.length ?? 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -685,14 +691,14 @@ function EventDetailBody({
           </Section>
         ) : null}
 
-        {ctx.parentEventId || ctx.operationId || (detail && causedCount(detail, e) > 0) ? (
+        {ctx.parentEventId || ctx.operationId || caused.total > 0 ? (
           <Section title="Causation">
             {detailLoading ? (
               <Skeleton className="h-8 w-full" />
             ) : (
               <ol aria-label="Causation chain" className="flex flex-col">
                 {(detail?.parents ?? []).map((p, i) => (
-                  <li className="flex items-center gap-2 text-[13px]" key={p.id} style={{ paddingInlineStart: i * 14 }}>
+                  <li className="flex items-center gap-2 text-[13px]" key={p.id} style={{ paddingInlineStart: causationIndent(i) }}>
                     <OutcomeDot outcome={p.outcome} />
                     {projectId ? (
                       <Link
@@ -712,17 +718,17 @@ function EventDetailBody({
                     <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={p.timestamp} />
                   </li>
                 ))}
-                <li className="flex items-center gap-2 font-medium text-[13px]" style={{ paddingInlineStart: (detail?.parents.length ?? 0) * 14 }}>
+                <li className="flex items-center gap-2 font-medium text-[13px]" style={{ paddingInlineStart: causationIndent(depth) }}>
                   <OutcomeDot outcome={e.outcome} />
                   <span className="min-w-0 truncate">This event</span>
-                  {detail && causedCount(detail, e) > 0 ? (
+                  {caused.total > 0 ? (
                     <span className="shrink-0 font-normal text-muted-foreground text-xs">
-                      caused {causedCount(detail, e)} event{causedCount(detail, e) === 1 ? '' : 's'}
+                      caused {caused.total} event{caused.total === 1 ? '' : 's'}
                     </span>
                   ) : null}
                 </li>
-                {detail && causedCount(detail, e) > 0 && projectId ? (
-                  <ChildEvents detail={detail} event={e} indent={(detail.parents.length + 1) * 14} projectId={projectId} />
+                {caused.total > 0 && projectId ? (
+                  <ChildEvents caused={caused} event={e} indent={causationIndent(depth + 1)} projectId={projectId} />
                 ) : null}
                 {ctx.parentEventId === e.id ? (
                   <li className="text-muted-foreground text-xs">This event names itself as its parent, so it has no parent to show.</li>

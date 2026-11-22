@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allStoredRange, rangePhrase, resolveRange } from './range';
+import { admittedRange, rangeLabel, rangePhrase, resolveRange } from './range';
 
 describe('rangePhrase', () => {
   it('reads presets as a phrase with "the"', () => {
@@ -15,17 +15,20 @@ describe('rangePhrase', () => {
   });
 });
 
-describe('allStoredRange', () => {
-  const now = Date.parse('2026-11-22T12:00:00.000Z');
-  const day = 86_400_000;
-
-  it('covers the retention window plus a day, up to the ingest limit of a day ahead', () => {
-    const r = resolveRange(allStoredRange(90, now));
-    expect(r.fromMs).toBe(now - 91 * day);
-    expect(r.toMs).toBe(now + day);
+describe('admittedRange', () => {
+  it('covers every timestamp ingest admits, with a day of slack on each side', () => {
+    const now = Date.parse('2026-11-22T12:00:00.000Z');
+    const day = 86_400_000;
+    const r = resolveRange(admittedRange(now));
+    expect(r.fromMs).toBe(now - 3651 * day);
+    expect(r.toMs).toBe(now + 2 * day);
   });
+});
 
-  it('falls back to the 3650-day ingest limit without a retention', () => {
-    expect(resolveRange(allStoredRange(undefined, now)).fromMs).toBe(now - 3650 * day);
+describe('rangeLabel', () => {
+  it('names the years of an absolute range that leaves the current year', () => {
+    const label = rangeLabel('2016-11-23T07:00:00.000Z..2026-11-24T07:00:00.000Z');
+    expect(label).toContain('2016');
+    expect(label).toContain('2026');
   });
 });

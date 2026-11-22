@@ -89,6 +89,9 @@ function OperationPage() {
   const t1 = nodes.length ? Math.max(...nodes.map((n) => n.end)) : 0;
   const total = Math.max(1, t1 - t0);
   const events = op.data ?? [];
+  // Every event of the operation, including any the tree cannot place (a parent cycle); the upper bound is exclusive.
+  const times = events.map((ev) => Date.parse(ev.timestamp));
+  const spanRange = times.length ? absoluteRange(Math.min(...times), Math.max(...times) + 1) : undefined;
   const failures = events.filter((e) => e.outcome === 'failure' || e.outcome === 'denied').length;
   const executors = [...new Map(events.filter((e) => e.executor?.id).map((e) => [e.executor?.id, e.executor])).values()];
   const actors = [...new Map(events.filter((e) => e.actor).map((e) => [e.actor?.id, e.actor])).values()];
@@ -156,7 +159,7 @@ function OperationPage() {
             <Link
               params={{ projectId }}
               // Exactly the operation's own span (the search's upper bound is exclusive), not whatever range was open.
-              search={(prev) => ({ range: nodes.length ? absoluteRange(t0, t1 + 1) : prev.range, q: formatExactTerm('operation', operationId) })}
+              search={(prev) => ({ range: spanRange ?? prev.range, q: formatExactTerm('operation', operationId) })}
               to="/p/$projectId/events"
             />
           }
