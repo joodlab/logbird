@@ -28,7 +28,7 @@ import { CloseWithoutCopying, useSecretCloseGuard } from '@/components/one-time-
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
-import { errorMessage } from '@/lib/api/errors';
+import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { keysQuery, keys as queryKeys } from '@/lib/api/queries';
 import {
   createKeyBody,
@@ -47,6 +47,8 @@ import {
   type KeyFormValues,
   MASK_HINT,
   MASK_LABEL,
+  ORIGIN_RULE,
+  SCOPE_ID_RULE,
   SCOPE_LIMITS,
   validateKeyForm,
 } from '@/lib/api-keys';
@@ -80,7 +82,7 @@ const KIND_COPY = {
 } as const;
 
 /** A secret shown once, with what the server granted and what was asked for. */
-type IssuedKey = { key: ApiKey; secret: string; expected: ExpectedGrant };
+type IssuedKey = { key: ApiKey; secret: string; expected: ExpectedGrant /** Rolls: whether the replaced key still worked. */; oldUsable?: boolean };
 
 function KeysSettings() {
   const { projectId } = Route.useParams();
@@ -322,7 +324,8 @@ function ExpiryChoice<T extends string>({
   note,
 }: {
   label: string;
-  value: T;
+  /** null: nothing chosen yet. */
+  value: T | null;
   options: readonly { id: T; label: string }[];
   onChange: (value: T) => void;
   note: ReactNode;
@@ -367,40 +370,57 @@ function RollKeyDialog({
   onRolled: (issued: IssuedKey) => void;
 }) {
   const queryClient = useQueryClient();
-  const expired = apiKey ? isKeyExpired(apiKey) : false;
   type RollExpiry = 'keep' | Exclude<KeyExpiryPreset, 'never'>;
-  const [choice, setChoice] = useState<RollExpiry>('keep');
-  // An expired key cannot keep its expiry (409 key_expired): it needs a new one.
-  const effective: RollExpiry = expired && choice === 'keep' ? '90d' : choice;
+  // The choice belongs to one opening of the dialog for one key: another key (or the same key opened again) starts over.
+  const [choice, setChoice] = useState<{ keyId: string; value: RollExpiry | null } | null>(null);
+  // Set when the key expired while the dialog was open (on Roll, or the server's 409 key_expired).
+  const [expiredMeanwhile, setExpiredMeanwhile] = useState<string | null>(null);
+  const expired = apiKey ? isKeyExpired(apiKey) || expiredMeanwhile === apiKey.id : false;
+  // A usable key defaults to keeping its expiry; an expired key has no default: the reader picks a new expiry.
+  const picked = apiKey && choice?.keyId === apiKey.id ? choice.value : null;
+  const value: RollExpiry | null = picked === 'keep' && expired ? null : (picked ?? (expired ? null : 'keep'));
+  const reset = () => {
+    setChoice(null);
+    setExpiredMeanwhile(null);
+  };
   const roll = useMutation({
-    mutationFn: async (key: ApiKey) => {
-      const expiresAt = effective === 'keep' ? undefined : expiryFor(effective);
+    mutationFn: async ({ key, expiry }: { key: ApiKey; expiry: RollExpiry }) => {
+      const expiresAt = expiry === 'keep' ? undefined : expiryFor(expiry);
       const result = await api.keys.roll(projectId, key.id, expiresAt ? { expiresAt } : {});
-      return { ...result, expected: expectedFromRoll(key, expiresAt) };
+      return { ...result, expected: expectedFromRoll(key, expiresAt), oldUsable: isKeyUsable(key) };
     },
     onSuccess: (issued) => {
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'keys'] });
+      reset();
       onRolled(issued);
     },
+    onError: (error, { key }) => {
+      // It expired between the click and the server: ask for a new expiry instead of failing with a code.
+      if (error instanceof ApiRequestError && error.code === 'key_expired') {
+        setExpiredMeanwhile(key.id);
+        roll.reset();
+      }
+    },
   });
+  const close = () => {
+    reset();
+    roll.reset();
+    onClose();
+  };
   const options: { id: RollExpiry; label: string }[] = [
     ...(expired ? [] : [{ id: 'keep' as const, label: 'Same as now' }]),
     ...KEY_EXPIRY_PRESETS.filter((p) => p.id !== 'never').map((p) => ({ id: p.id as RollExpiry, label: `In ${p.label}` })),
   ];
-  const newExpiry = effective === 'keep' ? (apiKey?.expiresAt ?? undefined) : expiryFor(effective);
+  const note =
+    value === null
+      ? 'Choose when the new key expires.'
+      : value === 'keep'
+        ? apiKey?.expiresAt
+          ? expiryNote(apiKey.expiresAt)
+          : 'Never expires, like the key it replaces.'
+        : expiryNote(expiryFor(value));
   return (
-    <Dialog
-      onOpenChange={(open) => {
-        if (!open) {
-          onClose();
-          setTimeout(() => {
-            setChoice('keep');
-            roll.reset();
-          }, 200);
-        }
-      }}
-      open={Boolean(apiKey)}
-    >
+    <Dialog onOpenChange={(open) => (open ? undefined : close())} open={Boolean(apiKey)}>
       <DialogContent className="sm:max-w-md">
         {apiKey ? (
           <div className="flex min-w-0 flex-col gap-4">
@@ -408,12 +428,14 @@ function RollKeyDialog({
               <DialogTitle>Roll “{apiKey.name}”?</DialogTitle>
               <DialogDescription>
                 Logbird creates a new {apiKey.kind} key named “{apiKey.name}”{apiKey.scope ? ' with the same scope' : ''}
-                {apiKey.embedOrigins.length ? ' and browser origins' : ''} and shows its secret once. {apiKey.prefix}… keeps working until you revoke
-                it: deploy the new key, check that the old one is no longer used, then revoke it here.
+                {apiKey.embedOrigins.length ? ' and browser origins' : ''} and shows its secret once.{' '}
+                {expired
+                  ? `${apiKey.prefix}… has expired and no longer works: deploy the new key in its place.`
+                  : `${apiKey.prefix}… keeps working until you revoke it: deploy the new key, check that the old one is no longer used, then revoke it here.`}
               </DialogDescription>
             </DialogHeader>
             {expired ? (
-              <p className="flex items-start gap-1.5 text-xs">
+              <p className="flex items-start gap-1.5 text-xs" role="status">
                 <TriangleAlertIcon className="mt-px size-3.5 shrink-0 text-outcome-denied" />
                 <span>
                   This key expired <Timestamp format="relative" iso={apiKey.expiresAt} />. Its replacement needs a new expiry.
@@ -422,23 +444,28 @@ function RollKeyDialog({
             ) : null}
             <ExpiryChoice
               label="The new key expires"
-              note={
-                effective === 'keep' && !apiKey.expiresAt
-                  ? 'Never expires, like the key it replaces.'
-                  : effective === 'keep'
-                    ? expiryNote(newExpiry)
-                    : expiryNote(newExpiry)
-              }
-              onChange={setChoice}
+              note={note}
+              onChange={(next) => setChoice({ keyId: apiKey.id, value: next })}
               options={options}
-              value={effective}
+              value={value}
             />
             {roll.isError ? <p className="text-destructive text-sm">{errorMessage(roll.error)}</p> : null}
             <DialogFooter>
-              <Button onClick={onClose} type="button" variant="outline">
+              <Button onClick={close} type="button" variant="outline">
                 Cancel
               </Button>
-              <Button data-testid="confirm-roll" disabled={roll.isPending} onClick={() => roll.mutate(apiKey)}>
+              <Button
+                data-testid="confirm-roll"
+                disabled={roll.isPending || value === null}
+                onClick={() => {
+                  // Recheck at the click: a key that expired while the dialog was open cannot keep its expiry.
+                  if (value === 'keep' && isKeyExpired(apiKey)) {
+                    setExpiredMeanwhile(apiKey.id);
+                    return;
+                  }
+                  if (value) roll.mutate({ key: apiKey, expiry: value });
+                }}
+              >
                 {roll.isPending ? <Loader2Icon className="animate-spin" /> : null}
                 Roll key
               </Button>
@@ -576,7 +603,11 @@ function CreateKeyDialog({
               </DialogTitle>
               <DialogDescription>
                 Copy it now — this is the only time Logbird shows the full secret.
-                {rolled ? ' The old key keeps working until you revoke it, so deploy this one first.' : ''}
+                {rolled
+                  ? rolled.oldUsable === false
+                    ? ' The key it replaces had already expired: deploy this one in its place.'
+                    : ' The old key keeps working until you revoke it, so deploy this one first.'
+                  : ''}
               </DialogDescription>
             </DialogHeader>
             {differences.length ? (
@@ -642,6 +673,7 @@ function CreateKeyDialog({
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="key-name">Name</Label>
                     <Input
+                      aria-describedby="key-name-hint"
                       aria-invalid={Boolean(message) || undefined}
                       id="key-name"
                       onChange={(e) => field.handleChange(e.target.value)}
@@ -649,7 +681,9 @@ function CreateKeyDialog({
                       ref={nameInput}
                       value={field.state.value}
                     />
-                    {message ? <p className="text-destructive text-xs">{message}</p> : null}
+                    <p className={cn('text-xs', message ? 'text-destructive' : 'text-muted-foreground')} id="key-name-hint">
+                      {message ?? 'Up to 64 characters. Name it after what will use it.'}
+                    </p>
                   </div>
                 );
               }}
@@ -691,7 +725,7 @@ function CreateKeyDialog({
                       {(field) => (
                         <TextField
                           error={fieldErrorMessage(field.state.meta.errors)}
-                          hint={`Required. Up to ${SCOPE_LIMITS.tenantId} characters, no spaces at the start or end.`}
+                          hint={`Required. Up to ${SCOPE_LIMITS.tenantId} characters, ${SCOPE_ID_RULE}.`}
                           id={`${ids}-tenant`}
                           label="Tenant id"
                           onChange={field.handleChange}
@@ -705,7 +739,7 @@ function CreateKeyDialog({
                         {(field) => (
                           <TextField
                             error={fieldErrorMessage(field.state.meta.errors)}
-                            hint={`Up to ${SCOPE_LIMITS.targetType} characters.`}
+                            hint={`Up to ${SCOPE_LIMITS.targetType} characters, ${SCOPE_ID_RULE}.`}
                             id={`${ids}-target-type`}
                             label="Target type"
                             onChange={field.handleChange}
@@ -719,7 +753,7 @@ function CreateKeyDialog({
                         {(field) => (
                           <TextField
                             error={fieldErrorMessage(field.state.meta.errors)}
-                            hint={`Up to ${SCOPE_LIMITS.targetId} characters. Only events with a target of this type and id.`}
+                            hint={`Up to ${SCOPE_LIMITS.targetId} characters, ${SCOPE_ID_RULE}. Only events with a target of this type and id.`}
                             id={`${ids}-target-id`}
                             label="Target id"
                             onChange={field.handleChange}
@@ -734,7 +768,7 @@ function CreateKeyDialog({
                       {(field) => (
                         <TextField
                           error={fieldErrorMessage(field.state.meta.errors)}
-                          hint={`One per line, up to ${SCOPE_LIMITS.actionPrefixes}, each up to ${SCOPE_LIMITS.actionPrefix} characters. Only actions that start with one of them.`}
+                          hint={`One per line, up to ${SCOPE_LIMITS.actionPrefixes}, each up to ${SCOPE_LIMITS.actionPrefix} characters, ${SCOPE_ID_RULE}. Only actions that start with one of them.`}
                           id={`${ids}-actions`}
                           label="Action prefixes"
                           multiline
@@ -781,7 +815,7 @@ function CreateKeyDialog({
                     {(field) => (
                       <TextField
                         error={fieldErrorMessage(field.state.meta.errors)}
-                        hint={`Browser origins where viewer tokens minted with this key may be used. One per line, up to ${SCOPE_LIMITS.embedOrigins}, lowercase, no path. Leave empty for server-to-server use only.`}
+                        hint={`Where viewer tokens minted with this key may be used. One per line, up to ${SCOPE_LIMITS.embedOrigins}: ${ORIGIN_RULE} Leave empty for server-to-server use only.`}
                         id={`${ids}-origins`}
                         label="Browser origins"
                         multiline

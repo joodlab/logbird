@@ -10,6 +10,7 @@ import {
   grantDifferences,
   isKeyExpired,
   isKeyUsable,
+  issuedKeyResponseSchema,
   type KeyFormValues,
   validateKeyForm,
 } from './api-keys';
@@ -83,7 +84,7 @@ describe('the create form', () => {
     expect(validateKeyForm(scoped({ actionPrefixes: Array.from({ length: 21 }, (_, i) => `a${i}.`).join('\n') })).actionPrefixes).toBe(
       'At most 20 prefixes (this has 21).',
     );
-    expect(validateKeyForm(scoped({ embedOrigins: 'https://cms.example.com/\n' })).embedOrigins).toMatch(/^Line 1: use a lowercase origin/);
+    expect(validateKeyForm(scoped({ embedOrigins: 'https://cms.example.com/\n' })).embedOrigins).toMatch(/^Line 1: use https:\/\/host/);
     expect(validateKeyForm({ ...EMPTY_KEY_FORM, kind: 'read', embedOrigins: 'https://App.example.com' }).embedOrigins).toMatch(/^Line 1/);
     // Scope fields are ignored for other kinds.
     expect(validateKeyForm({ ...EMPTY_KEY_FORM, name: 'x', kind: 'ingest', tenantId: ' bad', embedOrigins: 'nope' })).toEqual({});
@@ -143,4 +144,59 @@ it('shows how a server mints a viewer token, quoting ids for the shell', () => {
   expect(snippet).toContain(`-d '{"scope":{"tenantId":"o'"'"'brien","target":{"type":"website","id":"site_42"}},"ttlSeconds":900}'`);
   expect(snippet).toContain('Authorization: Bearer $LOGBIRD_VIEWER_TOKEN');
   expect(viewerTokenSnippet()).toContain('$LOGBIRD_READ_KEY');
+});
+
+describe('answers from servers older than scoped keys', () => {
+  it('parses a key without scope, origins or expiry and flags every restriction the server ignored', () => {
+    const legacy = {
+      key: {
+        id: 'k9',
+        projectId: 'p1',
+        name: 'Site 42 dashboard',
+        kind: 'read',
+        prefix: 'lb_read_abcd',
+        createdAt: '2026-11-22T10:00:00.000Z',
+        createdBy: null,
+        lastUsedAt: null,
+        lastUsedUserAgent: null,
+        replacesKeyId: null,
+        revokedAt: null,
+      },
+      secret: 'lb_read_legacy-secret',
+    };
+    const parsed = issuedKeyResponseSchema.parse(legacy);
+    expect(parsed.secret).toBe('lb_read_legacy-secret');
+    expect(parsed.key).toMatchObject({ scope: null, embedOrigins: [], expiresAt: null });
+    const body = createKeyBody(scoped({ embedOrigins: 'https://cms.example.com', expiry: '90d' }), now);
+    expect(grantDifferences(expectedFromBody(body), parsed.key)).toEqual(['permission', 'scope', 'embed origins', 'expiry']);
+  });
+});
+
+describe('exact comparison and line numbers', () => {
+  it('compares distinct members both ways and expiry to the millisecond', () => {
+    const asked = expectedFromBody(
+      createKeyBody(scoped({ actionPrefixes: 'booking.\nbooking.', embedOrigins: 'https://a.example\nhttps://a.example' }), now),
+    );
+    expect(asked.scope?.actionPrefixes).toEqual(['booking.']);
+    expect(asked.embedOrigins).toEqual(['https://a.example']);
+    expect(
+      grantDifferences(
+        asked,
+        key({ scope: { tenantId: 'biz_5', actionPrefixes: ['booking.', 'auth.'] }, embedOrigins: ['https://a.example'], expiresAt: null }),
+      ),
+    ).toEqual(['scope']);
+    const expiring = { ...asked, scope: null, kind: 'read' as const, expiresAt: '2027-02-20T10:00:00.000Z' };
+    expect(
+      grantDifferences(expiring, key({ kind: 'read', scope: null, embedOrigins: ['https://a.example'], expiresAt: '2027-02-20T10:00:00.500Z' })),
+    ).toEqual(['expiry']);
+  });
+
+  it('names the line as typed, blank lines included', () => {
+    expect(validateKeyForm(scoped({ actionPrefixes: `booking.\n\n${'a'.repeat(191)}` })).actionPrefixes).toBe(
+      'Line 3: At most 190 characters (this has 191).',
+    );
+    expect(validateKeyForm(scoped({ embedOrigins: 'https://cms.example.com\n\nhttp://evil.example' })).embedOrigins).toMatch(
+      /^Line 3: use https:\/\/host/,
+    );
+  });
 });

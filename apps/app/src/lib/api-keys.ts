@@ -1,6 +1,7 @@
 import {
   type ApiKey,
   type ApiKeyKind,
+  apiKeySchema,
   type createApiKeySchema,
   embedOriginSchema,
   type ReadScope,
@@ -8,7 +9,7 @@ import {
   SCOPE_MASKS,
   type scopeMaskSchema,
 } from '@logbird/contracts';
-import type { z } from 'zod';
+import { z } from 'zod';
 
 /** A key past its `expiresAt` is refused by the API like a revoked one (#138). */
 export const isKeyExpired = (key: Pick<ApiKey, 'expiresAt'>, now = Date.now()) => Boolean(key.expiresAt && Date.parse(key.expiresAt) <= now);
@@ -73,8 +74,14 @@ export const EMPTY_KEY_FORM: KeyFormValues = {
 };
 export type KeyFormField = keyof KeyFormValues;
 
-/** Non-blank lines, exactly as typed (no trimming: scope ids must be in stored form, and the check says so). */
-export const listLines = (text: string): string[] => text.split(/\r?\n/).filter((line) => line.trim() !== '');
+/** Non-blank lines with their line numbers as typed (no trimming: scope ids must be in stored form, and the check says so). */
+export const numberedLines = (text: string): { line: number; value: string }[] =>
+  text
+    .split(/\r?\n/)
+    .map((value, i) => ({ line: i + 1, value }))
+    .filter((l) => l.value.trim() !== '');
+/** The distinct non-blank lines, in order (a repeated prefix or origin is sent once, as the server stores it). */
+export const listLines = (text: string): string[] => [...new Set(numberedLines(text).map((l) => l.value))];
 
 const INVALID_UNICODE = /�|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 /** The contract's `scopeIdentifier` rule, with a message that names the problem. */
@@ -87,6 +94,12 @@ export function checkScopeId(value: string, max: number): string | undefined {
 }
 
 const isReadKind = (kind: ApiKeyKind) => kind !== 'ingest';
+
+/** The contract's `embedOriginSchema`, in words (shown before submit and in the error). */
+export const ORIGIN_RULE =
+  'use https://host or https://host:port (http only for localhost or 127.0.0.1), lowercase, no path or trailing slash, up to 255 characters.';
+/** The contract's `scopeIdentifier` rule, in words. */
+export const SCOPE_ID_RULE = 'no spaces at the start or end, no NUL or invalid Unicode';
 
 /** Field errors for the create form. Empty when the body built by `createKeyBody` is valid for the contract. */
 export function validateKeyForm(v: KeyFormValues): Partial<Record<KeyFormField, string>> {
@@ -102,8 +115,10 @@ export function validateKeyForm(v: KeyFormValues): Partial<Record<KeyFormField, 
     if (prefixes.length > SCOPE_LIMITS.actionPrefixes)
       errors.actionPrefixes = `At most ${SCOPE_LIMITS.actionPrefixes} prefixes (this has ${prefixes.length}).`;
     else {
-      const bad = prefixes.map((p, i) => [i, checkScopeId(p, SCOPE_LIMITS.actionPrefix)] as const).find(([, m]) => m);
-      if (bad) errors.actionPrefixes = `Line ${bad[0] + 1}: ${bad[1]}`;
+      const bad = numberedLines(v.actionPrefixes)
+        .map((l) => [l.line, checkScopeId(l.value, SCOPE_LIMITS.actionPrefix)] as const)
+        .find(([, m]) => m);
+      if (bad) errors.actionPrefixes = `Line ${bad[0]}: ${bad[1]}`;
     }
   }
   if (isReadKind(v.kind)) {
@@ -111,8 +126,8 @@ export function validateKeyForm(v: KeyFormValues): Partial<Record<KeyFormField, 
     if (origins.length > SCOPE_LIMITS.embedOrigins)
       errors.embedOrigins = `At most ${SCOPE_LIMITS.embedOrigins} origins (this has ${origins.length}).`;
     else {
-      const bad = origins.findIndex((o) => !embedOriginSchema.safeParse(o).success);
-      if (bad >= 0) errors.embedOrigins = `Line ${bad + 1}: use a lowercase origin such as https://app.example.com (no path or trailing slash).`;
+      const bad = numberedLines(v.embedOrigins).find((l) => !embedOriginSchema.safeParse(l.value).success);
+      if (bad) errors.embedOrigins = `Line ${bad.line}: ${ORIGIN_RULE}`;
     }
   }
   for (const k of Object.keys(errors) as KeyFormField[]) if (!errors[k]) delete errors[k];
@@ -144,7 +159,12 @@ export function createKeyBody(v: KeyFormValues, now = Date.now()): CreateKeyBody
   };
 }
 
-const sameSet = (a: readonly string[] = [], b: readonly string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
+/** The same members, ignoring order and repeats, checked both ways. */
+const sameSet = (a: readonly string[] = [], b: readonly string[] = []) => {
+  const x = new Set(a);
+  const y = new Set(b);
+  return x.size === y.size && [...x].every((v) => y.has(v));
+};
 export function sameScope(a: ReadScope | null | undefined, b: ReadScope | null | undefined): boolean {
   if (!a || !b) return !a && !b;
   return (
@@ -155,8 +175,8 @@ export function sameScope(a: ReadScope | null | undefined, b: ReadScope | null |
     sameSet(a.mask, b.mask)
   );
 }
-const sameInstant = (a: string | null | undefined, b: string | null | undefined) =>
-  !a || !b ? !a && !b : Math.abs(Date.parse(a) - Date.parse(b)) < 1000;
+/** The same instant to the millisecond (the server stores milliseconds), or both absent. */
+const sameInstant = (a: string | null | undefined, b: string | null | undefined) => (!a || !b ? !a && !b : Date.parse(a) === Date.parse(b));
 
 /** What the server should have granted: the create request, or (after a roll) the old key with an optional new expiry. */
 export type ExpectedGrant = { kind: ApiKeyKind; scope: ReadScope | null; embedOrigins: string[]; expiresAt: string | null };
@@ -185,3 +205,15 @@ export function grantDifferences(expected: ExpectedGrant, key: ApiKey): string[]
   if (!sameInstant(expected.expiresAt, key.expiresAt)) out.push('expiry');
   return out;
 }
+
+/**
+ * A key as any server returns it. Servers older than scoped keys (#180) omit `scope`, `embedOrigins` and `expiresAt`:
+ * read them as none, so the one-time secret is still shown and `grantDifferences` flags each restriction the server
+ * ignored, instead of the response failing to parse after the key was already issued.
+ */
+export const issuedKeySchema = apiKeySchema.extend({
+  scope: apiKeySchema.shape.scope.optional().transform((v) => v ?? null),
+  embedOrigins: apiKeySchema.shape.embedOrigins.optional().transform((v) => v ?? []),
+  expiresAt: apiKeySchema.shape.expiresAt.optional().transform((v) => v ?? null),
+});
+export const issuedKeyResponseSchema = z.object({ key: issuedKeySchema, secret: z.string() });
