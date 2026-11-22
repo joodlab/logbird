@@ -189,6 +189,8 @@ export const eventQuery = (projectId: string, eventId: string) =>
     queryKey: [...keys.project(projectId), 'event', eventId] as const,
     queryFn: ({ signal }) => api.events.get(projectId, eventId, signal),
     staleTime: 5 * 60_000,
+    // Structural sharing would copy a changed raw JSON number (exact 64-bit digits) into a plain object.
+    structuralSharing: false,
     retry: shouldRetry,
   });
 

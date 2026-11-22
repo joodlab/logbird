@@ -1,4 +1,4 @@
-import type { AuditEvent } from '@logbird/contracts';
+import { type AuditEvent, supportsExactJson } from '@logbird/contracts';
 import { formatRetention } from './format';
 
 const VERB_PAST: Record<string, string> = {
@@ -222,6 +222,12 @@ export function parentActor(parents: readonly Pick<AuditEvent, 'actor'>[]): NonN
   }
   return null;
 }
+
+/**
+ * True when this browser cannot parse JSON numbers exactly (no JSON.parse source access): long numbers and decimals
+ * in a raw payload may show and copy rounded. The stored event and the Complete export keep the exact digits.
+ */
+export const roundsLargeNumbers = !supportsExactJson;
 
 /** Events directly caused by `eventId` (their `context.parentEventId`), oldest first. */
 export function directChildren(events: readonly AuditEvent[], eventId: string): AuditEvent[] {
