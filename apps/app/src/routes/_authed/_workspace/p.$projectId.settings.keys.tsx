@@ -384,10 +384,11 @@ function RollKeyDialog({
     setExpiredMeanwhile(null);
   };
   const roll = useMutation({
-    mutationFn: async ({ key, expiry }: { key: ApiKey; expiry: RollExpiry }) => {
+    mutationFn: async ({ key, expiry, oldUsable }: { key: ApiKey; expiry: RollExpiry; oldUsable: boolean }) => {
       const expiresAt = expiry === 'keep' ? undefined : expiryFor(expiry);
       const result = await api.keys.roll(projectId, key.id, expiresAt ? { expiresAt } : {});
-      return { ...result, expected: expectedFromRoll(key, expiresAt), oldUsable: isKeyUsable(key) };
+      // Whether the old key still worked, as the dialog knew it (including a server-confirmed expiry the browser's clock missed).
+      return { ...result, expected: expectedFromRoll(key, expiresAt), oldUsable };
     },
     onSuccess: (issued) => {
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'keys'] });
@@ -404,7 +405,8 @@ function RollKeyDialog({
   });
   const close = () => {
     reset();
-    roll.reset();
+    // A roll already sent keeps its pending state, so reopening cannot send a second one; its secret still shows on success.
+    if (!roll.isPending) roll.reset();
     onClose();
   };
   const options: { id: RollExpiry; label: string }[] = [
@@ -463,7 +465,7 @@ function RollKeyDialog({
                     setExpiredMeanwhile(apiKey.id);
                     return;
                   }
-                  if (value) roll.mutate({ key: apiKey, expiry: value });
+                  if (value) roll.mutate({ key: apiKey, expiry: value, oldUsable: !expired && isKeyUsable(apiKey) });
                 }}
               >
                 {roll.isPending ? <Loader2Icon className="animate-spin" /> : null}
