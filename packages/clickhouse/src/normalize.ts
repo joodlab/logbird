@@ -1,4 +1,13 @@
 import { randomBytes } from 'node:crypto';
+import {
+  canonicalDecimal,
+  EXACT_NUMBER_MAX_DEPTH,
+  hasDeepRawNumbers,
+  isRawJson,
+  mayHoldInexactNumbers,
+  plainDecimal,
+  rawJsonText,
+} from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
@@ -10,8 +19,9 @@ function uuidv7() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
+// A raw JSON number (parseJsonExact keeps digits a double cannot hold) is a leaf value, never an object.
 const object = (v: unknown): Record<string, unknown> =>
-  v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  v !== null && typeof v === 'object' && !Array.isArray(v) && !isRawJson(v) ? (v as Record<string, unknown>) : {};
 const isHigh = (code: number) => code >= 0xd8_00 && code <= 0xdb_ff;
 const isLow = (code: number) => code >= 0xdc_00 && code <= 0xdf_ff;
 // A valid pair straddling a cap must not become a native JSONEachRow parse rejection.
@@ -19,21 +29,86 @@ const capText = (s: string, cap: number) => s.slice(0, isHigh(s.charCodeAt(cap -
 // Search columns are lossy by design: a lone surrogate (which ClickHouse rejects as invalid UTF-8, code 25) becomes
 // U+FFFD, like String.prototype.toWellFormed. The raw payload and v1 identity keep the original input.
 const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
-const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? capText(wellFormed(v.trim()), cap) : '');
+// Numbers (ids from integer keys, numeric names) are indexed by their exact decimal text, like a string would be.
+// Legacy (pre-v1) receipt fingerprints froze the old columns, where a number indexed as ''.
+const textOf = (v: unknown, cap: number, numbers: boolean): string => {
+  // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42"); when that
+  // pads too much or does not fit the column, as its canonical scientific spelling (1e256), which is unique per value.
+  // A number whose digits do not fit is not indexed: truncating could merge distinct ids.
+  if (typeof v !== 'string') return (numbers ? numericId(v, textNumberMax(cap)) : null) ?? '';
+  return capText(wellFormed(v.trim()), cap);
+};
+// A plain decimal adds at most this many zeros to the significant digits, so a compact spelling such
+// as 1e+2047 never expands to kilobytes per row; past it the value keeps its unique scientific spelling.
+const PLAIN_PADDING = 32;
+// Indexed numbers are shorter than the shortest text a longer string can be truncated to, so a truncated string can
+// never equal one. A code-unit cap keeps at least `cap - 1` units (one less when a surrogate pair straddles it); the
+// 2 KB attribute cut keeps at least 2,045 bytes (a split UTF-8 sequence is dropped, up to 3 bytes).
+const textNumberMax = (cap: number) => cap - 2;
+const ATTRIBUTE_BYTES = 2048;
+const ATTRIBUTE_NUMBER_MAX = ATTRIBUTE_BYTES - 4;
+/** The index text of a number: plain decimal, else unique scientific, else null; never longer than `maxLength`. */
+function numericId(v: unknown, maxLength: number): string | null {
+  const plain = plainDecimal(v, maxLength, PLAIN_PADDING);
+  if (plain !== null) return plain;
+  const text = rawJsonText(v);
+  const scientific = text === null ? null : canonicalDecimal(text);
+  return scientific !== null && scientific.length <= maxLength ? scientific : null;
+}
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
-export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string }) {
+const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
+// executor.attempt truncated toward zero from the exact decimal (1.99999999999999999 is 1, not 2), clamped to UInt16
+// as JSON.parse gave (1e400 is 65535, negatives 0). Legacy (pre-v1) columns keep the double conversion.
+function attemptOf(v: unknown, legacy: boolean): number {
+  if (!isNumber(v)) return 0;
+  if (legacy || !isRawJson(v)) return Math.min(65_535, Math.max(0, Math.trunc(Number(isRawJson(v) ? v.rawJSON : v)) || 0));
+  const canonical = canonicalDecimal(v.rawJSON);
+  if (canonical === null || canonical === '0' || canonical.startsWith('-')) return 0;
+  const e = canonical.indexOf('e');
+  const digits = canonical.slice(0, e);
+  const integer = digits.length + Number(canonical.slice(e + 1));
+  if (integer <= 0) return 0;
+  if (integer > 5) return 65_535;
+  return Math.min(65_535, Number(digits.slice(0, integer).padEnd(integer, '0')));
+}
+// Characters a JSON number is spelled with: a composite value cut inside one must not keep its partial digits.
+const numberChar = (c: string | undefined) => c !== undefined && /[\d.eE+-]/.test(c);
+/** True when the JSON text `json` ends inside a string literal (one linear scan honouring escapes). */
+function endsInsideString(json: string): boolean {
+  let inside = false;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
+    if (inside && c === '\\') i++;
+    else if (c === '"') inside = !inside;
+  }
+  return inside;
+}
+export const DEEP_NUMBERS_REASON = `invalid_event: numbers nested deeper than ${EXACT_NUMBER_MAX_DEPTH.toLocaleString('en-US')} levels cannot be stored exactly`;
+export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {
+  // Only identifiers index numbers (integer primary keys); other text columns keep string-only semantics.
+  const text = (v: unknown, cap = 512) => textOf(v, cap, false);
+  const idText = (v: unknown, cap = 256) => textOf(v, cap, !ctx.legacyColumns);
+  // A numeric id (even 0) is present; legacy columns keep the old truthiness score.
+  const present = (v: unknown) => (!ctx.legacyColumns && isNumber(v)) || Boolean(v);
   // Search normalization is intentionally lossy. Identity v1 hashes canonical raw input, NOT these columns.
   // Changing caps/flattening must not change v1 or remove the legacy receipt compatibility path.
   const e = object(input);
   if (typeof e.action !== 'string') return { ok: false as const, reason: 'action must be a string' };
   if (typeof e.id === 'string' && (e.id.includes('\u0000') || /[\uD800-\uDFFF]/u.test(e.id) || e.id.trim().length > 256))
     return { ok: false as const, reason: 'invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL' };
+  // Exactness is bounded by depth (stringifying raw values deeper would overflow the stack). An event that holds a
+  // number a double cannot keep that deep is rejected on its own, never rounded: a rounded payload would let a changed
+  // digit match as an exact retry.
+  // The tree walk only runs when the serialized event could hold such a number (or serializing it overflowed), so
+  // ordinary events pay one regex scan of their payload, not a second traversal.
   let payload: string;
   try {
     payload = JSON.stringify(input);
   } catch {
+    if (hasDeepRawNumbers(input)) return { ok: false as const, reason: DEEP_NUMBERS_REASON };
     return { ok: false as const, reason: 'event must be JSON serializable' };
   }
+  if (mayHoldInexactNumbers(payload) && hasDeepRawNumbers(input)) return { ok: false as const, reason: DEEP_NUMBERS_REASON };
   if (Buffer.byteLength(payload) > 256 * 1024) return { ok: false as const, reason: 'event exceeds 256 KB' };
   const attributes: Record<string, string> = Object.create(null);
   let invalidAttributeKey = false;
@@ -46,11 +121,34 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     }
     const entries = Object.entries(object(v));
     if (entries.length && depth < 6) for (const [key, child] of entries) flatten(child, path ? `${path}.${key}` : key, depth + 1);
-    else
-      attributes[path] = Buffer.from(value(v))
-        .subarray(0, 2048)
+    else if (!ctx.legacyColumns && (isRawJson(v) || (typeof v === 'number' && Number.isFinite(v)))) {
+      // A number is indexed whole, as the plain decimal of its value (0.0000001, not 1e-7) or else its unique scientific
+      // spelling, or not at all: a 2 KB prefix of its digits would match a different number. Legacy (pre-v1) columns
+      // keep JSON.stringify spelling.
+      const exact = numericId(v, ATTRIBUTE_NUMBER_MAX);
+      if (exact !== null) attributes[path] = exact;
+    } else {
+      const bytes = Buffer.from(value(v));
+      let cut = bytes
+        .subarray(0, ATTRIBUTE_BYTES)
         .toString('utf8')
         .replace(/\uFFFD$/, '');
+      // A composite value (JSON text) cut inside a number drops that number's partial digits: a prefix of its digits
+      // would match a different number. Only outside string literals: digits inside a string (or a plain string value)
+      // are text and keep the plain cut. One linear scan; legacy columns keep the plain cut.
+      if (
+        !ctx.legacyColumns &&
+        typeof v !== 'string' &&
+        bytes.length > ATTRIBUTE_BYTES &&
+        numberChar(String.fromCharCode(bytes[ATTRIBUTE_BYTES] ?? 0)) &&
+        !endsInsideString(cut)
+      ) {
+        let end = cut.length;
+        while (end > 0 && numberChar(cut[end - 1])) end--;
+        cut = cut.slice(0, end);
+      }
+      attributes[path] = cut;
+    }
   };
   const known: Record<string, string[]> = {
     actor: ['type', 'id', 'name', 'email'],
@@ -77,7 +175,12 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   for (const [key, fields] of Object.entries(known))
     for (const [k, v] of Object.entries(object(e[key]))) if (!fields.includes(k)) flatten(v, `${key}.${k}`, 2);
   const targets = Array.isArray(e.targets) ? e.targets.slice(0, 64).map(object) : [];
-  targets.forEach((t, i) => {
+  // A numeric target id too long to index is left out of the record columns (the payload keeps it): an empty id would
+  // make every such target one shared `type:` record.
+  const recordTargets = ctx.legacyColumns ? targets : targets.filter((t) => !(isNumber(t.id) && idText(t.id) === ''));
+  // Extra target fields are numbered by the target's position in the record columns, so `targets.N.*` always describes
+  // targets[N] of the normalized event. A left-out target's extra fields stay in the payload only.
+  recordTargets.forEach((t, i) => {
     for (const [k, v] of Object.entries(t)) if (!['type', 'id', 'name'].includes(k)) flatten(v, `targets.${i}.${k}`, 3);
   });
   if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
@@ -90,15 +193,24 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   // Only `action` is required: a bad occurredAt never drops the event. It is stored at receive time, the original value
   // is kept in attributes['logbird.occurredAt.rejected'] (and in payload), and the caller gets a warning.
   const { timestamp: date, problem: occurredAtProblem, valid: occurredAtValid } = resolveTimestamp(e.occurredAt, ctx.receivedAt);
-  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = capText(wellFormed(value(e.occurredAt)), 256);
+  if (occurredAtProblem) {
+    // A rejected numeric timestamp is indexed whole like any number (two long values never share a prefix match).
+    // Same column cap as a rejected string, so a truncated long string never equals an indexed number.
+    const rejected =
+      isNumber(e.occurredAt) && !ctx.legacyColumns ? numericId(e.occurredAt, textNumberMax(256)) : capText(wellFormed(value(e.occurredAt)), 256);
+    // Always replace a caller-supplied value of this reserved key, even when the number cannot be indexed.
+    if (rejected !== null) attributes['logbird.occurredAt.rejected'] = rejected;
+    else delete attributes['logbird.occurredAt.rejected'];
+  } else if (!ctx.legacyColumns) delete attributes['logbird.occurredAt.rejected']; // reserved: only Logbird sets it
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
-      typeof e.id === 'number' ? 'Numeric id is not a stable event id; send a string id for safe retries.' : null,
+      isNumber(e.id) ? 'Numeric id is not a stable event id; send a string id for safe retries.' : null,
     ]
       .filter(Boolean)
       .join('; ') || null;
-  const id = text(e.id, 256) || uuidv7();
+  // A numeric id is not a stable id (spec): it gets a fresh one and a warning, unlike numeric entity ids.
+  const id = (typeof e.id === 'string' ? text(e.id, 256) : '') || uuidv7();
   const row = {
     project_id: ctx.projectId,
     event_id: id,
@@ -110,29 +222,29 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     severity: text(e.severity, 32) || 'info',
     description: text(e.description, 4096),
     actor_type: text(actor.type, 64),
-    actor_id: text(actor.id, 256),
+    actor_id: idText(actor.id),
     actor_name: text(actor.name),
     actor_email: text(actor.email),
-    impersonator_id: text(imp.id, 256),
+    impersonator_id: idText(imp.id),
     impersonator_name: text(imp.name),
     executor_type: text(executor.type, 64),
-    executor_id: text(executor.id, 256),
+    executor_id: idText(executor.id),
     executor_name: text(executor.name),
-    job_id: text(executor.jobId, 256),
-    job_attempt: typeof executor.attempt === 'number' ? Math.min(65_535, Math.max(0, Math.trunc(executor.attempt) || 0)) : 0,
-    tenant_id: text(tenant.id, 256),
+    job_id: idText(executor.jobId),
+    job_attempt: attemptOf(executor.attempt, ctx.legacyColumns === true),
+    tenant_id: idText(tenant.id),
     tenant_name: text(tenant.name),
     source: text(e.source, 128),
-    target_types: targets.map((t) => text(t.type, 64)),
-    target_ids: targets.map((t) => text(t.id, 256)),
-    target_names: targets.map((t) => text(t.name)),
+    target_types: recordTargets.map((t) => text(t.type, 64)),
+    target_ids: recordTargets.map((t) => idText(t.id)),
+    target_names: recordTargets.map((t) => text(t.name)),
     changes_fields: changes.map((c) => text(c.field, 256)),
     changes_before: changes.map((c) => wellFormed(value(c.before))),
     changes_after: changes.map((c) => wellFormed(value(c.after))),
-    operation_id: text(context.operationId, 256),
-    parent_event_id: text(context.parentEventId, 256),
-    request_id: text(context.requestId, 256),
-    trace_id: text(context.traceId, 256),
+    operation_id: idText(context.operationId),
+    parent_event_id: idText(context.parentEventId),
+    request_id: idText(context.requestId),
+    trace_id: idText(context.traceId),
     ip: text(context.ip, 64),
     user_agent: text(context.userAgent, 1024),
     attributes,
@@ -140,19 +252,19 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     conformance: Math.round(
       ([
         occurredAtValid,
-        actor.id,
+        present(actor.id),
         actor.type,
         e.outcome,
         targets.length,
-        tenant.id,
+        present(tenant.id),
         executor.type,
-        context.operationId || context.requestId,
+        present(context.operationId) || present(context.requestId),
         e.description,
       ].filter(Boolean).length /
         9) *
         100,
     ),
-    schema_version: text(e.schemaVersion, 32),
+    schema_version: idText(e.schemaVersion, 32),
     sdk: text(ctx.sdk, 128),
   };
   return { ok: true as const, row, id, warning };
