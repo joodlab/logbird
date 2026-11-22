@@ -104,14 +104,17 @@ export function unguardedReads(src: string, queries: readonly string[]): string[
   const problems: string[] = [];
   for (const r of results) {
     const reads = new RegExp(String.raw`\b${r}\.data\b`);
-    // A condition on the flag in the same expression: `flag ?`, `!flag`, `flag &&` or `flag ||`. Merely mentioning it is not.
-    const branch = new RegExp(String.raw`(!\s*${r}\.isPlaceholderData\b|\b${r}\.isPlaceholderData\s*(\?|&&|\|\|))`);
-    const marker = /\/\/ placeholder: shown dimmed/;
+    // Same line: a ternary or a short circuit on the flag that the read sits in (`x.isPlaceholderData ? … : x.data`,
+    // `!x.isPlaceholderData && x.data`). Line before: an `if` whose condition tests the flag. Or a whole-line marker
+    // comment. Merely mentioning the flag (a log, a string) is not a branch.
+    const inline = new RegExp(String.raw`(\b${r}\.isPlaceholderData\s*\?|!\s*${r}\.isPlaceholderData\b[^;]*&&[^;]*\b${r}\.data\b)`);
+    const opensIf = new RegExp(String.raw`^\s*(?:\}\s*else\s+)?if\s*\(.*\b${r}\.isPlaceholderData\b.*\)\s*\{?\s*$`);
+    const marker = /^\s*\/\/ placeholder: shown dimmed\b/;
     lines.forEach((line, i) => {
-      // The branch can open on the line before (`if (… && !x.isPlaceholderData) {`).
       const prev = lines[i - 1] ?? '';
-      if (reads.test(line) && !branch.test(line) && !branch.test(prev) && !marker.test(prev))
-        problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
+      // An `if` that tests the flag also guards the reads in its own condition (`if (x.data && !x.isPlaceholderData) {`).
+      const guarded = inline.test(line) || opensIf.test(line) || opensIf.test(prev) || marker.test(prev);
+      if (reads.test(line) && !guarded) problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
     });
   }
   return problems;
@@ -137,6 +140,12 @@ describe('the guard catches unguarded reads', () => {
   it('does not accept a mere mention of the flag before an unconditional read', () => {
     const src = ['const fields = useQuery(fieldsQuery(p, r));', 'console.log(fields.isPlaceholderData);', 'render(fields.data);'].join('\n');
     expect(unguardedReads(src, ['fieldsQuery'])).toHaveLength(1);
+  });
+  it('does not accept a negated mention or a marker inside a string', () => {
+    const negated = ['const fields = useQuery(fieldsQuery(p, r));', 'console.log(!fields.isPlaceholderData);', 'render(fields.data);'].join('\n');
+    expect(unguardedReads(negated, ['fieldsQuery'])).toHaveLength(1);
+    const quoted = ['const fields = useQuery(fieldsQuery(p, r));', 'console.log("// placeholder: shown dimmed");', 'render(fields.data);'].join('\n');
+    expect(unguardedReads(quoted, ['fieldsQuery'])).toHaveLength(1);
   });
   it('accepts an explicit placeholder branch or the dimmed marker', () => {
     const marked = [
