@@ -1,11 +1,12 @@
 import { type AuditEvent, WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
 import { FilterChip } from '@logbird/ui/components/filter-chip';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
 import { Input } from '@logbird/ui/components/ui/input';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
-import { ActivityIcon, SearchIcon } from 'lucide-react';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { ActivityIcon, FolderPlusIcon, SearchIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { EventSheet } from '@/components/explorer/event-sheet';
@@ -13,7 +14,8 @@ import { EventsTable, type EventsTableHandle } from '@/components/explorer/event
 import { TimeZoneInline } from '@/components/time-zone-control';
 import { api } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
-import { workspaceActivityQuery } from '@/lib/api/queries';
+import { projectsQuery, workspaceActivityQuery } from '@/lib/api/queries';
+import { useCan } from '@/lib/permissions';
 import { formatExactTerm, includeTerm, removeTerm } from '@/lib/query-language';
 import { rangeLabel, resolveRange } from '@/lib/range';
 import { formatSearchTotal, searchTotal } from '@/lib/search-total';
@@ -32,6 +34,7 @@ const COLUMNS = ['time', 'outcome', 'action', 'description', 'actor'];
 function WorkspaceActivity() {
   useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const search = Route.useSearch();
+  const { workspace } = Route.useRouteContext();
   const navigate = Route.useNavigate();
   // Management actions are rare: this page defaults to a 90-day window (staticData.defaultRange).
   const { range } = useRange();
@@ -46,7 +49,7 @@ function WorkspaceActivity() {
     if (next !== q) navigate({ search: (prev) => ({ ...prev, q: next || undefined }), replace: true });
   }, [debounced]);
 
-  const activity = useInfiniteQuery(workspaceActivityQuery(range, q));
+  const activity = useInfiniteQuery(workspaceActivityQuery(workspace.id, range, q));
   // Another range's or search's actions never show (or count) under this one's label.
   const pages = current(activity)?.pages;
   const activityTotal = searchTotal(pages, pages?.reduce((n, p) => n + p.data.length, 0) ?? 0, activity.hasNextPage);
@@ -55,11 +58,16 @@ function WorkspaceActivity() {
   // new search or chip loads): the table starts a new set at the top even when it shares rows with the old one.
   const resultKey = useRef<string | undefined>(undefined);
   if (activity.isSuccess && !activity.isPlaceholderData) resultKey.current = `${range}|${q}|${category ?? ''}`;
+  // A workspace without projects (reachable here before the first one exists) gets a next step.
+  const projectList = useQuery(projectsQuery());
+  const noProjects = projectList.data?.length === 0;
+  const canCreateProject = useCan()('project.create');
   const selectedIndex = search.ev ? rows.findIndex((e) => e.id === search.ev) : -1;
   // A bookmarked or shared event beyond the loaded pages (page two, or any later one) is looked up by its id in the same
   // workspace stream and range, so the link opens it without loading every page before it.
   const loneEvent = useQuery({
-    queryKey: ['workspace-activity-event', range, search.ev],
+    // Keyed by workspace too: another tab can switch the session's workspace, and a cached event never crosses over.
+    queryKey: ['workspace-activity-event', workspace.id, range, search.ev],
     queryFn: ({ signal }) => {
       const r = resolveRange(range);
       return api.workspaceActivity({ from: r.from, to: r.to, q: formatExactTerm('id', search.ev ?? ''), limit: 1 }, signal);
@@ -76,6 +84,28 @@ function WorkspaceActivity() {
   return (
     <div className="flex min-h-[28rem] flex-1 flex-col">
       <div className="flex flex-col gap-3 border-b px-4 py-4 sm:px-6">
+        {noProjects ? (
+          // A new workspace (managed before its first project exists): say what to do next.
+          <div
+            className="flex flex-col gap-3 rounded-lg border border-dashed bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between"
+            data-testid="no-projects"
+          >
+            <div className="flex flex-col gap-0.5">
+              <p className="font-medium text-sm">This workspace has no projects yet</p>
+              <p className="text-muted-foreground text-sm">
+                {canCreateProject
+                  ? 'Create your first project to get an ingest key and start sending events. Workspace actions are recorded here either way.'
+                  : 'Ask a workspace owner or admin to create the first project. Workspace actions are recorded here either way.'}
+              </p>
+            </div>
+            {canCreateProject ? (
+              <Button nativeButton={false} render={<Link search={{ new: true }} to="/projects" />} size="sm">
+                <FolderPlusIcon />
+                Create your first project
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <p className="max-w-3xl text-muted-foreground text-sm">
           Logbird records its own management actions — projects, keys, retention, members, views, invite links, sign-ins, sessions and exports — into
           this stream. It is the same event model you send, shown with the same components.{' '}
