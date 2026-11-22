@@ -1,4 +1,4 @@
-import type { AuditEvent } from '@logbird/contracts';
+import type { AuditEvent, ReadScope } from '@logbird/contracts';
 
 /** Origin the SDK/curl should talk to. The app origin proxies `/v1` to the server. */
 export function ingestOrigin(): string {
@@ -125,6 +125,29 @@ curl --get "${ingestOrigin()}/v1/events" \\
 curl --get "${ingestOrigin()}/v1/events" \\
   ${auth} \\
   --data-urlencode "q=outcome:failure" \\
+  --data-urlencode "limit=20"`;
+}
+
+/**
+ * Viewer tokens: the console never mints them. A server holding a read or scoped-read key mints one per page view and
+ * hands only the token to the browser (docs/scoped-read-access.md). With a scoped key the example asks for the key's
+ * own scope (a token may be equal or narrower); with a read key it uses an example tenant.
+ */
+export function viewerTokenSnippet(key?: string, scope?: ReadScope | null): string {
+  const auth = `-H "Authorization: Bearer ${key ?? `$${READ_ENV}`}"`;
+  // Single-quoted for the shell: an id containing ' is closed, escaped and reopened.
+  const body = JSON.stringify({ scope: scope ?? { tenantId: 'biz_5' }, ttlSeconds: 900 }).replaceAll("'", `'"'"'`);
+  const what = scope ? "this key's own scope (or a narrower one)" : 'one tenant (biz_5 is an example)';
+  return `# 1. On your server: mint a token for ${what}, valid 60 to 3600 seconds
+curl -X POST "${ingestOrigin()}/v1/viewer-tokens" \\
+  ${auth} \\
+  -H "Content-Type: application/json" \\
+  -d '${body}'
+# Answers {"token":"lbv1.…","expiresAt":"…","scope":{…}}. Give the browser only the token.
+
+# 2. In the browser: read with the token, always in the Authorization header, never in a URL
+curl --get "${ingestOrigin()}/v1/events" \\
+  -H "Authorization: Bearer $LOGBIRD_VIEWER_TOKEN" \\
   --data-urlencode "limit=20"`;
 }
 

@@ -243,6 +243,7 @@ CREATE TABLE events
   sdk               LowCardinality(String),
 
   INDEX idx_event_id   event_id        TYPE bloom_filter(0.001) GRANULARITY 1,
+  INDEX idx_received_at received_at    TYPE minmax GRANULARITY 1,          -- 010: arrival-time slices (webhooks, alerts, live)
   INDEX idx_actor      actor_id        TYPE bloom_filter(0.01)  GRANULARITY 1,
   INDEX idx_tenant     tenant_id       TYPE bloom_filter(0.01)  GRANULARITY 1,
   INDEX idx_executor   executor_id     TYPE bloom_filter(0.01)  GRANULARITY 1,
