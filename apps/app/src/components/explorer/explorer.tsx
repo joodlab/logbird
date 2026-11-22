@@ -576,6 +576,7 @@ function ProjectExplorer({
         }}
         onPrev={selectedIndex > 0 ? () => move(-1) : undefined}
         missingError={deepLinked.isError ? deepLinked.error : undefined}
+        missingId={ev}
         open={Boolean(ev)}
         projectId={projectId}
       />

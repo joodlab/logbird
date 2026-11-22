@@ -4,7 +4,7 @@
  * "<isoFrom>..<isoTo>" window (what drag-to-zoom and the custom picker produce).
  */
 
-import { formatClock, formatMonthDay, localDayKey } from './format';
+import { formatClock, formatDate, formatMonthDay, localDayKey } from './format';
 
 export const RANGE_PRESETS = [
   { value: '15m', label: 'Last 15 minutes', short: '15m' },
@@ -96,9 +96,13 @@ export function rangeLabel(range: string): string {
     return `Last ${rel[1]} ${unit}${rel[1] === '1' ? '' : 's'}`;
   }
   const r = resolveRange(range);
+  // Years appear whenever the span leaves the current year, so a ten-year search never reads as one day.
+  const year = (ms: number) => localDayKey(ms).slice(0, 4);
+  const withYear = year(r.fromMs) !== year(r.toMs) || year(r.fromMs) !== year(Date.now());
+  const day = (ms: number) => (withYear ? formatDate(new Date(ms).toISOString()) : formatMonthDay(ms));
   return localDayKey(r.fromMs) === localDayKey(r.toMs)
-    ? `${formatMonthDay(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}`
-    : `${formatMonthDay(r.fromMs)} ${formatClock(r.fromMs)} – ${formatMonthDay(r.toMs)} ${formatClock(r.toMs)}`;
+    ? `${day(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}`
+    : `${day(r.fromMs)} ${formatClock(r.fromMs)} – ${day(r.toMs)} ${formatClock(r.toMs)}`;
 }
 
 export function rangeShortLabel(range: string): string {
@@ -128,4 +132,16 @@ export function historyRange(firstSeenIso: string, now = Date.now(), lastSeenIso
   // cut off. Bounds then come from the entity's own timestamps only, so the range (and every query key) is stable.
   if (!Number.isNaN(last) && last >= Math.floor(now / 1000) * 1000) return absoluteRange(first - UNIT_MS.d, last + 1);
   return `${days}d`;
+}
+
+/**
+ * Every timestamp ingest can admit, as of now: from 3650 days before arrival to a day after it (packages/clickhouse
+ * timestamp admission), with a day of slack on each side for clocks and the time since arrival. Used where a search
+ * must find every stored match, such as all children of an event.
+ */
+export function admittedRange(now = Date.now(), oldestStoredIso?: string | null): string {
+  const admitted = now - 3651 * UNIT_MS.d;
+  // A purge that has not run yet can leave older rows: reach back to the oldest one the project still holds.
+  const oldest = oldestStoredIso ? Date.parse(oldestStoredIso) - UNIT_MS.d : Number.NaN;
+  return absoluteRange(Number.isNaN(oldest) ? admitted : Math.min(admitted, oldest), now + 2 * UNIT_MS.d);
 }
