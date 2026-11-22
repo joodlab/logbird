@@ -1,0 +1,36 @@
+import { prisma } from '@logbird/database';
+import { sendWebhookDisabled } from '@logbird/email/send';
+
+export async function sendWebhookDisableNotices(projectId?: string) {
+  const notices = await prisma.webhookDisableNotice.findMany({
+    where: { nextAttemptAt: { lte: new Date() }, ...(projectId ? { endpoint: { projectId } } : {}) },
+    include: { endpoint: { select: { project: { select: { name: true, organizationId: true } } } } },
+    orderBy: [{ nextAttemptAt: 'asc' }, { id: 'asc' }],
+    take: 10,
+  });
+  await Promise.all(
+    notices.map(async (notice) => {
+      const { project } = notice.endpoint;
+      const claimed = await prisma.webhookDisableNotice.updateMany({
+        where: { id: notice.id, nextAttemptAt: notice.nextAttemptAt },
+        data: { nextAttemptAt: new Date(Date.now() + 3_600_000) },
+      });
+      if (!claimed.count) return;
+      try {
+        const member = await prisma.member.findFirst({
+          where: { organizationId: project.organizationId, userId: notice.recipientId, role: { in: ['owner', 'admin'] } },
+          select: { user: { select: { email: true } } },
+        });
+        if (member)
+          await sendWebhookDisabled({
+            email: member.user.email,
+            project: project.name,
+            reason: notice.reason === 'gone_410' ? 'gone_410' : 'consecutive_failures',
+          });
+        await prisma.webhookDisableNotice.deleteMany({ where: { id: notice.id } });
+      } catch {
+        console.error(JSON.stringify({ event: 'webhook.notification_failed', noticeId: notice.id }));
+      }
+    }),
+  );
+}

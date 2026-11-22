@@ -19,6 +19,8 @@ export const mutationPermissions = [
   { method: 'PATCH', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+$/, roles: admins },
   { method: 'DELETE', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+\/rotate-secret$/, roles: admins },
+  { method: 'POST', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+\/test$/, roles: admins },
+  { method: 'POST', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+\/deliveries\/[^/]+\/resend$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/keys$/, roles: admins },
   { method: 'DELETE', path: /^\/api\/projects\/[^/]+\/keys\/[^/]+$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/keys\/[^/]+\/roll$/, roles: admins },

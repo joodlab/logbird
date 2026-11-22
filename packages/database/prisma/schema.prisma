@@ -369,8 +369,16 @@ model WebhookEndpoint {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   secrets WebhookSecret[]
+  cursorReceivedAt DateTime @default(now())
+  cursorEventId String?
+  lastScannedAt DateTime?
+  consecutiveFailures Int @default(0)
+  failingSince DateTime?
+  deliveries WebhookDelivery[]
+  disableNotices WebhookDisableNotice[]
 
   @@index([projectId])
+  @@index([enabled, lastScannedAt, id])
 }
 
 model WebhookSecret {
@@ -382,4 +390,56 @@ model WebhookSecret {
   expiresAt DateTime?
 
   @@index([endpointId])
+}
+
+model WebhookDelivery {
+  id String @id @default(cuid())
+  endpointId String
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  eventId String
+  // Null identifies a synthetic test. The receive clock pins the original event identity on resend.
+  receivedAt DateTime?
+  createdAt DateTime @default(now())
+  status String @default("pending")
+  nextAttemptAt DateTime? @default(now())
+  leaseUntil DateTime?
+  attemptNumber Int @default(0)
+  windowAttempts Int @default(0)
+  retryUntil DateTime?
+  expiresAt DateTime
+  attempts WebhookAttempt[]
+
+  @@unique([endpointId, eventId])
+  @@index([endpointId, id])
+  @@index([endpointId, status, nextAttemptAt, id])
+  @@index([expiresAt])
+}
+
+model WebhookAttempt {
+  deliveryId String
+  delivery WebhookDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  number Int
+  startedAt DateTime
+  status String
+  latencyMs Int?
+  responseCode Int?
+  responseBody String?
+  error String?
+
+  @@id([deliveryId, number])
+  @@index([startedAt])
+}
+
+model WebhookDisableNotice {
+  id String @id @default(cuid())
+  endpointId String
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  recipientId String
+  reason String
+  createdAt DateTime @default(now())
+  nextAttemptAt DateTime @default(now())
+
+  @@index([endpointId])
+  @@index([nextAttemptAt])
+  @@index([createdAt])
 }

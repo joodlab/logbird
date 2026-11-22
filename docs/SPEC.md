@@ -439,11 +439,63 @@ Endpoint configuration includes URL, description, enabled state/disabled reason,
 Logbird `filterQuery`, and optional `{ tenantId?, target?: { type, id } }` scope.
 PATCH scope replaces the whole scope (`null` clears it); absent fields preserve
 stored values. URLs require HTTPS unless `WEBHOOKS_ALLOW_HTTP=true`; every resolved
-address must be public unicast, and the save-time lookup gives up after 3 seconds.
-Rejections return 400 `webhook_url_not_allowed`. A scope needs a `tenantId` or a
-`target`; `{}` is rejected (use `null` for no scope).
-Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800; secrets already past their window are deleted then. This API
-stores configuration only; delivery, cursors and delivery logs arrive separately.
+address must be public unicast. Save-time DNS uses a cancellable c-ares resolver
+with a 3-second deadline and separate per-workspace capacity. Invalid destinations
+return 400 `webhook_url_not_allowed`. A lookup timeout or exhausted capacity
+returns 503 `webhook_lookup_busy` with `Retry-After: 3`. A scope needs a `tenantId`
+or a `target`. Use `null` to clear it.
+
+Each endpoint starts at creation time, or at rollout for existing endpoints.
+There is no historical backfill. The worker reads ClickHouse in
+`(received_at, event_id)` order through the Logbird query compiler. The scope
+applies as an AND. A target must match both the type and ID on the same event
+target. The scan window ends at the earlier of:
+
+- The current database time minus the async-insert flush bound and a safety margin (15 seconds total).
+- The millisecond before the project's oldest unconfirmed ingest receipt.
+
+The worker captures that limit under the existing project ingest lock so an
+in-flight receipt cannot register behind the cursor. It inserts deliveries and
+advances the endpoint cursor in one Postgres transaction. Deliveries are unique
+by endpoint and event ID. Disabled endpoints pause scanning and sending. On
+re-enable, scanning resumes from the saved cursor. The worker rechecks the
+current scope and filter before sending an event. Events removed from storage or
+excluded by a new scope finish with `event_unavailable`.
+
+Each POST body is the public event shape returned in `/v1/events/:id`'s
+`event`. The worker signs the exact bytes with the Standard Webhooks headers
+`webhook-id`, `webhook-timestamp` (Unix seconds), and `webhook-signature`.
+Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800.
+Every non-expired secret contributes a space-separated `v1,<base64>`
+signature. The ID stays stable on retry and resend. Use it to deduplicate
+requests if a worker restarts after the receiver accepted a POST but before
+Logbird recorded the outcome. Event IDs that cannot be sent as Standard
+Webhooks headers are logged as `invalid_event_id`.
+
+Each send resolves the destination again, checks all addresses against the
+save-time policy, and pins one validated address for the socket while preserving
+the original TLS hostname. Redirects count as failures. Connect and total
+deadlines are 5 and 10 seconds. The sender reads up to 64 KiB of the response
+and keeps the first 2 KiB of body in the attempt log. It sends
+`User-Agent: Logbird-Webhooks/<version>` and no console headers or cookies.
+
+Each endpoint has four concurrent sends by default and a limit of 50 attempts
+per second. A separate worker-wide cap defaults to 16 concurrent sends.
+2xx succeeds. Network failures and other responses retry with jitter at roughly
+5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h for up to 24 hours.
+HTTP 410 disables immediately with `gone_410`. An endpoint also disables with
+`consecutive_failures` after 50 consecutive failed deliveries by default or
+24 hours of failures without a success. Auto-disable records `webhook.disabled`
+in workspace activity and queues email to owners and admins.
+
+Owners and admins can use `POST .../webhooks/:id/test` to queue a
+`logbird.webhook.test` event with its own ID. Use
+`GET .../webhooks/:id/deliveries?status=&cursor=` to page delivery statuses
+and attempts, and `POST .../webhooks/:id/deliveries/:deliveryId/resend` to give
+a completed delivery a new retry window. Both POSTs return 202 and require
+an enabled endpoint. Attempt logs include status, attempt number, latency,
+response code, and a body preview, with no response headers. The worker
+keeps attempt history for 30 days and removes expired delivery records.
 
 ### 5.1 Query language (`q`)
 

@@ -8,6 +8,7 @@ import { type InvitationEmailProps, invitation } from './templates/invitation';
 import { type MemberJoinedEmailProps, memberJoined } from './templates/member-joined';
 import { type RoleChangedEmailProps, roleChanged } from './templates/role-changed';
 import { type SignInCodeEmailProps, signInCode } from './templates/sign-in-code';
+import { type WebhookDisabledEmailProps, webhookDisabled } from './templates/webhook-disabled';
 
 if (env.AUTH_LOG_SIGN_IN_CODES === 'true')
   console.warn(
@@ -90,6 +91,7 @@ export const sendSignInCode = async (props: SendProps<SignInCodeEmailProps>) => 
 export const sendOrganizationInvitation = (props: SendProps<InvitationEmailProps>) => sendEmail(invitation, props);
 export const sendMemberJoined = (props: SendProps<MemberJoinedEmailProps>) => sendEmail(memberJoined, props);
 export const sendRoleChanged = (props: SendProps<RoleChangedEmailProps>) => sendEmail(roleChanged, props);
+export const sendWebhookDisabled = (props: SendProps<WebhookDisabledEmailProps>) => sendEmail(webhookDisabled, props);
 
 /** SMTP settings safe to print (never credentials). */
 export const smtpTarget = () => ({ host: env.SMTP_HOST, port: env.SMTP_PORT, tls: smtpTlsMode(env), from: env.MAIL_FROM, appUrl: env.APP_URL });

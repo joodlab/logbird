@@ -995,9 +995,8 @@ every ClickHouse upgrade before accepting ingest traffic; it also checks the asy
 
 ## Webhook endpoint settings
 
-The endpoint management API can store and rotate secrets; this change does not
-send webhooks yet. Each project may have up to 10 endpoints. Owners and admins
-manage them; workspace members can read endpoint configuration without secrets.
+Each project may have up to 10 signed webhook endpoints. Owners and admins
+manage endpoints and read delivery history.
 Create and rotate return a `whsec_` secret once, with `Cache-Control: no-store`.
 Save it in the receiver's secret store. Never put it in a webhook URL.
 
@@ -1021,11 +1020,29 @@ self-hosted receivers, but still requires public unicast addresses. Loopback,
 private, link-local, CGNAT, multicast, unspecified, reserved, documentation and
 metadata addresses are rejected, including mapped/translated forms. Every DNS
 answer must pass validation. Credentials and fragments are forbidden. Save-time
-validation does not protect a sender against DNS rebinding; the future sender
-must resolve and pin an allowed address again when connecting.
+validation uses a cancellable DNS resolver. The sender resolves again and pins
+an allowed address on every attempt.
 
 PATCH `scope` replaces the whole scope; `null` clears it. `filterQuery` uses the
 Logbird query language (empty matches everything). Secret rotation accepts an
 `overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH
-remain unchanged. Delivery, filters at delivery time, retries and the UI arrive
-in later webhook PRs.
+remain unchanged.
+
+Run the additive Postgres migration before upgrading the API and worker.
+Compose runs it through the existing migrate service. If the worker uses a
+separate runtime environment, provide the same `WEBHOOK_SECRET_KEY` as the
+server, or the same `BETTER_AUTH_SECRET` if using a derived key. The worker
+logs `webhook.delivery_key_missing` when neither is supplied. For disable
+notifications, give the worker the existing `SMTP_*`, `MAIL_FROM` and
+`APP_URL` settings. Keep both roles' `WEBHOOKS_ALLOW_HTTP` settings aligned.
+
+| Worker environment variable | Default | Effect |
+| --- | --- | --- |
+| `WEBHOOKS_WORKER_CONCURRENCY` | `16` | Concurrent attempts across replicas sharing the same BullMQ prefix (1–32). |
+| `WEBHOOKS_ENDPOINT_CONCURRENCY` | `4` | Concurrent attempts against one endpoint (1–16). |
+| `WEBHOOKS_FAILURE_LIMIT` | `50` | Consecutive failed deliveries before auto-disable (1–1000). |
+
+Set these optional variables in the worker's runtime environment, such as a
+Compose override or a Kubernetes deployment overlay. Logs expire after
+30 days. New endpoints start at the current time. A receiver should
+deduplicate by `webhook-id` and verify its signature against the raw request body.

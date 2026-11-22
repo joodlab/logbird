@@ -1,12 +1,20 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { createWebhookResponseSchema, listWebhooksResponseSchema, MAX_WEBHOOK_ENDPOINTS, webhookEndpointSchema } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
-import { decryptWebhookSecret, webhookSecretKey } from '@logbird/database/webhooks';
+import { decryptWebhookSecret, type WebhookLookup, webhookSecretKey } from '@logbird/database/webhooks';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { app } from './app';
 import { env } from './env';
 
-const control = vi.hoisted(() => ({ failAudit: false }));
+const control = vi.hoisted(() => ({ failAudit: false, lookup: undefined as WebhookLookup | undefined }));
+vi.mock('@logbird/database/webhooks', async (original) => {
+  const webhooks = await original<typeof import('@logbird/database/webhooks')>();
+  return {
+    ...webhooks,
+    validateWebhookUrl: (url: string, allowHttp?: boolean, lookup?: WebhookLookup, organizationId?: string) =>
+      webhooks.validateWebhookUrl(url, allowHttp, control.lookup ?? lookup, organizationId),
+  };
+});
 vi.mock('@logbird/database', async (original) => {
   const db = await original<typeof import('@logbird/database')>();
   return {
@@ -40,14 +48,24 @@ async function create(role = 'owner', input: unknown = { url: receiver }) {
 }
 beforeAll(async () => {
   for (const id of [org, otherOrg]) await prisma.organization.create({ data: { id, name: 'QA Webhooks', slug: id, createdAt: new Date() } });
-  for (const role of ['owner', 'admin', 'member', 'viewer', 'unknown', 'outsider']) {
+  for (const role of ['owner', 'admin', 'member', 'viewer', 'unknown', 'outsider', 'foreign-owner']) {
     const id = `qa-webhooks-${randomUUID()}`;
     users.push(id);
-    await prisma.user.create({ data: { id, name: `QA Webhook ${role}`, email: `${id}@example.test` } });
-    if (role !== 'outsider') await prisma.member.create({ data: { id: randomUUID(), organizationId: org, userId: id, role, createdAt: new Date() } });
+    await prisma.user.create({ data: { id, name: `QA Webhook ${role}`, email: `${id}@example.invalid` } });
+    const activeOrganizationId = role === 'foreign-owner' ? otherOrg : org;
+    if (role !== 'outsider')
+      await prisma.member.create({
+        data: {
+          id: randomUUID(),
+          organizationId: activeOrganizationId,
+          userId: id,
+          role: role === 'foreign-owner' ? 'owner' : role,
+          createdAt: new Date(),
+        },
+      });
     const token = randomUUID();
     await prisma.session.create({
-      data: { id: randomUUID(), userId: id, token, activeOrganizationId: org, expiresAt: new Date(Date.now() + 3_600_000) },
+      data: { id: randomUUID(), userId: id, token, activeOrganizationId, expiresAt: new Date(Date.now() + 3_600_000) },
     });
     cookies[role] =
       `logbird.session_token=${encodeURIComponent(`${token}.${createHmac('sha256', env.BETTER_AUTH_SECRET).update(token).digest('base64')}`)}`;
@@ -111,6 +129,67 @@ it('creates, lists, reads, patches and deletes configuration; exposes the encryp
   expect((await request(`${base()}/${endpoint.id}`, 'DELETE')).status).toBe(204);
   expect((await request(`${base()}/${endpoint.id}`)).status).toBe(404);
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(0);
+});
+
+it('queues synthetic pings and resends and restricts delivery logs to project owners and admins', async () => {
+  const { endpoint } = await create();
+  const path = `${base()}/${endpoint.id}`;
+  expect((await request(`${path}/test`, 'POST', undefined, 'member')).status).toBe(403);
+  expect((await request(`${path}/deliveries`, 'GET', undefined, 'member')).status).toBe(403);
+  const queued = await request(`${path}/test`, 'POST', undefined, 'admin');
+  expect(queued.status).toBe(202);
+  const ping = await queued.json();
+  expect(ping).toMatchObject({ eventId: expect.any(String), kind: 'test', status: 'pending' });
+  const log = await request(`${path}/deliveries?status=pending`);
+  expect(log.status).toBe(200);
+  expect(log.headers.get('cache-control')).toBe('no-store');
+  expect(await log.json()).toMatchObject({ data: [{ ...ping, attempts: [] }], nextCursor: null });
+  const resend = `${path}/deliveries/${ping.id}/resend`;
+  expect((await request(resend, 'POST')).status).toBe(409);
+  expect((await request(resend, 'POST', undefined, 'member')).status).toBe(403);
+  await prisma.webhookDelivery.update({ where: { id: ping.id }, data: { status: 'succeeded', nextAttemptAt: null } });
+  const requeued = await request(resend, 'POST');
+  expect(requeued.status).toBe(202);
+  expect(await requeued.json()).toEqual(ping);
+  expect((await request(`/api/projects/${siblingId}/webhooks/${endpoint.id}/deliveries`)).status).toBe(404);
+  expect(
+    await prisma.auditOutbox.count({
+      where: {
+        stream: `ws:${org}`,
+        OR: ['webhook.test_queued', 'webhook.resend_queued'].map((action) => ({ payload: { path: ['action'], equals: action } })),
+      },
+    }),
+  ).toBe(2);
+});
+
+it('returns a retryable lookup error for a busy workspace and lets another workspace save', async () => {
+  let release!: (value: Awaited<ReturnType<WebhookLookup>>) => void;
+  const stalled = new Promise<Awaited<ReturnType<WebhookLookup>>>((resolve) => {
+    release = resolve;
+  });
+  const allowed = [{ address: '8.8.8.8', family: 4 }];
+  let held = 0;
+  control.lookup = (hostname) => {
+    if (hostname !== 'stall.example.invalid') return Promise.resolve(allowed);
+    held++;
+    return stalled;
+  };
+  const input = { url: 'https://stall.example.invalid/receiver' };
+  const waiting = [request(base(), 'POST', input), request(base(), 'POST', input)];
+  try {
+    await expect.poll(() => held, { timeout: 3000 }).toBe(2);
+    const busy = await request(base(), 'POST', input);
+    expect(busy.status).toBe(503);
+    expect(busy.headers.get('Retry-After')).toBe('3');
+    expect(await busy.json()).toMatchObject({ error: { code: 'webhook_lookup_busy' } });
+    expect((await request(`/api/projects/${foreignId}/webhooks`, 'POST', { url: 'https://ready.example.invalid' }, 'foreign-owner')).status).toBe(
+      201,
+    );
+  } finally {
+    release(allowed);
+    await Promise.all(waiting);
+    control.lookup = undefined;
+  }
 });
 it('rotates with default, zero and maximum overlap without extending already expiring secrets', async () => {
   const { endpoint, secret } = await create();
@@ -293,7 +372,7 @@ it('rejects invalid filters, scopes and URLs on create and PATCH without writing
 it('sets creator to null when deleted and cascades endpoint secrets on project deletion', async () => {
   const creator = `qa-webhook-creator-${randomUUID()}`;
   users.push(creator);
-  await prisma.user.create({ data: { id: creator, name: 'QA creator', email: `${creator}@example.test` } });
+  await prisma.user.create({ data: { id: creator, name: 'QA creator', email: `${creator}@example.invalid` } });
   const project = await prisma.project.create({ data: { organizationId: org, name: 'QA cascade', slug: `qa-cascade-${randomUUID()}` } });
   const endpoint = await prisma.webhookEndpoint.create({
     data: { projectId: project.id, url: receiver, createdById: creator, secrets: { create: { ciphertext: 'qa-fictional-ciphertext' } } },

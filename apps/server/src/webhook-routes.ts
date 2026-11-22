@@ -1,16 +1,27 @@
+import { randomUUID } from 'node:crypto';
 import { compileQuery } from '@logbird/clickhouse';
 import {
   createWebhookResponseSchema,
   createWebhookSchema,
+  listWebhookDeliveriesQuerySchema,
+  listWebhookDeliveriesResponseSchema,
   listWebhooksResponseSchema,
   MAX_WEBHOOK_ENDPOINTS,
+  queuedWebhookDeliverySchema,
   rotateWebhookSecretResponseSchema,
   rotateWebhookSecretSchema,
   updateWebhookSchema,
   webhookEndpointSchema,
 } from '@logbird/contracts';
 import { type Prisma, prisma, type WebhookEndpoint } from '@logbird/database';
-import { encryptWebhookSecret, validateWebhookUrl, WebhookUrlError, webhookSecretKey } from '@logbird/database/webhooks';
+import {
+  encryptWebhookSecret,
+  validateWebhookUrl,
+  WEBHOOK_LOG_RETENTION_MS,
+  WebhookLookupBusyError,
+  WebhookUrlError,
+  webhookSecretKey,
+} from '@logbird/database/webhooks';
 import { generateWebhookSecret } from '@logbird/sdk';
 import { type Context, Hono } from 'hono';
 import { validator } from 'hono-openapi';
@@ -44,13 +55,17 @@ const scopeColumns = (scope: { tenantId?: string; target?: { type: string; id: s
   scopeTargetType: scope?.target?.type ?? null,
   scopeTargetId: scope?.target?.id ?? null,
 });
-async function allowedUrl(url: string) {
+async function allowedUrl(c: Context<AppEnv>, url: string) {
   try {
-    return await validateWebhookUrl(url, env.WEBHOOKS_ALLOW_HTTP);
+    return await validateWebhookUrl(url, env.WEBHOOKS_ALLOW_HTTP, undefined, c.get('project').organizationId);
   } catch (error) {
+    if (error instanceof WebhookLookupBusyError) throw new ApiError(503, error.code, error.message, undefined, 3);
     if (error instanceof WebhookUrlError) throw new ApiError(400, error.code, error.message);
     throw error;
   }
+}
+function requireEnabled(endpoint: WebhookEndpoint) {
+  if (!endpoint.enabled) throw new ApiError(409, 'webhook_disabled', 'Enable this webhook before queuing a delivery.');
 }
 const invalidBody = (result: { success: boolean; error?: unknown }) => {
   if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
@@ -64,10 +79,15 @@ const webhookBody = (result: { success: boolean; error?: readonly { path?: reado
  * transactions but doesn't block the FOR KEY SHARE that foreign-key inserts into the project's other child tables take. */
 async function lockedProject<T>(c: Context<AppEnv>, work: (tx: Prisma.TransactionClient) => Promise<T>) {
   return prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<
+    const [project] = await tx.$queryRaw<
       { id: string }[]
     >`SELECT id FROM "Project" WHERE id=${c.get('project').id} AND "organizationId"=${c.get('activeOrganizationId')} FOR NO KEY UPDATE`;
-    if (!rows.length) throw new ApiError(404, 'not_found', 'Project not found.');
+    if (!project) throw new ApiError(404, 'not_found', 'Project not found.');
+    const endpointId = c.req.param('id');
+    if (endpointId) {
+      // Automatic disable uses this row lock too. Re-read mutable endpoint state after acquiring it.
+      await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${endpointId} AND "projectId" = ${project.id} FOR UPDATE`;
+    }
     return work(tx);
   });
 }
@@ -117,7 +137,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     async (c) => {
       const input = c.req.valid('json');
       compileQuery(input.filterQuery ?? '');
-      const url = await allowedUrl(input.url);
+      const url = await allowedUrl(c, input.url);
       const secret = generateWebhookSecret();
       const endpoint = await lockedProject(c, async (tx) => {
         if ((await tx.webhookEndpoint.count({ where: { projectId: c.get('project').id } })) >= MAX_WEBHOOK_ENDPOINTS)
@@ -152,7 +172,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     if (input.filterQuery !== undefined) compileQuery(input.filterQuery);
     // A missing endpoint is a 404 before any DNS lookup; the locked re-read below still decides.
     if (input.url !== undefined) await findEndpoint(c);
-    const url = input.url === undefined ? undefined : await allowedUrl(input.url);
+    const url = input.url === undefined ? undefined : await allowedUrl(c, input.url);
     const endpoint = await lockedProject(c, async (tx) => {
       const before = await findEndpoint(c, tx);
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
@@ -165,6 +185,7 @@ export const webhookRoutes = new Hono<AppEnv>()
           enabled: input.enabled,
           ...(input.scope !== undefined ? scopeColumns(input.scope) : {}),
           ...(enabledChanged ? { disabledReason: input.enabled ? null : 'manual', disabledAt: input.enabled ? null : new Date() } : {}),
+          ...((input.enabled && enabledChanged) || (url !== undefined && url !== before.url) ? { consecutiveFailures: 0, failingSince: null } : {}),
         },
       });
       const old = serialize(before),
@@ -185,6 +206,67 @@ export const webhookRoutes = new Hono<AppEnv>()
       await record(c, tx, 'webhook.deleted', endpoint);
     });
     return c.body(null, 204);
+  })
+  .post(`${base}/:id/test`, doc('Queue a webhook test event', queuedWebhookDeliverySchema, 202), async (c) => {
+    const row = await lockedProject(c, async (tx) => {
+      const endpoint = await findEndpoint(c, tx);
+      requireEnabled(endpoint);
+      const delivery = await tx.webhookDelivery.create({
+        data: { endpointId: endpoint.id, eventId: randomUUID(), expiresAt: new Date(Date.now() + WEBHOOK_LOG_RETENTION_MS) },
+      });
+      await record(c, tx, 'webhook.test_queued', endpoint);
+      return delivery;
+    });
+    return c.json(queuedWebhookDeliverySchema.parse({ ...row, kind: 'test' }), 202);
+  })
+  .get(
+    `${base}/:id/deliveries`,
+    doc('List webhook deliveries and attempts', listWebhookDeliveriesResponseSchema),
+    validator('query', listWebhookDeliveriesQuerySchema, invalidBody),
+    async (c) => {
+      await requireRole(c);
+      const endpoint = await findEndpoint(c);
+      const { status, cursor } = c.req.valid('query');
+      const rows = await prisma.webhookDelivery.findMany({
+        where: { endpointId: endpoint.id, status, id: cursor ? { lt: cursor } : undefined, expiresAt: { gt: new Date() } },
+        orderBy: { id: 'desc' },
+        take: 21,
+        include: { attempts: { orderBy: { number: 'asc' }, where: { startedAt: { gt: new Date(Date.now() - WEBHOOK_LOG_RETENTION_MS) } } } },
+      });
+      const page = rows.slice(0, 20);
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        listWebhookDeliveriesResponseSchema.parse({
+          data: page.map((row) => ({
+            ...row,
+            kind: row.receivedAt ? 'event' : 'test',
+            createdAt: row.createdAt.toISOString(),
+            nextAttemptAt: row.nextAttemptAt?.toISOString() ?? null,
+            attempts: row.attempts.map((attempt) => ({ ...attempt, startedAt: attempt.startedAt.toISOString() })),
+          })),
+          nextCursor: rows.length > 20 ? (page.at(-1)?.id ?? null) : null,
+        }),
+      );
+    },
+  )
+  .post(`${base}/:id/deliveries/:deliveryId/resend`, doc('Requeue a webhook delivery', queuedWebhookDeliverySchema, 202), async (c) => {
+    const row = await lockedProject(c, async (tx) => {
+      const endpoint = await findEndpoint(c, tx);
+      requireEnabled(endpoint);
+      const now = new Date();
+      const delivery = await tx.webhookDelivery.findFirst({
+        where: { id: c.req.param('deliveryId'), endpointId: endpoint.id, expiresAt: { gt: now } },
+      });
+      if (!delivery) throw new ApiError(404, 'not_found', 'Webhook delivery not found.');
+      const updated = await tx.webhookDelivery.updateMany({
+        where: { id: delivery.id, status: { not: 'pending' } },
+        data: { status: 'pending', nextAttemptAt: now, retryUntil: null, windowAttempts: 0, expiresAt: new Date(+now + WEBHOOK_LOG_RETENTION_MS) },
+      });
+      if (!updated.count) throw new ApiError(409, 'webhook_delivery_pending', 'This delivery is already pending.');
+      await record(c, tx, 'webhook.resend_queued', endpoint);
+      return delivery;
+    });
+    return c.json(queuedWebhookDeliverySchema.parse({ ...row, status: 'pending', kind: row.receivedAt ? 'event' : 'test' }), 202);
   })
   .post(
     `${base}/:id/rotate-secret`,
@@ -207,6 +289,7 @@ export const webhookRoutes = new Hono<AppEnv>()
           data: { expiresAt: until },
         });
         await tx.webhookSecret.create({ data: { endpointId: endpoint.id, ciphertext: encryptWebhookSecret(secret, secretKey) } });
+        await tx.webhookEndpoint.update({ where: { id: endpoint.id }, data: { updatedAt: now } });
         await record(c, tx, 'webhook.secret_rotated', endpoint);
       });
       c.header('Cache-Control', 'no-store');

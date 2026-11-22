@@ -41,3 +41,34 @@ export const listWebhooksResponseSchema = z.object({ data: z.array(webhookEndpoi
 export const createWebhookResponseSchema = z.object({ endpoint: webhookEndpointSchema, secret: z.string() });
 export const rotateWebhookSecretResponseSchema = z.object({ secret: z.string() });
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>;
+
+export const webhookDeliveryStatusSchema = z.enum(['pending', 'succeeded', 'failed']);
+export const webhookAttemptSchema = z.object({
+  number: z.number().int().positive(),
+  status: z.enum(['sending', 'succeeded', 'failed', 'interrupted']),
+  startedAt: z.iso.datetime(),
+  latencyMs: z.number().int().nonnegative().nullable(),
+  responseCode: z.number().int().nullable(),
+  responseBody: z.string().nullable(),
+  error: z.enum(['destination_rejected', 'timeout', 'network_error', 'event_unavailable', 'invalid_event_id', 'signing_failed']).nullable(),
+});
+export const webhookDeliverySchema = z.object({
+  id: z.string(),
+  eventId: z.string(),
+  kind: z.enum(['event', 'test']),
+  status: webhookDeliveryStatusSchema,
+  createdAt: z.iso.datetime(),
+  nextAttemptAt: z.iso.datetime().nullable(),
+  attempts: z.array(webhookAttemptSchema),
+});
+export const listWebhookDeliveriesQuerySchema = z.object({
+  status: webhookDeliveryStatusSchema.optional(),
+  cursor: z.string().min(1).max(256).optional(),
+});
+export const listWebhookDeliveriesResponseSchema = z.object({
+  data: z.array(webhookDeliverySchema),
+  nextCursor: z.string().nullable(),
+});
+export const queuedWebhookDeliverySchema = webhookDeliverySchema.pick({ id: true, eventId: true, kind: true, status: true }).extend({
+  status: z.literal('pending'),
+});

@@ -6,8 +6,10 @@ import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } f
 import { runReceiptIndexCompaction } from './receipt-index-compaction';
 import { clickhouse, enforceProjectRetention } from './retention';
 import { enforceRetention } from './retention-sweep';
+import { startWebhookQueues } from './webhook-queues';
 
 await probeIngestRecovery(clickhouse);
+const closeWebhookQueues = await startWebhookQueues(clickhouse);
 const worker = new Worker(
   retentionQueueName,
   async (job) => {
@@ -116,7 +118,7 @@ async function shutdown() {
   stopping = true;
   // Cancel the owned PostgreSQL backend before waiting for workers; Redis hints are abortable too.
   compactionAbort.abort();
-  await Promise.all([worker.close(), receiptWorker.close(), compactionWorker.close()]);
+  await Promise.all([worker.close(), receiptWorker.close(), compactionWorker.close(), closeWebhookQueues()]);
   await Promise.all([receiptQueue.close(), compactionQueue.close()]);
   const results = await Promise.allSettled([closeRetentionQueue(), closeProjectLocks(), clickhouse.close(), prisma.$disconnect()]);
   if (results.some((r) => r.status === 'rejected')) process.exitCode = 1;
