@@ -1,13 +1,18 @@
 import { formatNumber } from '@/lib/format';
+import { shortZoneLabel, useConsoleZone } from '@/lib/time-zone';
 import { bucketLabel, outcomeChartConfig, SERIES, type SeriesRow } from './outcome-series';
 
 /** Tooltip body shared by the overview area chart and the explorer histogram. */
 export function OutcomeTooltip({ row, interval, hint }: { row: SeriesRow | undefined; interval: number; hint?: string }) {
+  const zone = useConsoleZone();
   if (!row) return null;
   return (
     <div className="grid min-w-44 gap-1.5 rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
       <div className="flex items-center justify-between gap-4">
-        <span className="font-medium">{bucketLabel(row.ts, interval)}</span>
+        <span className="font-medium">
+          {bucketLabel(row.ts, interval)}
+          <span className="font-normal text-muted-foreground"> · {shortZoneLabel(zone)}</span>
+        </span>
         <span className="font-medium tabular-nums">{formatNumber(row.total)}</span>
       </div>
       <div className="grid gap-1">

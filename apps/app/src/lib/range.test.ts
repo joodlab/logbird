@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_RANGE, admittedRange, historyRange, isValidRange, rangeLabel, rangePhrase, resolveRange } from './range';
+import { ALL_RANGE, admittedRange, historyRange, isValidRange, rangeInSentence, rangeLabel, rangePhrase, resolveRange } from './range';
 
 describe('rangePhrase', () => {
   it('reads presets as a phrase with "the"', () => {
@@ -82,5 +82,13 @@ describe('admittedRange with stored rows older than the admission window', () =>
     const oldest = '2016-11-01T00:00:00.000Z';
     expect(resolveRange(admittedRange(now, oldest)).fromMs).toBe(Date.parse(oldest) - 86_400_000);
     expect(resolveRange(admittedRange(now, null)).fromMs).toBe(now - 3651 * 86_400_000);
+  });
+});
+
+describe('rangeInSentence', () => {
+  it('lowercases relative labels but keeps month and zone names', () => {
+    expect(rangeInSentence('Last 7 days')).toBe('last 7 days');
+    expect(rangeInSentence('All time')).toBe('all time');
+    expect(rangeInSentence('Nov 22, 08:00 – 10:00 Berlin time')).toBe('Nov 22, 08:00 – 10:00 Berlin time');
   });
 });

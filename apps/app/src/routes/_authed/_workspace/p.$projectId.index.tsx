@@ -22,6 +22,7 @@ import { eventSentence } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { ALL_RANGE, DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/')({
@@ -36,6 +37,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/')({
 });
 
 function OverviewPage() {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const { projectId } = Route.useParams();
   const { range } = useRange();
   // "All time" has no earlier window of the same length to compare against: no trend badges.

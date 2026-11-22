@@ -28,6 +28,7 @@ import { errorMessage } from '@/lib/api/errors';
 import { keysQuery, keys as queryKeys } from '@/lib/api/queries';
 import { isKeyExpired, isKeyUsable } from '@/lib/api-keys';
 import { creatorLabel } from '@/lib/events';
+import { formatFull } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 import { useCan } from '@/lib/permissions';
 import { placeholderKeys } from '@/lib/placeholders';
@@ -216,7 +217,7 @@ function KeysSettings() {
                           disabled={revoke.isPending && revoke.variables?.id === k.id}
                           onClick={async () => {
                             const lastUse = k.lastUsedAt
-                              ? `It was last used ${new Date(k.lastUsedAt).toLocaleString()}${client ? ` by ${client}` : ''}. `
+                              ? `It was last used ${formatFull(k.lastUsedAt)}${client ? ` by ${client}` : ''}. `
                               : 'It was never used. ';
                             const ok = await confirm({
                               title: replacement ? `Revoke the old “${k.name}” key?` : `Revoke “${k.name}”?`,

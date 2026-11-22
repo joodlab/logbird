@@ -31,6 +31,7 @@ import {
   usesLabel,
 } from '@/lib/invite-links';
 import { ROLE_INFO, roleLabel, useOrganization } from '@/lib/organization';
+import { useConsoleZone } from '@/lib/time-zone';
 
 /** Webmail domains are never offered as a one-click "only people from my company" restriction. */
 const PUBLIC_DOMAINS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me']);
@@ -135,6 +136,7 @@ export function PanelHeading({ icon: Icon, title, description }: { icon: typeof 
 }
 
 function InviteLinkRow({ link }: { link: InviteLink }) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const confirm = useConfirm();
   const revoke = useRevokeInviteLink();
   const isActive = link.state === 'active';
@@ -225,6 +227,7 @@ const Dot = () => <span aria-hidden="true">·</span>;
 const EXPIRY_LABEL: Record<number, string> = { 1: '1 day', 7: '7 days', 30: '30 days' };
 
 function CreateInviteLinkDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const id = useId();
   const { me } = useOrganization();
   const create = useCreateInviteLink();
