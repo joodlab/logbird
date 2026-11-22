@@ -48,3 +48,11 @@ describe('the "all" range', () => {
     expect(r.fromMs).toBe(now - 3651 * 86_400_000);
   });
 });
+
+describe('historyRange within the current second', () => {
+  it('keeps a last event from the current second (relative ends round down to the second)', () => {
+    const now = Date.parse('2026-11-22T12:00:00.800Z');
+    const r = resolveRange(historyRange('2026-11-20T12:00:00.000Z', now, '2026-11-22T12:00:00.500Z'), now);
+    expect(r.toMs).toBe(Date.parse('2026-11-22T12:00:00.501Z'));
+  });
+});

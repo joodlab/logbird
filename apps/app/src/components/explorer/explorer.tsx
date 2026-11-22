@@ -19,7 +19,7 @@ import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
-import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
+import { ALL_RANGE, absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
@@ -93,6 +93,7 @@ export function Explorer({
 }: ExplorerProps) {
   const { q, range, columns, ev, live } = state;
   const rangeName = rangeLabelOverride ?? rangeLabel(range);
+  const complete = rangeComplete || range === ALL_RANGE;
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
   // The base filter (an entity or support agent) must constrain all of `q`, even one with a top-level OR.
   const effectiveQ = andQuery(baseQuery ?? '', q);
@@ -274,9 +275,9 @@ export function Explorer({
           <>
             Nothing in <span className="font-medium text-foreground">{rangeName.toLowerCase()}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>.{' '}
-            {rangeComplete ? 'Remove a filter to see more.' : 'Try a wider range or remove a filter.'}
+            {complete ? 'Remove a filter to see more.' : 'Try a wider range or remove a filter.'}
           </>
-        ) : rangeComplete ? (
+        ) : complete ? (
           `No events in ${rangeName.toLowerCase()}.`
         ) : (
           `No events in ${rangeName.toLowerCase()}. Widen the range, or send events with your ingest key.`
@@ -290,7 +291,7 @@ export function Explorer({
           Clear query
         </Button>
       ) : null}
-      {range !== '30d' && !rangeComplete ? (
+      {range !== '30d' && !complete ? (
         <Button onClick={() => onChange({ range: '30d' })} size="sm" variant="outline">
           Search last 30 days
         </Button>

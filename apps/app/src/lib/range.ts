@@ -122,7 +122,8 @@ export function historyRange(firstSeenIso: string, now = Date.now(), lastSeenIso
   const days = Math.max(1, Math.ceil((now - first) / UNIT_MS.d) + 1);
   // Ingest admits events stamped up to a day ahead; a relative range ends now and would hide them.
   const last = lastSeenIso ? Date.parse(lastSeenIso) : Number.NaN;
-  // Bounds from the entity's own timestamps only, so the range (and every query key) is stable across renders.
-  if (!Number.isNaN(last) && last >= now) return absoluteRange(first - UNIT_MS.d, last + 1);
+  // A relative range ends at now rounded down to the second (exclusive): a last event at or after that point would be
+  // cut off. Bounds then come from the entity's own timestamps only, so the range (and every query key) is stable.
+  if (!Number.isNaN(last) && last >= Math.floor(now / 1000) * 1000) return absoluteRange(first - UNIT_MS.d, last + 1);
   return `${days}d`;
 }

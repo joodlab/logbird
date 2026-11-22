@@ -57,7 +57,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   // The history shows everything this entity did unless the reader picked a range; the charts follow the picker.
   const { explicit: rangeChosen, clearRange } = useRange();
   // Only this entity's own profile may define its history (a placeholder can still hold the previous entity's).
-  const own = p && !(profile.isPlaceholderData && p.entity.id !== entityId) ? p : undefined;
+  const own = p && !profile.isPlaceholderData ? p : undefined;
   const timelineRange = rangeChosen ? timeline.range : own ? historyRange(own.entity.firstSeen, Date.now(), own.entity.lastSeen) : undefined;
   // Out of a full history, links say "all" rather than this entity's computed window, so the next page is not narrowed.
   const linkRange = rangeChosen ? timeline.range : ALL_RANGE;
@@ -146,7 +146,8 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                   name={own.entity.name || displayId}
                   projectId={projectId}
                   query={baseQuery}
-                  range={timelineRange}
+                  // The scope the reader sees: "all" for an implicit full history, so the view never shrinks.
+                  range={linkRange}
                 />
                 <Button
                   nativeButton={false}
@@ -206,6 +207,12 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                   </>
                 ) : !own ? (
                   <Skeleton className="h-4 w-56" />
+                ) : kind === 'target' ? (
+                  // The timeline matches this record's id and type separately (the query language has no paired form
+                  // yet), so it may include events about another record of the same id: no exact count is claimed here.
+                  <>
+                    Events with this record's id and type since <Timestamp format="date" iso={own.entity.firstSeen} />, newest first
+                  </>
                 ) : (
                   <>
                     All {formatNumber(own.entity.events)} event{own.entity.events === 1 ? '' : 's'} since{' '}
