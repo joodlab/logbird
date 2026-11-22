@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { EventHistogram } from '@/components/charts/event-histogram';
 import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
+import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
@@ -503,6 +504,8 @@ function ProjectExplorer({
                   {totalLowerBound ? formatSearchTotal({ count: total, exact: false }) : formatNumber(total)}
                 </span>{' '}
                 {!totalLowerBound && total === 1 ? 'event' : 'events'} · {rangeName}
+                {/* Phones have no column header: name the zone here (and switch it) instead. */}
+                <TimeZoneInline className="sm:hidden" />
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>

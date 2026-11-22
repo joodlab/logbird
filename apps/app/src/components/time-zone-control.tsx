@@ -60,3 +60,23 @@ export function TimeZoneSetting() {
     </div>
   );
 }
+
+/** " · Berlin time": a compact zone label that switches Local/UTC, for places without a time column header (phones). */
+export function TimeZoneInline({ className }: { className?: string }) {
+  const preference = useZonePreference();
+  const zone = zoneFor(preference);
+  const next: ZonePreference = preference === 'utc' ? 'local' : 'utc';
+  return (
+    <span className={className}>
+      {' · '}
+      <button
+        aria-label={`Times in ${zone}. Show times in ${zoneFor(next)} instead.`}
+        className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+        onClick={() => setZonePreference(next)}
+        type="button"
+      >
+        {shortZoneLabel(zone)} time
+      </button>
+    </span>
+  );
+}
