@@ -56,7 +56,10 @@ function WebhooksSettings() {
   const list = useQuery({ ...webhooksQuery(projectId), enabled: can.isAdmin });
   const [editing, setEditing] = useState<WebhookEndpoint | 'new' | null>(null);
   const [rotating, setRotating] = useState<WebhookEndpoint | null>(null);
-  const [issued, setIssued] = useState<Issued | null>(null);
+  // Every issued secret waits its turn: one finishing while another is on screen never replaces it.
+  const [issued, setIssued] = useState<(Issued & { n: number })[]>([]);
+  const issuedCount = useRef(0);
+  const enqueue = (secret: Issued) => setIssued((queue) => [...queue, { ...secret, n: ++issuedCount.current }]);
 
   const description = (
     <>
@@ -128,23 +131,12 @@ function WebhooksSettings() {
       <EndpointDialog
         endpoint={editing === 'new' ? null : editing}
         onClose={() => setEditing(null)}
-        onCreated={(result) => {
-          setEditing(null);
-          setIssued({ ...result, overlapSeconds: null });
-        }}
+        onSecret={enqueue}
         open={editing !== null}
         projectId={projectId}
       />
-      <RotateDialog
-        endpoint={rotating}
-        onClose={() => setRotating(null)}
-        onRotated={(result) => {
-          setRotating(null);
-          setIssued(result);
-        }}
-        projectId={projectId}
-      />
-      <SecretDialog issued={issued} onClose={() => setIssued(null)} />
+      <RotateDialog endpoint={rotating} onClose={() => setRotating(null)} onSecret={enqueue} projectId={projectId} />
+      <SecretDialog issued={issued[0] ?? null} key={issued[0]?.n ?? 0} onClose={() => setIssued((queue) => queue.slice(1))} />
     </div>
   );
 }
@@ -279,13 +271,14 @@ function EndpointDialog({
   endpoint,
   open,
   onClose,
-  onCreated,
+  onSecret,
 }: {
   projectId: string;
   endpoint: WebhookEndpoint | null;
   open: boolean;
   onClose: () => void;
-  onCreated: (result: { endpoint: WebhookEndpoint; secret: string }) => void;
+  /** A created endpoint's secret, handed straight to the one-time dialog (never kept in mutation state). */
+  onSecret: (issued: Issued) => void;
 }) {
   const { refresh } = useEndpointMutations(projectId);
   const ids = useId();
@@ -307,18 +300,25 @@ function EndpointDialog({
   const session = useRef(0);
   if (open !== wasOpen) session.current += 1;
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
+  const onSecretRef = useRef(onSecret);
+  onSecretRef.current = onSecret;
   const save = useMutation({
+    gcTime: 0,
     // Everything comes from the variables captured at submit: the endpoint, its values then, the form and the session.
     mutationFn: async ({ f, target, at }: { f: Form; target: WebhookEndpoint | null; at: number }) => {
       if (at !== session.current) throw new SaveAbandoned();
       const scope = scopeOf(f);
       if (!target) {
-        return api.webhooks.create(projectId, {
+        const result = await api.webhooks.create(projectId, {
           url: f.url.trim(),
           description: f.description.trim() || null,
           filterQuery: f.filter.trim(),
           scope,
         });
+        // The endpoint exists now, so its secret is shown whatever happened to this form meanwhile (closed, reopened).
+        // It goes straight to the one-time dialog and never enters the mutation's state.
+        onSecretRef.current({ endpoint: result.endpoint, secret: result.secret, overlapSeconds: null });
+        return { created: result.endpoint };
       }
       const before = formFrom(target);
       const body: Record<string, unknown> = {};
@@ -335,13 +335,8 @@ function EndpointDialog({
     onSuccess: (result, { at }) => {
       refresh();
       if (at !== session.current) return;
-      // The secret leaves the mutation's state at once: only the one-time dialog holds it.
-      save.reset();
-      if (result && 'secret' in result) onCreated(result);
-      else {
-        toast.success(result ? 'Endpoint saved' : 'Nothing to save');
-        onClose();
-      }
+      if (!(result && 'created' in result)) toast.success(result ? 'Endpoint saved' : 'Nothing to save');
+      onClose();
     },
     onError: (error, { f, at }) => {
       if (error instanceof SaveAbandoned || at !== session.current) return;
@@ -506,12 +501,13 @@ function RotateDialog({
   projectId,
   endpoint,
   onClose,
-  onRotated,
+  onSecret,
 }: {
   projectId: string;
   endpoint: WebhookEndpoint | null;
   onClose: () => void;
-  onRotated: (result: Issued) => void;
+  /** The new secret, handed straight to the one-time dialog (never kept in mutation state). */
+  onSecret: (issued: Issued) => void;
 }) {
   const ids = useId();
   const [overlap, setOverlap] = useState<number>(86_400);
@@ -521,17 +517,22 @@ function RotateDialog({
     setShownFor(endpoint);
     if (endpoint) setOverlap(86_400);
   }
+  const onSecretRef = useRef(onSecret);
+  onSecretRef.current = onSecret;
+  const showing = useRef(endpoint);
+  showing.current = endpoint;
   const rotate = useMutation({
-    mutationFn: async ({ e, seconds }: { e: WebhookEndpoint; seconds: number }) => ({
-      endpoint: e,
-      secret: (await api.webhooks.rotateSecret(projectId, e.id, seconds)).secret,
-      overlapSeconds: seconds,
-    }),
+    gcTime: 0,
+    mutationFn: async ({ e, seconds }: { e: WebhookEndpoint; seconds: number }) => {
+      const { secret } = await api.webhooks.rotateSecret(projectId, e.id, seconds);
+      // Rotated: the new secret is shown whatever happened to this dialog meanwhile, and never enters mutation state.
+      onSecretRef.current({ endpoint: e, secret, overlapSeconds: seconds });
+      return e.id;
+    },
     ...webhookRetry,
-    onSuccess: (result) => {
-      // The secret leaves the mutation's state at once: only the one-time dialog holds it.
-      rotate.reset();
-      onRotated(result);
+    // Close only the dialog that asked (not one since opened for another endpoint).
+    onSuccess: (id) => {
+      if (showing.current?.id === id) onClose();
     },
     onError: (error) => toast.error('Could not rotate the secret', { description: webhookErrorCopy(error) }),
   });
