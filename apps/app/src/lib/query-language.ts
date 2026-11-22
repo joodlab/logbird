@@ -5,7 +5,7 @@
  * query bar, drive autocomplete, and add/remove filter terms from facets, charts and entity pages
  * without destroying what the user typed.
  */
-import { quoteQueryValue, scanBareRecordValue } from '@logbird/contracts';
+import { quoteQueryValue, readQueryValue, scanBareRecordValue } from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 
 export type TokenKind = 'field' | 'text' | 'phrase' | 'regex' | 'operator' | 'paren' | 'space';
@@ -23,6 +23,8 @@ export interface QueryToken {
   field?: string;
   /** Unquoted value for `field` / `phrase` / `text` tokens (comparison values exclude the operator). */
   value?: string;
+  /** The final star is a wildcard in this simple value. */
+  wildcard?: boolean;
   valueKind?: ValueKind;
   /** Offset of the first value character (after `:`) for `field` tokens. */
   valueStart?: number;
@@ -32,14 +34,6 @@ export interface QueryToken {
 
 const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
 const OPERATORS = new Set(['OR', 'AND', 'NOT']);
-
-function unquote(value: string): string {
-  if (value.startsWith('"')) {
-    const inner = value.endsWith('"') && value.length > 1 ? value.slice(1, -1) : value.slice(1);
-    return inner.replace(/\\([\s\S])/g, '$1');
-  }
-  return value;
-}
 
 /** End offset (exclusive) of a delimited run starting at `i` (`"…"`, `/…/`), honouring backslash escapes. */
 function scanDelimited(input: string, i: number, close: string): number {
@@ -129,6 +123,8 @@ export function tokenize(input: string): QueryToken[] {
       const v = scanValue(input, valueStart, key[2] === 'record');
       const raw = input.slice(i, v.end);
       const valueRaw = input.slice(skipWhitespace(input, valueStart + (v.op?.length ?? 0)), v.end);
+      const decoded =
+        v.kind === 'plain' || v.kind === 'quoted' || v.kind === 'compare' ? readQueryValue(valueRaw) : { value: valueRaw, wildcard: false };
       tokens.push({
         kind: 'field',
         raw,
@@ -137,7 +133,8 @@ export function tokenize(input: string): QueryToken[] {
         negated: key[1] === '-',
         // Case is significant: unknown fields are attribute keys (attr.metadata.supportTicket).
         field: key[2] ?? '',
-        value: v.kind === 'plain' || v.kind === 'quoted' || v.kind === 'compare' ? unquote(valueRaw) : valueRaw,
+        value: decoded.value,
+        wildcard: decoded.wildcard && (key[2] !== 'record' || valueRaw === '*'),
         valueKind: v.kind,
         valueStart,
         op: v.op,
@@ -150,7 +147,8 @@ export function tokenize(input: string): QueryToken[] {
     if (delimiter === '"' || delimiter === '/') {
       const end = scanDelimited(input, i + neg, delimiter);
       const raw = input.slice(i, end);
-      tokens.push({ kind: delimiter === '"' ? 'phrase' : 'regex', raw, start: i, end, negated: neg === 1, value: unquote(raw.slice(neg)) });
+      const value = delimiter === '"' ? readQueryValue(raw.slice(neg)).value : raw.slice(neg);
+      tokens.push({ kind: delimiter === '"' ? 'phrase' : 'regex', raw, start: i, end, negated: neg === 1, value });
       i = end;
       continue;
     }
@@ -188,7 +186,7 @@ export function canonicalField(field: string): string {
 }
 
 /** The server lexer splits on whitespace and `():[]{}<>`; values containing them (or starting like a regex) need quotes. */
-const NEEDS_QUOTES = /[\s()"\\:[\]{}<>]|&&|\|\||^\/|^TO$|^$/;
+const NEEDS_QUOTES = /[\s()"\\:[\]{}<>*]|&&|\|\||^\/|^TO$|^$/;
 
 export function quoteIfNeeded(value: string): string {
   return NEEDS_QUOTES.test(value) || OPERATORS.has(value) ? quoteQueryValue(value) : value;
@@ -196,69 +194,6 @@ export function quoteIfNeeded(value: string): string {
 
 export function formatTerm(field: string, value: string, negated = false): string {
   return `${negated ? '-' : ''}${field}:${quoteIfNeeded(value)}`;
-}
-
-/**
- * Drop operators and groups that removing a term left dangling — `(a OR b)` minus `a` and `b` must
- * not become `( OR )`, which the server rightly rejects.
- */
-function tidy(tokens: QueryToken[]): QueryToken[] {
-  let current = tokens;
-  for (;;) {
-    const solid = current.filter((t) => t.kind !== 'space');
-    const drop = new Set<QueryToken>();
-    solid.forEach((t, i) => {
-      const prev = solid[i - 1];
-      const next = solid[i + 1];
-      const opens = (x?: QueryToken) => x?.kind === 'paren' && x.raw !== ')';
-      const nextIsBinary = next?.kind === 'operator' && next.raw !== 'NOT';
-      if (t.kind === 'operator' && t.raw !== 'NOT' && (!prev || !next || opens(prev) || next.raw === ')' || nextIsBinary)) drop.add(t);
-      if (t.raw === 'NOT' && (!next || next.raw === ')' || (next.kind === 'operator' && next.raw !== 'NOT'))) drop.add(t);
-      if (opens(t) && next?.raw === ')') {
-        drop.add(t);
-        drop.add(next);
-        // `NOT (…)` whose group emptied: the NOT goes too, or it would negate whatever follows.
-        if (prev?.raw === 'NOT') drop.add(prev);
-      }
-    });
-    current.forEach((t, i) => {
-      const prev = current[i - 1];
-      if (t.kind === 'space' && ((prev?.kind === 'paren' && prev.raw !== ')') || current[i + 1]?.raw === ')')) drop.add(t);
-    });
-    if (drop.size === 0) return current;
-    current = current.filter((t) => !drop.has(t));
-  }
-}
-
-/**
- * Drop the tokens `test` accepts together with a unary `NOT` that applies to them (`NOT field:x`), so removing an
- * operand never leaves its NOT to negate the next predicate. Every other token keeps its place and polarity.
- */
-function dropTokens(tokens: QueryToken[], test: (t: QueryToken) => boolean): QueryToken[] {
-  const drop = new Set<QueryToken>();
-  tokens.forEach((t, i) => {
-    if (!test(t)) return;
-    drop.add(t);
-    let j = i - 1;
-    while (j >= 0 && tokens[j]?.kind === 'space') j -= 1;
-    const prev = tokens[j];
-    if (prev?.kind === 'operator' && prev.raw === 'NOT') drop.add(prev);
-  });
-  return tokens.filter((t) => !drop.has(t));
-}
-
-function join(tokens: QueryToken[]): string {
-  let result = '';
-  let space = false;
-  for (const token of tidy(tokens)) {
-    if (token.kind === 'space') {
-      space = result !== '';
-    } else {
-      result += (space ? ' ' : '') + token.raw;
-      space = false;
-    }
-  }
-  return result;
 }
 
 /** True when `q` has an `OR` outside every group. Adjacent terms bind tighter than `OR` (`a b OR c` = `(a b) OR c`). */
@@ -295,9 +230,57 @@ export function topLevelFieldTerms(q: string): QueryToken[] {
   return out;
 }
 
-/** Remove the tokens `test` accepts (by identity), tidying operators and groups they leave dangling. */
+/** Drop operands within each AND branch, then drop empty branches from the enclosing OR. */
 export function removeTokens(q: string, test: (t: QueryToken) => boolean): string {
-  return join(dropTokens(tokenize(q), test));
+  const tokens = tokenize(q).filter((t) => t.kind !== 'space');
+  let i = 0;
+  const isOperator = (raw: string) => tokens[i]?.kind === 'operator' && tokens[i]?.raw === raw;
+  function expression(depth: number): string | null {
+    if (depth > 16) return null;
+    const branches: string[] = [];
+    do {
+      const terms: string[] = [];
+      let connector = '';
+      let previousEnd: number | undefined;
+      do {
+        const start = tokens[i]?.start;
+        let not = '';
+        while (isOperator('NOT')) {
+          not += 'NOT ';
+          i += 1;
+        }
+        const token = tokens[i++];
+        if (!token || token.kind === 'operator' || token.raw === ')') return null;
+        let term = '';
+        if (token.kind === 'paren') {
+          const group = expression(depth + 1);
+          if (group === null || tokens[i++]?.raw !== ')') return null;
+          if (group) term = `${token.raw}${group})`;
+        } else if (!test(token)) {
+          term = token.raw;
+        }
+        if (term) {
+          const separator = terms.length && (connector || previousEnd !== start) ? ' ' : '';
+          terms.push(`${separator}${terms.length ? connector : ''}${not}${term}`);
+          previousEnd = tokens[i - 1]?.end;
+        }
+        if (isOperator('AND')) {
+          i += 1;
+          connector = 'AND ';
+        } else {
+          connector = '';
+          if (!tokens[i] || tokens[i]?.raw === ')' || isOperator('OR')) break;
+        }
+      } while (true);
+      if (terms.length) branches.push(terms.join(''));
+      if (!isOperator('OR')) break;
+      i += 1;
+    } while (true);
+    return branches.join(' OR ');
+  }
+  if (!tokens.length) return '';
+  const result = expression(0);
+  return result !== null && i === tokens.length ? result : q.trim();
 }
 
 /** Field terms with their effective polarity: a leading `-` or a unary `NOT` before them (not both) negates. */
@@ -307,9 +290,14 @@ export function fieldTermsWithPolarity(q: string): { token: QueryToken; negated:
   tokens.forEach((t, i) => {
     if (t.kind !== 'field') return;
     let j = i - 1;
-    while (j >= 0 && tokens[j]?.kind === 'space') j -= 1;
-    const not = tokens[j]?.kind === 'operator' && tokens[j]?.raw === 'NOT';
-    out.push({ token: t, negated: t.negated !== not });
+    let negated = t.negated;
+    while (j >= 0) {
+      const previous = tokens[j--];
+      if (previous?.kind === 'space') continue;
+      if (previous?.kind !== 'operator' || previous.raw !== 'NOT') break;
+      negated = !negated;
+    }
+    out.push({ token: t, negated });
   });
   return out;
 }
@@ -325,22 +313,21 @@ const isSimple = (t: QueryToken) => t.valueKind === 'plain' || t.valueKind === '
 export function hasTerm(q: string, field: string, value: string, negated?: boolean): boolean {
   const f = canonicalField(field);
   return fieldTerms(q).some(
-    (t) => isSimple(t) && canonicalField(t.field ?? '') === f && t.value === value && (negated === undefined || t.negated === negated),
+    (t) => isSimple(t) && !t.wildcard && canonicalField(t.field ?? '') === f && t.value === value && (negated === undefined || t.negated === negated),
   );
 }
 
 /** Remove every term for `field` (optionally only one value / polarity). */
 export function removeTerm(q: string, field: string, value?: string, negated?: boolean): string {
   const f = canonicalField(field);
-  const kept = dropTokens(
-    tokenize(q),
+  return removeTokens(
+    q,
     (t) =>
       t.kind === 'field' &&
       canonicalField(t.field ?? '') === f &&
-      (value === undefined || (isSimple(t) && t.value === value)) &&
+      (value === undefined || (isSimple(t) && !t.wildcard && t.value === value)) &&
       (negated === undefined || t.negated === negated),
   );
-  return join(kept);
 }
 
 /**
@@ -422,7 +409,7 @@ function pushValueWord(out: Segment[], input: string, start: number, end: number
     out.push({ start, end, cls: 'wildcard' });
     return;
   }
-  if (raw.endsWith('*')) {
+  if (readQueryValue(raw).wildcard) {
     out.push({ start, end: end - 1, cls: 'value' }, { start: end - 1, end, cls: 'wildcard' });
     return;
   }
@@ -626,7 +613,7 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
     }
     case 'quoted': {
       if (caret <= valueStart) return value('', valueStart, t.end, { quoted: true });
-      return value(unquote(q.slice(valueStart, caret)), valueStart, t.end, { quoted: true });
+      return value(readQueryValue(q.slice(valueStart, caret)).value, valueStart, t.end, { quoted: true });
     }
     case 'group': {
       if (caret <= valueStart) return value('', valueStart, t.end);
@@ -641,9 +628,9 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
       // A member before the caret (not `(` or `OR`) means the next thing is `OR`.
       const before = q.slice(valueStart + 1, s).trimEnd();
       const afterMember = before.length > 0 && !/(^|\s)OR$/.test(before);
-      return value(unquote(word), s, e, { inGroup: true, quoted: q[s] === '"', afterMember });
+      return value(readQueryValue(word).value, s, e, { inGroup: true, quoted: q[s] === '"', afterMember });
     }
     default:
-      return value(q.slice(valueStart, caret), valueStart, t.end);
+      return value(readQueryValue(q.slice(valueStart, caret)).value, valueStart, t.end);
   }
 }

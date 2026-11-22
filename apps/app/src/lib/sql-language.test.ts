@@ -259,6 +259,16 @@ describe('predicates', () => {
     const ex = toggleSqlPredicate(toggleSqlPredicate('', "action != 'a'", 'action', 'exclude'), "action != 'b'", 'action', 'exclude');
     expect(ex).toBe("action != 'a' AND action != 'b'");
   });
+
+  it('compares predicate literals exactly when checking and toggling filters', () => {
+    const oneSpace = "NOT has(target_ids, 'page:A B')";
+    const twoSpaces = "NOT has(target_ids, 'page:A  B')";
+    expect(hasSqlPredicate(oneSpace, twoSpaces)).toBe(false);
+    expect(hasSqlPredicate("outcome  =\n'failure'", "outcome = 'failure'")).toBe(true);
+    const included = toggleSqlPredicate(oneSpace, twoSpaces, 'target_ids', 'exclude');
+    expect(included).toBe(`${oneSpace} AND ${twoSpaces}`);
+    expect(toggleSqlPredicate(included, twoSpaces, 'target_ids', 'exclude')).toBe(oneSpace);
+  });
 });
 
 describe('translateQueryToSql', () => {
@@ -273,7 +283,9 @@ describe('translateQueryToSql', () => {
   it('translates v2 comparisons, ranges, regexes and groups', () => {
     expect(translateQueryToSql('attempt:>2')).toBe('job_attempt > 2');
     expect(translateQueryToSql('attempt:[2 TO 5}')).toBe('(job_attempt >= 2 AND job_attempt < 5)');
-    expect(translateQueryToSql('metadata.channel:whatsapp')).toBe("attributes['metadata.channel'] = 'whatsapp'");
+    expect(translateQueryToSql('metadata.channel:whatsapp')).toBe(
+      "(mapContains(attributes, 'metadata.channel') AND attributes['metadata.channel'] = 'whatsapp')",
+    );
     expect(translateQueryToSql('duration_ms:>100')).toBe("toFloat64OrNull(attributes['duration_ms']) > 100");
     expect(translateQueryToSql('action:/booking\\.(created|cancelled)/')).toBe("match(action, '^(?:booking\\\\.(created|cancelled))$')");
     expect(translateQueryToSql('-outcome:(failure OR denied)')).toBe("NOT outcome IN ('failure', 'denied')");
@@ -312,7 +324,30 @@ describe('translateQueryToSql', () => {
     expect(translateQueryToSql('record:*')).toBe('notEmpty(target_ids)');
     expect(translateQueryToSql('_exists_:"record"')).toBe('notEmpty(target_ids)');
     expect(translateQueryToSql('attempt:* NOT _exists_:"timestamp"')).toBe('1 = 1 AND NOT 1 = 1');
-    expect(translateQueryToSql('-_exists_:"metadata.plan"')).toBe("NOT attributes['metadata.plan'] != ''");
+    expect(translateQueryToSql('-_exists_:"metadata.plan"')).toBe(
+      "NOT (mapContains(attributes, 'metadata.plan') AND attributes['metadata.plan'] != '')",
+    );
+  });
+
+  it.each([
+    ['attr.note:""', "attributes['note'] = ''"],
+    ['attr.note:/a*/', "match(attributes['note'], '^(?:a*)$')"],
+    ['attr.note:("" OR other)', "attributes['note'] IN ('', 'other')"],
+    ['attributes.note:("" OR prefix*)', "(attributes['note'] = '' OR startsWith(attributes['note'], 'prefix'))"],
+    ['attr.note:*', "attributes['note'] != ''"],
+  ])('requires an existing attribute for %s, including when negated', (q, valuePredicate) => {
+    const sql = `(mapContains(attributes, 'note') AND ${valuePredicate})`;
+    expect(translateQueryToSql(q)).toBe(sql);
+    expect(translateQueryToSql(`NOT ${q}`)).toBe(`NOT ${sql}`);
+  });
+
+  it.each([
+    [String.raw`tenant:team\*`, "tenant_id = 'team*'"],
+    [String.raw`tenant:"team\*"`, "tenant_id = 'team*'"],
+    [String.raw`target:(team\* OR "org*")`, "(has(target_ids, 'team*') OR arrayExists(x -> startsWith(x, 'org'), target_ids))"],
+    ['tenant:"team*"', "startsWith(tenant_id, 'team')"],
+  ])('translates wildcard and literal stars in %s', (q, sql) => {
+    expect(translateQueryToSql(q)).toBe(sql);
   });
 
   it.each([

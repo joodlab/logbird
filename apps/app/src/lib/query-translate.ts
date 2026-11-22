@@ -5,7 +5,7 @@
  * Only constructs with an unambiguous SQL equivalent are translated; anything else (free text, phrases,
  * the `description` text field) returns null so the caller can ask instead of guessing.
  */
-import { decodeRecordPair, QUERY_DIALECT_PREFIX, scanBareRecordValue } from '@logbird/contracts';
+import { decodeRecordPair, QUERY_DIALECT_PREFIX, readQueryValue, scanBareRecordValue } from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 import { type QueryToken, tokenize } from './query-language';
 import { sqlString } from './sql-language';
@@ -16,16 +16,13 @@ const SQL_OPS: Record<string, string> = { '>': '>', '>=': '>=', '<': '<', '<=': 
 const QUOTED_VALUE = /^"(?:[^"\\]|\\[\s\S])*"$/;
 const BARE_VALUE = /^[^\s()"<>[\]{}]+$/;
 
-interface Target {
-  /** SQL reference: column or `attributes['k']`. */
-  ref: string;
-  type: 'string' | 'number' | 'date' | 'array' | 'attr';
-}
+type Target = { ref: string; type: 'string' | 'number' | 'date' | 'array' } | { ref: string; type: 'attr'; key: string };
 
 function targetFor(field: string): Target | null {
   const core = /^(attr|attributes)\./.test(field) ? undefined : coreField(field);
   if (core) return core.type === 'text' || core.type === 'record' || !core.column ? null : { ref: core.column, type: core.type };
-  return { ref: `attributes[${sqlString(attributeKey(field))}]`, type: 'attr' };
+  const key = sqlString(attributeKey(field));
+  return { ref: `attributes[${key}]`, type: 'attr', key };
 }
 
 function literal(value: string, t: Target, forceNumber = false): string {
@@ -46,9 +43,13 @@ function presence(t: Target): string {
   return `${t.ref} != ''`;
 }
 
-function equals(t: Target, value: string): string | null {
-  if (value === '*') return presence(t);
-  if (value.endsWith('*')) {
+function attributePredicate(t: Target, sql: string | null): string | null {
+  return sql && t.type === 'attr' ? `(mapContains(attributes, ${t.key}) AND ${sql})` : sql;
+}
+
+function equals(t: Target, value: string, wildcard: boolean | undefined): string | null {
+  if (wildcard && value === '*') return presence(t);
+  if (wildcard) {
     const prefix = sqlString(value.slice(0, -1));
     return t.type === 'array' ? `arrayExists(x -> startsWith(x, ${prefix}), ${t.ref})` : `startsWith(${t.ref}, ${prefix})`;
   }
@@ -61,8 +62,8 @@ function recordValueToSql(raw: string): string | null {
   const quoted = raw.startsWith('"');
   if (quoted ? !QUOTED_VALUE.test(raw) : raw.startsWith('/') || QUERY_DIALECT_PREFIX.test(raw) || scanBareRecordValue(raw, 0) !== raw.length)
     return null;
-  const value = quoted ? raw.slice(1, -1).replace(/\\([\s\S])/g, '$1') : raw;
-  if (!quoted && value === '*') return 'notEmpty(target_ids)';
+  const { value, wildcard } = readQueryValue(raw);
+  if (!quoted && wildcard && value === '*') return 'notEmpty(target_ids)';
   const pair = decodeRecordPair(value);
   if (!pair) return null;
   const id = sqlString(pair.id);
@@ -107,14 +108,14 @@ function termToSql(token: QueryToken): string | null {
     if (!isSimpleOperand(token, raw, start) || (token.valueKind === 'plain' && raw.includes(':'))) return null;
     if (value === 'record') return 'notEmpty(target_ids)';
     const target = targetFor(value);
-    return target ? presence(target) : null;
+    return target ? attributePredicate(target, presence(target)) : null;
   }
   const t = targetFor(token.field ?? '');
   if (!t) return null;
   switch (token.valueKind) {
     case 'plain':
     case 'quoted':
-      return isSimpleOperand(token, raw, start) ? equals(t, value) : null;
+      return isSimpleOperand(token, raw, start) ? attributePredicate(t, equals(t, value, token.wildcard)) : null;
     case 'compare': {
       const operand = raw.slice(token.op?.length ?? 0);
       if (t.type === 'string' || t.type === 'array' || (!NUMBER.test(value) && !DATE.test(value)) || /^\s+-/.test(operand)) return null;
@@ -135,18 +136,18 @@ function termToSql(token: QueryToken): string | null {
       if (!/^\/(?:[^/\\]|\\[\s\S])*\/$/.test(value)) return null;
       const body = value.slice(1, -1).replaceAll('\\/', '/');
       const re = sqlString(`^(?:${body})$`);
-      return t.type === 'array' ? `arrayExists(x -> match(x, ${re}), ${t.ref})` : `match(${t.ref}, ${re})`;
+      return t.type === 'array' ? `arrayExists(x -> match(x, ${re}), ${t.ref})` : attributePredicate(t, `match(${t.ref}, ${re})`);
     }
     case 'group': {
       const members = groupMembers(value);
       if (!members || members.some((m) => !QUOTED_VALUE.test(m) && (/^[-/]/.test(m) || !isBareValue(m)))) return null;
-      const values = members.map((m) => (m.startsWith('"') ? m.slice(1, -1).replace(/\\([\s\S])/g, '$1') : m));
-      if (values.some((v) => v.includes('*'))) {
-        const each = values.map((v) => equals(t, v));
-        return each.every(Boolean) ? `(${each.join(' OR ')})` : null;
+      const values = members.map(readQueryValue);
+      if (values.some((v) => v.wildcard)) {
+        const each = values.map((v) => equals(t, v.value, v.wildcard));
+        return each.every(Boolean) ? attributePredicate(t, `(${each.join(' OR ')})`) : null;
       }
-      if (t.type === 'array') return `hasAny(${t.ref}, [${values.map(sqlString).join(', ')}])`;
-      return `${t.ref} IN (${values.map((v) => literal(v, t)).join(', ')})`;
+      if (t.type === 'array') return `hasAny(${t.ref}, [${values.map(({ value: member }) => sqlString(member)).join(', ')}])`;
+      return attributePredicate(t, `${t.ref} IN (${values.map(({ value: member }) => literal(member, t)).join(', ')})`);
     }
     default:
       return null;

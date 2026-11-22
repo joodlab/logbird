@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type EntityProfile, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
+import { type EntityProfile, encodeRecordPair, formatRecordTerm, quoteQueryValue } from '@logbird/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type ClickHouseClient, createClickHouseClient, createQueryClickHouseClient, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
@@ -12,7 +12,10 @@ function expectSiteProfile(profile: EntityProfile | null) {
   expect(profile?.series.buckets.reduce((total, bucket) => total + bucket.total, 0)).toBe(1);
   expect(profile?.topActions.map(({ id, count }) => ({ id, count }))).toEqual([{ id: 'site.published', count: 1 }]);
   expect(profile?.outcomes).toEqual({ success: 1 });
-  expect(profile?.related.map(({ id, kind, count }) => ({ id, kind, count }))).toEqual([{ id: 'publishing-actor', kind: 'actor', count: 1 }]);
+  expect(profile?.related.map(({ id, kind, count }) => ({ id, kind, count }))).toEqual([
+    { id: 'publishing-actor', kind: 'actor', count: 1 },
+    { id: 'team*', kind: 'tenant', count: 1 },
+  ]);
 }
 
 describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse', () => {
@@ -29,13 +32,22 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
         action: 'page.updated',
         outcome: 'failure',
         actor: { id: 'different-actor' },
+        tenant: { id: 'teamA' },
         targets: [
           { type: 'page', id: '12', name: 'Page 12' },
           { type: 'site', id: '7' },
         ],
       },
-      { id: 'paired', action: 'site.published', outcome: 'success', actor: { id: 'publishing-actor' }, targets: [{ type: 'site', id: '12' }] },
-      { id: 'no-targets', action: 'job.started', outcome: 'success' },
+      {
+        id: 'paired',
+        action: 'site.published',
+        outcome: 'success',
+        actor: { id: 'publishing-actor' },
+        tenant: { id: 'team*' },
+        note: '',
+        targets: [{ type: 'site', id: '12' }],
+      },
+      { id: 'no-targets', action: 'job.started', outcome: 'success', note: 'ordinary' },
     ];
     await insertEvents(
       ch,
@@ -46,6 +58,44 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
       }),
     );
   }, 60_000);
+
+  it('keeps a tenant ID with a literal trailing star distinct from a tenant sharing its prefix', async () => {
+    for (const [q, expected] of [
+      [`tenant:${quoteQueryValue('team*')}`, ['paired']],
+      [String.raw`tenant:team\*`, ['paired']],
+      ['tenant:team*', ['paired', 'separate']],
+    ] as const) {
+      const result = await searchEvents(ch, projectId, { ...range, limit: 10, order: 'asc', q });
+      expect(
+        result.data.map(({ id }) => id),
+        q,
+      ).toEqual(expected);
+    }
+  }, 60_000);
+
+  it.runIf(process.env.CLICKHOUSE_QUERY_USER && process.env.CLICKHOUSE_QUERY_PASSWORD)(
+    'distinguishes an empty attribute from a missing key in query and restricted SQL mode',
+    async () => {
+      const sqlClient = createQueryClickHouseClient();
+      if (!sqlClient) throw new Error('The restricted ClickHouse query user is required for attribute verification');
+      const predicate = "(mapContains(attributes, 'note') AND attributes['note'] = '')";
+      try {
+        for (const [q, sql, ids] of [
+          ['attr.note:""', predicate, ['paired']],
+          ['NOT attr.note:""', `NOT ${predicate}`, ['no-targets', 'separate']],
+        ] as const) {
+          const base = { ...range, limit: 10, order: 'asc' as const };
+          const query = await searchEvents(ch, projectId, { ...base, q });
+          const translated = await searchEvents(sqlClient, projectId, { ...base, q: sql, lang: 'sql' });
+          expect(query.data.map(({ id }) => id)).toEqual(ids);
+          expect(translated.data.map(({ id }) => id)).toEqual(ids);
+        }
+      } finally {
+        await sqlClient.close();
+      }
+    },
+    60_000,
+  );
 
   afterAll(async () => {
     try {

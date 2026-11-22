@@ -1,3 +1,4 @@
+import { compileQuery } from '@logbird/clickhouse';
 import { formatRecordTerm } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import {
@@ -5,6 +6,7 @@ import {
   canonicalField,
   excludeTerm,
   formatTerm,
+  hasTerm,
   hasTopLevelOr,
   highlightQuery,
   includeTerm,
@@ -285,6 +287,30 @@ describe('queryCompletionAt', () => {
 });
 
 describe('removeTerm', () => {
+  it('preserves compiled boolean structure when removing a facet across generated expressions', () => {
+    for (const record of ['record:page:7', formatRecordTerm('page', 'A  B*')]) {
+      for (const action of ['action:booked', '-action:booked', 'NOT action:booked']) {
+        for (const and of ['', 'AND ']) {
+          const facet = 'outcome:failure';
+          const cases = [
+            [`${record} OR ${facet} ${and}${action}`, `${record} OR ${action}`],
+            [`${record} ${and}${facet} OR ${action}`, `${record} OR ${action}`],
+            [`${record} OR ${facet} OR ${action}`, `${record} OR ${action}`],
+            [`${record} ${and}${facet} ${and}${action}`, `${record} ${and}${action}`],
+            [`(${record} OR (${facet})) ${and}${action}`, `(${record}) ${and}${action}`],
+            [`${record} OR NOT (-(${facet}) AND ${action})`, `${record} OR NOT (${action})`],
+            [`${record} OR NOT NOT ${facet} AND ${action}`, `${record} OR ${action}`],
+            [`${record} AND (${facet} OR outcome:denied) OR ${action}`, `${record} OR ${action}`],
+          ];
+          for (const [query = '', expected = ''] of cases) {
+            expect(compileQuery(query).params).toHaveProperty('q0');
+            expect(compileQuery(removeTerm(query, 'outcome')), query).toEqual(compileQuery(expected));
+          }
+        }
+      }
+    }
+  });
+
   it('removes a whole OR group without leaving dangling syntax', () => {
     expect(removeTerm('tenant.name:"Rawda Suites" (outcome:failure OR outcome:denied)', 'outcome')).toBe('tenant.name:"Rawda Suites"');
     expect(removeTerm('(outcome:failure OR outcome:denied) action:booking.*', 'outcome')).toBe('action:booking.*');
@@ -294,6 +320,10 @@ describe('removeTerm', () => {
     expect(removeTerm('(action:a OR outcome:failure) x', 'outcome')).toBe('(action:a) x');
     expect(removeTerm('a OR outcome:failure', 'outcome')).toBe('a');
     expect(removeTerm('a AND outcome:failure', 'outcome')).toBe('a');
+  });
+
+  it('keeps abutting source tokens together', () => {
+    expect(compileQuery(removeTerm('outcome:failure a"b" OR action:c', 'outcome'))).toEqual(compileQuery('a"b" OR action:c'));
   });
 
   it('treats aliases and attribute spellings as the same field', () => {
@@ -322,6 +352,16 @@ describe('include / exclude', () => {
     expect(formatTerm('metadata.jobName', 'hospitality:sync:bookings')).toBe('metadata.jobName:"hospitality:sync:bookings"');
     expect(formatTerm('attr.range', 'a[1]')).toBe('attr.range:"a[1]"');
     expect(formatTerm('action', 'booking.created')).toBe('action:booking.created');
+  });
+
+  it('keeps literal wildcard-looking values exact when including and toggling a facet', () => {
+    const exact = formatTerm('action', 'a*b*');
+    expect(exact).toBe(String.raw`action:"a\*b\*"`);
+    expect(compileQuery(exact).params).toEqual({ q0: 'a*b*' });
+    expect(hasTerm('action:a*b*', 'action', 'a*b*')).toBe(false);
+    expect(hasTerm(exact, 'action', 'a*b*')).toBe(true);
+    expect(toggleTerm(exact, 'action', 'a*b*', 'include')).toBe('');
+    expect(classes(String.raw`tenant:team\*`)).toContain(String.raw`team\*:value`);
   });
 
   it('stacks exclusions and toggles them off', () => {

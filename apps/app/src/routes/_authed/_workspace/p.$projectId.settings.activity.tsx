@@ -33,11 +33,11 @@ function WorkspaceActivity() {
   const q = search.q ?? '';
   const [draft, setDraft] = useState(q.replace(/category:\S+/g, '').trim());
   const [debounced] = useDebouncedValue(draft, { wait: 250 });
-  const category = /category:(\S+)/.exec(q)?.[1];
+  const [categoryTerm, category] = /category:(\S+)/.exec(q) ?? [];
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: sync the debounced free text into the URL
   useEffect(() => {
-    const next = [category ? `category:${category}` : '', debounced.trim()].filter(Boolean).join(' ');
+    const next = [categoryTerm, debounced.trim()].filter(Boolean).join(' ');
     if (next !== q) navigate({ search: (prev) => ({ ...prev, q: next || undefined }), replace: true });
   }, [debounced]);
 

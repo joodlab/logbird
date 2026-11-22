@@ -26,9 +26,20 @@ export function scanBareRecordValue(input: string, start: number): number {
   return start + (operator?.index ?? bare.length);
 }
 
-/** Inside query quotes, a backslash escapes only the next character. Keep whitespace literal. */
+/** Decode the outer value syntax, keeping a wildcard distinct from a literal star. */
+export function readQueryValue(raw: string): { value: string; wildcard: boolean } {
+  const quoted = raw.startsWith('"');
+  const body = quoted ? raw.slice(1, raw.endsWith('"') && raw.length > 1 ? -1 : undefined) : raw;
+  const wildcard = body.endsWith('*') && /(?:^|[^\\])(?:\\\\)*\*$/.test(body);
+  const value = quoted
+    ? body.replace(/\\([\s\S])/g, '$1')
+    : body.replace(/(\\+)\*/g, (match, slashes: string) => (slashes.length % 2 === 0 ? match : match.slice(1)));
+  return { value, wildcard };
+}
+
+/** Quote an exact query value, keeping whitespace literal. */
 export function quoteQueryValue(value: string): string {
-  return `"${value.replace(/["\\]/g, '\\$&')}"`;
+  return `"${value.replace(/["\\*]/g, '\\$&')}"`;
 }
 
 /** Quotes use standard query escaping around the already encoded pair. */

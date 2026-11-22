@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
+import { compileQuery } from '@logbird/clickhouse';
+import { formatRecordTerm } from '@logbird/contracts';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { expect, it, vi } from 'vitest';
+import { fieldsQuery, suggestQuery } from '@/lib/api/queries';
 import { QueryInput } from './query-input';
 
 vi.mock(import('@tanstack/react-router'), async (original) => ({ ...(await original()), useNavigate: () => vi.fn() }));
@@ -57,6 +60,51 @@ it.each([
     client.clear();
     host.remove();
     error.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it.each(['\r', '\r\n'])('preserves CR in a generated record selector while editing with %j', (separator) => {
+  const id = `A${separator}B*`;
+  const value = formatRecordTerm('page', id);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const client = new QueryClient();
+  client.setQueryData(fieldsQuery('fictional', '24h').queryKey, { data: [], avgConformance: 0 });
+  client.setQueryData(suggestQuery('fictional', 'action', '').queryKey, { field: 'action', values: [], complete: true });
+  const submit = vi.fn();
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  try {
+    act(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <QueryInput lang="query" onSubmit={submit} projectId="fictional" range="24h" value={value} />
+        </QueryClientProvider>,
+      ),
+    );
+    const input = host.querySelector('textarea');
+    if (!input) throw new Error('Missing query editor');
+    const visible = value.replaceAll('\r', '␍');
+    expect(input.value).toBe(visible);
+    const setNativeValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    const edit = (text: string, caret: number) =>
+      act(() => {
+        setNativeValue?.call(input, text);
+        input.setSelectionRange(caret, caret);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    const prefix = 'outcome:success ';
+    edit(prefix + visible, prefix.length);
+    const suffix = ' action:booked';
+    edit(prefix + visible + suffix, prefix.length + visible.length + suffix.length);
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'Enter' })));
+    expect(submit).toHaveBeenCalledExactlyOnceWith(prefix + value + suffix, 'query');
+    expect(compileQuery(submit.mock.calls[0]?.[0]).params).toMatchObject({ recordId0: id });
+  } finally {
+    act(() => root.unmount());
+    client.clear();
+    host.remove();
     vi.unstubAllGlobals();
   }
 });

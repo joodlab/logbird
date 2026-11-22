@@ -57,7 +57,7 @@ export function nameableTerms(q: string, lang: 'query' | 'sql' = 'query'): ViewL
   const seen = new Set<string>();
   const out: ViewLabelTerm[] = [];
   for (const token of fieldTerms(q)) {
-    if (token.negated || !token.value || (token.valueKind !== 'plain' && token.valueKind !== 'quoted')) continue;
+    if (token.negated || token.wildcard || !token.value || (token.valueKind !== 'plain' && token.valueKind !== 'quoted')) continue;
     const field = RESOLVABLE[canonicalField(token.field ?? '')] ?? RESOLVABLE[token.field ?? ''];
     if (!field) continue;
     const pair = field === 'record' ? decodeRecordPair(token.value) : undefined;

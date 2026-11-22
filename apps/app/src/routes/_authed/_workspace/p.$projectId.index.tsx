@@ -135,7 +135,7 @@ function OverviewPage() {
               // The chart (240 px), the gap and the one-row legend below it.
               <Skeleton className="h-[276px] w-full" />
             ) : (
-              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(`outcome:${o}`)} />
+              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(formatTerm('outcome', o))} />
             )}
           </div>
         </Panel>
@@ -202,7 +202,7 @@ function OverviewPage() {
               label: <ActionName action={a.id} />,
               count: a.count,
               render: (children, className) => (
-                <button className={className} onClick={() => explore(`action:${a.id}`)} type="button">
+                <button className={className} onClick={() => explore(formatTerm('action', a.id))} type="button">
                   {children}
                 </button>
               ),

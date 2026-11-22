@@ -6,10 +6,39 @@ import { compileQuery, parseQuery, QueryError } from './query';
 const literalValues = ['a\tb', 'a\nb', 'a\rb', '"', '\\', ':', 'a b', ' surrounded ', '*', '(', ')', 'OR', 'العربية', '🦜'];
 
 describe('query language', () => {
-  it('round-trips generated quoted field values through the lexer', () => {
-    for (const value of literalValues) {
-      expect(parseQuery(`actor:${quoteQueryValue(value)}`).at(-1)).toMatchObject({ kind: 'value', value });
+  it('round-trips generated exact field values through compilation', () => {
+    for (const value of [...literalValues, 'team*', 'a*b', 'a*b*', 'a\\*']) {
+      for (const field of ['actor', 'tenant', 'target']) {
+        const q = `${field}:${quoteQueryValue(value)}`;
+        expect(compileQuery(q).params, q).toEqual({ q0: value });
+        expect(compileQuery(q).sql, q).toContain(' = {q0:String}');
+      }
     }
+  });
+
+  it.each([
+    [String.raw`tenant:team\*`, 'team*'],
+    [String.raw`tenant:"team\*"`, 'team*'],
+    [String.raw`tenant:\*`, '*'],
+    [String.raw`tenant:"\*"`, '*'],
+    [String.raw`tenant:team\*west`, 'team*west'],
+    [String.raw`tenant:id:team\*`, 'id:team*'],
+  ])('matches escaped stars exactly in %s', (q, value) => {
+    expect(compileQuery(q)).toEqual({ sql: '(tenant_id = {q0:String})', params: { q0: value } });
+  });
+
+  it('retains unescaped wildcards in quoted values and mixed groups', () => {
+    expect(compileQuery('tenant:"team*"')).toEqual(compileQuery('tenant:team*'));
+    expect(compileQuery(String.raw`tenant:"team\\*"`)).toEqual({ sql: '(startsWith(tenant_id, {q0:String}))', params: { q0: 'team\\' } });
+    expect(compileQuery(String.raw`tenant:(team\* OR "org*")`)).toEqual({
+      sql: '((tenant_id = {q0:String}) OR (startsWith(tenant_id, {q1:String})))',
+      params: { q0: 'team*', q1: 'org' },
+    });
+  });
+
+  it('preserves backslashes in bare attribute keys', () => {
+    expect(compileQuery(String.raw`attr.note\*:yes`).params).toEqual({ q0: 'note\\*', q1: 'yes' });
+    expect(compileQuery(String.raw`_exists_:note\*`).params).toEqual({ q0: 'note\\*' });
   });
 
   it.each([
@@ -104,6 +133,8 @@ describe('record selector', () => {
     ['record:"page:home page"', 'page', 'home page'],
     ['record:page:OR', 'page', 'OR'],
     ['record:page:*', 'page', '*'],
+    [String.raw`record:page:home\*`, 'page', 'home*'],
+    [String.raw`record:"page\*:home\*"`, 'page*', 'home*'],
     [String.raw`record:"order:a\\b\"c"`, 'order', 'a\\b"c'],
   ])('matches a paired target with %s', (q, type, id) => {
     expect(compileQuery(q)).toEqual({
@@ -114,7 +145,7 @@ describe('record selector', () => {
 
   it('round-trips generated selectors across punctuation, whitespace and Unicode', () => {
     const types = ['order', 'order:archived', 'trailing\\', String.raw`slash\:colon`, '"a type"', 'مَلَفّ:📃', ':start', '/type/'];
-    const ids = [...literalValues, 'A1', ':A:1', 'a\\b', '"quote" and space', '/home/', '(nested)'];
+    const ids = [...literalValues, 'A1', ':A:1', 'a\\b', 'a*b*', 'a\\*', '"quote" and space', '/home/', '(nested)'];
     for (const type of types) {
       for (const id of ids) {
         const q = formatRecordTerm(type, id);

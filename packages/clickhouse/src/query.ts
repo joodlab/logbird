@@ -1,4 +1,11 @@
-import { decodeRecordPair, QUERY_DIALECT_PREFIX, QUERY_FIELDS, type QueryErrorDetails, scanBareRecordValue } from '@logbird/contracts';
+import {
+  decodeRecordPair,
+  QUERY_DIALECT_PREFIX,
+  QUERY_FIELDS,
+  type QueryErrorDetails,
+  readQueryValue,
+  scanBareRecordValue,
+} from '@logbird/contracts';
 export class QueryError extends Error {
   constructor(
     message: string,
@@ -23,7 +30,8 @@ export function recordTargetPredicate(type: string, id: string, index?: number) 
 }
 
 const RECORD_HINT = 'Use record:<type>:<id>, for example record:booking:bk_1042';
-type Token = { kind: string; value: string; start: number; end: number };
+type ParsedToken = { kind: string; value: string; start: number; end: number };
+type Token = ParsedToken & { wildcard?: boolean };
 export type Term = { field: string; value: string; negate: boolean; start: number; end: number };
 function fail(reason: QueryErrorDetails['reason'], start: number, end: number, hint: string): never {
   throw new QueryError(reason === 'syntax' ? `Invalid query syntax: ${hint}` : hint, { lang: 'query', reason, start, end, hint });
@@ -77,20 +85,21 @@ function queryLexer(q: string) {
         }
         if (ch === '\\' && i < q.length) {
           const next = q[i++]!;
-          value += c === '/' && next !== '/' ? `\\${next}` : next;
-        } else value += ch;
+          if (c === '/') value += next === '/' ? next : `\\${next}`;
+        } else if (c === '/') value += ch;
       }
       if (!closed) fail('syntax', start, i, c === '"' ? 'Unterminated quoted query' : 'Unterminated regex');
-      return { kind: c === '/' ? 'regex' : 'value', value, start, end: i };
+      if (c === '/') return { kind: 'regex', value, start, end: i };
+      return { kind: 'value', ...readQueryValue(q.slice(start, i)), start, end: i };
     }
     if (record) i = scanBareRecordValue(q, start);
     else while (i < q.length && !/[\s():[\]{}<>]/.test(q[i]!) && !['&&', '||'].includes(q.slice(i, i + 2))) i++;
-    const value = q.slice(start, i);
-    return { kind: !record && ['AND', 'OR', 'NOT', 'TO'].includes(value) ? value : 'value', value, start, end: i };
+    const raw = q.slice(start, i);
+    return { kind: !record && ['AND', 'OR', 'NOT', 'TO'].includes(raw) ? raw : 'value', ...readQueryValue(raw), start, end: i };
   };
 }
 // Parsing and compilation share spans; no user value is emitted into SQL.
-function compile(q: string, now: number, tokens?: Token[]) {
+function compile(q: string, now: number, tokens?: ParsedToken[]) {
   const nextToken = queryLexer(q);
   const params: Record<string, string | number> = {};
   let buffered: Token | undefined;
@@ -104,10 +113,14 @@ function compile(q: string, now: number, tokens?: Token[]) {
   const take = (record = false) => {
     const token = peek(record);
     buffered = undefined;
-    if (token) tokens?.push({ ...token });
+    if (token && tokens) {
+      const { kind, value: text, start, end } = token;
+      tokens.push({ kind, value: text, start, end });
+    }
     return token;
   };
   const error = (hint: string, t = peek()) => fail('syntax', t?.start ?? q.length, t?.end ?? q.length, hint);
+  const fieldName = (t: Token) => (q[t.start] === '"' || t.kind === 'regex' ? t.value : q.slice(t.start, t.end));
   const bind = (value: string | number, type = 'String') => {
     const key = `q${parameter++}`;
     params[key] = value;
@@ -121,6 +134,7 @@ function compile(q: string, now: number, tokens?: Token[]) {
       for (let next = peek(); next?.start === t.end; next = peek()) {
         if (next.kind !== ':' && !(afterColon && next.kind === 'value')) break;
         t.value += next.value;
+        t.wildcard = next.wildcard;
         t.end = next.end;
         afterColon = next.kind === ':';
         take();
@@ -131,7 +145,7 @@ function compile(q: string, now: number, tokens?: Token[]) {
   function predicate(field: string, token: Token, operator = '=', countTerm = true): string {
     if (countTerm && ++terms > 64) fail('too_complex', token.start, token.end, 'Query exceeds 64 terms');
     if (field === 'record') {
-      if (token.kind === 'presence' || (token.kind === 'value' && token.value === '*' && q[token.start] !== '"')) return 'notEmpty(target_ids)';
+      if (token.kind === 'presence' || (token.wildcard && token.value === '*' && q[token.start] !== '"')) return 'notEmpty(target_ids)';
       const pair = token.kind === 'regex' ? null : decodeRecordPair(token.value);
       if (!pair) fail('type', token.start, token.end, RECORD_HINT);
       const record = recordTargetPredicate(pair.type, pair.id, recordIndex++);
@@ -144,7 +158,8 @@ function compile(q: string, now: number, tokens?: Token[]) {
     const attrParameter = col ? '' : bind(attr);
     let expr = col ?? `attributes[${attrParameter}]`;
     const numeric = operator !== '=' || info?.type === 'number' || info?.type === 'date';
-    if (numeric && token.value !== '*') {
+    const presence = token.wildcard && token.value === '*';
+    if (numeric && !presence) {
       if (info && !['number', 'date'].includes(info.type)) fail('type', token.start, token.end, `${field} does not support comparisons`);
       const date = info?.type === 'date' || (!info && /^(?:\d{4}-\d{2}-\d{2}|now(?:$|[-+/]))/.test(token.value));
       if (date) {
@@ -189,8 +204,8 @@ function compile(q: string, now: number, tokens?: Token[]) {
         fail('type', token.start, token.end, 'Use a valid RE2 regex without lookaround or backreferences');
       }
       test = `match(${x}, ${bind(`^(?:${token.value})$`)})`;
-    } else if (token.value === '*') test = info?.type === 'number' || info?.type === 'date' ? '1' : `${x} != ''`;
-    else if (token.value.endsWith('*')) test = `startsWith(${x}, ${bind(token.value.slice(0, -1))})`;
+    } else if (presence) test = info?.type === 'number' || info?.type === 'date' ? '1' : `${x} != ''`;
+    else if (token.wildcard) test = `startsWith(${x}, ${bind(token.value.slice(0, -1))})`;
     else test = `${x} = ${bind(token.value)}`;
     if (info?.type === 'array') return `arrayExists(x -> ${test}, ${expr})`;
     if (!col) return `mapContains(attributes,${attrParameter}) AND (${test})`;
@@ -215,8 +230,10 @@ function compile(q: string, now: number, tokens?: Token[]) {
       if (!close || ![']', '}'].includes(close.kind)) error('Expected closing range bracket');
       take();
       const parts: string[] = [];
-      if (lower.value !== '*') parts.push(predicate(field, lower, t.kind === '[' ? '>=' : '>'));
-      if (upper.value !== '*') parts.push(predicate(field, upper, close?.kind === ']' ? '<=' : '<', lower.value === '*'));
+      const openLower = lower.wildcard && lower.value === '*';
+      const openUpper = upper.wildcard && upper.value === '*';
+      if (!openLower) parts.push(predicate(field, lower, t.kind === '[' ? '>=' : '>'));
+      if (!openUpper) parts.push(predicate(field, upper, close?.kind === ']' ? '<=' : '<', openLower));
       return parts.length ? parts.join(' AND ') : predicate(field, lower);
     }
     if (t.kind === '(') {
@@ -230,7 +247,7 @@ function compile(q: string, now: number, tokens?: Token[]) {
       if (peek()?.kind !== ')') error('Expected closing value group parenthesis');
       take();
       const info = QUERY_FIELDS.find((f) => f.key === field || f.aliases?.includes(field));
-      if (info && ['string', 'text'].includes(info.type) && members.every((m) => m.kind === 'value' && !m.value.endsWith('*'))) {
+      if (info && ['string', 'text'].includes(info.type) && members.every((m) => m.kind === 'value' && !m.wildcard)) {
         terms += members.length;
         if (terms > 64) fail('too_complex', t.start, peek()?.start ?? q.length, 'Query exceeds 64 terms');
         return `${info.column} IN (${members.map((m) => bind(m.value)).join(',')})`;
@@ -257,11 +274,13 @@ function compile(q: string, now: number, tokens?: Token[]) {
     const v = value(false);
     if (peek()?.kind === ':') {
       take();
-      if (v.value === '_exists_') {
-        const field = value(false);
-        return `(${predicate(field.value, { ...field, kind: field.value === 'record' ? 'presence' : field.kind, value: '*' })})`;
+      const field = fieldName(v);
+      if (field === '_exists_') {
+        const name = value(false);
+        const operand = fieldName(name);
+        return `(${predicate(operand, { ...name, kind: operand === 'record' ? 'presence' : name.kind, value: '*', wildcard: true })})`;
       }
-      return `(${fieldValue(v.value, depth)})`;
+      return `(${fieldValue(field, depth)})`;
     }
     if (++terms > 64) fail('too_complex', v.start, v.end, 'Query exceeds 64 terms');
     if (v.kind === 'regex') return `(${predicate('description', v, '=', false)})`;
@@ -292,7 +311,7 @@ export function compileQuery(q = '', now = Date.now()) {
   return compile(q, now);
 }
 export function parseQuery(q = '') {
-  const tokens: Token[] = [];
+  const tokens: ParsedToken[] = [];
   compile(q, Date.now(), tokens);
   return tokens;
 }

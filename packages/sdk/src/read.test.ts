@@ -18,3 +18,10 @@ it('keeps control characters literal in SDK trail selectors', () => {
   expect(q).toBe('record:"page\\\\:section\\\\\\\\v2: x\t\n\r:y\\"\\\\ " AND actor:" x\t\n\r:y\\"\\\\ " AND tenant:" x\t\n\r:y\\"\\\\ "');
   expect(trailQuery({ target: { id } }).q).toBe('target:" x\t\n\r:y\\"\\\\ "');
 });
+
+it('escapes every star in exact trail selectors', () => {
+  expect(trailQuery({ target: { id: 'doc*v2*' }, actor: 'agent*', tenant: 'team*' }).q).toBe(
+    String.raw`target:"doc\*v2\*" AND actor:"agent\*" AND tenant:"team\*"`,
+  );
+  expect(trailQuery({ target: { type: 'page*', id: 'doc*v2*' } }).q).toBe(String.raw`record:"page\*:doc\*v2\*"`);
+});

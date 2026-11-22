@@ -77,9 +77,9 @@ interface FacetOps {
   activeCount: (q: string) => number;
   /** The query without this field's own filters (so sibling values keep their counts). */
   without: (q: string) => string;
-  included: (q: string, value: string) => boolean;
-  excluded: (q: string, value: string) => boolean;
-  toggle: (q: string, value: string, mode: 'include' | 'exclude') => string;
+  included: (q: string, value: string, presence?: boolean) => boolean;
+  excluded: (q: string, value: string, presence?: boolean) => boolean;
+  toggle: (q: string, value: string, mode: 'include' | 'exclude', presence?: boolean) => string;
 }
 
 function queryOps(field: string): FacetOps {
@@ -113,9 +113,9 @@ function presenceOps(field: string, lang: QueryLang): FacetOps {
   const base = lang === 'sql' ? sqlOps(field) : queryOps(field);
   return {
     ...base,
-    included: (q, v) => hasPresenceTerm(q, field, { value: v, negated: false }, lang),
-    excluded: (q, v) => hasPresenceTerm(q, field, { value: v, negated: true }, lang),
-    toggle: (q, v, mode) => togglePresenceTerm(q, field, v, mode, lang),
+    included: (q, v, presence) => hasPresenceTerm(q, field, { value: presence ? null : v, negated: false }, lang),
+    excluded: (q, v, presence) => hasPresenceTerm(q, field, { value: presence ? null : v, negated: true }, lang),
+    toggle: (q, v, mode, presence) => togglePresenceTerm(q, field, presence ? null : v, mode, lang),
   };
 }
 
@@ -203,10 +203,10 @@ function FacetGroup({
   const dimmed = stale || facet.isPlaceholderData || failed;
 
   const renderRow = (v: { value: string; label: string; count: number }, presenceRow = false) => {
-    const included = ops.included(q, v.value);
-    const excluded = ops.excluded(q, v.value);
+    const included = ops.included(q, v.value, presenceRow);
+    const excluded = ops.excluded(q, v.value, presenceRow);
     return (
-      <div className="group/facet relative flex items-center" key={v.value}>
+      <div className="group/facet relative flex items-center" key={presenceRow ? 'any' : `value:${v.value}`}>
         <button
           aria-pressed={included}
           className={cn(
@@ -214,7 +214,7 @@ function FacetGroup({
             included && 'bg-brand/10 text-foreground',
             excluded && 'text-muted-foreground line-through decoration-outcome-failure/60',
           )}
-          onClick={(e) => onChange(ops.toggle(q, v.value, e.altKey ? 'exclude' : 'include'))}
+          onClick={(e) => onChange(ops.toggle(q, v.value, e.altKey ? 'exclude' : 'include', presenceRow))}
           title={
             presenceRow
               ? `${v.label} — click for only these events, ${altClickLabel(isMac)} to hide them`
@@ -266,7 +266,7 @@ function FacetGroup({
                   'absolute end-1 text-muted-foreground opacity-0 hover:bg-background hover:text-outcome-failure focus-visible:opacity-100 group-hover/facet:opacity-100 dark:hover:bg-background',
                   excluded && 'text-outcome-failure opacity-100',
                 )}
-                onClick={() => onChange(ops.toggle(q, v.value, 'exclude'))}
+                onClick={() => onChange(ops.toggle(q, v.value, 'exclude', presenceRow))}
                 size="icon-xs"
                 variant="ghost"
               />

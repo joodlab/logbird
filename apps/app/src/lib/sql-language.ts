@@ -465,7 +465,10 @@ function joinConjuncts(parts: string[]): string {
   return parts.map((p) => (hasTopLevelOr(p) && !isWrapped(p) ? `(${p})` : p)).join(' AND ');
 }
 
-const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
+const normalize = (s: string) =>
+  tokenizeSql(s.trim())
+    .map((token) => (token.kind === 'space' ? ' ' : token.raw))
+    .join('');
 
 export function hasSqlPredicate(q: string, predicate: string): boolean {
   const p = normalize(predicate);

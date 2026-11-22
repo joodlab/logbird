@@ -8,7 +8,7 @@ Logbird searches one authorized project within a half-open UTC time range. The d
 | --- | --- | --- |
 | Exact | action:hotel.policy.updated | Exact, case-sensitive value |
 | Record | record:booking:bk_1042 | Exact type and id on the same target |
-| Prefix | action:hotel.* | Trailing wildcard; internal stars are literal |
+| Prefix | action:hotel.* | An unescaped trailing star is a prefix wildcard |
 | Negation | -env:staging or NOT env:staging | Exclude matches |
 | Presence | impersonator:* -tenant:* or _exists_:impersonator | Non-empty / missing (numeric/date columns always present) |
 | Text | "free text" bare words | Search description, actor, tenant and target names; adjacency AND |
@@ -24,9 +24,11 @@ Logbird searches one authorized project within a half-open UTC time range. The d
 
 Arrays (target, target.type, target.name, changes.field) match any element. Attribute comparisons convert strings with toFloat64OrNull, or parseDateTime64BestEffortOrNull for date bounds; invalid conversions do not match. String fields do not support ordered comparisons. Quote values containing whitespace or grammar punctuation; quoted strings accept backslash escapes.
 
+Use `\*` for a literal asterisk in a quoted or unquoted value. For example, `tenant:team\*` and `tenant:"team\*"` both match the exact ID `team*`. An unescaped trailing star remains a wildcard even inside quotes, and unescaped internal stars are literal. An unescaped `*` on its own checks presence. An odd number of consecutive backslashes escapes the following star. In a bare value, only the escaping backslash is removed.
+
 Use `record:<type>:<id>` to filter a record's history. The first unescaped colon separates the type from the id. Within the type, `\:` means a literal colon and `\\` means a literal backslash. Everything after the separator is the literal id. For example, `record:order\:archived:A1` matches type `order:archived` and id `A1`, while `record:order:archived:A1` matches type `order` and id `archived:A1`.
 
-Quote the whole pair if it contains whitespace or grammar punctuation such as parentheses. The standard quoted-string rules apply first, where a backslash quotes the next character. Then record-pair escaping applies. For example, `record:"order\\:archived:A1"` matches type `order:archived` and id `A1`, and `record:"page:home (west)"` matches id `home (west)`. `record:page:/home/` and `record:page:home*` match those exact ids.
+Quote the whole pair if it contains whitespace or grammar punctuation such as parentheses. Query-value escapes apply before record-pair escapes. For example, `record:"order\\:archived:A1"` matches type `order:archived` and id `A1`, and `record:"page:home (west)"` matches id `home (west)`. `record:page:/home/`, `record:page:home*`, and `record:page:home\*` use literal ids.
 
 Record pairs support negation and value groups, such as `-record:(page:1 OR site:7)`. `record:*` and `_exists_:record` match events with any target. Use `attr.record` to search a custom attribute named `record`.
 

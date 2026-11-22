@@ -79,6 +79,22 @@ const TEXT = 'px-2.5 py-[calc((var(--query-bar-height)-2px-1.25rem)/2)] font-mon
 /** A 16px icon centred on the first line. */
 const FIRST_LINE_ICON = 'mt-[calc((var(--query-bar-height)-2px-1rem)/2)]';
 
+/** Textareas normalize CR. Display it as a single character to keep caret and query offsets aligned. */
+const displayQuery = (draft: string) => draft.replaceAll('\r', '␍');
+
+function applyTextareaEdit(draft: string, displayed: string, edited: string, caret: number): string {
+  if (displayed === draft) return edited;
+  let start = 0;
+  let oldEnd = displayed.length;
+  let newEnd = edited.length;
+  while (newEnd > caret && oldEnd > 0 && displayed[oldEnd - 1] === edited[newEnd - 1]) {
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+  while (start < oldEnd && start < newEnd && displayed[start] === edited[start]) start += 1;
+  return draft.slice(0, start) + edited.slice(start, newEnd) + draft.slice(oldEnd);
+}
+
 /**
  * Query bar: a transparent auto-growing textarea over a syntax-highlighted mirror (no editor dependency, same
  * metrics, so the caret and selection line up), with a suggestion panel that follows the caret (recent queries,
@@ -107,6 +123,7 @@ export function QueryInput({
   ref,
 }: QueryInputProps) {
   const [draft, setDraft] = useState(value);
+  const displayed = displayQuery(draft);
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -374,7 +391,14 @@ export function QueryInput({
           <div aria-hidden className={cn(TEXT, 'pointer-events-none [grid-area:1/1]')}>
             {draft ? (
               <>
-                <HighlightedText error={error} lang={lang} typingAt={open ? caret : undefined} value={draft} warnings={completions.fixes} />
+                <HighlightedText
+                  displayValue={displayed}
+                  error={error}
+                  lang={lang}
+                  typingAt={open ? caret : undefined}
+                  value={draft}
+                  warnings={completions.fixes}
+                />
                 {/* Keep a trailing newline measurable so the mirror grows with the textarea. */}
                 {'​'}
               </>
@@ -402,8 +426,9 @@ export function QueryInput({
             dir="ltr"
             onBlur={() => setTimeout(() => setOpen(false), 120)}
             onChange={(e) => {
-              setDraft(e.target.value);
-              setCaret(e.target.selectionStart ?? e.target.value.length);
+              const { value: edited, selectionStart } = e.currentTarget;
+              setDraft(applyTextareaEdit(draft, displayed, edited, selectionStart));
+              setCaret(selectionStart);
               setNavigated(false);
               setOpen(true);
             }}
@@ -414,7 +439,7 @@ export function QueryInput({
             role="combobox"
             rows={1}
             spellCheck={false}
-            value={draft}
+            value={displayed}
           />
         </div>
         <div className="flex shrink-0 items-center gap-0.5 pe-(--control-group-inset) pt-(--control-group-inset)">
