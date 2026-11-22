@@ -6,60 +6,73 @@
 
 ### Highlights
 
-- Show each customer only its own audit trail: tenant-scoped read keys and 15-minute viewer tokens read one tenant's (or one record's) events through search, event detail, counts grouped by a field and export. The server enforces the scope, and ClickHouse enforces the tenant as well when the restricted query user is configured.
-- Stored events are exact: 64-bit ids and long decimals keep every digit, a record's history matches its type and id on the same target, a slow total count no longer fails a search, and one oversized event no longer rejects its batch.
-- Breaking for some saved queries: `record:` is now a query field for one record (it used to search a custom attribute named `record`), and two escapes inside quoted values changed. See "Breaking changes" below before upgrading.
+- Show each customer only its own audit trail: tenant-scoped read keys and short-lived viewer tokens (15 minutes by default) read one tenant's (or one record's) events through search, event detail, counts grouped by a field and export. The server enforces the scope, and ClickHouse enforces the tenant as well when the restricted query user is configured.
+- Stored events are exact: 64-bit ids and long decimals keep every digit, a record's history matches its type and id on the same target, and a slow total count no longer fails a search.
+- Breaking for some saved queries and API filters: `record:` now selects one record (to search a custom attribute named `record`, write `attr.record:`), `\*` and `\r` are now escapes, and numeric attribute values are indexed under one spelling. Read [Breaking changes](https://github.com/joodlab/logbird/blob/v0.2.0/CHANGELOG.md#breaking-changes) before upgrading.
 
 ### Breaking changes
 
-This is a minor release because of the query language. The default Compose installation
-needs no settings change.
+This is a minor release because of the query language and how numbers are indexed. The
+default Compose installation needs no settings change. The reference for everything below
+is the [query language](docs/query-language.md) and
+[numbers and ids](docs/integrating-a-backend.md#numbers-and-ids).
 
-- **`record:` now means a record.** `record:<type>:<id>` matches one target with that type
-  and id. A query that used `record:` for a custom attribute named `record` changes
-  meaning, and one without a type and id (for example `record:pending`) is now rejected
-  with 422. To keep searching that attribute, write `attr.record:pending`. This applies to
-  `q` on `/v1/events`, `/v1/export` and `/v1/facets`, and to saved views.
-- **Escapes in quoted values.** Inside quotes, `\r` is now a carriage return and `\*` is a
-  literal asterisk. A saved query that relied on the old reading of either matches
-  differently.
+- **`record:` now selects a record.** `record:<type>:<id>` matches one target with that
+  type and id, and `record:*` matches any event with a target. A query that used `record:`
+  for a custom attribute named `record` changes meaning, and a value that is neither a
+  type and id nor `*` (for example `record:pending`) is rejected with 422. To keep
+  searching that attribute, write `attr.record:pending`. This applies to `q` on
+  `/v1/events`, `/v1/export` and `/v1/facets`, and to saved views.
+- **`\*` is a literal asterisk**, in quoted and unquoted values. `tenant:team\*` used to be
+  a prefix search for ids starting with `team\`; it now matches the exact id `team*`.
+- **`\r` in a quoted value is a carriage return**; `\\r` is a backslash followed by `r`.
+- **Numbers have one indexed spelling.** A numeric attribute value or id is indexed as one
+  canonical text of its exact value, so events sent with `1e-7` are indexed as `0.0000001`.
+  A saved filter written with another spelling of the number can miss events stored from
+  this release on; write the canonical spelling.
 
 ### Changes
 
 **Scoped read access.** A `scoped-read` key carries a scope (`tenantId`, optionally one
-target, action prefixes and a field mask). `POST /v1/viewer-tokens` mints a short-lived
-token for a browser. `/v1/events`, `/v1/events/:id`, `/v1/facets` and `/v1/export` apply
-the scope outside the caller's query. `/v1/facets` groups by one or two fields; `record`
-and fields hidden by the scope's mask cannot be grouped. Keys can expire; rolling a key
-keeps its scope and, unless a new one is given, its expiry. See
-[scoped read access](docs/scoped-read-access.md) and [security](docs/security.md).
+target, action prefixes and a field mask). `POST /v1/viewer-tokens` mints a token for a
+browser, valid 15 minutes by default (60 to 3,600 seconds). `/v1/events`,
+`/v1/events/:id`, `/v1/facets` and `/v1/export` apply the scope outside the caller's
+query. `/v1/facets` groups by one or two fields; `record` and fields hidden by the scope's
+mask cannot be grouped. Keys can expire; rolling a key keeps its scope and, unless a new
+one is given, its expiry. See [scoped read access](docs/scoped-read-access.md) and
+[security](docs/security.md).
 
 **Exact numbers.** Numbers a double cannot hold are stored, returned and exported with
 their exact digits, and numeric entity ids are indexed, so integer primary keys work as
-sent. Search matches them exactly within the index limits: a numeric id whose text is
-longer than 254 characters and a numeric attribute value longer than 2,044 characters are
-kept in the stored event but not indexed. Equality on a number is exact; `>` and `<`
-compare at double precision. Send `occurredAt` as ISO-8601 or integer epoch milliseconds.
+sent. A number is indexed as one canonical text of its value: its plain decimal in the
+usual case (`42`, `42.0` and `4.2e1` are all `42`), scientific notation for very large or
+very small values, and not at all when neither fits the index (254 characters for an id,
+2,044 for an attribute value); the stored event keeps it either way. Equality on a number
+is exact; `>` and `<` compare at double precision. Send `occurredAt` as ISO-8601 or
+integer epoch milliseconds. The rules are in
+[numbers and ids](docs/integrating-a-backend.md#numbers-and-ids).
 
 **Record histories.** Record pages, the Record facet and the read helper in the TypeScript
 SDK use `record:<type>:<id>`. A saved view that filters `target:` and `target.type:`
-separately opens as saved, with a note that it can include other records; when it names
-exactly one type and one id, the note offers an "Open exact version" button.
+separately opens as saved, with a note that it can include other records. When the view
+can be rewritten as a single `record:` term, the note offers an "Open exact version"
+button.
 
 **Search totals.** A slow count no longer fails a search. The count has a one-second
 budget; when it runs out, the rows are returned with `totalExact: false` and `total` as a
-lower bound. The console then shows the histogram's total when it has one, and otherwise
-"≥ N" (or "10,000+" at the cap).
+lower bound. When the console cannot show an exact total it shows a lower bound ("≥ N", or
+"10,000+" at the cap).
 
-**Ingest.** Within the request limits (1,000 events and 5 MiB, which still refuse the
-whole request with 413), an event over 256 KB is rejected on its own (`invalid_event`) and
-the rest of its batch is stored. A console test event completes only the "first event"
-setup step; sources beginning with `logbird-` are reserved for events Logbird generates.
+**Ingest.** A request over 1,000 events or 5 MiB is still refused as a whole with 413.
+Inside those limits, an event over 256 KB is rejected on its own (`invalid_event`) and the
+rest of its batch is stored. A console test event completes only the "first event" setup
+step; sources beginning with `logbird-` are reserved for events Logbird generates.
 
 **Arrival-time index.** Migration 010 adds a min/max index on `received_at`. The live view
 uses it today to skip parts of a project's history whose arrival time misses the requested
-range; webhook delivery and alerts will use it when they ship. It gives no gain while a
-large historical import is being read.
+range; webhook delivery and alerts will use it when they ship. In the one large historical
+import that was measured it gave no gain; see
+[self-hosting](docs/self-hosting.md).
 
 **Console.** Record, actor, tenant and executor pages lead with the complete history,
 newest first. Every time names its zone, with one switch between local time and UTC. The
@@ -78,9 +91,9 @@ from a previous project or entity is never shown as current.
   set to `0.2.0` before pulling. The `0.2.0` migrate image applies two additive PostgreSQL
   migrations (new columns on `ApiKey`, and a trigger, `ApiKey_roll_fence`, that refuses a
   replacement key that drops its predecessor's scope or expiry; no data changes) and
-  ClickHouse migration 010. Building the index needs no extra downtime: it materializes in
-  the background after the services are back, and reads stay correct meanwhile. Check
-  `system.mutations` in the Logbird database for progress.
+  ClickHouse migration 010. The migration starts building the index and does not wait for
+  it: the build continues in the background, needs no extra downtime, and reads stay
+  correct meanwhile. Check `system.mutations` in the Logbird database for progress.
 - **Restricted query user.** The Compose and Coolify stacks re-provision it automatically
   (the migrate image runs `create-query-user` before the server starts). Source
   installations run `pnpm --filter @logbird/clickhouse create-query-user` once after
@@ -94,22 +107,24 @@ from a previous project or entity is never shown as current.
   expiry with what you asked for, and revoke the key if they differ. Rolling a scoped or
   expiring key on an older server fails at the database trigger and creates nothing.
 - **Retries across the upgrade.** A retry, after the upgrade, of an event first stored
-  before it that contains a number a double cannot hold answers `duplicate_id_conflict`,
-  because its stored digits were rounded. Events stored before this release keep their
-  rounded values, and their numeric entity ids stay unindexed.
+  before it that contains a number a double cannot hold can answer
+  `duplicate_id_conflict`, because its stored digits were rounded. Events stored before
+  this release keep their rounded values, and their numeric entity ids stay unindexed.
 - **New per-event rejections.** An event over 256 KB, and an event nested more than 1,000
   levels deep that holds a number a double cannot keep, are each rejected as
   `invalid_event`; the other events in the batch are stored.
-- **Scoped reads.** One tenant per scope. A scope names stored ids: string ids are still
-  trimmed at ingest, so an id sent with surrounding whitespace is its trimmed id; a
-  numeric id is stored as the plain decimal text of its value, so a tenant sent as the
-  number `42` and one sent as the string `"42"` are the same tenant and the same scope.
-  Events stored before this release with a numeric tenant id are not visible to any scope,
-  and older events match a target scope only for the targets indexed when they were
-  ingested. With the restricted query user, a scoped read runs under that user's limits
-  (10 seconds, 5,000,000 rows read and 1 GiB per query), so a very large tenant over a wide
-  range can hit them, and a scoped export takes both of the workspace's export slots.
-  Revoking a key reaches its viewer tokens within 30 seconds. Rotating
+- **Scoped reads.** One tenant per scope. A scope names stored ids. String ids are still
+  trimmed at ingest, so an id sent with surrounding whitespace is its trimmed id. A
+  numeric id is stored as the canonical text of its value, so a tenant sent as the number
+  `42` and one sent as the string `"42"` are the same tenant and the same scope, while the
+  string `"42.0"` is a different one; for very large or very small numbers the canonical
+  text is scientific notation, and a string holding the expanded digits is a different
+  tenant. Events stored before this release with a numeric tenant id are not visible to
+  any scope, and older events match a target scope only for the targets indexed when they
+  were ingested. With the restricted query user, a scoped read runs under that user's
+  limits (10 seconds, 5,000,000 rows read and 1 GiB per query), so a very large tenant
+  over a wide range can hit them, and a scoped export takes both of the workspace's export
+  slots. Revoking a key reaches its viewer tokens within 30 seconds. Rotating
   `BETTER_AUTH_SECRET` invalidates viewer tokens.
 - **Webhooks.** Endpoints can still be created and rotated, but nothing is delivered in
   this release.

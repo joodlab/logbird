@@ -51,10 +51,13 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 - Ingest also caps ids (256 characters) and replaces invalid Unicode. Scope ids are refused unless they are already
   in stored form (at most 250 characters, no surrounding whitespace, no U+FFFD), so a capped or repaired stored id can
   never match a scope.
-- An id sent as a JSON number is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all
-  stored as `"42"`). A scope written as `"42"` therefore matches a tenant sent as the number 42 in any spelling and
-  as the string `"42"`, not the string `"42.0"`: a numeric id and a string id with the same digits are one tenant
-  and one scope. Events stored before 0.2.0 with a numeric id were not indexed as an id, so no scope sees them.
+- An id sent as a JSON number is stored as one canonical text of its exact value: its plain decimal in the usual
+  case (42, 42.0 and 4.2e1 are all stored as `"42"`), scientific notation for very large or very small values
+  (the number 1e33 is stored as `"1e33"`); see [numbers and ids](integrating-a-backend.md#numbers-and-ids). A scope
+  written as `"42"` therefore matches a tenant sent as the number 42 in any spelling and as the string `"42"`, not
+  the string `"42.0"`: a numeric id and a string id with the same stored text are one tenant and one scope. A string
+  holding the expanded digits of 1e33 is a different tenant from the number. Events stored before 0.2.0 with a
+  numeric id were not indexed as an id, so no scope sees them.
 - A read-only operator query that counts stored ids differing from the sent ones ships with the ingest change.
 
 ## Where the scope applies

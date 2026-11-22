@@ -51,10 +51,12 @@ Two different sent ids share a stored id in two cases:
 - Surrounding whitespace, which ingest has trimmed so far: `" biz_5"` is stored, and scoped, as `biz_5`. Ingest is
   being changed to store ids exactly as sent; after that, this applies only to events stored before the change. A
   read-only operator query that counts stored ids differing from the sent ones ships with that change.
-- Numbers. Since 0.2.0 an id sent as a JSON number is stored as the plain decimal text of its exact value (42, 42.0
-  and 4.2e1 are all stored as `"42"`), so the number 42 and the string `"42"` are one tenant and one scope. The
-  string `"42.0"` is a different id. Events stored before 0.2.0 with a numeric id were not indexed as an id, so no
-  scope sees them.
+- Numbers. Since 0.2.0 an id sent as a JSON number is stored as one canonical text of its exact value: its plain
+  decimal in the usual case (42, 42.0 and 4.2e1 are all stored as `"42"`), scientific notation for very large or
+  very small values (see [numbers and ids](integrating-a-backend.md#numbers-and-ids)). So the number 42 and the
+  string `"42"` are one tenant and one scope; the string `"42.0"` is a different id, and so is a string holding the
+  expanded digits of a number stored in scientific notation. Events stored before 0.2.0 with a numeric id were not
+  indexed as an id, so no scope sees them.
 
 Capped or Unicode-repaired ids can't match, because scope ids must already be in stored form. This is a maintainer
 decision (#180).
