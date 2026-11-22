@@ -139,7 +139,7 @@ path: /security
     working behind a shared network address.
   - If Redis fails, sign-in limits fail closed (requests are refused) and ingest and read limits fail open (requests
     continue).
-  - Delivery is at least once. An exact retry with the same valid, non-blank string `id` reuses the stored event while the project retains it, so retries
+  - Delivery is at least once when the client retries unsettled events, as the SDK does. An exact retry with the same valid, non-blank string `id` reuses the stored event while the project retains it, so retries
     from the SDK, which sets ids, don't add copies; changed content under that id is rejected with
     `duplicate_id_conflict`. An event sent without an id gets a new one on every retry. Once retention deletes an
     event, its id can be used again.
