@@ -4,7 +4,7 @@ import { activeWebhookSecrets, decryptWebhookSecret, WEBHOOK_LOG_RETENTION_MS } 
 import { MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
 import { webhookEvent } from './webhook-discovery';
 import { RETRY_WINDOW_MS, webhookRetryDelay } from './webhook-policy';
-import { type AttemptResult, postWebhook, type WebhookTransportOptions } from './webhook-transport';
+import { type AttemptResult, legacyWebhookHeaderId, postWebhook, type WebhookTransportOptions } from './webhook-transport';
 
 const LEASE_MS = 120_000;
 const MAX_ENDPOINT_ATTEMPTS_PER_SECOND = 50;
@@ -225,7 +225,8 @@ async function attemptDelivery(ch: ClickHouseClient, delivery: WebhookDelivery, 
     return { error: 'signing_failed' } as const;
   }
   // Check the snapshot after DNS so an edit during resolution cannot send to a superseded URL or scope.
-  return postWebhook(endpoint.url, delivery.eventId, JSON.stringify(event), keys, options.transport, async () => {
+  const webhookId = delivery.webhookId ?? legacyWebhookHeaderId(delivery.eventId);
+  return postWebhook(endpoint.url, webhookId, JSON.stringify(event), keys, options.transport, async () => {
     const now = new Date();
     const unchanged = await prisma.webhookEndpoint.count({
       where: {

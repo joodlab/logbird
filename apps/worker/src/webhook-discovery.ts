@@ -63,15 +63,15 @@ async function captureWatermark(projectId: string) {
 // Keep the arrival-time predicate on the stored column so ClickHouse can use an arrival-time index when present.
 function readWebhookCandidates(ch: ClickHouseClient, endpoint: WebhookEndpoint, sliceEnd: Date, now: Date) {
   const match = scopePredicate(endpoint, +now);
-  return read<{ event_id: string; delivery_received_at: string }>(
+  return read<{ event_id: string; received_ms: string | number }>(
     ch,
-    `SELECT event_id, min(received_at) AS delivery_received_at FROM events
+    `SELECT event_id, toUnixTimestamp64Milli(received_at) AS received_ms FROM events
         WHERE ${match.sql}
           AND timestamp >= subtractDays({from:DateTime64(3,'UTC')}, ${OCCURRED_AT_PAST_DAYS})
           AND timestamp < addDays({to:DateTime64(3,'UTC')}, ${OCCURRED_AT_FUTURE_DAYS})
           AND received_at >= {from:DateTime64(3,'UTC')} AND received_at < {to:DateTime64(3,'UTC')}
           ${endpoint.cursorEventId === null ? '' : "AND (received_at > {from:DateTime64(3,'UTC')} OR event_id > {cursorId:String})"}
-        GROUP BY event_id ORDER BY delivery_received_at, event_id LIMIT ${DISCOVERY_PAGE_SIZE} ${COMPLETE_READ}`,
+        GROUP BY received_at, event_id ORDER BY received_at, event_id LIMIT ${DISCOVERY_PAGE_SIZE} ${COMPLETE_READ}`,
     {
       ...match.params,
       to: sliceEnd.toISOString(),
@@ -97,13 +97,19 @@ export async function discoverWebhookDeliveries(ch: ClickHouseClient, endpoint: 
     // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
     const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +watermark + 1));
     const rows = await readWebhookCandidates(ch, endpoint, sliceEnd, now);
-    const deliveries = rows.map((row) => ({
-      endpointId: endpoint.id,
-      eventId: row.event_id,
-      receivedAt: new Date(row.delivery_received_at.endsWith('Z') ? row.delivery_received_at : `${row.delivery_received_at.replace(' ', 'T')}Z`),
-      createdAt: now,
-      expiresAt: new Date(+now + WEBHOOK_LOG_RETENTION_MS),
-    }));
+    const deliveries = rows.map(({ event_id: eventId, received_ms }) => {
+      const receivedAt = new Date(Number(received_ms));
+      // NUL is forbidden in event IDs, so this namespace cannot overlap legacy lb1_ headers.
+      const occurrence = `\0${JSON.stringify([endpoint.projectId, eventId, receivedAt])}`;
+      return {
+        endpointId: endpoint.id,
+        eventId,
+        receivedAt,
+        webhookId: `lb1_${Buffer.from(occurrence, 'utf8').toString('base64url')}`,
+        createdAt: now,
+        expiresAt: new Date(+now + WEBHOOK_LOG_RETENTION_MS),
+      };
+    });
     const last = deliveries.at(-1);
     await prisma.$transaction(async (tx) => {
       const full = deliveries.length === DISCOVERY_PAGE_SIZE && last;

@@ -17,9 +17,9 @@ export type AttemptResult = {
 export type WebhookTransportOptions = NonNullable<Parameters<typeof resolveWebhookDestination>[1]> & {
   totalTimeoutMs?: number;
 };
-type AttemptContext = { started: number; signal: AbortSignal; responseCode?: number };
+type AttemptContext = { started: number; signal: AbortSignal; requestStarted: boolean; responseCode?: number };
 
-function webhookHeaderId(id: string) {
+export function legacyWebhookHeaderId(id: string) {
   // Reserve the prefix in both branches so a literal ID can never collide with an encoded ID.
   const prefix = 'lb1_';
   return /^[\x21-\x7e]+$/.test(id) && !id.includes('.') && !id.startsWith(prefix) ? id : `${prefix}${Buffer.from(id, 'utf8').toString('base64url')}`;
@@ -34,16 +34,16 @@ export async function postWebhook(
   stillCurrent?: () => Promise<boolean>,
 ): Promise<AttemptResult | undefined> {
   const controller = new AbortController();
-  const attempt: AttemptContext = { started: Date.now(), signal: controller.signal };
+  const attempt: AttemptContext = { started: Date.now(), signal: controller.signal, requestStarted: false };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<AttemptResult>((resolve) => {
     timer = setTimeout(() => {
-      resolve({ error: 'timeout', responseCode: attempt.responseCode });
+      resolve(attempt.requestStarted ? { error: 'timeout', responseCode: attempt.responseCode } : { error: 'lookup_failed' });
       controller.abort();
     }, options.totalTimeoutMs ?? TOTAL_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([deadline, sendWebhook(rawUrl, webhookHeaderId(id), payload, secrets, options, stillCurrent, attempt)]);
+    return await Promise.race([deadline, sendWebhook(rawUrl, id, payload, secrets, options, stillCurrent, attempt)]);
   } finally {
     clearTimeout(timer);
   }
@@ -70,11 +70,11 @@ async function sendWebhook(
   try {
     destination = await resolveWebhookDestination(rawUrl, options);
   } catch (error) {
-    return { error: error instanceof WebhookLookupBusyError ? 'timeout' : 'destination_rejected' };
+    return { error: error instanceof WebhookLookupBusyError ? 'lookup_failed' : 'destination_rejected' };
   }
-  if (signal.aborted) return { error: 'timeout' };
+  if (signal.aborted) return { error: 'lookup_failed' };
   if (stillCurrent && !(await stillCurrent())) return;
-  if (signal.aborted || Date.now() - started >= CONNECT_TIMEOUT_MS) return { error: 'timeout' };
+  if (signal.aborted || Date.now() - started >= CONNECT_TIMEOUT_MS) return { error: 'lookup_failed' };
   const { url, address, family } = destination;
   const https = url.protocol === 'https:';
   return new Promise((resolve) => {
@@ -121,6 +121,7 @@ async function sendWebhook(
         response.once('error', networkFailure);
       },
     );
+    attempt.requestStarted = true;
     const connectTimer = setTimeout(
       () => {
         finish({ error: 'timeout' });

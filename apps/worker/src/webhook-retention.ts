@@ -17,6 +17,5 @@ export async function pruneWebhookLogs(now = new Date(), projectId?: string) {
           ${projectId ? Prisma.sql`AND EXISTS (SELECT 1 FROM "WebhookEndpoint" e WHERE e.id = d."endpointId" AND e."projectId" = ${projectId})` : Prisma.empty}
         ORDER BY d."expiresAt" LIMIT 5000 FOR UPDATE SKIP LOCKED
       )`),
-    prisma.webhookDisableNotice.deleteMany({ where: { createdAt: { lte: expired }, endpoint }, limit: 5000 }),
   ]);
 }

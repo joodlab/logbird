@@ -8,6 +8,7 @@ import { createWebhookResponseSchema, listWebhooksResponseSchema, MAX_WEBHOOK_EN
 import { prisma } from '@logbird/database';
 import { decryptWebhookSecret, encryptWebhookSecret, type WebhookLookup, webhookSecretKey } from '@logbird/database/webhooks';
 import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES, verifyWebhook } from '@logbird/sdk';
+import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from '../../worker/src/webhook-delivery';
 import { discoverWebhookDeliveries } from '../../worker/src/webhook-discovery';
@@ -78,7 +79,7 @@ async function withLocalReceiver(endpointId: string, work: (received: { headers:
   }
 }
 
-const send = () =>
+const send = (project = projectId) =>
   deliverWebhooks(
     clickhouse,
     {
@@ -88,7 +89,7 @@ const send = () =>
       failureLimit: 50,
       transport: { allowHttp: true, allowAddress: (address) => address === '127.0.0.1' },
     },
-    projectId,
+    project,
   );
 beforeAll(async () => {
   for (const id of [org, otherOrg]) await prisma.organization.create({ data: { id, name: 'QA Webhooks', slug: id, createdAt: new Date() } });
@@ -310,7 +311,18 @@ it('advances discovery while HTTP ingest keeps arriving behind a slow admitted w
   }
 });
 
-it('returns a retryable lookup error for a busy workspace and lets another workspace save', async () => {
+it('documents and returns a retryable lookup error on create and update while another workspace can save', async () => {
+  const { endpoint } = await create();
+  const openapi = await app.request('/openapi.json');
+  expect(openapi.status).toBe(200);
+  const { paths } = await openapi.json();
+  const documented = [paths['/api/projects/{projectId}/webhooks'].post, paths['/api/projects/{projectId}/webhooks/{id}'].patch];
+  for (const route of documented) {
+    expect(route.responses['503']).toMatchObject({
+      headers: { 'Retry-After': { schema: { type: 'integer', example: 3 } } },
+      content: { 'application/json': { schema: { properties: { error: { properties: { code: { const: 'webhook_lookup_busy' } } } } } } },
+    });
+  }
   let release!: (value: Awaited<ReturnType<WebhookLookup>>) => void;
   const stalled = new Promise<Awaited<ReturnType<WebhookLookup>>>((resolve) => {
     release = resolve;
@@ -326,10 +338,11 @@ it('returns a retryable lookup error for a busy workspace and lets another works
   const waiting = [request(base(), 'POST', input), request(base(), 'POST', input)];
   try {
     await expect.poll(() => held, { timeout: 3000 }).toBe(2);
-    const busy = await request(base(), 'POST', input);
-    expect(busy.status).toBe(503);
-    expect(busy.headers.get('Retry-After')).toBe('3');
-    expect(await busy.json()).toMatchObject({ error: { code: 'webhook_lookup_busy' } });
+    for (const busy of await Promise.all([request(base(), 'POST', input), request(`${base()}/${endpoint.id}`, 'PATCH', input)])) {
+      expect(busy.status).toBe(503);
+      expect(busy.headers.get('Retry-After')).toBe('3');
+      expect(await busy.json()).toMatchObject({ error: { code: 'webhook_lookup_busy' } });
+    }
     expect((await request(`/api/projects/${foreignId}/webhooks`, 'POST', { url: 'https://ready.example.invalid' }, 'foreign-owner')).status).toBe(
       201,
     );
@@ -337,6 +350,75 @@ it('returns a retryable lookup error for a busy workspace and lets another works
     release(allowed);
     await Promise.all(waiting);
     control.lookup = undefined;
+  }
+});
+
+it('delivers a reused event ID once after seven-day retention while the first delivery is still retained', async () => {
+  const fixture = await immutableFixture('qa-webhook-id-reuse');
+  const eventId = 'qa-reused-after-retention';
+  const secret = generateWebhookSecret();
+  try {
+    await prisma.project.update({ where: { id: fixture.project }, data: { retentionDays: 7 } });
+    const now = new Date();
+    const hook = await prisma.webhookEndpoint.create({
+      data: {
+        projectId: fixture.project,
+        url: receiver,
+        createdAt: now,
+        cursorReceivedAt: now,
+        secrets: { create: { ciphertext: encryptWebhookSecret(secret, webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY)) } },
+      },
+    });
+    const rows = () => prisma.webhookDelivery.findMany({ where: { endpointId: hook.id, eventId }, orderBy: { receivedAt: 'asc' } });
+    const scan = async () => discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } }));
+    const ingest = async (action: string, occurredAt?: string) => {
+      const response = await fixture.post({ id: eventId, action, occurredAt });
+      expect(response.status, await response.clone().text()).toBe(202);
+      expect(await response.json()).toMatchObject({ accepted: 1, ids: [eventId] });
+    };
+    await withLocalReceiver(hook.id, async (received) => {
+      const delivered = (count: number) =>
+        expect
+          .poll(
+            async () => {
+              await scan();
+              await send(fixture.project);
+              return received.length;
+            },
+            { timeout: 30_000, interval: 500 },
+          )
+          .toBe(count);
+      await ingest('qa.original', new Date(+now - 8 * 86_400_000).toISOString());
+      await delivered(1);
+      expect(await rows()).toMatchObject([{ status: 'succeeded' }]);
+      await enforceProjectRetention(fixture.project);
+      expect(await fixture.count()).toBe(0);
+      expect(await prisma.ingestReceipt.count({ where: { projectId: fixture.project, eventId } })).toBe(0);
+      expect(await rows()).toMatchObject([{ status: 'succeeded' }]);
+
+      await ingest('qa.reused');
+      await delivered(2);
+      const [first, second, extra] = await rows();
+      expect([first?.status, second?.status, extra]).toEqual(['succeeded', 'succeeded', undefined]);
+      if (!first?.receivedAt || !second?.receivedAt) throw new Error('Missing stored occurrence clocks');
+      expect(+second.receivedAt).toBeGreaterThan(+first.receivedAt);
+      const [original, reused] = received;
+      if (!original || !reused) throw new Error('Missing signed receiver requests');
+      expect(original.headers['webhook-id']).toBe(first.webhookId);
+      expect(reused.headers['webhook-id']).toBe(second.webhookId);
+      expect(second.webhookId).not.toBe(first.webhookId);
+      expect(await verifyWebhook({ ...original, secret })).toMatchObject({ id: eventId, action: 'qa.original' });
+      expect(await verifyWebhook({ ...reused, secret })).toMatchObject({ id: eventId, action: 'qa.reused' });
+
+      // Revisiting the same stored occurrence must keep the original delivery row and signed ID.
+      await prisma.webhookEndpoint.update({ where: { id: hook.id }, data: { cursorReceivedAt: second.receivedAt, cursorEventId: null } });
+      await scan();
+      await send(fixture.project);
+      expect(await rows()).toEqual([first, second]);
+      expect(received).toHaveLength(2);
+    });
+  } finally {
+    await fixture.cleanup();
   }
 });
 it('rotates with default, zero and maximum overlap without extending already expiring secrets', async () => {

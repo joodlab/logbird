@@ -495,13 +495,14 @@ target. The scan window ends at the earlier of:
 
 The worker queues for the receipt gate while writers assign their arrival clocks and register receipts.
 Unconfirmed receipts then fence the scan during ClickHouse writes. Each query examines up to five minutes of
-receive time and pages up to 100 matching IDs, ordered by receive time and ID. Empty slices advance
+receive time and pages up to 100 matching event occurrences, ordered by receive time and ID. Empty slices advance
 the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
 through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
 sorts by event time. On very large projects delivery can stall until the arrival-time index is present.
 The cursor never skips events when a scan exceeds its read budget.
 The worker inserts deliveries and advances the cursor in one Postgres transaction. Deliveries are unique
-by endpoint and event ID. Disabled endpoints pause scanning and sending. On
+by endpoint, event ID, and stored receive time. If retention frees an event ID and it is used again,
+the new occurrence gets its own delivery even while the earlier delivery is retained. Disabled endpoints pause scanning and sending. On
 re-enable, scanning resumes from the saved cursor. The worker rechecks the
 current scope and filter before sending an event. Events removed from storage or
 excluded by a new scope finish with `event_unavailable`.
@@ -512,8 +513,10 @@ Each POST body is the public event shape returned in `/v1/events/:id`'s
 `event`. It is built from stored event columns, which preserve exact attribute
 text such as large numeric identifiers supplied as strings. The worker signs the exact bytes with the Standard Webhooks headers
 `webhook-id`, `webhook-timestamp` (Unix seconds), and `webhook-signature`.
-IDs made of visible ASCII characters (`!` through `~`) without a dot or the `lb1_` prefix are used directly. Other IDs are encoded as
-`lb1_` followed by the unpadded base64url of the UTF-8 ID. The original ID stays in the JSON body.
+New event deliveries use an opaque `lb1_`-prefixed header ID for the stored occurrence. A reused event ID
+gets a distinct header ID, and the original event ID stays in the JSON body. Test pings and deliveries queued
+before occurrence IDs use the original header form. A visible ASCII ID without a dot or the `lb1_` prefix is
+used directly. Other IDs in that form use `lb1_` followed by unpadded base64url of the UTF-8 ID.
 The SDK verifies the signature using the exact header value.
 
 Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800. Up to ten active secrets
@@ -537,12 +540,14 @@ Each endpoint has four concurrent sends by default and a limit of 50 attempts
 per second. A separate worker-wide cap defaults to 16 concurrent sends.
 2xx succeeds. Network failures and other responses retry with jitter at roughly
 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h for up to 24 hours.
-Internal lookup failures are recorded as `lookup_failed` and retry within the same window.
+Internal lookup failures, including deadlines reached before starting an HTTP request, are recorded as
+`lookup_failed` and retry within the same window without counting toward endpoint disablement.
 Once the window expires, the delivery is marked failed before another attempt can start.
 HTTP 410 disables immediately with `gone_410`. An endpoint also disables with
 `consecutive_failures` after 50 consecutive failed deliveries by default or
 24 hours of failures without a success. Auto-disable records `webhook.disabled`
-in workspace activity and queues email to owners and admins.
+in workspace activity and queues email to owners and admins. Pending disable notices survive delivery-log
+pruning and retry until SMTP accepts them or the recipient loses eligibility.
 
 Owners and admins can use `POST .../webhooks/:id/test` to queue a
 `logbird.webhook.test` event with its own ID. Use

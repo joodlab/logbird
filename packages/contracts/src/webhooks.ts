@@ -47,6 +47,9 @@ export const rotateWebhookSecretResponseSchema = z.object({ secret: z.string() }
 export const webhookSecretOverlapLimitSchema = z.object({
   error: z.object({ code: z.literal('webhook_secret_overlap_limit'), message: z.string() }),
 });
+export const webhookLookupBusySchema = z.object({
+  error: z.object({ code: z.literal('webhook_lookup_busy'), message: z.string() }),
+});
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>;
 
 export const webhookDeliveryStatusSchema = z.enum(['pending', 'succeeded', 'failed']);

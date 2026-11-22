@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@clickhouse/client';
-import { createClickHouseClient, insertEvents, normalizeEvent, purgeProject } from '@logbird/clickhouse';
+import { createClickHouseClient, createMaintenanceClickHouseClient, insertEvents, normalizeEvent, purgeProject } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { discoverWebhookDeliveries } from './webhook-discovery';
@@ -33,16 +33,17 @@ const queuedIds = async (endpointId: string) =>
   );
 
 afterAll(async () => {
+  const maintenance = createMaintenanceClickHouseClient();
   try {
-    await purgeProject(ch, projectId);
+    await purgeProject(maintenance, projectId);
   } finally {
     try {
       await prisma.organization.deleteMany({ where: { id: projectId } });
     } finally {
-      await Promise.all([ch.close(), prisma.$disconnect(), closeProjectLocks()]);
+      await Promise.all([ch.close(), maintenance.close(), prisma.$disconnect(), closeProjectLocks()]);
     }
   }
-}, 120_000);
+}, 360_000);
 
 it('includes the creation millisecond and pages 105 events with the same received_at', async () => {
   const from = new Date(Date.now() - 60_000);

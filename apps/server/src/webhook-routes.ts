@@ -12,6 +12,7 @@ import {
   rotateWebhookSecretSchema,
   updateWebhookSchema,
   webhookEndpointSchema,
+  webhookLookupBusySchema,
   webhookSecretOverlapLimitSchema,
 } from '@logbird/contracts';
 import { Prisma, prisma, type WebhookAttempt, type WebhookEndpoint } from '@logbird/database';
@@ -27,6 +28,7 @@ import {
 import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
 import { type Context, Hono } from 'hono';
 import { resolver, validator } from 'hono-openapi';
+import type { ZodType } from 'zod';
 import { env } from './env';
 import { ApiError } from './errors';
 import { audit } from './ingest';
@@ -38,6 +40,18 @@ import type { AppEnv } from './types';
 const base = '/projects/:projectId/webhooks';
 const secretKey = webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY);
 const rotationSummary = 'Rotate webhook secret (shown once; default 24-hour overlap, maximum 7 days)';
+const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
+  routeDoc(summary, {
+    responses: {
+      [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } },
+      503: {
+        description: 'Destination lookup capacity is busy. Retry after the indicated delay.',
+        headers: { 'Retry-After': { description: 'Seconds before retrying', schema: { type: 'integer', example: 3 } } },
+        content: { 'application/json': { schema: resolver(webhookLookupBusySchema) } },
+      },
+    },
+  });
+const updateWebhookDoc = webhookUrlDoc('Update webhook endpoint', webhookEndpointSchema);
 function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
   return webhookEndpointSchema.parse({
     ...endpoint,
@@ -138,7 +152,7 @@ export const webhookRoutes = new Hono<AppEnv>()
   })
   .post(
     base,
-    doc('Create webhook endpoint (secret shown once)', createWebhookResponseSchema, 201),
+    webhookUrlDoc('Create webhook endpoint (secret shown once)', createWebhookResponseSchema, 201),
     validator('json', createWebhookSchema, webhookBody),
     async (c) => {
       const input = c.req.valid('json');
@@ -183,7 +197,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     if (!endpoint) throw new ApiError(404, 'not_found', 'Webhook endpoint not found.');
     return c.json(serialize(endpoint, endpoint._count.secrets));
   })
-  .patch(`${base}/:id`, doc('Update webhook endpoint', webhookEndpointSchema), validator('json', updateWebhookSchema, webhookBody), async (c) => {
+  .patch(`${base}/:id`, updateWebhookDoc, validator('json', updateWebhookSchema, webhookBody), async (c) => {
     const input = c.req.valid('json');
     if (input.filterQuery !== undefined) compileQuery(input.filterQuery);
     // A missing endpoint is a 404 before any DNS lookup; the locked re-read below still decides.

@@ -1047,6 +1047,9 @@ Set these optional variables in the worker's runtime environment, such as a
 Compose override or a Kubernetes deployment overlay. Attempt logs expire
 after 30 days. Delivery records expire 30 days after they finish. New endpoints start at their creation millisecond. A receiver should
 deduplicate by `webhook-id` and verify its signature against the raw request body.
+The header stays stable on retry and resend. When retention frees an event ID and it is used again,
+the new occurrence has a different `webhook-id` and the same JSON `id`. Pending disable emails survive
+delivery-log pruning and retry when SMTP is available again for eligible recipients.
 
 On very large projects delivery can stall until the arrival-time index is present.
 The cursor never skips events when a scan exceeds its read budget.

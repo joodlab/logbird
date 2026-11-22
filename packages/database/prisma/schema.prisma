@@ -410,6 +410,8 @@ model WebhookDelivery {
   eventId String
   // Null identifies a synthetic test. The receive clock pins the original event identity on resend.
   receivedAt DateTime?
+  // Legacy deliveries and test pings derive their signed ID from eventId.
+  webhookId String?
   createdAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
   status String @default("pending")
   nextAttemptAt DateTime? @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
@@ -420,7 +422,7 @@ model WebhookDelivery {
   expiresAt DateTime
   attempts WebhookAttempt[]
 
-  @@unique([endpointId, eventId])
+  @@unique([endpointId, eventId, receivedAt])
   @@index([endpointId, id])
   @@index([endpointId, status, nextAttemptAt, id])
   @@index([expiresAt])

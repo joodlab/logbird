@@ -3,13 +3,12 @@ import { once } from 'node:events';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createClient } from '@clickhouse/client';
-import { createClickHouseClient, insertEvents, normalizeEvent, purgeProject } from '@logbird/clickhouse';
+import { createClickHouseClient, createMaintenanceClickHouseClient, insertEvents, normalizeEvent, purgeProject } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, type WebhookEndpoint } from '@logbird/database';
 import { encryptWebhookSecret, WEBHOOK_LOG_RETENTION_MS, webhookSecretKey } from '@logbird/database/webhooks';
 import { generateWebhookSecret, verifyWebhook } from '@logbird/sdk';
-import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from './webhook-delivery';
-import { discoverWebhookDeliveries } from './webhook-discovery';
 import { pruneWebhookLogs } from './webhook-retention';
 
 const projectId = `qa-webhook-resilience-${randomUUID()}`;
@@ -81,16 +80,17 @@ afterEach(async () => {
 afterAll(async () => {
   receiver.closeAllConnections();
   await new Promise<void>((resolve) => receiver.close(() => resolve()));
+  const maintenance = createMaintenanceClickHouseClient();
   try {
-    await purgeProject(ch, projectId);
+    await purgeProject(maintenance, projectId);
   } finally {
     try {
       await prisma.organization.deleteMany({ where: { id: projectId } });
     } finally {
-      await Promise.all([ch.close(), prisma.$disconnect(), closeProjectLocks()]);
+      await Promise.all([ch.close(), maintenance.close(), prisma.$disconnect(), closeProjectLocks()]);
     }
   }
-}, 120_000);
+}, 360_000);
 
 it('settles HTTP 101 as a failed attempt and sends the next delivery to a different endpoint', async () => {
   const time = await storeEvents(['qa-upgrade', 'qa-healthy']);
@@ -141,11 +141,11 @@ it('sweeps old terminal records and attempts while an old pending event waits fo
   expect(requests.map(({ headers }) => headers['webhook-id'])).toEqual(['qa-old']);
 });
 
-it('signs dotted, Unicode, and reserved-prefix IDs without collisions and verifies original body IDs', async () => {
+it('preserves signed IDs for queued legacy deliveries with dotted, Unicode, and reserved-prefix IDs', async () => {
   const ids = ['qa.dot', 'qa-مرحبا', 'lb1_cWEuZG90'];
-  await storeEvents(ids, undefined, 'qa.webhook.encoded');
+  const time = await storeEvents(ids, undefined, 'qa.webhook.encoded');
   const hook = await endpoint('encoded-ids', true, 'action:qa.webhook.encoded');
-  await discoverWebhookDeliveries(ch, hook);
+  for (const id of ids) await enqueue(hook, id, time);
   for (const _ of ids) await tick();
   expect(requests).toHaveLength(3);
   const headerIds = new Map<string, string>();
@@ -163,6 +163,61 @@ it('signs dotted, Unicode, and reserved-prefix IDs without collisions and verifi
     ]),
   );
 });
+
+it.each([5.3, 10.8])(
+  'retries without charging the endpoint when eligibility takes %s seconds in PostgreSQL',
+  { timeout: 25_000 },
+  async (seconds) => {
+    const time = await storeEvents([`qa-slow-eligibility-${seconds}`]);
+    const hook = await endpoint('slow-eligibility');
+    const delivery = await enqueue(hook, `qa-slow-eligibility-${seconds}`, time);
+    let checked = false;
+    let eligibility: Promise<unknown> | undefined;
+    const delayed = prisma.$extends({
+      query: {
+        webhookEndpoint: {
+          async count({ args, query }) {
+            await prisma.$executeRaw`SELECT pg_sleep(${seconds}::double precision)`;
+            const count = await query(args);
+            checked = count === 1;
+            return count;
+          },
+        },
+      },
+    });
+    const count = vi.spyOn(prisma.webhookEndpoint, 'count').mockImplementation((args) => {
+      const query = delayed.webhookEndpoint.count(args);
+      eligibility = query.then((result) => result);
+      return query;
+    });
+    try {
+      const { totalTimeoutMs: _, ...transport } = options.transport;
+      await deliverWebhooks(ch, { ...options, transport }, projectId);
+      expect(count).toHaveBeenCalledTimes(1);
+      expect(checked).toBe(seconds < 10);
+      expect(await log(delivery.id)).toMatchObject({
+        status: 'pending',
+        leaseUntil: null,
+        attempts: [{ error: 'lookup_failed', responseCode: null }],
+      });
+      const past = new Date(Date.now() - 1000);
+      await prisma.webhookDelivery.update({ where: { id: delivery.id }, data: { nextAttemptAt: past, retryUntil: past } });
+      await tick();
+      expect(await log(delivery.id)).toMatchObject({ status: 'failed', attempts: [{ error: 'lookup_failed' }] });
+      expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).toMatchObject({
+        enabled: true,
+        consecutiveFailures: 0,
+        failingSince: null,
+      });
+      expect(await prisma.webhookDisableNotice.count({ where: { endpointId: hook.id } })).toBe(0);
+      expect(requests).toEqual([]);
+    } finally {
+      count.mockRestore();
+      await eligibility;
+      expect(requests).toEqual([]);
+    }
+  },
+);
 
 it('retries real stored-event lookup errors and expires the claim without starting another attempt', async () => {
   const time = await storeEvents(['qa-lookup']);

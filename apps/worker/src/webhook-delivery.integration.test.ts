@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createClient } from '@clickhouse/client';
-import { insertEvents, normalizeEvent, purgeProject, read } from '@logbird/clickhouse';
+import { createMaintenanceClickHouseClient, insertEvents, normalizeEvent, purgeProject, read } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { encryptWebhookSecret, webhookSecretKey } from '@logbird/database/webhooks';
 import { generateWebhookSecret, verifyWebhook } from '@logbird/sdk';
@@ -13,9 +13,10 @@ import { expect, it } from 'vitest';
 import { claimWebhookDeliveries, deliverWebhooks } from './webhook-delivery';
 import { discoverWebhookDeliveries } from './webhook-discovery';
 import { sendWebhookDisableNotices } from './webhook-notices';
+import { pruneWebhookLogs } from './webhook-retention';
 
-it('delivers a late insert once with a non-UTC ClickHouse session, signs stored text and emails a composite-role admin', {
-  timeout: 60_000,
+it('delivers a late non-UTC insert once, signs stored text and catches up on disable email after a 31-day outage', {
+  timeout: 360_000,
 }, async () => {
   const id = `qa-webhooks-${randomUUID()}`;
   const email = `${id}@example.invalid`;
@@ -28,6 +29,7 @@ it('delivers a late insert once with a non-UTC ClickHouse session, signs stored 
     password: process.env.CLICKHOUSE_PASSWORD,
     clickhouse_settings: { session_timezone: sessionTimezone, date_time_input_format: 'best_effort' },
   });
+  const maintenance = createMaintenanceClickHouseClient();
   const connection = new Redis(process.env.REDIS_URL ?? '', { maxRetriesPerRequest: null });
   const prefix = process.env.BULLMQ_PREFIX ?? '{logbird-t2w}';
   const queue = new Queue(id, { prefix, connection });
@@ -94,7 +96,7 @@ it('delivers a late insert once with a non-UTC ClickHouse session, signs stored 
     const cleanups: Promise<unknown>[] = [queue.obliterate({ force: true })];
     if (organizationCreated)
       cleanups.push(
-        purgeProject(ch, id),
+        purgeProject(maintenance, id),
         prisma.$transaction([
           prisma.auditOutbox.deleteMany({ where: { stream: `ws:${id}` } }),
           prisma.organization.deleteMany({ where: { id } }),
@@ -175,7 +177,7 @@ it('delivers a late insert once with a non-UTC ClickHouse session, signs stored 
     await scan();
     await tick();
     await tick();
-    expect(requests.map(({ headers }) => headers['webhook-id']).sort()).toEqual(['late-insert', 'newer-visible']);
+    expect(requests).toHaveLength(2);
     const [stored] = await read<{ payloadText: string; attributeText: string }>(
       ch,
       `SELECT JSONExtractString(payload, 'numericId') AS payloadText, attributes['numericId'] AS attributeText
@@ -183,17 +185,19 @@ it('delivers a late insert once with a non-UTC ClickHouse session, signs stored 
       { project: id, event: first.event_id },
     );
     expect(stored).toEqual({ payloadText: numericId, attributeText: numericId });
-    const wire = requests.find(({ headers }) => headers['webhook-id'] === first.event_id)?.payload ?? '';
+    const wire = requests.find(({ payload }) => JSON.parse(payload).id === first.event_id)?.payload ?? '';
     expect(Buffer.from(wire).includes(Buffer.from(`"numericId":"${stored?.attributeText}"`))).toBe(true);
     for (const request of requests) {
       expect((request.headers['webhook-signature'] as string).split(' ')).toHaveLength(2);
+      const expected = JSON.parse(request.payload).id === delayed.event_id ? delayed : first;
       for (const secret of [primary, rotated])
         expect(await verifyWebhook({ ...request, secret })).toMatchObject({
-          id: request.headers['webhook-id'],
-          receivedAt: request.headers['webhook-id'] === delayed.event_id ? delayed.received_at : first.received_at,
+          id: expected.event_id,
+          receivedAt: expected.received_at,
           tenant: { id: 't1' },
         });
     }
+    expect(requests.map(({ payload }) => JSON.parse(payload).id).sort()).toEqual(['late-insert', 'newer-visible']);
     expect(await prisma.webhookDelivery.count({ where: { endpointId: endpoint.id, status: 'succeeded' } })).toBe(2);
 
     await prisma.webhookSecret.updateMany({ where: { endpointId: endpoint.id, expiresAt: { not: null } }, data: { expiresAt: time(-1) } });
@@ -285,7 +289,14 @@ it('delivers a late insert once with a non-UTC ClickHouse session, signs stored 
       { action: 'webhook.disabled', metadata: { webhook: { reason: 'gone_410' } } },
       { action: 'webhook.disabled', metadata: { webhook: { reason: 'consecutive_failures' } } },
     ]);
+    // Advance this fixture's outbox clock across an SMTP outage without interrupting shared Mailpit.
+    const outage = new Date(Date.now() - 31 * 86_400_000);
+    await prisma.webhookDisableNotice.updateMany({ where: { endpoint: { projectId: id } }, data: { createdAt: outage, nextAttemptAt: outage } });
+    await pruneWebhookLogs(new Date(), id);
+    expect(await prisma.webhookDisableNotice.count({ where: { endpoint: { projectId: id } } })).toBe(2);
+    expect((await mailSearch()).messages).toEqual([]);
     await sendWebhookDisableNotices(id);
+    expect(await prisma.webhookDisableNotice.count({ where: { endpoint: { projectId: id } } })).toBe(0);
     await expect
       .poll(async () => (await mailSearch()).messages.map(({ Subject }) => Subject), { timeout: 5000 })
       .toEqual([`A webhook was disabled in ${id}`, `A webhook was disabled in ${id}`]);
@@ -295,7 +306,7 @@ it('delivers a late insert once with a non-UTC ClickHouse session, signs stored 
     try {
       await cleanFixtures();
     } finally {
-      await Promise.all([queue.close(), events.close(), closeProjectLocks(), prisma.$disconnect(), ch.close()]);
+      await Promise.all([queue.close(), events.close(), closeProjectLocks(), prisma.$disconnect(), ch.close(), maintenance.close()]);
       await connection.quit();
     }
   }
