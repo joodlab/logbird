@@ -384,36 +384,72 @@ public class FinalCycleTests
     }
 
     [Fact]
-    public async Task Stats_count_every_delivery_by_the_time_FlushAsync_returns_even_when_a_flush_completes_mid_send()
+    public async Task A_flush_that_completes_mid_send_already_sees_its_deliveries_counted()
     {
-        // A 503 with partial acknowledgements settles events while the send is still running, and a flush can complete
-        // then. Deliveries must already be counted at that point; this race showed up once in CI on .NET Framework, and
-        // the loop keeps exercising that window (it cannot be forced deterministically).
-        var server = new FakeServer { Fallback = request => Task.FromResult(FakeServer.Json(HttpStatusCode.Accepted, JsonSerializer.Serialize(new { accepted = request.Ids.Length, ids = request.Ids, rejected = Array.Empty<object>() }))) };
-        await using var client = Client(Options(), server);
-        for (var round = 1; round <= 100; round++)
-        {
-            server.Then(request => FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new
+        static HttpResponseMessage Accept(CapturedRequest request)
+            => FakeServer.Json(HttpStatusCode.Accepted, JsonSerializer.Serialize(new { accepted = request.Ids.Length, ids = request.Ids, rejected = Array.Empty<object>() }));
+
+        // [X] is held open; then [A, B] gets a 503 that accepts A and leaves B unresolved, which completes a flush covering
+        // X and A while the send goes on; B's retry is held open, so the send cannot return before the assertion.
+        var releaseX = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseB = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new FakeServer()
+            .ThenAsync(async request =>
+            {
+                await releaseX.Task;
+                return Accept(request);
+            })
+            .Then(request => FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new
             {
                 error = new
                 {
                     code = "ingest_pending",
                     details = new
                     {
-                        accepted = request.Ids.Length - 1,
-                        ids = request.Ids.Take(request.Ids.Length - 1).ToArray(),
+                        accepted = 1,
+                        ids = new[] { request.Ids[0] },
                         rejected = Array.Empty<object>(),
                         warnings = Array.Empty<object>(),
-                        indices = new[] { request.Ids.Length - 1 },
-                        eventIds = new[] { request.Ids[request.Ids.Length - 1] },
+                        indices = new[] { 1 },
+                        eventIds = new[] { request.Ids[1] },
                     },
                 },
-            })));
-            client.Track(new AuditEvent("a"));
-            client.Track(new AuditEvent("b"));
-            client.Track(new AuditEvent("c"));
-            Assert.True(await client.FlushAsync());
-            Assert.Equal(3 * round, client.Stats.Delivered);
+            })))
+            .ThenAsync(async request =>
+            {
+                await releaseB.Task;
+                return Accept(request);
+            });
+        await using var client = Client(Options(), server);
+        client.Track(new AuditEvent("x"));
+        var flushX = client.FlushAsync();
+        await WaitUntil(() => server.Requests.Count == 1);
+
+        client.Track(new AuditEvent("a"));
+        var flushA = client.FlushAsync();
+        client.Track(new AuditEvent("b"));
+        releaseX.SetResult(true);
+        Assert.True(await flushX);
+
+        Assert.Same(flushA, await Task.WhenAny(flushA, Task.Delay(TimeSpan.FromSeconds(10))));
+        Assert.True(await flushA);
+
+        // B's retry is now held at the server, so the send has not returned: X and A must already be counted.
+        await WaitUntil(() => server.Requests.Count == 3);
+        Assert.Equal(2, client.Stats.Delivered);
+
+        releaseB.SetResult(true);
+        Assert.True(await client.FlushAsync());
+        Assert.Equal(3, client.Stats.Delivered);
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "timed out");
+            await Task.Delay(10);
         }
     }
 
