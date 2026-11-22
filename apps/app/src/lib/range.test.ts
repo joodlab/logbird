@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { historyRange, rangePhrase, resolveRange } from './range';
+import { ALL_RANGE, historyRange, isValidRange, rangeLabel, rangePhrase, resolveRange } from './range';
 
 describe('rangePhrase', () => {
   it('reads presets as a phrase with "the"', () => {
@@ -35,5 +35,16 @@ describe('historyRange with a future-dated last event', () => {
     const r = resolveRange(historyRange('2026-11-20T12:00:00.000Z', now, last), now);
     expect(r.toMs).toBe(Date.parse(last) + 1);
     expect(r.fromMs).toBe(now - 3 * 86_400_000);
+  });
+});
+
+describe('the "all" range', () => {
+  it('is valid, labelled "All time" and covers every admitted timestamp', () => {
+    const now = Date.parse('2026-11-22T12:00:00.000Z');
+    expect(isValidRange(ALL_RANGE)).toBe(true);
+    expect(rangeLabel(ALL_RANGE)).toBe('All time');
+    const r = resolveRange(ALL_RANGE, now);
+    expect(r.toMs).toBe(now + 2 * 86_400_000);
+    expect(r.fromMs).toBe(now - 3651 * 86_400_000);
   });
 });

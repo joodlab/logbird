@@ -29,8 +29,14 @@ export interface ResolvedRange {
   relative: boolean;
 }
 
+/**
+ * "Everything the project stores": entity pages pass it on when they link out of a full history, so following another
+ * entity from there never inherits a computed window (like "2d") the reader did not choose.
+ */
+export const ALL_RANGE = 'all';
+
 export function isValidRange(range: string): boolean {
-  if (RELATIVE_RE.test(range)) return true;
+  if (range === ALL_RANGE || RELATIVE_RE.test(range)) return true;
   const [a, b] = range.split('..');
   return Boolean(a && b && !Number.isNaN(Date.parse(a)) && !Number.isNaN(Date.parse(b)) && Date.parse(a) < Date.parse(b));
 }
@@ -42,6 +48,12 @@ export function rangeDurationMs(range: string): number {
 
 /** Resolve to concrete ISO bounds. Relative ranges end "now" (rounded down to the second). */
 export function resolveRange(range: string, now = Date.now()): ResolvedRange {
+  if (range === ALL_RANGE) {
+    // Every timestamp ingest admits (3650 days back, a day ahead), with a day of slack each side.
+    const toMs = Math.floor(now / 1000) * 1000 + 2 * UNIT_MS.d;
+    const fromMs = toMs - 3653 * UNIT_MS.d;
+    return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), fromMs, toMs, relative: true };
+  }
   const rel = RELATIVE_RE.exec(range);
   if (rel) {
     const toMs = Math.floor(now / 1000) * 1000;
@@ -73,6 +85,7 @@ export function rangePhrase(range: string): string {
 }
 
 export function rangeLabel(range: string): string {
+  if (range === ALL_RANGE) return 'All time';
   const preset = RANGE_PRESETS.find((p) => p.value === range);
   if (preset) return preset.label;
   const rel = RELATIVE_RE.exec(range);
@@ -109,6 +122,7 @@ export function historyRange(firstSeenIso: string, now = Date.now(), lastSeenIso
   const days = Math.max(1, Math.ceil((now - first) / UNIT_MS.d) + 1);
   // Ingest admits events stamped up to a day ahead; a relative range ends now and would hide them.
   const last = lastSeenIso ? Date.parse(lastSeenIso) : Number.NaN;
-  if (!Number.isNaN(last) && last >= now) return absoluteRange(now - days * UNIT_MS.d, last + 1);
+  // Bounds from the entity's own timestamps only, so the range (and every query key) is stable across renders.
+  if (!Number.isNaN(last) && last >= now) return absoluteRange(first - UNIT_MS.d, last + 1);
   return `${days}d`;
 }

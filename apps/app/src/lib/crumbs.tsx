@@ -35,5 +35,10 @@ declare module '@tanstack/react-router' {
     range?: boolean;
     /** Range used when the URL has none (sparse pages want a wider window). */
     defaultRange?: string;
+    /**
+     * Keep a range the reader picks even when it equals the default (entity pages: "no range" means full history, so
+     * a chosen 24 hours must stay in the URL). Other pages drop the default to return to their own.
+     */
+    keepChosenRange?: boolean;
   }
 }

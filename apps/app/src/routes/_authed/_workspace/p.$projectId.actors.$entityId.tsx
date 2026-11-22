@@ -11,7 +11,7 @@ import { useRange } from '@/lib/use-range';
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/actors/$entityId')({
   head: () => ({ meta: [{ title: 'Actor · Logbird' }] }),
   validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional(), live: z.boolean().optional() }),
-  staticData: { crumb: 'Actors', range: true },
+  staticData: { crumb: 'Actors', range: true, keepChosenRange: true },
   loaderDeps: ({ search }) => ({ range: search.range }),
   loader: ({ context, params, deps }) => {
     const range = deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE;

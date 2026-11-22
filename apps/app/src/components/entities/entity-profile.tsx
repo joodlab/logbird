@@ -26,7 +26,7 @@ import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
 import { andQuery, formatTerm } from '@/lib/query-language';
-import { historyRange, rangeLabel } from '@/lib/range';
+import { ALL_RANGE, historyRange, rangeLabel } from '@/lib/range';
 import { useDocumentTitle } from '@/lib/use-document-title';
 import { useRange } from '@/lib/use-range';
 
@@ -59,6 +59,8 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   // Only this entity's own profile may define its history (a placeholder can still hold the previous entity's).
   const own = p && !(profile.isPlaceholderData && p.entity.id !== entityId) ? p : undefined;
   const timelineRange = rangeChosen ? timeline.range : own ? historyRange(own.entity.firstSeen, Date.now(), own.entity.lastSeen) : undefined;
+  // Out of a full history, links say "all" rather than this entity's computed window, so the next page is not narrowed.
+  const linkRange = rangeChosen ? timeline.range : ALL_RANGE;
 
   if (profile.isError && !p) {
     const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
@@ -136,19 +138,19 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {timelineRange ? (
+            {timelineRange && own ? (
               <>
                 <SaveEntityViewButton
                   entityId={entityId}
                   kind={kind}
-                  name={p?.entity.name || displayId}
+                  name={own.entity.name || displayId}
                   projectId={projectId}
                   query={baseQuery}
                   range={timelineRange}
                 />
                 <Button
                   nativeButton={false}
-                  render={<Link params={{ projectId }} search={{ range: timelineRange, q: baseQuery }} to="/p/$projectId/events" />}
+                  render={<Link params={{ projectId }} search={{ range: linkRange, q: baseQuery }} to="/p/$projectId/events" />}
                   size="sm"
                   variant="outline"
                 >
@@ -223,7 +225,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                     ? navigate({
                         to: '/p/$projectId/events',
                         params: { projectId },
-                        search: { range: timelineRange, q: andQuery(baseQuery, timeline.q) },
+                        search: { range: linkRange, q: andQuery(baseQuery, timeline.q) },
                       })
                     : undefined
                 }

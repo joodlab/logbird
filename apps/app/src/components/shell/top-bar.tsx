@@ -55,7 +55,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
           const last = i === sections.length - 1 && !dynamicCrumb;
           return (
             // Section crumbs ("Actors", "Settings") stay whole; only the page's own name truncates.
-            <span className={cn('flex items-center gap-1', last ? 'min-w-0' : 'shrink-0')} key={s.id}>
+            <span className={cn('flex min-w-0 items-center gap-1', !last && 'sm:shrink-0')} key={s.id}>
               {i === 0 && !params.projectId ? null : (
                 <ChevronRightIcon
                   className={i === 0 ? 'hidden size-3.5 shrink-0 text-muted-foreground/60 sm:block' : 'size-3.5 shrink-0 text-muted-foreground/60'}

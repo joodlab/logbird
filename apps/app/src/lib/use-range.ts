@@ -1,6 +1,6 @@
 import { useMatches, useNavigate, useSearch } from '@tanstack/react-router';
 import { useCallback } from 'react';
-import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
+import { ALL_RANGE, DEFAULT_RANGE, isValidRange } from '@/lib/range';
 
 /** The shared time range lives in the `range` search param of every project page. */
 export function useRange(): {
@@ -13,20 +13,23 @@ export function useRange(): {
 } {
   const search = useSearch({ strict: false }) as { range?: string };
   const pageDefault = useMatches({ select: (matches) => matches.findLast((m) => m.staticData?.defaultRange)?.staticData.defaultRange });
+  const keepChosen = useMatches({ select: (matches) => matches.some((m) => m.staticData?.keepChosenRange) });
   const fallback = pageDefault ?? DEFAULT_RANGE;
-  const explicit = Boolean(search.range && isValidRange(search.range));
-  const range = explicit && search.range ? search.range : fallback;
+  // "all" (passed on from an entity's full history) is not a narrowing choice.
+  const valid = search.range && isValidRange(search.range) ? search.range : undefined;
+  const explicit = Boolean(valid && valid !== ALL_RANGE);
+  const range = valid ?? fallback;
   const navigate = useNavigate();
   const setRange = useCallback(
     (next: string) => {
       navigate({
         to: '.',
-        // A chosen range stays in the URL even when it equals the page default: entity pages tell "the reader picked
-        // 24 hours" apart from "no choice, show the full history".
-        search: ((prev: Record<string, unknown>) => ({ ...prev, range: next })) as never,
+        // Entity pages keep a chosen range even when it equals the default ("the reader picked 24 hours" is not "no
+        // choice, show the full history"); other pages drop the default so the next page falls back to its own.
+        search: ((prev: Record<string, unknown>) => ({ ...prev, range: next === fallback && !keepChosen ? undefined : next })) as never,
       });
     },
-    [navigate],
+    [navigate, fallback, keepChosen],
   );
   const clearRange = useCallback(
     () => navigate({ to: '.', search: ((prev: Record<string, unknown>) => ({ ...prev, range: undefined })) as never }),
