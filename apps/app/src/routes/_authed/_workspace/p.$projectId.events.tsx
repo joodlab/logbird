@@ -15,7 +15,7 @@ import { errorMessage } from '@/lib/api/errors';
 import { eventsInfiniteQuery, histogramQuery, keys, viewsQuery } from '@/lib/api/queries';
 import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
-import { holdForSavedView, upgradeRecordView, useCopyViewLink } from '@/lib/views';
+import { holdForSavedView, upgradeRecordView, useConfirmedMissingView, useCopyViewLink } from '@/lib/views';
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -65,12 +65,16 @@ function ExplorerPage() {
   // record-page view never fetches or renders, not even for a moment. That includes a cached view list that does not
   // have the linked view yet while it refreshes. A views error, or a view that is gone once the list settles, opens
   // the link as it is.
+  // A cached list without the linked view may just be out of date (it can still count as fresh): fetch it once more
+  // before treating the view as gone, and hold until that fetch settles.
+  const confirmedMissing = useConfirmedMissingView(views, search.view, Boolean(storedView));
   const holdForView = holdForSavedView({
     viewId: search.view,
     q: search.q ?? '',
     listPending: views.isPending,
-    listFetching: views.isFetching,
+    listError: views.isError,
     found: Boolean(storedView),
+    confirmedMissing,
     legacyQ,
   });
   const savedView = storedView && upgrade ? { ...storedView, state: upgrade.state } : undefined;

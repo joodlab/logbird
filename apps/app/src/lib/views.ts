@@ -1,6 +1,6 @@
 import { decodeRecordPair, type EntityKind, encodeRecordPair, formatRecordTerm, type SavedView } from '@logbird/contracts';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { meQuery } from '@/lib/api/queries';
@@ -71,19 +71,41 @@ export function upgradeRecordView(view: Pick<SavedView, 'name' | 'state'>): { st
 
 /**
  * Whether the explorer must wait before running anything for a link that opens a saved view: while the view list is
- * loading, while a cached list without the linked view refreshes, and while an old record-page view's stored query has
- * not yet been replaced by its exact form. A list error, or a view that is gone once the list settles, does not hold.
+ * loading, while the linked view is missing from it until a fresh fetch has confirmed it is gone (a cached list can be
+ * out of date yet still count as fresh), and while an old record-page view's stored query has not yet been replaced by
+ * its exact form. A list error, or a view confirmed gone, does not hold: the link opens as it is.
  */
 export function holdForSavedView(o: {
   viewId: string | undefined;
   q: string;
   listPending: boolean;
-  listFetching: boolean;
+  listError: boolean;
   found: boolean;
+  confirmedMissing: boolean;
   legacyQ: string | undefined;
 }): boolean {
-  if (!o.viewId) return false;
-  return o.listPending || (!o.found && o.listFetching) || (o.legacyQ !== undefined && o.q === o.legacyQ);
+  if (!o.viewId || o.listError) return false;
+  return o.listPending || (!o.found && !o.confirmedMissing) || (o.legacyQ !== undefined && o.q === o.legacyQ);
+}
+
+/**
+ * True once a fresh fetch of the view list has confirmed that `viewId` is not in it. A cached list without the view
+ * may simply be out of date while still counting as fresh, so it is fetched once more (after any fetch in flight)
+ * before the view is treated as gone.
+ */
+export function useConfirmedMissingView(
+  views: { isSuccess: boolean; isFetching: boolean; refetch: () => Promise<unknown> },
+  viewId: string | undefined,
+  found: boolean,
+): boolean {
+  const [confirmed, setConfirmed] = useState<string | undefined>(undefined);
+  const missing = Boolean(viewId) && views.isSuccess && !found;
+  const { refetch, isFetching } = views;
+  useEffect(() => {
+    if (!missing || !viewId || confirmed === viewId || isFetching) return;
+    void refetch().finally(() => setConfirmed(viewId));
+  }, [missing, viewId, confirmed, isFetching, refetch]);
+  return Boolean(viewId) && confirmed === viewId && !found;
 }
 
 /** Explorer search params that open a saved view (and mark it open). */

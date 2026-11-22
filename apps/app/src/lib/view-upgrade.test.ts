@@ -69,19 +69,26 @@ it('upgrades a record page save whose long name was cut to 80 characters', () =>
 });
 
 it('holds a saved-view link until no legacy query can run', () => {
-  const base = { viewId: 'v1', q: 'target:12 target.type:site', listPending: false, listFetching: false, found: true, legacyQ: undefined };
+  const base = {
+    viewId: 'v1',
+    q: 'target:12 target.type:site',
+    listPending: false,
+    listError: false,
+    found: true,
+    confirmedMissing: false,
+    legacyQ: undefined,
+  };
   // A cold list.
   expect(holdForSavedView({ ...base, listPending: true, found: false })).toBe(true);
-  // A cached list without the linked view, refreshing.
-  expect(holdForSavedView({ ...base, found: false, listFetching: true })).toBe(true);
+  // A cached list without the linked view, fresh or refreshing: hold until a fresh fetch confirms it is gone.
+  expect(holdForSavedView({ ...base, found: false })).toBe(true);
+  expect(holdForSavedView({ ...base, found: false, confirmedMissing: true })).toBe(false);
   // An old record-page view whose stored query is still in the link.
   expect(holdForSavedView({ ...base, legacyQ: 'target:12 target.type:site' })).toBe(true);
   // Replaced by its exact form, or an ordinary view: run.
   expect(holdForSavedView({ ...base, q: formatRecordTerm('site', '12'), legacyQ: 'target:12 target.type:site' })).toBe(false);
   expect(holdForSavedView(base)).toBe(false);
-  // A cached list that has the view, refreshing: the decision is already made.
-  expect(holdForSavedView({ ...base, listFetching: true })).toBe(false);
-  // No view in the link; a view that is gone once the list settles; a list error (not pending, not fetching).
+  // No view in the link; a list error.
   expect(holdForSavedView({ ...base, viewId: undefined, listPending: true })).toBe(false);
-  expect(holdForSavedView({ ...base, found: false })).toBe(false);
+  expect(holdForSavedView({ ...base, found: false, listError: true })).toBe(false);
 });
