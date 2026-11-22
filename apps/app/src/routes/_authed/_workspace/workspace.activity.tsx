@@ -63,7 +63,8 @@ function WorkspaceActivity() {
   const [committer] = useState(() =>
     createSearchCommitter({
       wait: 250,
-      location: () => router.state.location.href,
+      // The history entry (its index): replace-writes keep it, Back/Forward and pushes change it.
+      entry: () => `${router.history.location.state.__TSR_index ?? 0}`,
       commit: (text) => {
         const next = activityQuery(activityChip(qRef.current), text);
         if (next !== qRef.current) write(next, text);

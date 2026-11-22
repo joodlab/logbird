@@ -21,9 +21,9 @@ function chipToken(q: string): QueryToken | undefined {
     if (t.kind === 'paren') depth += t.raw === ')' ? -1 : 1;
     if (depth !== 0 || t.kind !== 'field' || t.negated) continue;
     if (canonicalField(t.field ?? '') !== 'category' || (t.valueKind !== 'plain' && t.valueKind !== 'quoted')) continue;
-    let j = i - 1;
-    while (j >= 0 && tokens[j]?.kind === 'space') j -= 1;
-    if (tokens[j]?.kind === 'operator' && tokens[j]?.raw === 'NOT') continue;
+    const before = tokens[previousNonSpace(tokens, i)];
+    // `NOT category:x` and `- category:x` (a standalone minus, which the server reads as NOT) negate the term.
+    if ((before?.kind === 'operator' && before.raw === 'NOT') || before?.raw === '-') continue;
     if (t.value !== undefined && CATALOGUE.has(t.value)) return t;
   }
   return undefined;
@@ -38,9 +38,28 @@ export function activityChip(q: string): string | undefined {
 export function activityFreeText(q: string): string {
   const t = chipToken(q);
   if (!t) return q.trim();
-  const left = q.slice(0, t.start).replace(/\s+$/, '');
-  const right = q.slice(t.end).replace(/^\s+/, '');
+  const tokens = tokenize(q);
+  const at = tokens.findIndex((x) => x.start === t.start && x.end === t.end);
+  // An explicit `AND` joining the term to its neighbour goes with it (`revoked AND category:auth` → `revoked`).
+  const prev = tokens[previousNonSpace(tokens, at)];
+  const next = tokens[nextNonSpace(tokens, at)];
+  const isAnd = (x: QueryToken | undefined) => x?.kind === 'operator' && x.raw === 'AND';
+  const start = isAnd(prev) ? (prev as QueryToken).start : t.start;
+  const end = !isAnd(prev) && isAnd(next) ? (next as QueryToken).end : t.end;
+  const left = q.slice(0, start).replace(/\s+$/, '');
+  const right = q.slice(end).replace(/^\s+/, '');
   return left && right ? `${left} ${right}` : `${left}${right}`.trim();
+}
+
+function previousNonSpace(tokens: QueryToken[], i: number): number {
+  let j = i - 1;
+  while (j >= 0 && tokens[j]?.kind === 'space') j -= 1;
+  return j;
+}
+function nextNonSpace(tokens: QueryToken[], i: number): number {
+  let j = i + 1;
+  while (j < tokens.length && tokens[j]?.kind === 'space') j += 1;
+  return j;
 }
 
 /** The query for a chip and the search box's text. */

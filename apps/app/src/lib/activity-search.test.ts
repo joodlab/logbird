@@ -9,6 +9,7 @@ describe('workspace activity chips (#226)', () => {
     for (const q of [
       '-category:auth',
       'NOT category:auth',
+      '- category:auth',
       'NOT (category:auth)',
       'category:auth OR category:member',
       '(category:auth revoked)',
@@ -42,21 +43,26 @@ describe('workspace activity chips (#226)', () => {
     expect(toggleActivityChip('category:api_key revoked', 'member')).toBe('category:member revoked');
     // A compound filter is not a chip: selecting one ANDs it with the whole filter.
     expect(toggleActivityChip('category:auth OR category:member', 'auth')).toBe('category:auth (category:auth OR category:member)');
+    // An explicit AND goes with the chip's term.
+    expect(toggleActivityChip('revoked AND category:auth', 'auth')).toBe('revoked');
+    expect(toggleActivityChip('category:auth AND revoked', 'auth')).toBe('revoked');
+    expect(activityFreeText('revoked AND category:auth AND -category:member')).toBe('revoked AND -category:member');
   });
 });
 
 describe('search committer', () => {
   afterEach(() => vi.useRealTimers());
+  // History entries by index: the page's own writes replace the current entry; Back/Forward and pushes move.
   const setup = () => {
     vi.useFakeTimers();
-    let location = '/workspace/activity?q=revoked';
+    let entry = 1;
     const commits: string[] = [];
-    const committer = createSearchCommitter({ wait: 250, location: () => location, commit: (t) => commits.push(t) });
+    const committer = createSearchCommitter({ wait: 250, entry: () => `${entry}`, commit: (t) => commits.push(t) });
     return {
       committer,
       commits,
-      go: (l: string) => {
-        location = l;
+      moveTo: (e: number) => {
+        entry = e;
       },
     };
   };
@@ -72,23 +78,33 @@ describe('search committer', () => {
     expect(commits).toEqual(['ab']);
   });
 
-  it('drops the edit when the location changed meanwhile (Back, a range change)', () => {
-    const { committer, commits, go } = setup();
+  it('drops the edit when the reader moved to another entry (Back to no q, Back to the same q with another range)', () => {
+    const { committer, commits, moveTo } = setup();
     committer.edit('abc');
-    go('/workspace/activity'); // Back to an entry without q
+    moveTo(0); // Back
     vi.advanceTimersByTime(300);
     expect(commits).toEqual([]);
+    moveTo(2); // a pushed entry: same q, another range
     committer.edit('x');
-    go('/workspace/activity?q=revoked&range=7d'); // same q, another range
+    moveTo(1); // Back again before the write
     vi.advanceTimersByTime(300);
     expect(commits).toEqual([]);
   });
 
+  it('keeps typing across its own write: an edit begun before the previous write lands still commits', () => {
+    const { committer, commits } = setup();
+    committer.edit('rev');
+    vi.advanceTimersByTime(250); // the write for "rev" replaces the current entry (same index)
+    committer.edit('revoked'); // typed before the router reflects that write
+    vi.advanceTimersByTime(250);
+    expect(commits).toEqual(['rev', 'revoked']);
+  });
+
   it('commits text equal to a previous edit again (paste after Back)', () => {
-    const { committer, commits, go } = setup();
+    const { committer, commits, moveTo } = setup();
     committer.edit('revoked');
     vi.advanceTimersByTime(300);
-    go('/workspace/activity');
+    moveTo(0);
     committer.edit('revoked');
     vi.advanceTimersByTime(300);
     expect(commits).toEqual(['revoked', 'revoked']);
