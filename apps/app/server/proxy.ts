@@ -65,7 +65,11 @@ export default defineEventHandler(async (event) => {
   // a reverse proxy would. Only X-Forwarded-For: X-Forwarded-Proto/Host from an outer proxy must survive.
   const forwardedFor = event.req.headers.get('x-forwarded-for');
   const peer = event.req.ip;
-  const headers = peer ? { 'x-forwarded-for': forwardedFor ? `${forwardedFor}, ${peer}` : peer } : undefined;
+  // The API stores the client's User-Agent on audit events (as the SDK when X-Logbird-SDK is absent). Forward it
+  // exactly, and an empty one when the client sent none: otherwise the fetch under proxyRequest adds its own
+  // (`node`), and an event would claim a client that never sent it.
+  const headers: Record<string, string> = { 'user-agent': event.req.headers.get('user-agent') ?? '' };
+  if (peer) headers['x-forwarded-for'] = forwardedFor ? `${forwardedFor}, ${peer}` : peer;
   return proxyRequest(event, target.href, {
     headers,
     // The reference is public: never pass the console session or an API key along with it.
