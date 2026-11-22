@@ -1,214 +1,80 @@
 ---
-title: Logbird — open-source audit logs for your product
-description: Send who-did-what events over HTTP or the SDK, search them, and self-host it. MIT-licensed, built on ClickHouse. Logbird Cloud waitlist open.
 path: /
+module: apps/web/src/content/home.ts
 ---
 
-# Home
+# Home: brief
 
-> **Cloud open (`WEB_APP_URL` set).** Primary CTA "Request access"; the line under the hero actions reads "Logbird Cloud
-> is in early access: sign-ups are limited to invited teams for now. Already invited? Sign in." The open-source
-> quickstart pulls the published images of the latest release (see self-hosting.md).
+**The words live in the module.** The page renders `apps/web/src/content/home.ts`. The shared calls to action and the
+closing band render `apps/web/src/content/shared.ts`, and the illustration renders `apps/web/src/content/illustration.ts`.
+This file holds what the module can't: the job of each section, the proof behind every claim, the visuals and the owner
+notes. It doesn't restate page text. To change wording, edit the module and check the claim against the sources below in
+the same pull request. `apps/web/src/content/content-modules.test.ts` fails if prose comes back into the route file.
 
-## hero
+## The page's job
 
-- **id:** `hero`
-- **eyebrow:** Open-source audit logs · MIT
-- **heading (H1):** Retrace every step.
-- **body:** Logbird is the audit log for your product. Send who-did-what events over HTTP or the SDK. Search them,
-  follow any user, customer account or record, and run it on your own servers.
-- **cta (primary):** Join the waitlist → `/contact`
-- **cta (primary) (when Cloud is open):** Request access → `/contact`
-- **cta (secondary):** Self-host it → `/self-hosting` (only once the repository is public; until then "Self-host when
-  the source opens" → `/contact?interest=self-host`, see `README.md` § Self-host CTA rule)
-- **code sample (copy button):**
+Home tells a product team what Logbird is in one screen, and then proves it to two readers in turn: the developer who
+sends the events and the person who answers "what happened?" (support, operations, compliance). Every claim is true of
+the product today. Nothing gated (see `README.md` § Owner-gated copy) appears here.
 
-  ```sh
-  curl http://localhost:4600/v1/events \
-    -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \
-    -H 'Content-Type: application/json' \
-    -d '{"action":"booking.cancelled"}'
-  ```
+## State variants
 
-  Caption under the snippet: "That's a valid event. Only `action` is required."
-  <!-- source: README.md Quickstart; docs/SPEC.md §1.1 -->
-- **small print under the CTAs:** Logbird Cloud is not open yet. <!-- private build: prefixed with "Source on GitHub — coming soon." -->
-- **small print under the CTAs (when Cloud is open):** Logbird Cloud is in early access: sign-ups are limited to invited teams for
-  now. Already invited? [Sign in](<sign-in URL>).
-- **visual:** `marketing/media/staydesk/explorer-light.webp` (dark-mode pair:
-  `marketing/media/staydesk/explorer-dark.webp`).
+The module is a function of `SiteState` (`content/site.ts`). `ByRepo` and `ByCloud` require both variants, so a missing
+one fails `tsc`.
 
-## for-developers
+| State | What changes | Module keys |
+| --- | --- | --- |
+| Repository private | Status line prefixed "Source on GitHub — coming soon."; the self-host CTA leads to the waitlist; the open-source lead drops the images sentence; the third bullet; the quickstart becomes a waitlist panel | `hero.status`, `openSource.lead`, `openSource.bullets`, `openSource.quickstart`, `shared.selfHostCta`, `shared.ctaBand.body` |
+| Cloud open (`WEB_APP_URL`) | Primary CTA asks for access; the status line says early access; a sign-in link appears | `shared.accessCta`, `shared.cloudStatusLine`, `hero.signIn`, `shared.ctaBand.body` |
+| Release published | The quickstart title names the version and pulls its images | `openSource.quickstart.title`, `lib/selfhost.ts` |
 
-- **id:** `developers`
-- **eyebrow:** For developers
-- **heading:** One call per action. No schema to migrate.
-- **body:** Only an `action` string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which
-  customer account, to which records, what changed. Logbird lifts the fields it knows into their own columns. Custom
-  top-level fields and anything under `metadata` are searchable as attributes within the indexing limits, and the full
-  parsed event is available as JSON. Recommended fields are optional: an event is never
-  rejected for missing them.
-  <!-- source: docs/SPEC.md §1.1, §3 normalization rules -->
-- **bullets:**
-  - **TypeScript SDK** with batching, retries and an explicit flush and shutdown.
-  - Middleware for Hono, TanStack Start and Nuxt; a Vue read composable. <!-- source: docs/integrations.md (Vue is useAuditTrail/AuditTimeline, a reader, not middleware) -->
-  - `jobAudit` for queue workers: the job keeps the original actor and joins the request's operation.
-    <!-- source: packages/sdk/README.md §Requests and workers -->
-  - A conformance score on every event: the share of nine recommended checks it passes. The setup page shows which
-    fields your events miss.
-- **code sample:** (tabs "Route" and "Worker")
+## Sections, in order
 
-  ```ts
-  // Route (Hono)
-  app.post('/bookings/:id/cancel', async (c) => {
-    const id = c.req.param('id');
-    // ...cancel the booking
-    const eventId = c.var.audit('booking.cancelled', {
-      targets: [{ type: 'booking', id }],
-      changes: [{ field: 'status', before: 'confirmed', after: 'cancelled' }],
-    });
-    const carrier = await c.var.audit.carrier({ parentEventId: eventId });
-    await refunds.add('refund', { bookingId: id, carrier });
-    return c.json({ ok: true });
-  });
-  ```
+| Section (module key) | Job | Visual |
+| --- | --- | --- |
+| `hero` | What it is, who it's for, how to start; the smallest valid event | `LogStack` illustration and the curl sample |
+| `explorer` | Show the console, not describe it | `marketing/media/staydesk/explorer-light.webp` (dark pair `explorer-dark.webp`) |
+| `developers` | One call per action, no schema; the SDK, middleware and worker story | Route and Worker code tabs |
+| `operators` | The questions support and compliance get, answered in the console | `marketing/media/staydesk/event-sheet-light.webp` |
+| `howItWorks` | Four steps from a key to a searchable history; the architecture | Steps and the architecture figure (matches `README.md` § Architecture) |
+| `envelope` | The fields that make the console useful; only `action` is required | The annotated envelope |
+| `openSource` | MIT, Docker Compose, your infrastructure | Quickstart commands, or the waitlist panel while private |
+| `guarantees` | What Logbird promises and where each promise ends | Two-column table |
+| closing band (`shared.ctaBand`, `closingNote`) | Start with one event; the design-partner line | `LogStack` |
 
-  ```ts
-  // Worker
-  import { jobAudit } from '@logbird/sdk/integration';
+## Proof
 
-  new Worker('refunds', async (job) => {
-    const audit = jobAudit({ client, job, carrier: job.data.carrier });
-    // ...refund the payment
-    audit('payment.refunded', {
-      targets: [{ type: 'booking', id: job.data.bookingId }],
-    });
-    await audit.pending();
-  });
-  ```
+Every claim on the page, with its source in the repository. Update the source and the module together.
 
-  Caption: "The actor is Lina on both events. The worker only carried it out." Full setup on `/developers`.
-- **cta:** Read the developer guide → `/developers`
-- **visual:** code sample
+| Claim (module key) | Source |
+| --- | --- |
+| Only `action` is required; recommended fields never cause a rejection (`hero.sample.caption`, `developers.lead`, `envelope.lead`, `guarantees.items[2]`) | `docs/SPEC.md` §1.1, §3 normalization rules |
+| The curl sample is a valid event (`hero.sample`) | `README.md` Quickstart; `docs/SPEC.md` §1.1 |
+| Custom fields and `metadata` searchable as attributes within the indexing limits (`developers.lead`) | `docs/SPEC.md` §3 |
+| SDK batching, retries, explicit flush and shutdown (`developers.items[0]`) | `packages/sdk/README.md` |
+| Middleware for Hono, TanStack Start and Nuxt; Vue is a reader (`developers.items[1]`) | `docs/integrations.md` (Vue is `useAuditTrail`/`AuditTimeline`, not middleware) |
+| `jobAudit` keeps the actor and joins the operation (`developers.items[2]`, `developers.code`, `developers.codeCaption`) | `packages/sdk/README.md` § Requests and workers |
+| Conformance score: nine recommended checks; the setup page lists missing fields (`developers.items[3]`) | `docs/SPEC.md` §3 (`conformance`); `packages/clickhouse/src/normalize.ts`; the setup page's field list, `ENVELOPE_FIELDS` in `packages/contracts/src/setup.ts` |
+| Before and after values for the first 256 changes per event (`operators.lead`, `operators.screenshot.caption`) | `packages/contracts/src/events.ts` (`changes` holds at most 256 entries) |
+| Search syntax and guarded SQL `WHERE` (`operators.features.search`) | `docs/SPEC.md` §5.1 Query language (and its SQL mode) |
+| Entity pages, operation trees, impersonation (`operators.features`) | `docs/concepts.md` (actors, tenants, executors, records, operations; `impersonator`) |
+| Retention from 7 days to 10 years, permanent deletion (`operators.features.retention`, `guarantees.items[3]`) | `packages/contracts/src/api.ts` `RETENTION_OPTIONS` (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days); `docs/SPEC.md` §1.4, §4 |
+| Ingest key shown once, stored as a hash (`howItWorks.steps[0]`) | `docs/SPEC.md` §5 |
+| Up to 1000 events per request (`howItWorks.steps[1]`) | `docs/SPEC.md` §5 size limits |
+| `202` with `ids` and `rejected` (`howItWorks.steps[2]`, `guarantees.items[0]`) | `docs/SPEC.md` §2 ingestion path |
+| Expired events deleted every hour (`howItWorks.steps[3]`, `howItWorks.architecture`) | `docs/SPEC.md` §4 retention |
+| The envelope example (`envelope.lines`) | `docs/concepts.md` worked example, event 1 (condensed) |
+| One repository, MIT, Compose, Coolify, Caddy (`openSource`) | `LICENSE`; `docs/self-hosting.md` |
+| The quickstart commands (`openSource.quickstart`) | `docs/self-hosting.md` § Five-minute quickstart, via `lib/selfhost.ts` |
+| At-least-once delivery, exact retries stored once, `duplicate_id_conflict` (`guarantees.items[0]`) | `docs/SPEC.md` §2, §3; `docs/concepts.md` |
+| The SDK queue is in memory (`guarantees.items[1]`) | `packages/sdk/README.md` |
+| Per-event validation and `503` retry rules (`guarantees.items[2]`) | `docs/integrations.md` § Outage backpressure (ingest paragraph) |
+| Imports with the original `occurredAt`, up to 3650 days back (`guarantees.items[4]`) | `docs/SPEC.md` §3 |
 
-## for-operators
+## Owner notes
 
-- **id:** `operators`
-- **eyebrow:** For support, operations and compliance
-- **heading:** Answer "what happened in this account?" in one search.
-- **body:** The console is built for the people who get the question: support, operators, and whoever answers the
-  auditor. Search every event, open a customer account or a single record, and see the before and after values you
-  send for the first 256 changes of each event.
-- **bullets:**
-  - **Search.** `actor:usr_42 action:booking.* outcome:failure`, or a guarded SQL `WHERE` expression.
-  - **Entity pages.** Actors, tenants, executors and records get their own pages and timelines.
-  - **Operation trees.** The events that share an operation id, from the request to the jobs it spawned, as one tree.
-  - **Impersonation.** When support acts for a customer, the event records who acted for whom.
-  - **Retention.** Per project, from 7 days to 10 years. Expired events are permanently deleted.
-    <!-- source: packages/contracts/src/api.ts RETENTION_OPTIONS (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days) -->
-- **cta:** Take the product tour → `/product`
-- **visual:** `marketing/media/staydesk/event-sheet-light.webp` (event detail with actor, executor,
-  tenant, targets and changes).
-
-## how-it-works
-
-- **id:** `how-it-works`
-- **eyebrow:** How it works
-- **heading:** From one curl to a searchable history.
-- **steps:**
-  1. **Create a project.** Copy its ingest key. It's shown once and stored only as a hash.
-     <!-- source: docs/SPEC.md §5 -->
-  2. **Send events.** Over HTTP or the SDK: one event, or up to 1000 per request.
-     <!-- source: docs/SPEC.md §5 size limits -->
-  3. **Logbird stores them.** On `202`, `ids` lists the events written to ClickHouse, by this request or an earlier identical one, and `rejected` names the entries that failed.
-     <!-- source: docs/SPEC.md §2 ingestion path -->
-  4. **Search, follow, keep.** Use the console, or read events from your own backend with a read key. Expired events are
-     deleted every hour.
-     <!-- source: docs/SPEC.md §4 retention -->
-- **visual:** diagram: four boxes left to right — "Your product (SDK or HTTP)" → "Logbird API" → "ClickHouse" →
-  "Console and read API", with a "Retention worker" box under ClickHouse and a small "Postgres: workspaces, projects,
-  keys" box under the API. Matches the README architecture diagram (`README.md` §Architecture).
-
-## envelope
-
-- **id:** `envelope`
-- **eyebrow:** The envelope at a glance
-- **heading:** Who caused it, what did the work, what changed.
-- **body:** Only `action` is required. These fields fill the console's pages and make search precise.
-- **code sample:**
-
-  ```json
-  {
-    "action": "booking.cancelled",
-    "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
-    "executor": { "type": "api", "id": "api-server" },
-    "tenant": { "id": "biz_7", "name": "Azure Hotels" },
-    "targets": [{ "type": "booking", "id": "bk_1042", "name": "Booking #1042" }],
-    "changes": [{ "field": "status", "before": "confirmed", "after": "cancelled" }],
-    "context": { "operationId": "op_cancel_bk_1042" }
-  }
-  ```
-
-  <!-- source: docs/concepts.md worked example, event 1 (condensed) -->
-- **annotations (one line each, placed beside the JSON):**
-  - `action`: What happened. The only required field. required
-  - `actor`: Who asked.
-  - `executor`: What did the work, and on which attempt.
-  - `tenant`: Whose account.
-  - `targets`: Which records.
-  - `changes`: Before and after. Never secrets.
-  - `operationId`: Ties a request to the jobs it started.
-- **cta:** Read the envelope guide → `/developers`
-- **visual:** code sample
-
-## open-source
-
-- **id:** `open-source`
-- **eyebrow:** Open source
-- **heading:** MIT-licensed. Runs with Docker Compose.
-- **body:** The whole product is in one repository: the API, the console, the retention worker, the SDK and the
-  integrations. Self-hosting runs on your server, from the published, versioned images once a release exists, so
-  your events stay on your infrastructure.
-  <!-- source: LICENSE; docs/self-hosting.md -->
-- **bullets:**
-  - Bundled Docker Compose, Coolify, or your own Postgres, ClickHouse and Redis.
-  - Automatic HTTPS with Caddy, or any reverse proxy you already run.
-  - Source on GitHub, under the MIT licence. <!-- private build: "Source on GitHub — coming soon." -->
-- **cta:** Self-host it → `/self-hosting` (public repo only; see the CTA rule) · What's in the repository → `/open-source`
-- **while the repository is private:** replace the quickstart code block with "Available when the repository opens.
-  On one VM: clone, generate secrets, configure SMTP, pull the images, then `docker compose up -d --no-build`. We'll
-  publish the commands here the day the source is public." and a "Tell me when it opens" button → `/contact?interest=self-host`.
-- **visual:** a new, reviewed capture (required before publication) (terminal: `docker compose ps` with the
-  stack running). Check the terminal for paths or hostnames before use.
-
-## guarantees
-
-- **id:** `guarantees`
-- **eyebrow:** Guarantees and limits
-- **heading:** What Logbird promises, and where the promise ends.
-- **bullets (two columns: "We guarantee" / "The limit")**
-  - A `202` lists accepted event IDs in `ids` and rejected events in `rejected`. / Delivery is at least once when the client retries unsettled events, as the SDK does. An
-    exact retry with the same valid, non-blank string `id` is stored once while the project retains the event; changed content under that id is rejected
-    with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry. <!-- source: docs/SPEC.md §2, §3; docs/concepts.md -->
-  - The SDK batches and retries for you. / Its queue is in memory: a crash before the server acknowledges can lose
-    pending events. <!-- source: packages/sdk/README.md -->
-  - Only an `action` string is required, and each event must fit the ingest limits. / Each event is checked on its own: rejected events are
-    listed in `rejected` with a reason. On `202`, the rest of the batch is accepted. When a `503` lists the
-    unsettled events, retry only those; otherwise retry the whole batch with the same ids. <!-- source: docs/integrations.md §Outage backpressure (ingest paragraph) -->
-  - Retention deletes expired events for good. / There's no archive and no undo.
-    <!-- source: docs/SPEC.md §1.4; capture 10-retention-preview.png -->
-  - Import history by sending events with their original `occurredAt`, up to 3650 days back. / An older `occurredAt`
-    is stored at receive time with a warning, and project retention still applies to imports. Logbird doesn't rebuild
-    history from your database. <!-- source: docs/SPEC.md §3 -->
-- **cta:** Read how Logbird handles data → `/security`
-- **visual:** none (text block)
-
-## final-cta
-
-- **id:** `final-cta`
-- **heading:** Start with one event.
-- **body:** Self-host Logbird today, or join the waitlist for Logbird Cloud. <!-- private build: "The source opens soon.
-  Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens." -->
-- **cta (primary):** Join the waitlist → `/contact`
-- **cta (secondary):** Self-host it → `/self-hosting`
-- **visual:** none
+- The design-partner line (`closingNote`, from `lib/copy-flags.ts`) never names the partner.
+- The open-source visual (a terminal with `docker compose ps`) needs a new, reviewed capture before it ships. Check the
+  terminal for paths or hostnames first.
+- The landing-page rework (#250 step 2) replaces this page's structure around the two paid jobs: customer-facing audit
+  logs and compliance evidence. Its brief replaces this one.

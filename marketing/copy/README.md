@@ -16,7 +16,7 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 
 | File | Page | Path |
 | --- | --- | --- |
-| [`home.md`](home.md) | Home | `/` |
+| [`home.md`](home.md) | Home (brief; the words are in `apps/web/src/content/home.ts`) | `/` |
 | [`product.md`](product.md) | Product tour | `/product` |
 | [`developers.md`](developers.md) | Developers | `/developers` |
 | [`self-hosting.md`](self-hosting.md) | Self-hosting | `/self-hosting` |
@@ -49,6 +49,18 @@ Then one `##` block per section, in page order:
 - `cta`: label → target.
 - `visual`: an exact path under `marketing/media/`, or "code sample", or "diagram: …".
 
+### Content modules and briefs (#250)
+
+Pages are moving to typed content modules under `apps/web/src/content/`, one per page, plus `shared.ts` for the calls to
+action and the closing band. A module is a function of the site's state (`content/site.ts`: repository public or
+private, Cloud open or closed, the latest release), and both variants of a state are required, so a missing one fails
+`tsc`. Once a page has moved, its file here becomes a **brief**: the section jobs, the proof for every claim with its
+source, the visuals and the owner notes, but not the page text. Change wording in the module, and check the claim
+against the brief's sources in the same pull request. `apps/web/src/content/content-modules.test.ts` fails if prose
+comes back into a moved route file or component.
+
+Moved so far: home (`home.md` is its brief).
+
 ### Interim drift check
 
 **Interim.** The planned fix is typed content modules (#250): the pages render them, so each claim has one source. This
@@ -60,8 +72,8 @@ Cloud closed and once open (`WEB_APP_URL` set). It looks for the claims the copy
 elements rather than loose text. Change a claim in the copy and on the page in the same pull request.
 
 - **Headings.** A `heading` must be a heading on the page. In the other direction, every `h1`/`h2` section heading in
-  the page's `<main>` must be a heading in the copy. The shared closing band is the exception: its words are checked on
-  home.
+  the page's `<main>` must be a heading in the copy. The shared closing band is the exception: its words render from
+  `apps/web/src/content/shared.ts`.
 - **Texts.** A `body`, `eyebrow`, `limit line`, `small print`, note or message must be one element's whole text, or a
   run of up to three adjacent sibling elements (a title and its body). A prefix or an extended sentence fails.
 - **Lists.** `bullets`, `steps`, `items`, `cards` and the like must be one list on the page: the same items, in the same
@@ -88,7 +100,8 @@ elements rather than loose text. Change a claim in the copy and on the page in t
   has a `data` field pointing at the module, its only source.
 - **Inventory.** Every file in this folder is either in the map above or listed in the test with the reason it has no
   page: this guide, the two legal briefs (the legal pages are their own owner-approved wording source;
-  `legal-pages.test.ts` checks selected facts) and `arabic-notes.md`.
+  `legal-pages.test.ts` checks selected facts), `arabic-notes.md`, and the briefs of pages that render a content module
+  (`home.md`).
 
 ## Messaging hierarchy
 

@@ -1,3 +1,4 @@
+import { homeMeta } from '../content/home';
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from './cloud';
 import { buildLog, postPath, posts, releases } from './publications';
@@ -23,8 +24,7 @@ export interface SitePage {
 export const siteMap: SitePage[] = [
   {
     path: '/',
-    title: 'Home',
-    description: 'Open-source audit logs you can self-host.',
+    ...homeMeta,
     section: 'product',
     priority: 1,
     changefreq: 'daily',

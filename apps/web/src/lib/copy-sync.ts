@@ -25,6 +25,7 @@ export const NOT_CHECKED: Record<string, string> = {
   'legal-terms.md':
     'a placeholder brief: the legal pages are their own wording source (owner-approved TSX); legal-pages.test.ts checks selected facts',
   'arabic-notes.md': 'reference strings for a future localization, not a page',
+  'home.md': 'a brief: the page renders apps/web/src/content/home.ts, and content-modules.test.ts guards the route file',
 };
 
 const releaseDate = (iso: string) => {
@@ -125,7 +126,7 @@ export function readPage(html: string): Page {
     if (/^h[12]$/.test(element.tag)) {
       let inMain = false;
       for (let node: PageElement | undefined = element.parent; node; node = node.parent) if (node.tag === 'main') inMain = true;
-      // The closing band (CtaBand, id cta-title) is shared by every page; its words are checked on home (home.md#final-cta).
+      // The closing band (CtaBand, id cta-title) is shared by every page; its words render from content/shared.ts.
       const text = normalize(textOf(element));
       if (inMain && text && element.attrs.id !== 'cta-title') page.sections.push(text);
     }
