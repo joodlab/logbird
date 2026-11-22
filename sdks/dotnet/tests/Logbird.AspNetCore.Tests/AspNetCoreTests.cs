@@ -798,7 +798,7 @@ public class AspNetCoreTests
     }
 
     [Fact]
-    public async Task R2_a_large_backlog_never_holds_the_host_and_is_reported_in_the_background()
+    public async Task R2_host_shutdown_finishes_within_10_seconds_and_all_backlog_events_are_counted_as_dropped()
     {
         const int Count = 100_000;
 
