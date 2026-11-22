@@ -448,8 +448,9 @@ function DevelopersPage() {
                   ClickHouse has the rows.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">At least once.</strong> A retry after a lost response can store an event twice.
-                  Counts may include duplicates.
+                  <strong className="font-medium text-foreground">At least once, stored once.</strong> The SDK gives every event an id before it
+                  queues it, so a retry after a lost response is stored once. Raw HTTP clients should send their own <code>id</code>: without one,
+                  each retry gets a new id.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Bounded under outage.</strong> The queue holds up to 10,000 events by default. When
@@ -461,9 +462,9 @@ function DevelopersPage() {
                   Call <code>shutdown()</code> on exit.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">Partial batches.</strong> Events without an <code>action</code> are rejected one by
-                  one, and the rest are stored. Permanent errors other than <code>429</code> drop the batch and report it through <code>onError</code>{' '}
-                  and <code>onDrop</code>, without rejecting <code>flush()</code>.
+                  <strong className="font-medium text-foreground">Partial batches.</strong> Events without an <code>action</code> are rejected and
+                  listed in the response, and the rest are stored. Permanent errors other than <code>429</code> drop the batch and report it through{' '}
+                  <code>onError</code> and <code>onDrop</code>, without rejecting <code>flush()</code>.
                 </>,
               ]}
             />

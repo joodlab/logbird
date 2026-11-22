@@ -260,17 +260,23 @@ function HomePage() {
         <div className="mt-12">
           <Guarantees
             items={[
-              { promise: 'A 202 means the event is stored in ClickHouse.', limit: 'Delivery is at least once; counts may include duplicates.' },
+              {
+                promise: 'A 202 means the event is stored in ClickHouse.',
+                limit: 'Delivery is at least once. A resent id is stored once; an event sent without an id gets a new one on every retry.',
+              },
               {
                 promise: 'The SDK batches and retries for you.',
                 limit: 'Its queue is in memory: a crash before the server acknowledges can lose pending events.',
               },
               {
                 promise: 'Any shape is accepted; only action is required.',
-                limit: 'Events without an action are rejected one by one; the rest of the batch is stored.',
+                limit: 'Events without an action are rejected and listed in the response; the rest of the batch is stored.',
               },
               { promise: 'Retention deletes expired events for good.', limit: "There's no archive and no undo." },
-              { promise: 'History starts the day you start sending.', limit: 'There is no backfill.' },
+              {
+                promise: 'Import history by sending events with their original occurredAt, up to ten years back.',
+                limit: "Logbird doesn't rebuild history from your database. Events reach it only when you send them.",
+              },
             ]}
           />
         </div>

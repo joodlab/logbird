@@ -252,11 +252,12 @@ path: /developers
   - **Retried.** Rate limits (`429`), server errors and network failures are retried with exponential backoff and
     jitter, up to 5 times. A numeric `Retry-After` is honoured.
   - **Acknowledged after storage.** The server answers `202` only once ClickHouse has the rows.
-  - **At least once.** A retry after a lost response can store an event twice. Counts may include duplicates.
+  - **At least once, stored once.** The SDK gives every event an id before it queues it, so a retry after a lost
+    response is stored once. Raw HTTP clients should send their own `id`: without one, each retry gets a new id.
   - **Bounded under outage.** The queue holds up to 10,000 events by default. When it's full, `dropPolicy: 'oldest'`
     (the default) or `'newest'` decides what goes, and `onDrop` reports each event dropped.
   - **In memory.** A crash before the server acknowledges can lose pending events. Call `shutdown()` on exit.
-  - **Partial batches.** Events without an `action` are rejected one by one, and the rest are stored.
+  - **Partial batches.** Events without an `action` are rejected and listed in the response, and the rest are stored.
     Permanent errors other than `429` drop the batch and report it through `onError` and `onDrop`, without rejecting
     `flush()`.
   <!-- source: packages/sdk/README.md (defaults: 100 rows, 1000 ms, 5 retries; maxQueueSize 10,000); docs/SPEC.md §2; docs/integrations.md -->

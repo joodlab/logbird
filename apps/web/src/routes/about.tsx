@@ -22,7 +22,10 @@ const principles: { title: string; body: string }[] = [
     title: "Capture is your code's job.",
     body: 'We give you the SDK, the integrations and the patterns. Our guarantee starts at the `202`.',
   },
-  { title: 'History starts when capture starts.', body: "There's no backfill." },
+  {
+    title: 'Your code sends the history.',
+    body: "Logbird doesn't rebuild history from your database. Import past events by sending them with their original `occurredAt`.",
+  },
   { title: 'Retention means deletion.', body: 'Expired events are deleted for good.' },
   { title: 'We audit ourselves.', body: "Logbird records its own management actions in your workspace's activity stream." },
 ];

@@ -1,10 +1,13 @@
 /**
  * Prerendered pages are written after Nitro's `compressPublicAssets` step, so the Node preview would serve them
  * uncompressed. Write .br/.gz copies next to every prerendered text file. (Cloudflare compresses on its own.)
+ * Every page is first wrapped in Cloudflare's `email_off` markers (src/lib/email-off.ts), so the CDN can't rewrite
+ * mailto links and code samples.
  */
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
+import { withEmailOff } from '../src/lib/email-off';
 
 const root = resolve(process.argv[2] ?? '.output/public');
 const extensions = ['.html', '.xml', '.txt', '.webmanifest', '.svg'];
@@ -22,6 +25,13 @@ async function* walk(dir: string): AsyncGenerator<string> {
 
 let count = 0;
 for await (const file of walk(root)) {
+  if (file.endsWith('.html')) {
+    const html = await readFile(file, 'utf8');
+    const marked = withEmailOff(html);
+    if (marked !== html) {
+      await writeFile(file, marked);
+    }
+  }
   const body = await readFile(file);
   if (body.byteLength < 1024 || (await stat(`${file}.br`).catch(() => null))) {
     continue;

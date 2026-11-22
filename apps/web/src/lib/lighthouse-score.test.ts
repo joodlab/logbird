@@ -65,9 +65,11 @@ describe('Lighthouse SEO pass mark', () => {
   it('keeps crawlers off console and API paths only when the console shares the origin', () => {
     const shared = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: RELEASED_ENV.WEB_SITE_URL }));
     expect(robotsAllowsCrawling(shared)).toBe(true);
-    for (const path of ['/api/', '/v1/', '/login', '/p/', '/docs']) {
+    for (const path of ['/api/', '/v1/', '/login', '/p/']) {
       expect(shared).toContain(`\nDisallow: ${path}\n`);
     }
+    // The public API reference is documentation, so crawlers may read it.
+    expect(shared).not.toMatch(/Disallow: \/(docs|openapi\.json)/);
     const separate = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: 'https://console.example.test' }));
     expect(separate).not.toContain('Disallow');
   });

@@ -105,7 +105,7 @@ function ProductPage() {
         bullets={[
           'Fields are suggested from what your project actually sends, with how often each one appears.',
           'Errors point at the exact token and say what was expected, for example "attempt is a number".',
-          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes and the first 2 KiB of each value; the full event is stored as received.',
+          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes and the first 2 KiB of each value; every value you send is kept.',
         ]}
         eyebrow="Search"
         id="search"
@@ -218,7 +218,7 @@ function ProductPage() {
         bullets={[
           'Before and after values for every changed field.',
           'The causation breadcrumb, with a link to the whole operation.',
-          'Context ids (request, trace, IP), every custom attribute, and the raw JSON exactly as received.',
+          'Context ids (request, trace, IP), every custom attribute, and the full event as JSON, with the values you sent.',
           'Copy a link, or copy the event as a curl command.',
           'Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent has a page.',
         ]}

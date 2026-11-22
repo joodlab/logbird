@@ -88,7 +88,8 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 | MIT licence | `LICENSE` |
 | Only `action` is required; nothing is rejected for missing recommended fields | `docs/SPEC.md` §1, `README.md` |
 | The server answers `202` only after ClickHouse has the rows (`async_insert=1, wait_for_async_insert=1`) | `docs/SPEC.md` §2 |
-| Delivery is at least once; counts may include duplicates | `README.md` |
+| Delivery is at least once; a resent event id is stored once (the SDK sets ids; an event without an id gets a new one per retry) | `docs/SPEC.md` §3, `docs/concepts.md` (Event ids and retries) |
+| Historical events can be sent with their original `occurredAt`, up to 3650 days back | `docs/SPEC.md` §3 |
 | Retention permanently deletes expired events; lowering it requires typing the project slug and purges immediately | `docs/SPEC.md` §1, §7.1 |
 | Retention options run from 7 days to 10 years (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days); new projects default to 90 days | `packages/contracts/src/api.ts` (`RETENTION_OPTIONS`), `docs/SPEC.md` §6 |
 | One ingest request carries up to 1000 events or 5 MB; one event up to 256 KB | `docs/SPEC.md` §5, `packages/sdk/README.md` |
@@ -201,7 +202,7 @@ Use these words the same way on every page. They match `docs/concepts.md`.
 | audit log, activity history, who did what | "observability platform", "SIEM" (Logbird is neither) |
 | send, search, follow, keep, delete | leverage, unlock, supercharge, empower |
 | "permanently deleted", "no archive, no undo" | "smart data lifecycle", "auto-archiving" |
-| "at least once; counts may include duplicates" | "never lose an event", "exactly once", "100% reliable" |
+| "at least once; a resent id is stored once" | "never lose an event", "exactly once", "100% reliable", "tamper-proof", "immutable storage" |
 | "a `202` means the event is in ClickHouse" | "real-time", "instant", any latency figure |
 | self-host, self-hosted (adjective), on your own servers | on-prem (unless quoting someone) |
 | open source, MIT-licensed | "free forever", "community edition" (there is one edition) |

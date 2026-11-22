@@ -310,7 +310,7 @@ function SecurityPage() {
               'Each project has its own ingest and read rate limits, shared across replicas through Redis.',
               'Failed authentication attempts are limited per client, so repeated bad keys are throttled. Valid keys keep working behind a shared network address.',
               'If Redis fails, sign-in limits fail closed (requests are refused) and ingest and read limits fail open (requests continue).',
-              'Delivery is at least once. A retry can store an event twice, so counts may include duplicates.',
+              'Delivery is at least once. A resent event id is stored once, so retries from the SDK, which sets ids, never double-count. An event sent without an id gets a new one on every retry.',
               <>
                 Don't send secrets. The SDK's <code>redact()</code> helper replaces common secret fields before sending.
               </>,

@@ -19,12 +19,12 @@ export function sitemapXml(config: SiteConfig = siteConfig) {
  * Console and API paths. When the hosted console shares the site's origin (WEB_APP_URL's origin is WEB_SITE_URL's: the
  * console forwards marketing paths to this site, see docs/coolify.md), crawlers stay off everything that isn't the
  * site. Keep in step with the console's routes (apps/app/src/routes) and its proxied API paths.
+ *
+ * The read-only API reference (`/docs`, `/openapi.json`) is public documentation, so it stays crawlable.
  */
 export const CONSOLE_PATHS = [
   '/api/',
   '/v1/',
-  '/docs',
-  '/openapi.json',
   '/login',
   '/accept-invitation/',
   '/join/',
