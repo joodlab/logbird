@@ -68,7 +68,12 @@ export function useSampleData(projectId: string) {
 export function useTestEvent(projectId: string) {
   const invalidate = useInvalidateSetup(projectId);
   return useMutation({
-    mutationFn: () => api.events.testEvent(projectId),
+    mutationFn: async () => {
+      const result = await api.events.testEvent(projectId);
+      // A 202 can still reject the event individually; never report success for zero stored events.
+      if (result.accepted < 1) throw new Error(result.rejected[0]?.reason ?? 'The test event was not stored.');
+      return result;
+    },
     onSuccess: () => {
       invalidate();
       toast.success('Test event accepted', { description: 'It shows up here within a few seconds.' });
