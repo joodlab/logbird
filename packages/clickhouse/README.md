@@ -88,16 +88,21 @@ before claiming exactly-once counts. Search dedupes page keys; no FINAL hot path
 ## Verification
 
 From the repository root, `pnpm test:unit` runs the service-free unit tests (no
-ClickHouse needed). `pnpm --filter @logbird/clickhouse test` loads the root `.env`
-when it exists and also runs the real ClickHouse integration tests against it,
-with UUID-named fixture projects that never collide with real ones. Tests use only
-the database `CLICKHOUSE_DATABASE` selects. The row-policy
-suite probes the policies on the `logbird` database and runs only when
-`CLICKHOUSE_DATABASE=logbird`; the opt-in online-migration test
-(`CLICKHOUSE_ONLINE_MIGRATION_TEST=1`) uses its dedicated `logbird_qa_062` fixture
-database. Variables already set in the environment take precedence over `.env`.
-Integration test files end in `.integration.test.ts`, which `pnpm test:unit`
-excludes.
+ClickHouse needed); integration test files end in `.integration.test.ts`, which it
+excludes. `pnpm --filter @logbird/clickhouse test` loads the root `.env` when it
+exists (variables already set in the environment take precedence) and also runs the
+real ClickHouse integration tests. Run those against a development or test database,
+never production:
+
+- They write fictional fixture projects into the database `CLICKHOUSE_DATABASE`
+  selects. Most use random UUID project ids, some use fixed fixture ids, and not
+  every suite removes its rows afterwards.
+- The row-policy suite probes the policies on the `logbird` database and runs only
+  when `CLICKHOUSE_DATABASE=logbird`; it removes its fixture projects when done.
+- The SQL-guard suite sends queries naming `system`, `default` and `logbird` that
+  ClickHouse is expected to reject.
+- The opt-in online-migration test (`CLICKHOUSE_ONLINE_MIGRATION_TEST=1`) uses its
+  dedicated `logbird_qa_062` fixture database.
 
 ## Restricted SQL query account
 
