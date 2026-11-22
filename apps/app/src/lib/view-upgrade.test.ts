@@ -1,7 +1,7 @@
 import { formatRecordTerm } from '@logbird/contracts';
 import { expect, it } from 'vitest';
 import { entityViewName } from '@/components/views/save-entity-view-button';
-import { upgradeRecordView, viewSearch } from './views';
+import { holdForSavedView, upgradeRecordView, viewSearch } from './views';
 
 // What a record page saved before exact record matching: generated name, no columns, a Record label for the id.
 const state = {
@@ -66,4 +66,22 @@ it('upgrades a record page save whose long name was cut to 80 characters', () =>
   expect(
     upgradeRecordView({ name: 'L'.repeat(40), state: { ...state, labels: [{ field: 'target', value: '12', label: 'L'.repeat(200) }] } }).upgraded,
   ).toBe(false);
+});
+
+it('holds a saved-view link until no legacy query can run', () => {
+  const base = { viewId: 'v1', q: 'target:12 target.type:site', listPending: false, listFetching: false, found: true, legacyQ: undefined };
+  // A cold list.
+  expect(holdForSavedView({ ...base, listPending: true, found: false })).toBe(true);
+  // A cached list without the linked view, refreshing.
+  expect(holdForSavedView({ ...base, found: false, listFetching: true })).toBe(true);
+  // An old record-page view whose stored query is still in the link.
+  expect(holdForSavedView({ ...base, legacyQ: 'target:12 target.type:site' })).toBe(true);
+  // Replaced by its exact form, or an ordinary view: run.
+  expect(holdForSavedView({ ...base, q: formatRecordTerm('site', '12'), legacyQ: 'target:12 target.type:site' })).toBe(false);
+  expect(holdForSavedView(base)).toBe(false);
+  // A cached list that has the view, refreshing: the decision is already made.
+  expect(holdForSavedView({ ...base, listFetching: true })).toBe(false);
+  // No view in the link; a view that is gone once the list settles; a list error (not pending, not fetching).
+  expect(holdForSavedView({ ...base, viewId: undefined, listPending: true })).toBe(false);
+  expect(holdForSavedView({ ...base, found: false })).toBe(false);
 });

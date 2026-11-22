@@ -69,6 +69,23 @@ export function upgradeRecordView(view: Pick<SavedView, 'name' | 'state'>): { st
   };
 }
 
+/**
+ * Whether the explorer must wait before running anything for a link that opens a saved view: while the view list is
+ * loading, while a cached list without the linked view refreshes, and while an old record-page view's stored query has
+ * not yet been replaced by its exact form. A list error, or a view that is gone once the list settles, does not hold.
+ */
+export function holdForSavedView(o: {
+  viewId: string | undefined;
+  q: string;
+  listPending: boolean;
+  listFetching: boolean;
+  found: boolean;
+  legacyQ: string | undefined;
+}): boolean {
+  if (!o.viewId) return false;
+  return o.listPending || (!o.found && o.listFetching) || (o.legacyQ !== undefined && o.q === o.legacyQ);
+}
+
 /** Explorer search params that open a saved view (and mark it open). */
 export function viewSearch(view: Pick<SavedView, 'id' | 'state'> & { name?: string }) {
   // An old record-page view opens in its exact form; the explorer banner says so and offers to save it. (Links built

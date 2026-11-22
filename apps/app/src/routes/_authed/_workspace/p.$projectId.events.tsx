@@ -15,7 +15,7 @@ import { errorMessage } from '@/lib/api/errors';
 import { eventsInfiniteQuery, histogramQuery, keys, viewsQuery } from '@/lib/api/queries';
 import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
-import { upgradeRecordView, useCopyViewLink } from '@/lib/views';
+import { holdForSavedView, upgradeRecordView, useCopyViewLink } from '@/lib/views';
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -62,8 +62,17 @@ function ExplorerPage() {
       navigate({ replace: true, search: (prev) => ({ ...prev, q: upgradedQ || undefined }) });
   }, [legacyQ, upgradedQ, search.q, navigate]);
   // Until the view is known (and an old one replaced by its exact form), no search runs: the stored query of an old
-  // record-page view never fetches or renders, not even for a moment. A views error opens the link as it is.
-  const holdForView = Boolean(search.view) && (views.isPending || (legacyQ !== undefined && (search.q ?? '') === legacyQ));
+  // record-page view never fetches or renders, not even for a moment. That includes a cached view list that does not
+  // have the linked view yet while it refreshes. A views error, or a view that is gone once the list settles, opens
+  // the link as it is.
+  const holdForView = holdForSavedView({
+    viewId: search.view,
+    q: search.q ?? '',
+    listPending: views.isPending,
+    listFetching: views.isFetching,
+    found: Boolean(storedView),
+    legacyQ,
+  });
   const savedView = storedView && upgrade ? { ...storedView, state: upgrade.state } : undefined;
   // The banner (and its Copy link) speaks for the view only while what is on screen is still that view: same query,
   // language and range. Narrowing it by picker, zoom or Back hides it.
