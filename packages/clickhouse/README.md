@@ -87,9 +87,11 @@ before claiming exactly-once counts. Search dedupes page keys; no FINAL hot path
 
 ## Verification
 
-`pnpm test` runs units. `node --env-file=.env node_modules/vitest/vitest.mjs run`
-also runs the real ClickHouse contract test, with UUID-isolated test projects
-cleaned up in finally. No other databases are touched.
+From the repository root, `pnpm test:unit` runs the service-free unit tests (no
+ClickHouse needed). `pnpm --filter @logbird/clickhouse test` loads the root `.env`
+when it exists and also runs the real ClickHouse integration tests against it,
+with UUID-isolated test projects cleaned up in finally. No other databases are
+touched. Variables already set in the environment take precedence over `.env`.
 
 ## Restricted SQL query account
 
