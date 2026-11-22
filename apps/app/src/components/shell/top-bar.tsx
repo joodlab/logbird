@@ -12,7 +12,7 @@ import { projectQuery } from '@/lib/api/queries';
 import { useCrumb } from '@/lib/crumbs';
 import { zoneOffsetMs } from '@/lib/format';
 import { modKeyLabel, useIsMac } from '@/lib/platform';
-import { absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange } from '@/lib/range';
+import { ALL_RANGE, absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange } from '@/lib/range';
 import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
@@ -24,7 +24,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const params = useParams({ strict: false }) as { projectId?: string };
   const project = useQuery({ ...projectQuery(params.projectId ?? ''), enabled: Boolean(params.projectId) });
   const dynamicCrumb = useCrumb();
-  const { range, setRange } = useRange();
+  const { range, setRange, wholeHistory } = useRange();
   const resolved = useMemo(() => {
     const r = resolveRange(range);
     return { from: new Date(r.fromMs), to: new Date(r.toMs) };
@@ -95,12 +95,14 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         {showRange ? (
           <TimeRangePicker
             className="w-auto max-w-[min(60vw,15rem)]"
-            label={typeof window !== 'undefined' && window.innerWidth < 640 ? rangeShortLabel(range) : rangeLabel(range)}
+            // An entity page with no range chosen shows its whole history: the picker says so instead of naming the default
+            // window it does not use; picking a range narrows the page as before.
+            label={wholeHistory ? 'All history' : typeof window !== 'undefined' && window.innerWidth < 640 ? rangeShortLabel(range) : rangeLabel(range)}
             onChange={setRange}
             presets={RANGE_PRESETS}
             resolved={resolved}
             toAbsolute={(from, to) => absoluteRange(from.getTime(), to.getTime())}
-            value={range}
+            value={wholeHistory ? ALL_RANGE : range}
             zone={pickerZone}
           />
         ) : null}
