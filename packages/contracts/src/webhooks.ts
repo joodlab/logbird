@@ -85,16 +85,25 @@ export const webhookLookupBusySchema = z.object({
 });
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>;
 
-export const webhookDeliveryStatusSchema = z.enum(['pending', 'succeeded', 'failed']);
+export const webhookDeliveryStatusSchema = z.enum(['pending', 'succeeded', 'failed', 'skipped']);
 export const webhookAttemptSchema = z.object({
   number: z.number().int().positive(),
-  status: z.enum(['sending', 'succeeded', 'failed', 'interrupted']),
+  status: z.enum(['sending', 'succeeded', 'failed', 'interrupted', 'skipped']),
   startedAt: z.iso.datetime(),
   latencyMs: z.number().int().nonnegative().nullable(),
   responseCode: z.number().int().nullable(),
   responseBody: z.string().nullable(),
   error: z
-    .enum(['destination_rejected', 'timeout', 'network_error', 'event_unavailable', 'invalid_event_id', 'lookup_failed', 'signing_failed'])
+    .enum([
+      'destination_rejected',
+      'timeout',
+      'network_error',
+      'event_unavailable',
+      'invalid_event_id',
+      'lookup_failed',
+      'signing_failed',
+      'scope_mismatch',
+    ])
     .nullable(),
 });
 export const webhookDeliverySchema = z.object({

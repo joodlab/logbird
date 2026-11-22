@@ -46,14 +46,20 @@ export async function webhookEvent(
   filterClock: Date,
 ) {
   const match = scopePredicate(endpoint, scope, +filterClock);
+  const identity = `project_id = {project:String} AND event_id = {id:String} AND received_at = {from:DateTime64(3,'UTC')}`;
+  const params = { ...match.params, id: eventId, from: receivedAt.toISOString() };
   const [row] = await read<EventRow>(
     ch,
     `SELECT * FROM events WHERE ${match.sql} AND event_id = {id:String} AND received_at = {from:DateTime64(3,'UTC')}
       ORDER BY timestamp LIMIT 1 ${COMPLETE_READ}`,
-    { ...match.params, id: eventId, from: receivedAt.toISOString() },
+    params,
   );
   // The public projection keeps stored attribute text exact, including integers beyond JavaScript's safe range.
-  return row ? toEvent(row) : null;
+  if (row) return toEvent(row);
+  if (!scope && !endpoint.filterQuery) return null;
+  // Distinguish a present occurrence that is out of scope without loading its payload.
+  const [present] = await read<{ present: number }>(ch, `SELECT 1 AS present FROM events WHERE ${identity} LIMIT 1 ${COMPLETE_READ}`, params);
+  return present ? 'scope_mismatch' : null;
 }
 
 async function captureWatermark(projectId: string) {
@@ -103,6 +109,7 @@ export async function discoverWebhookDeliveries(
     cursorReceivedAt: endpoint.cursorReceivedAt,
     cursorEventId: endpoint.cursorEventId,
     cursorReviewRequired: false,
+    cursorVerifiedFloor: endpoint.cursorVerifiedFloor,
     lastScannedAt: endpoint.lastScannedAt,
     scopeTenantId: endpoint.scopeTenantId,
     scopeTargetType: endpoint.scopeTargetType,

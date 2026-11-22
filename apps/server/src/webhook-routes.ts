@@ -218,6 +218,7 @@ export const webhookRoutes = new Hono<AppEnv>()
         compileMaskedQuery(input.filterQuery ?? before.filterQuery, scope?.mask);
       }
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
+      const scopeCorrected = input.scope !== undefined && (before.scopeReviewRequired || storedWebhookScope(before) === undefined);
       const after = await tx.webhookEndpoint.update({
         where: { id: before.id },
         include: activeSecretCount(),
@@ -227,14 +228,26 @@ export const webhookRoutes = new Hono<AppEnv>()
           filterQuery: input.filterQuery,
           enabled: input.enabled,
           ...(input.scope !== undefined ? scopeColumns(input.scope) : {}),
+          ...(scopeCorrected && { scopeReviewRequired: false }),
           ...(enabledChanged ? { disabledReason: input.enabled ? null : 'manual', disabledAt: input.enabled ? null : new Date() } : {}),
           ...((input.enabled && enabledChanged) || (url !== undefined && url !== before.url) ? { consecutiveFailures: 0, failingSince: null } : {}),
         },
       });
+      if (scopeCorrected) {
+        // Preserve attempt history and give previously attempted pending rows a full window after the hold.
+        await tx.webhookDelivery.updateMany({
+          where: { endpointId: before.id, status: 'pending', OR: [{ retryUntil: { not: null } }, { leaseUntil: { not: null } }] },
+          data: { nextAttemptAt: new Date(), retryUntil: null, windowAttempts: 0, leaseUntil: null },
+        });
+        await tx.webhookAttempt.updateMany({
+          where: { status: 'sending', delivery: { endpointId: before.id, status: 'pending' } },
+          data: { status: 'interrupted' },
+        });
+      }
       const old = serialize(before),
         current = serialize(after);
       const fields = (['url', 'description', 'filterQuery', 'scope', 'enabled'] as const).filter(
-        (field) => JSON.stringify(old[field]) !== JSON.stringify(current[field]),
+        (field) => (field === 'scope' && scopeCorrected) || JSON.stringify(old[field]) !== JSON.stringify(current[field]),
       );
       if (fields.length) await record(c, tx, 'webhook.updated', after, fields);
       if (enabledChanged) await record(c, tx, input.enabled ? 'webhook.enabled' : 'webhook.disabled', after, ['enabled'], 'manual');

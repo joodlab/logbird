@@ -698,21 +698,24 @@ it('rejects invalid filters, scopes and URLs on create and PATCH without writing
 it('blocks a seeded legacy scope that would match a truncated tenant and resumes after correction', async () => {
   const legacyTenant = 'q'.repeat(256);
   const at = new Date(Date.now() - 60_000);
-  const { endpoint } = await create();
+  const scanClock = () => ({ now: new Date(), rollout: new Date(+at - 1) });
+  const { endpoint, secret } = await create();
   const path = `${base()}/${endpoint.id}`;
-  const hook = await prisma.webhookEndpoint.update({
-    where: { id: endpoint.id },
-    data: { createdAt: at, cursorReceivedAt: at, scopeTenantId: legacyTenant },
-  });
-  const event = normalizeEvent(
+  const collision = normalizeEvent(
     { id: 'qa-legacy-collision', action: 'qa.webhook', tenant: { id: `${legacyTenant}-other` } },
     { projectId, receivedAt: at },
   );
-  if (!event.ok) throw new Error(event.reason);
-  expect(event.row.tenant_id).toBe(legacyTenant);
+  const target = { type: 'website', id: 'qa-site' };
+  const matching = normalizeEvent({ id: 'qa-held-match', action: 'qa.webhook', targets: [target] }, { projectId, receivedAt: at });
+  if (!collision.ok || !matching.ok) throw new Error('Invalid legacy scope fixtures');
+  expect(collision.row.tenant_id).toBe(legacyTenant);
   try {
-    await insertEvents(clickhouse, [event.row]);
-    await discoverWebhookDeliveries(clickhouse, hook);
+    await insertEvents(clickhouse, [collision.row, matching.row]);
+    const hook = await prisma.webhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: { createdAt: at, cursorReceivedAt: at, scopeTenantId: legacyTenant },
+    });
+    await discoverWebhookDeliveries(clickhouse, hook, scanClock());
     expect(await prisma.webhookDelivery.count({ where: { endpointId: hook.id } })).toBe(0);
     expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).toMatchObject({ cursorReceivedAt: at, cursorEventId: null });
     const warning = { scope: { tenantId: legacyTenant }, scopeWarning: 'webhook_invalid_scope' };
@@ -723,18 +726,62 @@ it('blocks a seeded legacy scope that would match a truncated tenant and resumes
     expect(await test.json()).toMatchObject({ error: { code: 'webhook_invalid_scope' } });
 
     await withLocalReceiver(hook.id, async (received) => {
-      // A delivery claimed before the upgrade must recheck the stored scope too.
-      await prisma.webhookDelivery.create({
-        data: { endpointId: hook.id, eventId: event.row.event_id, receivedAt: at, expiresAt: new Date(Date.now() + 60_000) },
+      // Legacy pending work includes both unattempted rows and earlier retries whose deadlines have passed.
+      const queued = { endpointId: hook.id, receivedAt: at, nextAttemptAt: at, expiresAt: new Date(Date.now() + 60_000) };
+      const outOfScope = await prisma.webhookDelivery.create({ data: { ...queued, eventId: collision.row.event_id } });
+      const eligible = await prisma.webhookDelivery.create({
+        data: {
+          ...queued,
+          eventId: matching.row.event_id,
+          retryUntil: at,
+          attemptNumber: 1,
+          windowAttempts: 1,
+          attempts: { create: { status: 'failed', error: 'lookup_failed', number: 1, startedAt: at } },
+        },
       });
+      for (let tick = 0; tick < 2; tick++) await send();
+      expect(received).toHaveLength(0);
+      const getEndpoint = () => prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } });
+      expect(await getEndpoint()).toMatchObject({ scopeReviewRequired: true, consecutiveFailures: 0, failingSince: null });
+      for (const row of [eligible, outOfScope]) expect(await prisma.webhookDelivery.findUnique({ where: { id: row.id } })).toEqual(row);
+      expect(await prisma.webhookAttempt.count({ where: { delivery: { endpointId: hook.id } } })).toBe(1);
+
+      const fixed = await request(path, 'PATCH', { scope: { target } });
+      expect(fixed.status).toBe(200);
+      expect(await fixed.json()).not.toHaveProperty('scopeWarning');
+      const corrected = await getEndpoint();
+      expect(corrected.scopeReviewRequired).toBe(false);
+      await discoverWebhookDeliveries(clickhouse, corrected, scanClock());
+      expect(+(await getEndpoint()).cursorReceivedAt).toBeGreaterThan(+at);
+      // The matching occurrence is already queued. Rediscovery must not create a second delivery.
+      expect(await prisma.webhookDelivery.count({ where: { endpointId: hook.id } })).toBe(2);
       await send();
       expect(received).toHaveLength(0);
+      expect(await getEndpoint()).toMatchObject({ enabled: true, consecutiveFailures: 0, failingSince: null });
+      await send();
+      await send();
+      expect(received).toHaveLength(1);
+      const [wire] = received;
+      if (!wire) throw new Error('Missing signed delivery after scope correction');
+      expect(await verifyWebhook({ ...wire, secret })).toMatchObject({ id: matching.row.event_id });
+      expect(await (await request(`${path}/deliveries?status=skipped`)).json()).toMatchObject({
+        data: [{ id: outOfScope.id, status: 'skipped', attempts: [{ status: 'skipped', error: 'scope_mismatch' }] }],
+      });
+      expect(await (await request(`${path}/deliveries?status=succeeded`)).json()).toMatchObject({
+        data: [
+          {
+            id: eligible.id,
+            attemptCount: 2,
+            attempts: [
+              { number: 1, error: 'lookup_failed' },
+              { number: 2, status: 'succeeded' },
+            ],
+          },
+        ],
+      });
+      expect(await getEndpoint()).toMatchObject({ enabled: true, consecutiveFailures: 0, failingSince: null });
+      expect(await prisma.webhookDisableNotice.count({ where: { endpointId: hook.id } })).toBe(0);
     });
-    const fixed = await request(path, 'PATCH', { scope: { target: { type: 'website', id: 'qa-site' } } });
-    expect(fixed.status).toBe(200);
-    expect(await fixed.json()).not.toHaveProperty('scopeWarning');
-    await discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } }));
-    expect(+(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).cursorReceivedAt).toBeGreaterThan(+at);
   } finally {
     await withProjectLock(projectId, () => purgeProjectEvents(projectId));
   }
@@ -830,6 +877,49 @@ it('preserves future and implausibly old rollout cursors, records a sticky warni
     await discoverWebhookDeliveries(clickhouse, reconciled);
     expect(await (await request(path)).json()).not.toHaveProperty('cursorWarning');
     expect(await prisma.webhookDelivery.count({ where: { endpointId: hook.id } })).toBe(0);
+  }
+});
+
+it('discovers a retained occurrence between the verified checkpoint and a rebuilt ledger timestamp', async () => {
+  const clock = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL TIME ZONE 'Pacific/Auckland'`;
+    await tx.$executeRaw`CREATE TEMP TABLE "_prisma_migrations" (
+      migration_name text, started_at timestamptz, finished_at timestamptz, rolled_back_at timestamptz
+    ) ON COMMIT DROP`;
+    await tx.$executeRaw`INSERT INTO "_prisma_migrations" VALUES (
+      '20261122140000_webhook_deliveries', CURRENT_TIMESTAMP - interval '1 minute', CURRENT_TIMESTAMP, NULL
+    )`;
+    return webhookCursorClock(tx);
+  });
+  const checkpoint = new Date(+clock.rollout - 60_000);
+  const floor = new Date(+checkpoint - 60_000);
+  const hook = await prisma.webhookEndpoint.create({
+    data: {
+      projectId,
+      url: receiver,
+      createdAt: new Date(+floor - 60_000),
+      cursorReceivedAt: checkpoint,
+      lastScannedAt: checkpoint,
+    },
+  });
+  const event = normalizeEvent({ id: 'qa-rebuilt-ledger', action: 'qa.webhook' }, { projectId, receivedAt: checkpoint });
+  if (!event.ok) throw new Error(event.reason);
+  try {
+    await insertEvents(clickhouse, [event.row]);
+    await discoverWebhookDeliveries(clickhouse, hook, clock);
+    expect(await prisma.webhookEndpoint.findUnique({ where: { id: hook.id } })).toMatchObject({ cursorReviewRequired: true });
+    expect(await prisma.webhookDelivery.count({ where: { endpointId: hook.id } })).toBe(0);
+    const reconciled = await prisma.webhookEndpoint.update({
+      where: { id: hook.id },
+      data: { cursorVerifiedFloor: floor, cursorReviewRequired: false },
+    });
+    await discoverWebhookDeliveries(clickhouse, reconciled, clock);
+    expect(await prisma.webhookEndpoint.findUnique({ where: { id: hook.id } })).toMatchObject({ cursorReviewRequired: false });
+    expect(await prisma.webhookDelivery.findMany({ where: { endpointId: hook.id } })).toMatchObject([
+      { eventId: 'qa-rebuilt-ledger', receivedAt: checkpoint, status: 'pending' },
+    ]);
+  } finally {
+    await withProjectLock(projectId, () => purgeProjectEvents(projectId));
   }
 });
 

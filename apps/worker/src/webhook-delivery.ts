@@ -1,5 +1,5 @@
 import { type ClickHouseClient, maskEvent, normalizeEvent, toEvent } from '@logbird/clickhouse';
-import { storedWebhookScope } from '@logbird/contracts';
+import { storedWebhookScope, type WebhookScope } from '@logbird/contracts';
 import { hasAdminRole, Prisma, prisma, storeAuditEvent, type WebhookDelivery, type WebhookEndpoint, workspaceAdminRoles } from '@logbird/database';
 import { activeWebhookSecrets, decryptWebhookSecret, WEBHOOK_LOG_RETENTION_MS } from '@logbird/database/webhooks';
 import { MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
@@ -10,6 +10,8 @@ import { type AttemptResult, legacyWebhookHeaderId, postWebhook, type WebhookTra
 const LEASE_MS = 120_000;
 const MAX_ENDPOINT_ATTEMPTS_PER_SECOND = 50;
 type Claim = { delivery: WebhookDelivery; expired: boolean };
+type ScopeColumns = Parameters<typeof storedWebhookScope>[0];
+type DeliveryResult = Omit<AttemptResult, 'error'> & { error?: AttemptResult['error'] | 'scope_mismatch' };
 type DeliveryOptions = {
   secretKey: Buffer;
   maskKey?: Buffer;
@@ -19,8 +21,16 @@ type DeliveryOptions = {
   transport?: WebhookTransportOptions;
 };
 
+const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }: ScopeColumns) => ({
+  scopeTenantId,
+  scopeTargetType,
+  scopeTargetId,
+  scopeMask: { equals: scopeMask },
+});
+
 export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint'>, projectId?: string, now = new Date()) {
-  return prisma.$transaction(async (tx) => {
+  const held = new Map<string, { scope: ScopeColumns; updatedAt: Date }>();
+  const claims = await prisma.$transaction(async (tx) => {
     // The delivery queue's global concurrency is one. Limit each endpoint independently and exclude live leases
     // from its allowance, even after a worker restarts while some requests are still in flight.
     const liveLeases = await tx.webhookDelivery.count({
@@ -28,8 +38,11 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
     });
     const capacity = options.concurrency - liveLeases;
     if (capacity <= 0) return [];
-    const due = await tx.$queryRaw<WebhookDelivery[]>(Prisma.sql`
-      SELECT d.* FROM "WebhookEndpoint" e
+    const due = await tx.$queryRaw<(WebhookDelivery & { scope: ScopeColumns; scopeUpdatedAt: Date })[]>(Prisma.sql`
+      SELECT d.*, e."updatedAt" AS "scopeUpdatedAt", jsonb_build_object(
+        'scopeTenantId', e."scopeTenantId", 'scopeTargetType', e."scopeTargetType",
+        'scopeTargetId', e."scopeTargetId", 'scopeMask', e."scopeMask"
+      ) AS scope FROM "WebhookEndpoint" e
       CROSS JOIN LATERAL (
         SELECT id FROM "WebhookDelivery"
         WHERE "endpointId" = e.id AND status = 'pending'
@@ -47,10 +60,15 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
         ))
       ) candidate
       JOIN "WebhookDelivery" d ON d.id = candidate.id
-      WHERE e.enabled ${projectId ? Prisma.sql`AND e."projectId" = ${projectId}` : Prisma.empty}
+      WHERE e.enabled AND NOT e."scopeReviewRequired"
+        ${projectId ? Prisma.sql`AND e."projectId" = ${projectId}` : Prisma.empty}
       ORDER BY d."nextAttemptAt", d.id LIMIT ${capacity} FOR UPDATE OF d SKIP LOCKED`);
     const claims: Claim[] = [];
     for (const row of due) {
+      if (storedWebhookScope(row.scope) === undefined) {
+        held.set(row.endpointId, { scope: row.scope, updatedAt: row.scopeUpdatedAt });
+        continue;
+      }
       if (row.leaseUntil)
         await tx.webhookAttempt.updateMany({
           where: { deliveryId: row.id, number: row.attemptNumber, status: 'sending' },
@@ -74,29 +92,50 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
     }
     return claims;
   });
+  // Release delivery locks before marking endpoints. Endpoint edits lock the endpoint before its deliveries.
+  await Promise.all(
+    [...held].map(async ([id, { scope, updatedAt }]) => {
+      try {
+        await prisma.webhookEndpoint.updateMany({
+          where: { id, updatedAt, ...scopeWhere(scope) },
+          data: { scopeReviewRequired: true, updatedAt },
+        });
+      } catch {
+        console.error(JSON.stringify({ event: 'webhook.scope_hold_failed', endpointId: id }));
+      }
+    }),
+  );
+  return claims;
 }
 
-function isSuccess(result?: AttemptResult) {
+function isSuccess(result?: DeliveryResult) {
   return result && !result.error && result.responseCode !== undefined && result.responseCode >= 200 && result.responseCode < 300;
 }
 
 async function settle(
   delivery: WebhookDelivery,
-  configAt: Date | undefined,
-  result: AttemptResult | undefined,
+  snapshot: WebhookEndpoint | null | undefined,
+  result: DeliveryResult | undefined,
   latencyMs: number,
   failureLimit: number,
   now = new Date(),
 ) {
+  const skipped = result?.error === 'scope_mismatch';
   const success = isSuccess(result);
   const gone = result?.responseCode === 410;
-  const localFailure = result?.error === 'event_unavailable';
+  const localFailure = result?.error === 'event_unavailable' || skipped;
   const retryUntil = delivery.retryUntil ?? now;
   const finished = !result || success || gone || localFailure || now >= retryUntil;
-  const status = success ? 'succeeded' : finished ? 'failed' : 'pending';
+  const status = skipped ? 'skipped' : success ? 'succeeded' : finished ? 'failed' : 'pending';
   // Keep one lock order for endpoint mutations and settlement. The lease's sequence fences stale results.
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${delivery.endpointId} FOR UPDATE`;
+    if (skipped && snapshot) {
+      const current = await tx.webhookEndpoint.count({
+        where: { id: snapshot.id, enabled: true, updatedAt: snapshot.updatedAt, filterQuery: snapshot.filterQuery, ...scopeWhere(snapshot) },
+      });
+      if (!current) return interruptClaim(tx, delivery);
+    }
     const updated = await tx.webhookDelivery.updateMany({
       where: { id: delivery.id, status: 'pending', attemptNumber: delivery.attemptNumber, leaseUntil: delivery.leaseUntil },
       data: {
@@ -110,14 +149,14 @@ async function settle(
     if (result)
       await tx.webhookAttempt.update({
         where: { deliveryId_number: { deliveryId: delivery.id, number: delivery.attemptNumber } },
-        data: { status: success ? 'succeeded' : 'failed', latencyMs, ...result },
+        data: { status: skipped ? 'skipped' : success ? 'succeeded' : 'failed', latencyMs, ...result },
       });
     if (localFailure || result?.error === 'signing_failed' || result?.error === 'lookup_failed') return;
     const endpoint = await tx.webhookEndpoint.findUniqueOrThrow({
       where: { id: delivery.endpointId },
       include: { project: { select: { id: true, organizationId: true, name: true } } },
     });
-    if (!endpoint.enabled || (configAt && +endpoint.updatedAt !== +configAt)) return;
+    if (!endpoint.enabled || (snapshot && +endpoint.updatedAt !== +snapshot.updatedAt)) return;
     // At the deadline, count an endpoint failure only when this retry window actually saw a receiver failure
     // under the current configuration. Expiring an internal lookup failure must not disable an endpoint.
     if (!result) {
@@ -184,28 +223,38 @@ function testEvent(delivery: WebhookDelivery, projectId: string) {
   return toEvent(normalized.row);
 }
 
-async function interruptClaim(delivery: WebhookDelivery) {
-  await prisma.$transaction(async (tx) => {
-    const updated = await tx.webhookDelivery.updateMany({
-      where: { id: delivery.id, attemptNumber: delivery.attemptNumber, status: 'pending', leaseUntil: delivery.leaseUntil },
-      data: { leaseUntil: null, windowAttempts: { decrement: 1 }, ...(delivery.windowAttempts === 1 ? { retryUntil: null } : {}) },
-    });
-    if (updated.count)
-      await tx.webhookAttempt.updateMany({
-        where: { deliveryId: delivery.id, number: delivery.attemptNumber, status: 'sending' },
-        data: { status: 'interrupted' },
-      });
+async function interruptClaim(
+  tx: Prisma.TransactionClient,
+  delivery: WebhookDelivery,
+  reason: 'interrupted' | 'expired' | 'invalid_scope' = 'interrupted',
+) {
+  const updated = await tx.webhookDelivery.updateMany({
+    where: { id: delivery.id, attemptNumber: delivery.attemptNumber, status: 'pending', leaseUntil: delivery.leaseUntil },
+    data: {
+      leaseUntil: null,
+      ...(reason !== 'expired' && { windowAttempts: { decrement: 1 }, ...(delivery.windowAttempts === 1 ? { retryUntil: null } : {}) }),
+      ...(reason === 'invalid_scope' && { attemptNumber: { decrement: 1 } }),
+    },
   });
+  if (!updated.count || reason === 'expired') return;
+  const where = { deliveryId: delivery.id, number: delivery.attemptNumber, status: 'sending' };
+  if (reason === 'invalid_scope') await tx.webhookAttempt.deleteMany({ where });
+  else await tx.webhookAttempt.updateMany({ where, data: { status: 'interrupted' } });
 }
 
-async function attemptDelivery(ch: ClickHouseClient, delivery: WebhookDelivery, endpoint: WebhookEndpoint, options: DeliveryOptions) {
-  const scope = storedWebhookScope(endpoint);
-  if (scope === undefined) return { error: 'event_unavailable' } as const;
+async function attemptDelivery(
+  ch: ClickHouseClient,
+  delivery: WebhookDelivery,
+  endpoint: WebhookEndpoint,
+  scope: WebhookScope | null,
+  options: DeliveryOptions,
+): Promise<DeliveryResult | undefined> {
   if (scope?.mask?.includes('actor_email') && !options.maskKey) return { error: 'signing_failed' } as const;
   const event = delivery.receivedAt
     ? await webhookEvent(ch, endpoint, scope, delivery.eventId, delivery.receivedAt, delivery.createdAt)
     : testEvent(delivery, endpoint.projectId);
   if (!event) return { error: 'event_unavailable' } as const;
+  if (event === 'scope_mismatch') return { error: event };
   const now = new Date();
   const secrets = await prisma.webhookSecret.findMany({
     where: { endpointId: endpoint.id, ...activeWebhookSecrets(now) },
@@ -239,10 +288,7 @@ async function attemptDelivery(ch: ClickHouseClient, delivery: WebhookDelivery, 
         id: endpoint.id,
         updatedAt: endpoint.updatedAt,
         enabled: true,
-        scopeTenantId: endpoint.scopeTenantId,
-        scopeTargetType: endpoint.scopeTargetType,
-        scopeTargetId: endpoint.scopeTargetId,
-        scopeMask: { equals: endpoint.scopeMask },
+        ...scopeWhere(endpoint),
         filterQuery: endpoint.filterQuery,
         url: endpoint.url,
         deliveries: {
@@ -255,18 +301,29 @@ async function attemptDelivery(ch: ClickHouseClient, delivery: WebhookDelivery, 
 }
 
 async function sendClaim(ch: ClickHouseClient, { delivery, expired }: Claim, options: DeliveryOptions) {
-  if (expired) return settle(delivery, undefined, undefined, 0, options.failureLimit);
   const start = Date.now();
   let endpoint: WebhookEndpoint | null | undefined;
-  let result: AttemptResult | undefined;
+  let result: DeliveryResult | undefined;
+  let invalidScope = false;
   try {
     endpoint = await prisma.webhookEndpoint.findUnique({ where: { id: delivery.endpointId } });
-    if (endpoint?.enabled) result = await attemptDelivery(ch, delivery, endpoint, options);
-  } catch {
+    if (endpoint?.enabled) {
+      const scope = storedWebhookScope(endpoint);
+      if (scope === undefined) invalidScope = true;
+      else {
+        if (expired) return settle(delivery, endpoint, undefined, 0, options.failureLimit);
+        result = await attemptDelivery(ch, delivery, endpoint, scope, options);
+      }
+    }
+  } catch (error) {
+    if (expired) throw error;
     result = { error: 'lookup_failed' };
   }
-  if (!result) return interruptClaim(delivery);
-  await settle(delivery, endpoint?.updatedAt, result, Date.now() - start, options.failureLimit);
+  if (!result) {
+    const reason = expired ? 'expired' : invalidScope ? 'invalid_scope' : 'interrupted';
+    return prisma.$transaction((tx) => interruptClaim(tx, delivery, reason));
+  }
+  await settle(delivery, endpoint, result, Date.now() - start, options.failureLimit);
 }
 
 export async function deliverWebhooks(ch: ClickHouseClient, options: DeliveryOptions, projectId?: string, now = new Date()) {

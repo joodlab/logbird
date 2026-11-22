@@ -7,6 +7,7 @@ import { discoverWebhookDeliveries } from './webhook-discovery';
 
 const ch = createClickHouseClient();
 const projectId = `qa-webhook-discovery-${randomUUID()}`;
+const scanClock = (from: Date) => ({ now: new Date(), rollout: new Date(+from - 1) });
 
 beforeAll(async () => {
   await prisma.organization.create({ data: { id: projectId, name: projectId, slug: projectId, createdAt: new Date() } });
@@ -50,10 +51,10 @@ it('includes the creation millisecond across delivery batches with the same rece
   const { hook, row } = await fixture(from, 'created');
   const ids = Array.from({ length: 105 }, (_, index) => `same-${String(index).padStart(3, '0')}`);
   await insertEvents(ch, [row('before-creation', new Date(+from - 1)), ...ids.map((id) => row(id, from))]);
-  await discoverWebhookDeliveries(ch, hook);
+  await discoverWebhookDeliveries(ch, hook, scanClock(from));
   expect((await refetch(hook.id)).cursorEventId).toBeNull();
   expect(await queuedIds(hook.id)).toEqual(ids);
-  await discoverWebhookDeliveries(ch, await refetch(hook.id));
+  await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
   expect(await queuedIds(hook.id)).toEqual(ids);
 });
 
@@ -82,7 +83,7 @@ it('resumes an interrupted batch and drains 25,000 events in receive-time and ID
       max_memory_usage: '134217728',
     },
   });
-  const scan = async () => discoverWebhookDeliveries(limited, await refetch(hook.id));
+  const scan = async () => discoverWebhookDeliveries(limited, await refetch(hook.id), scanClock(from));
   const pairs = () =>
     prisma.webhookDelivery.findMany({
       where: { endpointId: hook.id },
@@ -128,15 +129,15 @@ it('walks five-minute slices across a backlog, including an empty slice and a la
   const secondEnd = new Date(+from + 10 * 60_000);
   await insertEvents(ch, [row('first-slice', from), row('third-slice', secondEnd, new Date(+secondEnd - 60 * 86_400_000))]);
 
-  await discoverWebhookDeliveries(ch, hook);
+  await discoverWebhookDeliveries(ch, hook, scanClock(from));
   const first = await refetch(hook.id);
   expect(first).toMatchObject({ cursorReceivedAt: new Date(+from + 5 * 60_000), cursorEventId: null });
   expect(await queuedIds(hook.id)).toEqual(['first-slice']);
-  await discoverWebhookDeliveries(ch, first);
+  await discoverWebhookDeliveries(ch, first, scanClock(from));
   const second = await refetch(hook.id);
   expect(second).toMatchObject({ cursorReceivedAt: secondEnd, cursorEventId: null });
   expect(await queuedIds(hook.id)).toEqual(['first-slice']);
-  await discoverWebhookDeliveries(ch, second);
+  await discoverWebhookDeliveries(ch, second, scanClock(from));
   expect(await queuedIds(hook.id)).toEqual(['first-slice', 'third-slice']);
 });
 
@@ -160,10 +161,10 @@ it.each([
     clickhouse_settings,
   });
   try {
-    await expect(discoverWebhookDeliveries(limited, hook)).rejects.toThrow('Query exceeded its resource budget');
+    await expect(discoverWebhookDeliveries(limited, hook, scanClock(from))).rejects.toThrow('Query exceeded its resource budget');
     expect(await refetch(hook.id)).toMatchObject({ cursorReceivedAt: from, cursorEventId: null });
     expect(await queuedIds(hook.id)).toEqual([]);
-    await discoverWebhookDeliveries(ch, await refetch(hook.id));
+    await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
     expect(await queuedIds(hook.id)).toEqual(ids);
   } finally {
     await limited.close();

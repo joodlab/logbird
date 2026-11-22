@@ -13,10 +13,10 @@ export async function webhookCursorClock(db: Pick<Prisma.TransactionClient, '$qu
 }
 
 export function webhookCursorNeedsReview(
-  endpoint: Pick<WebhookEndpoint, 'createdAt' | 'cursorReceivedAt' | 'lastScannedAt'>,
+  endpoint: Pick<WebhookEndpoint, 'createdAt' | 'cursorReceivedAt' | 'cursorVerifiedFloor' | 'lastScannedAt'>,
   { now, rollout }: Awaited<ReturnType<typeof webhookCursorClock>>,
 ) {
-  const start = Math.max(+endpoint.createdAt, +rollout);
+  const start = Math.max(+endpoint.createdAt, +(endpoint.cursorVerifiedFloor ?? rollout));
   // Former workers recorded lastScannedAt before acquiring the watermark. Allow a minute for that gap.
   const scanLimit = endpoint.lastScannedAt ? +endpoint.lastScannedAt + 60_000 : start;
   const cursor = +endpoint.cursorReceivedAt;

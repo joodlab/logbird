@@ -6,6 +6,7 @@ import { expect, it } from 'vitest';
 const rolloutName = '20261122140000_webhook_deliveries';
 const repairName = '20261122150000_webhook_rollout_utc';
 const originalCursorRepairName = '20261122160000_webhook_repair_original_cursor';
+const reconciliationName = '20261122190000_webhook_reconciliation';
 const migration = async (name: string) =>
   (await readFile(new URL(`../../../packages/database/prisma/migrations/${name}/migration.sql`, import.meta.url), 'utf8'))
     .replace(/^\s*--.*$/gm, '')
@@ -83,7 +84,7 @@ it.each(['Pacific/Auckland', 'America/Los_Angeles'])('repairs untouched webhook 
 });
 
 it.each(['Pacific/Auckland', 'America/Los_Angeles'])('detects a stranded rollout cursor after a table rewrite in %s', async (zone) => {
-  const repair = await migration(originalCursorRepairName);
+  const [repair, reconciliation] = await Promise.all([migration(originalCursorRepairName), migration(reconciliationName)]);
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
     await tx.$executeRaw`CREATE TEMP TABLE "WebhookEndpoint" (
@@ -109,12 +110,74 @@ it.each(['Pacific/Auckland', 'America/Los_Angeles'])('detects a stranded rollout
       WHERE attrelid = '"WebhookEndpoint"'::regclass AND attname = 'cursorReceivedAt'`,
     ).toEqual([{ atthasmissing: false }]);
     for (const sql of repair) expect(await tx.$executeRawUnsafe(sql)).toBe(0);
+    for (const sql of reconciliation) await tx.$executeRawUnsafe(sql);
     const clock = await webhookCursorClock(tx);
-    const [stranded] = await tx.$queryRaw<{ createdAt: Date; cursorReceivedAt: Date; lastScannedAt: Date }[]>`
-      SELECT "createdAt", "cursorReceivedAt", "lastScannedAt" FROM "WebhookEndpoint"`;
+    const [stranded] = await tx.$queryRaw<Parameters<typeof webhookCursorNeedsReview>[0][]>`
+      SELECT "createdAt", "cursorReceivedAt", "cursorVerifiedFloor", "lastScannedAt" FROM "WebhookEndpoint"`;
     if (!stranded) throw new Error('Missing restored cursor fixture');
     expect(+stranded.cursorReceivedAt).toBeLessThan(+clock.now);
     expect(webhookCursorNeedsReview(stranded, clock)).toBe(true);
     expect(webhookCursorNeedsReview({ ...stranded, cursorReceivedAt: clock.rollout }, clock)).toBe(false);
+  });
+});
+
+it('accepts an earlier verified checkpoint after reading a rebuilt ledger in a non-UTC session', async () => {
+  const [reconciliation, guide] = await Promise.all([
+    migration(reconciliationName),
+    readFile(new URL('../../../docs/self-hosting.md', import.meta.url), 'utf8'),
+  ]);
+  const statement = guide.match(/WITH bounds AS \([\s\S]+?RETURNING id;/)?.[0];
+  if (!statement) throw new Error('Missing operator reconciliation statement');
+  const parameters = ['endpoint_id', 'project_id', 'original_rollout', 'checkpoint', 'evidence_ref', 'audit_namespace'];
+  const sql = statement.replace(/:'(\w+)'/g, (_, name: string) => `$${parameters.indexOf(name) + 1}::text`);
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL TIME ZONE 'Pacific/Auckland'`;
+    await tx.$executeRaw`CREATE TEMP TABLE "WebhookEndpoint" (
+      id text PRIMARY KEY, "projectId" text, "createdAt" timestamp(3), "updatedAt" timestamp(3),
+      "cursorReceivedAt" timestamp(3), "cursorEventId" text, "lastScannedAt" timestamp(3), "cursorReviewRequired" boolean
+    ) ON COMMIT DROP`;
+    await tx.$executeRaw`CREATE TEMP TABLE "Project" (id text PRIMARY KEY, "organizationId" text) ON COMMIT DROP`;
+    await tx.$executeRaw`CREATE TEMP TABLE "AuditOutbox" (LIKE public."AuditOutbox" INCLUDING DEFAULTS) ON COMMIT DROP`;
+    await tx.$executeRaw`CREATE TEMP TABLE "_prisma_migrations" (
+      migration_name text, started_at timestamptz, finished_at timestamptz, rolled_back_at timestamptz
+    ) ON COMMIT DROP`;
+    await tx.$executeRaw`INSERT INTO "_prisma_migrations" VALUES (${rolloutName}, '2026-10-02 14:00:00+00', '2026-10-02 14:00:01+00', NULL)`;
+    await tx.$executeRaw`INSERT INTO "Project" VALUES ('qa-project', 'qa-org')`;
+    await tx.$executeRaw`INSERT INTO "WebhookEndpoint" VALUES (
+      'qa-rebuilt', 'qa-project', '2026-09-30 12:00:00', '2026-10-01 15:02:00',
+      '2026-10-01 15:02:00', 'qa-old-position', '2026-10-01 15:02:00', true
+    )`;
+    for (const sql of reconciliation) await tx.$executeRawUnsafe(sql);
+    const clock = await webhookCursorClock(tx);
+    expect(clock.rollout.toISOString()).toBe('2026-10-02T14:00:00.000Z');
+    const endpoint = async () => {
+      const [row] = await tx.$queryRaw<(Parameters<typeof webhookCursorNeedsReview>[0] & { cursorReviewRequired: boolean })[]>`
+        SELECT * FROM "WebhookEndpoint"`;
+      if (!row) throw new Error('Missing rebuilt-ledger fixture');
+      return row;
+    };
+    expect(webhookCursorNeedsReview(await endpoint(), clock)).toBe(true);
+    const reconcile = (project: string) =>
+      tx.$queryRawUnsafe<{ id: string }[]>(
+        sql,
+        'qa-rebuilt',
+        project,
+        '2026-10-01T14:00:00.000Z',
+        '2026-10-01T15:02:00.000Z',
+        'qa-backup',
+        '{logbird-t2w}',
+      );
+    expect(await reconcile('qa-unrelated')).toEqual([]);
+    expect(await reconcile('qa-project')).toHaveLength(1);
+    expect(await reconcile('qa-project')).toEqual([]);
+    const restored = await endpoint();
+    expect(restored).toMatchObject({ cursorEventId: null, cursorReviewRequired: false });
+    expect(restored.cursorVerifiedFloor?.toISOString()).toBe('2026-10-01T14:00:00.000Z');
+    expect(webhookCursorNeedsReview(restored, clock)).toBe(false);
+    expect(webhookCursorNeedsReview({ ...restored, cursorReceivedAt: new Date('2026-10-01T13:59:59.999Z') }, clock)).toBe(true);
+    expect(webhookCursorNeedsReview({ ...restored, createdAt: new Date('2026-10-01T15:03:00.000Z') }, clock)).toBe(true);
+    expect(await tx.$queryRaw`SELECT stream, namespace, payload FROM "AuditOutbox"`).toMatchObject([
+      { stream: 'ws:qa-org', namespace: '{logbird-t2w}', payload: { action: 'webhook.cursor_reconciled', metadata: { evidenceRef: 'qa-backup' } } },
+    ]);
   });
 });

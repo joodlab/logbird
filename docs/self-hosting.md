@@ -1075,6 +1075,14 @@ The header stays stable on retry and resend. When retention frees an event ID an
 the new occurrence has a different `webhook-id` and the same JSON `id`. Pending disable emails survive
 delivery-log pruning and retry when SMTP is available again for eligible recipients.
 
+If the endpoint API reports `scopeWarning: webhook_invalid_scope`, queued deliveries
+stay pending without new attempts or retry deadlines. Correct or clear the scope
+through the endpoint's PATCH API to resume. Previously attempted pending rows get a
+fresh retry window and retain their attempt history. Before sending, the worker
+applies the current scope and filter to the stored occurrence. A present event that
+no longer matches is recorded as `skipped` with `scope_mismatch`, without an HTTP
+request or a charge to the endpoint's failure counters.
+
 On very large projects delivery can stall until the arrival-time index is present.
 The cursor never skips events when a scan exceeds its read budget.
 A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
@@ -1092,8 +1100,10 @@ The rollout repair uses the original PostgreSQL fast-default metadata. A table
 rewrite or logical restore can remove that metadata while leaving an original
 cursor shifted by the former database session time zone. Discovery compares
 the stored cursor to database time, the later of endpoint creation and the UTC
-rollout, and the last recorded scan. It allows a minute for prior workers to
-acquire their scan watermark. A cursor outside those bounds is held in place.
+rollout, and the last recorded scan. A verified original rollout stored on the
+endpoint takes precedence over the live ledger's time. The scan bound allows a
+minute for prior workers to acquire their watermark. A cursor outside those
+bounds is held in place.
 The worker logs `webhook.cursor_review_required` and the endpoint API returns
 `cursorWarning: webhook_cursor_review_required`. The hold persists until an
 operator clears it. The check detects impossible positions and cannot establish
@@ -1103,9 +1113,12 @@ that scans completed through an otherwise plausible position.
    backup and record the endpoint ID, project ID, `createdAt`, `cursorReceivedAt`,
    `cursorEventId` and `lastScannedAt`. Use the original rollout's `started_at`
    from `_prisma_migrations` for `20261122140000_webhook_deliveries`, converted to
-   UTC. If the migration ledger was rebuilt, use the original backup or rollout
-   record.
-2. Compare with retained `WebhookDelivery.receivedAt` and receiver records. Test
+   UTC. If the ledger was rebuilt, read the completed, non-rolled-back migration's
+   `started_at` from a pre-rebuild backup of the original database, or use a verified
+   record of that original migration run. Confirm the backup or record belongs to
+   this installation. Record the source in the reconciliation log.
+2. Compare the backed-up cursor and retained `WebhookDelivery` occurrences against
+   stored event receive times and receiver records, using `webhook-id` where available. Test
    pings (`receivedAt IS NULL`), a scan timestamp, and the newest successful
    delivery alone cannot prove coverage. Choose the earliest uncertain receive
    millisecond, no earlier than the later of endpoint creation and rollout. If
@@ -1118,7 +1131,59 @@ that scans completed through an otherwise plausible position.
    `cursorReviewRequired`. If using a later independently verified checkpoint,
    preserve `lastScannedAt` or set it to the checkpoint if the stored value was
    absent or earlier. Update `updatedAt` in UTC. Verify exactly one row changed
-   before committing. Leave delivery and attempt records intact.
+   before committing. Leave delivery and attempt records intact. For a rebuilt
+   ledger, record the verified original rollout on the endpoint in the same
+   transaction using the procedure below.
 4. Restart workers. Verify the warning clears, the cursor resumes moving and
    expected deliveries appear in the log. Keep workers stopped if the restored
    data cannot establish a trustworthy starting bound.
+
+#### Record the original rollout after a ledger rebuild
+
+In `psql`, set `endpoint_id`, `project_id`, `original_rollout`, `checkpoint`,
+`evidence_ref` and `audit_namespace` with `\set`. Use ISO 8601 timestamps with `Z`
+for `original_rollout` and `checkpoint`. Use a backup or incident record reference
+without credentials or payload data for `evidence_ref`. Use the worker's
+`BULLMQ_PREFIX` (default `{logbird}`) for `audit_namespace`.
+
+Run this transaction while webhook workers are stopped. It stores the verified
+floor and queues a workspace audit event with the operator's database login and
+the evidence reference. Commit after confirming the statement returned one audit ID.
+Roll back if it returned zero rows and check the endpoint, hold and timestamps.
+
+```sql
+BEGIN;
+
+WITH bounds AS (
+  SELECT (:'original_rollout'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS floor,
+         (:'checkpoint'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS checkpoint,
+         (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now_utc
+), reconciled AS (
+  UPDATE "WebhookEndpoint" e
+  SET "cursorVerifiedFloor" = b.floor, "cursorReceivedAt" = b.checkpoint,
+      "cursorEventId" = NULL, "lastScannedAt" = b.checkpoint,
+      "cursorReviewRequired" = false, "updatedAt" = b.now_utc
+  FROM bounds b, "Project" p
+  WHERE e.id = :'endpoint_id' AND e."projectId" = :'project_id'
+    AND p.id = e."projectId" AND e."cursorReviewRequired"
+    AND b.checkpoint BETWEEN greatest(e."createdAt", b.floor) AND b.now_utc
+    AND length(trim(:'evidence_ref')) > 0 AND length(trim(:'audit_namespace')) > 0
+  RETURNING e.id, p."organizationId", e."projectId", b.floor, b.checkpoint, b.now_utc
+), audit AS (
+  SELECT *, gen_random_uuid()::text AS audit_id FROM reconciled
+)
+INSERT INTO "AuditOutbox" (id, namespace, stream, payload, "createdAt", "nextAttemptAt", "confirmedAt")
+SELECT audit_id, :'audit_namespace', 'ws:' || "organizationId", jsonb_build_object(
+  'id', audit_id, 'action', 'webhook.cursor_reconciled', 'occurredAt', clock_timestamp(),
+  'actor', jsonb_build_object('type', 'database-operator', 'id', session_user),
+  'targets', jsonb_build_array(jsonb_build_object('type', 'webhook', 'id', id),
+                             jsonb_build_object('type', 'project', 'id', "projectId")),
+  'metadata', jsonb_build_object('originalRollout', floor AT TIME ZONE 'UTC',
+                                'checkpoint', checkpoint AT TIME ZONE 'UTC', 'evidenceRef', :'evidence_ref'::text)
+), now_utc, now_utc, now_utc
+FROM audit
+RETURNING id;
+```
+
+Run `COMMIT;` or `ROLLBACK;` as described above, then follow the restart and
+verification step. Keep the recorded floor for future scans and reconciliations.

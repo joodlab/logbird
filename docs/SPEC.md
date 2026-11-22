@@ -531,9 +531,13 @@ The worker commits at most 100 deliveries with their cursor position in each Pos
 resumes after the last committed position. Deliveries are unique
 by endpoint, event ID, and stored receive time. If retention frees an event ID and it is used again,
 the new occurrence gets its own delivery even while the earlier delivery is retained. Disabled endpoints pause scanning and sending. On
-re-enable, scanning resumes from the saved cursor. The worker rechecks the
-current scope and filter before sending an event. Events removed from storage or
-excluded by a new scope finish with `event_unavailable`.
+re-enable, scanning resumes from the saved cursor. Legacy scopes with
+`webhook_invalid_scope` also hold pending deliveries without consuming attempts.
+Correcting the scope resumes delivery and starts a fresh retry window for pending
+rows with prior attempts. The worker rechecks the current scope and filter before
+sending an event. If a stored event no longer matches, the delivery is `skipped`
+with `scope_mismatch` and does not count toward endpoint failure. A missing event
+finishes with `event_unavailable`.
 Relative filter times use the start of the discovery scan as `now`. Send-time
 rechecks use the same clock for that delivery.
 

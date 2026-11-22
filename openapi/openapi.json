@@ -9032,7 +9032,8 @@
               "enum": [
                 "pending",
                 "succeeded",
-                "failed"
+                "failed",
+                "skipped"
               ],
               "type": "string"
             }
@@ -9092,7 +9093,8 @@
                                         "event_unavailable",
                                         "invalid_event_id",
                                         "lookup_failed",
-                                        "signing_failed"
+                                        "signing_failed",
+                                        "scope_mismatch"
                                       ],
                                       "type": "string"
                                     },
@@ -9146,7 +9148,8 @@
                                     "sending",
                                     "succeeded",
                                     "failed",
-                                    "interrupted"
+                                    "interrupted",
+                                    "skipped"
                                   ],
                                   "type": "string"
                                 }
@@ -9198,7 +9201,8 @@
                             "enum": [
                               "pending",
                               "succeeded",
-                              "failed"
+                              "failed",
+                              "skipped"
                             ],
                             "type": "string"
                           }
