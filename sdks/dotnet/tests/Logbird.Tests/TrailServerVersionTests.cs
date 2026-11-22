@@ -60,6 +60,7 @@ public class TrailServerVersionTests
     [Theory]
     [InlineData("0.2.0")]
     [InlineData("0.2.1-rc.1")]
+    [InlineData("0.2.0+build.7")]
     [InlineData("1.0.0")]
     public async Task A_current_server_runs_the_trail_and_its_version_is_read_once(string version)
     {
@@ -73,6 +74,30 @@ public class TrailServerVersionTests
 
         Assert.Equal(1, Calls(server, "/openapi.json"));
         Assert.Equal(2, Calls(server, "/v1/events"));
+    }
+
+    [Theory]
+    [InlineData("0.2.0-rc.1")]
+    [InlineData("0.2.0-rc.1+build.7")]
+    public async Task A_pre_release_of_0_2_0_comes_before_0_2_0(string version)
+    {
+        var server = Server(version);
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "lb_read_fictional" }, new HttpClient(server));
+        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync(EventSearch.ForTrail(targetId: "inv_1", targetType: "invoice")));
+        Assert.Equal("server_too_old", error.Code);
+        Assert.Contains("0.2.0 (pre-release)", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, Calls(server, "/v1/events"));
+    }
+
+    [Fact]
+    public async Task A_version_that_escapes_a_lone_surrogate_is_unreadable_not_an_unexpected_exception()
+    {
+        // The JSON text is "0.2.0" followed by the six characters of the escape for U+D800, which .NET cannot decode.
+        var server = Server("0.2.0" + (char)92 + "uD800");
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "lb_read_fictional" }, new HttpClient(server));
+        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync(EventSearch.ForTrail(targetId: "inv_1", targetType: "invoice")));
+        Assert.Equal("server_version_unknown", error.Code);
+        Assert.Equal(0, Calls(server, "/v1/events"));
     }
 
     [Fact]
@@ -154,6 +179,38 @@ public class TrailServerVersionTests
         await reader.SearchAsync(search);
         Assert.Equal(2, Calls(server, "/openapi.json"));
         Assert.Equal(1, Calls(server, "/v1/events"));
+    }
+
+    [Fact]
+    public async Task A_server_upgraded_after_the_first_call_is_seen_on_the_next_one()
+    {
+        // A long-lived client first meets an older server; once it reports 0.2.0, the next trail is sent.
+        var current = "0.1.3";
+        var server = new FakeServer
+        {
+            Fallback = request => Task.FromResult(request.Request.RequestUri!.AbsolutePath == "/openapi.json"
+                ? FakeServer.Json(HttpStatusCode.OK, "{" + (char)34 + "info" + (char)34 + ":{" + (char)34 + "version" + (char)34 + ":" + (char)34 + Volatile.Read(ref current) + (char)34 + "}}")
+                : FakeServer.Json(HttpStatusCode.OK, """{"data":[],"nextCursor":null,"total":0,"tookMs":1}""")),
+        };
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "lb_read_fictional" }, new HttpClient(server));
+        var search = EventSearch.ForTrail(targetId: "inv_1", targetType: "invoice");
+        Assert.Equal("server_too_old", (await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync(search))).Code);
+
+        // The refused version is not kept: the probe forgets itself when it completes.
+        var cache = typeof(LogbirdReadClient).GetField("_serverVersion", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+        {
+            while (cache.GetValue(reader) is not null)
+            {
+                await Task.Delay(10);
+            }
+        });
+
+        Volatile.Write(ref current, "0.2.0");
+        await reader.SearchAsync(search);
+        await reader.SearchAsync(search);
+        Assert.Equal(2, Calls(server, "/openapi.json"));
+        Assert.Equal(2, Calls(server, "/v1/events"));
     }
 
     [Fact]
