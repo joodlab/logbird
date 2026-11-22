@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Logbird.Tests;
@@ -70,6 +71,38 @@ public class TrailServerVersionTests
         {
         }
 
+        Assert.Equal(1, Calls(server, "/openapi.json"));
+        Assert.Equal(2, Calls(server, "/v1/events"));
+    }
+
+    [Fact]
+    public async Task Concurrent_first_searches_share_one_version_read_and_a_cancelled_caller_fails_only_itself()
+    {
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new FakeServer
+        {
+            Fallback = async request =>
+            {
+                if (request.Request.RequestUri!.AbsolutePath == "/openapi.json")
+                {
+                    await release.Task;
+                    return FakeServer.Json(HttpStatusCode.OK, "{\"info\":{\"version\":\"0.2.0\"}}");
+                }
+
+                return FakeServer.Json(HttpStatusCode.OK, "{\"data\":[],\"nextCursor\":null,\"total\":0,\"tookMs\":1}");
+            },
+        };
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "lb_read_fictional" }, new HttpClient(server));
+        var search = EventSearch.ForTrail(targetId: "inv_1", targetType: "invoice");
+        using var cancel = new CancellationTokenSource();
+        var cancelled = reader.SearchAsync(search, cancel.Token);
+        var first = reader.SearchAsync(search);
+        var second = reader.SearchAsync(search);
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+
+        release.SetResult(true);
+        await Deadline.Within(TimeSpan.FromSeconds(30), () => Task.WhenAll(first, second));
         Assert.Equal(1, Calls(server, "/openapi.json"));
         Assert.Equal(2, Calls(server, "/v1/events"));
     }

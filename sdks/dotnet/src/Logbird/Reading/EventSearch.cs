@@ -93,13 +93,15 @@ public sealed record EventSearch
 
         CheckSelector(actorId, nameof(actorId));
         CheckSelector(tenantId, nameof(tenantId));
-        if (targetId is null && actorId is null && tenantId is null && string.IsNullOrWhiteSpace(query))
+        // Blank means what JavaScript's trim() removes, so a query is blank in exactly the cases trailQuery treats as blank.
+        var blankQuery = query is null || Internal.EventJson.JsTrim(query).Length == 0;
+        if (targetId is null && actorId is null && tenantId is null && blankQuery)
         {
             throw new ArgumentException("A trail needs a target, actor, tenant or query; an empty trail would be the whole project.");
         }
 
         var terms = new List<string>();
-        if (!string.IsNullOrWhiteSpace(query))
+        if (!blankQuery)
         {
             terms.Add("(" + query + ")");
         }

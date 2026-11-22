@@ -19,9 +19,10 @@ it('escapes carriage returns in SDK trail selectors', () => {
   expect(trailQuery({ target: { id } }).q).toBe('target:" x\t\n\\r:y\\"\\\\ "');
 });
 
-it('treats a blank query as no query, so the trail never contains an empty group', () => {
+it('drops a blank query next to a selector and keeps it (for the server to reject) without one', () => {
   expect(trailQuery({ target: { id: 'inv_1' }, q: '  ' }).q).toBe('target:"inv_1"');
   expect(trailQuery({ actor: 'u', q: '\t' }).q).toBe('actor:"u"');
+  expect(trailQuery({ q: '  ' }).q).toBe('(  )');
 });
 
 it('escapes every star in exact trail selectors', () => {

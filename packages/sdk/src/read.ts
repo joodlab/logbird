@@ -55,7 +55,8 @@ export interface TrailQuery {
 export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
   const target = input.target;
   const terms = [
-    input.q?.trim() ? `(${input.q})` : '',
+    // A blank q next to a selector is no query; without a selector it is kept, so the server rejects it (never widens).
+    input.q && (input.q.trim() || !(target || input.actor || input.tenant)) ? `(${input.q})` : '',
     target?.type !== undefined ? formatRecordTerm(target.type, target.id) : target ? `target:${quoteQueryValue(target.id)}` : '',
     input.actor ? `actor:${quoteQueryValue(input.actor)}` : '',
     input.tenant ? `tenant:${quoteQueryValue(input.tenant)}` : '',

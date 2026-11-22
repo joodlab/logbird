@@ -51,7 +51,7 @@ public sealed class LogbirdReadClient : IDisposable
     private readonly bool _ownsHttp;
     private readonly string _eventsUrl;
     private readonly string _openApiUrl;
-    private Task<Version?>? _serverVersion;
+    private Lazy<Task<Version?>>? _serverVersion;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
     private readonly int? _maxPages;
@@ -121,27 +121,33 @@ public sealed class LogbirdReadClient : IDisposable
             return;
         }
 
-        var pending = Volatile.Read(ref _serverVersion);
-        if (pending is null)
+        // One probe for all callers: created once, started once, and not tied to any caller's token (each caller waits under
+        // its own, so cancelling one search never fails another). A failed or unreadable probe is forgotten.
+        var probe = Volatile.Read(ref _serverVersion);
+        if (probe is null)
         {
-            var created = ReadServerVersionAsync(cancellationToken);
-            pending = Interlocked.CompareExchange(ref _serverVersion, created, null) ?? created;
+            var created = new Lazy<Task<Version?>>(ReadServerVersionAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+            probe = Interlocked.CompareExchange(ref _serverVersion, created, null) ?? created;
         }
 
         Version? version;
         try
         {
-            version = await pending.ConfigureAwait(false);
+            version = await WaitAsync(probe.Value, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
-            _ = Interlocked.CompareExchange(ref _serverVersion, null, pending);
+            _ = Interlocked.CompareExchange(ref _serverVersion, null, probe);
             throw;
         }
 
         if (version is null)
         {
-            _ = Interlocked.CompareExchange(ref _serverVersion, null, pending);
+            _ = Interlocked.CompareExchange(ref _serverVersion, null, probe);
             throw new LogbirdApiException(null, "server_version_unknown", "This trail needs Logbird 0.2.0 or later, and the server's version could not be read; it was not sent.");
         }
 
@@ -151,10 +157,28 @@ public sealed class LogbirdReadClient : IDisposable
         }
     }
 
-    private async Task<Version?> ReadServerVersionAsync(CancellationToken cancellationToken)
+    private static async Task<T> WaitAsync<T>(Task<T> task, CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_timeout);
+        if (!cancellationToken.CanBeCanceled || task.IsCompleted)
+        {
+            return await task.ConfigureAwait(false);
+        }
+
+        var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (cancellationToken.Register(() => cancelled.TrySetResult(true)))
+        {
+            if (await Task.WhenAny(task, cancelled.Task).ConfigureAwait(false) != task)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+        }
+
+        return await task.ConfigureAwait(false);
+    }
+
+    private async Task<Version?> ReadServerVersionAsync()
+    {
+        using var timeout = new CancellationTokenSource(_timeout);
         using var request = new HttpRequestMessage(HttpMethod.Get, _openApiUrl);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Logbird.NET", LogbirdClient.Version));
@@ -164,11 +188,6 @@ public sealed class LogbirdReadClient : IDisposable
         {
             response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
             body = await Internal.BatchSender.ReadBodyAsync(response, MaxResponseBytes, timeout.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            response?.Dispose();
-            throw;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException or System.IO.InvalidDataException)
         {

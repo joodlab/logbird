@@ -253,7 +253,9 @@ that type and id together (the `record:` query field); with only `targetId`, any
 quoted, and quotes, backslashes, `*` and line breaks are matched literally, so a value can never widen the search. A
 trail with `targetType`, or with a selector that ends in `*` or contains a carriage return, needs Logbird 0.2.0 or later
 (older servers read those differently): the read client checks the server's version once (from its public OpenAPI
-document) and throws `LogbirdApiException` (`server_too_old` or `server_version_unknown`) instead of sending it. `ForTrail` throws `ArgumentException` when it has no selector or query, or for an empty selector (pass `null`
+document, shared by all searches) and throws `LogbirdApiException` instead of sending the trail: `server_too_old`, or
+`server_version_unknown` when the document has no readable version, or `unreachable` when it cannot be fetched. A failed
+check is retried by the next search. `ForTrail` throws `ArgumentException` when it has no selector or query, or for an empty selector (pass `null`
 to leave one out), so a bug cannot silently widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
 may see the tenant or record first, on every request including next-page requests.
 
