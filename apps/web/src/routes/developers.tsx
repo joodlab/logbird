@@ -292,7 +292,7 @@ function DevelopersPage() {
         <SectionHeader
           eyebrow="The envelope"
           id="envelope-title"
-          lead="Logbird stores anything you send. These recommended fields become indexed columns, each one fills a page in the console, and the conformance score tells you how many of them an event has."
+          lead="Only action is required, and any event within the ingest limits is accepted. These recommended fields become indexed columns, each one fills a page in the console, and the conformance score tells you how many of them an event has."
           title="Six fields that make an audit log useful."
         />
         <div className="panel mt-10 overflow-hidden">
@@ -444,13 +444,14 @@ function DevelopersPage() {
                   are retried with exponential backoff and jitter, up to 5 times. A numeric <code>Retry-After</code> is honoured.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">Acknowledged after storage.</strong> On <code>202</code>, every event listed in{' '}
-                  <code>ids</code> is in ClickHouse and <code>rejected</code> names the entries that failed.
+                  <strong className="font-medium text-foreground">Acknowledged after storage.</strong> On <code>202</code>, <code>ids</code> lists the
+                  accepted events and <code>rejected</code> names the entries that failed. An accepted event was written to ClickHouse by this request
+                  or an earlier identical one.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">At least once, stored once.</strong> The SDK gives every event an id before it
-                  queues it, so a retry after a lost response is stored once. Raw HTTP clients should send their own <code>id</code>: without one,
-                  each retry gets a new id.
+                  queues it, so a retry after a lost response reuses the stored event while the project retains it. Raw HTTP clients should send their
+                  own valid, non-blank string <code>id</code>: without one, each retry gets a new id.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Bounded under outage.</strong> The queue holds up to 10,000 events by default. When
@@ -463,9 +464,10 @@ function DevelopersPage() {
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Partial batches.</strong> Each event is checked on its own. Rejected events, such as
-                  one without an <code>action</code> or an id conflict, are listed in <code>rejected</code>. On <code>202</code> the rest are stored;
-                  a <code>503</code> names the events still to retry. Permanent errors other than <code>429</code> drop the batch and report it
-                  through <code>onError</code> and <code>onDrop</code>, without rejecting <code>flush()</code>.
+                  one without an <code>action</code> or an id conflict, are listed in <code>rejected</code>. On <code>202</code> the rest are
+                  accepted. When a <code>503</code> lists the unsettled events, retry only those; otherwise retry the whole batch with the same ids.
+                  Permanent errors other than <code>429</code> drop the batch and report it through <code>onError</code> and <code>onDrop</code>,
+                  without rejecting <code>flush()</code>.
                 </>,
               ]}
             />

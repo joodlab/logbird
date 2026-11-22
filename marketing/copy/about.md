@@ -41,7 +41,7 @@ path: /about
 - **eyebrow:** What we hold to
 - **heading:** Five decisions that don't change.
 - **bullets:**
-  1. **Accept anything.** Any JSON object with an `action` is a valid event. We recommend a shape; we never reject
+  1. **Accept any shape.** Any JSON object with an `action` that fits the ingest limits is a valid event. We recommend a shape; we never reject
      an event for missing it.
   2. **Capture is your code's job.** We give you the SDK, the integrations and the patterns. Our guarantee starts at
      the `202`.

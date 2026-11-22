@@ -97,7 +97,7 @@ const retraced: Comparison = {
     { label: 'Hosted offering', logbird: LOGBIRD_HOSTED_OFFERING, them: 'None found', sourceIds: ['S8'] },
     {
       label: 'Required event fields',
-      logbird: '`action` only; any other shape accepted',
+      logbird: '`action` only; any other shape within the ingest limits accepted',
       them: '`action` and `crud` in the API spec; the docs also list `actor` as mandatory',
       sourceIds: ['S9', 'S10'],
     },
@@ -225,7 +225,7 @@ const workos: Comparison = {
     { label: 'Hosting model', logbird: LOGBIRD_HOSTING, them: 'Hosted by WorkOS', sourceIds: ['W2'] },
     {
       label: 'Schema',
-      logbird: 'Any JSON with an `action`; nothing to register',
+      logbird: 'Any JSON with an `action`, within the ingest limits; nothing to register',
       them: 'Event schemas must be configured per action before you emit; metadata JSON Schema validation is optional',
       sourceIds: ['W2', 'W7', 'W8'],
     },
@@ -346,7 +346,7 @@ const pangea: Comparison = {
     { label: 'Hosting model', logbird: LOGBIRD_HOSTING, them: 'Hosted by Pangea', sourceIds: ['P12'] },
     {
       label: 'Schema',
-      logbird: 'Any JSON with an `action`; recommended envelope',
+      logbird: 'Any JSON with an `action`, within the ingest limits; recommended envelope',
       them: "Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation",
       sourceIds: ['P13'],
     },

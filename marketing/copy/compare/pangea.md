@@ -32,7 +32,7 @@ path: /compare/pangea
   | Licence and source | MIT | Hosted service, no source published; SDKs and the viewer component are MIT [P8, P9] |
   | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service [P10, P11] |
   | Hosting model | Self-hosted when the source opens (MIT); Logbird Cloud waitlist <!-- public repo: Self-hosted, MIT; Logbird Cloud waitlist --> | Hosted by Pangea [P12] |
-  | Schema | Any JSON with an `action`; recommended envelope | Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation [P13] |
+  | Schema | Any JSON with an `action`, within the ingest limits; recommended envelope | Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation [P13] |
   | Tamper evidence | None | Merkle-tree tamperproofing, roots published to Arweave, optional event signing [P2] |
   | Search | Query language and guarded SQL `WHERE` mode | `field:value` with `AND`, `OR`, parentheses and quotes; up to 10,000 results per search [P14, P12] |
   | Retention | Per project, 7 days to 10 years; hourly permanent deletion | Hot up to 14 days, warm up to 10 years, cold up to 10 years (cold retrievable on request) [P15] |

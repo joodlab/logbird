@@ -15,8 +15,8 @@ export const Route = createFileRoute('/about')({ head: () => pageHead('/about'),
 // maintainers keep the published origin story and partner attribution unnamed (see marketing/copy/README.md).
 const principles: { title: string; body: string }[] = [
   {
-    title: 'Accept anything.',
-    body: 'Any JSON object with an `action` is a valid event. We recommend a shape; we never reject an event for missing it.',
+    title: 'Accept any shape.',
+    body: 'Any JSON object with an `action` that fits the ingest limits is a valid event. We recommend a shape; we never reject an event for missing it.',
   },
   {
     title: "Capture is your code's job.",

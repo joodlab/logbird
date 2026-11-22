@@ -40,7 +40,7 @@ path: /
 - **id:** `developers`
 - **eyebrow:** For developers
 - **heading:** One call per action. No schema to migrate.
-- **body:** Any JSON object with an `action` string is a valid event. Add the fields you have: who did it, in which
+- **body:** Only an `action` string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which
   customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns and indexes
   your other fields as attributes, within the ingest limits. Recommended fields are optional: an event is never
   rejected for missing them.
@@ -115,7 +115,7 @@ path: /
      <!-- source: docs/SPEC.md §5 -->
   2. **Send events.** Over HTTP or the SDK: one event, or up to 1000 per request.
      <!-- source: docs/SPEC.md §5 size limits -->
-  3. **Logbird stores them in ClickHouse.** On `202`, every event listed in `ids` is in ClickHouse and `rejected` names the entries that failed.
+  3. **Logbird stores them in ClickHouse.** On `202`, `ids` lists the events written to ClickHouse, by this request or an earlier identical one, and `rejected` names the entries that failed.
      <!-- source: docs/SPEC.md §2 ingestion path -->
   4. **Search, follow and keep them.** Use the console, or read them from your own backend with a read key. A worker
      deletes events older than the project's retention window, every hour.
@@ -181,14 +181,14 @@ path: /
 - **eyebrow:** Guarantees and limits
 - **heading:** What Logbird promises, and where the promise ends.
 - **bullets (two columns: "We guarantee" / "The limit")**
-  - A `202` lists the stored event IDs in `ids` and rejected events in `rejected`. / Delivery is at least once. An
+  - A `202` lists accepted event IDs in `ids` and rejected events in `rejected`. / Delivery is at least once. An
     exact retry with the same valid, non-blank string `id` is stored once while the project retains the event; changed content under that id is rejected
     with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry. <!-- source: docs/SPEC.md §2, §3; docs/concepts.md -->
   - The SDK batches and retries for you. / Its queue is in memory: a crash before the server acknowledges can lose
     pending events. <!-- source: packages/sdk/README.md -->
-  - Any shape is accepted; only `action` is required. / Each event is checked on its own: rejected events are
-    listed in `rejected` with a reason. On `202`, the rest of the batch is stored; a `503` names the events still
-    to retry. <!-- source: docs/integrations.md §Outage backpressure (ingest paragraph) -->
+  - Any shape within the ingest limits is accepted; only `action` is required. / Each event is checked on its own: rejected events are
+    listed in `rejected` with a reason. On `202`, the rest of the batch is accepted. When a `503` lists the
+    unsettled events, retry only those; otherwise retry the whole batch with the same ids. <!-- source: docs/integrations.md §Outage backpressure (ingest paragraph) -->
   - Retention deletes expired events for good. / There's no archive and no undo.
     <!-- source: docs/SPEC.md §1.4; capture 10-retention-preview.png -->
   - Import history by sending events with their original `occurredAt`, up to 3650 days back. / An older `occurredAt`

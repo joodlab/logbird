@@ -311,8 +311,8 @@ function SecurityPage() {
               'Failed authentication attempts are limited per client, so repeated bad keys are throttled. Valid keys keep working behind a shared network address.',
               'If Redis fails, sign-in limits fail closed (requests are refused) and ingest and read limits fail open (requests continue).',
               <>
-                Delivery is at least once. An exact retry with the same valid, non-blank string <code>id</code> is stored once while the project
-                retains the event, so retries from the SDK, which sets ids, never double-count; changed content under that id is rejected with{' '}
+                Delivery is at least once. An exact retry with the same valid, non-blank string <code>id</code> reuses the stored event while the
+                project retains it, so retries from the SDK, which sets ids, don't add copies; changed content under that id is rejected with{' '}
                 <code>duplicate_id_conflict</code>. An event sent without an id gets a new one on every retry. Once retention deletes an event, its id
                 can be used again.
               </>,

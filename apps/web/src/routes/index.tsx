@@ -73,7 +73,7 @@ function HomePage() {
             <SectionHeader
               eyebrow="For developers"
               id="developers-title"
-              lead="Any JSON object with an action string is a valid event. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns and indexes your other fields as attributes, within the ingest limits. Recommended fields are optional: an event is never rejected for missing them."
+              lead="Only an action string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns and indexes your other fields as attributes, within the ingest limits. Recommended fields are optional: an event is never rejected for missing them."
               title="One call per action. No schema to migrate."
             />
             <ul className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
@@ -168,8 +168,8 @@ function HomePage() {
                 title: 'Logbird stores them',
                 body: (
                   <>
-                    On <code>202</code>, every event listed in <code>ids</code> is in ClickHouse and <code>rejected</code> names the entries that
-                    failed.
+                    On <code>202</code>, <code>ids</code> lists the events written to ClickHouse, by this request or an earlier identical one, and{' '}
+                    <code>rejected</code> names the entries that failed.
                   </>
                 ),
                 detail: '202 Accepted',
@@ -270,7 +270,7 @@ function HomePage() {
           <Guarantees
             items={[
               {
-                promise: 'A `202` lists the stored event IDs in `ids` and rejected events in `rejected`.',
+                promise: 'A `202` lists accepted event IDs in `ids` and rejected events in `rejected`.',
                 limit:
                   'Delivery is at least once. An exact retry with the same valid, non-blank string `id` is stored once while the project retains the event; changed content under that id is rejected with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry.',
               },
@@ -279,9 +279,9 @@ function HomePage() {
                 limit: 'Its queue is in memory: a crash before the server acknowledges can lose pending events.',
               },
               {
-                promise: 'Any shape is accepted; only `action` is required.',
+                promise: 'Any shape within the ingest limits is accepted; only `action` is required.',
                 limit:
-                  'Each event is checked on its own: rejected events are listed in `rejected` with a reason. On `202`, the rest of the batch is stored; a `503` names the events still to retry.',
+                  'Each event is checked on its own: rejected events are listed in `rejected` with a reason. On `202`, the rest of the batch is accepted. When a `503` lists the unsettled events, retry only those; otherwise retry the whole batch with the same ids.',
               },
               { promise: 'Retention deletes expired events for good.', limit: "There's no archive and no undo." },
               {

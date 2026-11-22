@@ -65,6 +65,9 @@ describe('release list', () => {
 
   it('every snapshot release has its highlights in the real CHANGELOG.md', () => {
     const real = readFileSync(CHANGELOG_PATH, 'utf8');
+    // An empty fallback would pass the loop below; v0.1.2 was tagged but never published, so it must never appear.
+    expect(snapshotReleases.length).toBeGreaterThan(0);
+    expect(snapshotReleases.map((release) => release.version)).not.toContain('0.1.2');
     for (const release of snapshotReleases) {
       expect(release.highlights).toEqual(changelogHighlights(real, release.version));
       expect(release.highlights.length).toBeGreaterThan(0);
