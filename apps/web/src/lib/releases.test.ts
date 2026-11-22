@@ -13,7 +13,7 @@ const changelog = `# Changelog
 ### Highlights
 
 - Fictional \`code\` highlight one.
-- Fictional highlight two.
+- Fictional highlight two, with the [upgrade notes](https://example.test/notes#990).
 
 ### Upgrade and known limits
 
@@ -36,7 +36,8 @@ const respond = (body: unknown, status = 200) => vi.fn(async () => new Response(
 
 describe('release list', () => {
   it('reads only the highlight bullets of the exact version', () => {
-    expect(changelogHighlights(changelog, '9.9.0')).toEqual(['Fictional `code` highlight one.', 'Fictional highlight two.']);
+    // Links keep their text only: the site's highlight renderer has no links, and each release links to its notes.
+    expect(changelogHighlights(changelog, '9.9.0')).toEqual(['Fictional `code` highlight one.', 'Fictional highlight two, with the upgrade notes.']);
     expect(changelogHighlights(changelog, '9.8.0')).toEqual([]);
     expect(changelogHighlights(changelog, '9.9')).toEqual([]);
   });
@@ -66,7 +67,7 @@ describe('release list', () => {
     ]);
     const releases = await loadReleases({ githubUrl: 'https://github.com/example-org/example', githubPublic: true, changelog, fetchImpl });
     expect(releases).toEqual([
-      { version: '9.9.0', date: '2026-11-08', highlights: ['Fictional `code` highlight one.', 'Fictional highlight two.'] },
+      { version: '9.9.0', date: '2026-11-08', highlights: ['Fictional `code` highlight one.', 'Fictional highlight two, with the upgrade notes.'] },
       { version: '9.8.0', date: '2026-11-08', highlights: [] },
     ]);
     expect(fetchImpl).toHaveBeenCalledWith('https://api.github.com/repos/example-org/example/releases?per_page=100', expect.anything());

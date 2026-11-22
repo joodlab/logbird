@@ -27,6 +27,12 @@ export function githubRepo(url: string | undefined): string | undefined {
 }
 
 /** The bullets under `### Highlights` in CHANGELOG.md's `## <version>` section (empty when there are none). */
+/**
+ * Markdown links reduced to their text. The site's highlight renderer (Rich) has no links, and each release already
+ * links to its full notes, so `[upgrade notes](https://…)` would otherwise show as raw markdown.
+ */
+const withoutLinks = (text: string) => text.replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1');
+
 export function changelogHighlights(markdown: string, version: string): string[] {
   const lines = markdown.split(/\r?\n/);
   const start = lines.findIndex((line) => line.trim() === `## ${version}`);
@@ -45,7 +51,7 @@ export function changelogHighlights(markdown: string, version: string): string[]
     }
     const bullet = line.match(/^- (\S.*)$/);
     if (inHighlights && bullet?.[1]) {
-      highlights.push(bullet[1].trim());
+      highlights.push(withoutLinks(bullet[1].trim()));
     }
   }
   return highlights.slice(0, 3);
