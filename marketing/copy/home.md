@@ -94,13 +94,13 @@ path: /
 - **eyebrow:** For support, operations and compliance
 - **heading:** Answer "what happened in this account?" in one search.
 - **body:** The console is built for the people who get the question: support, operators, and whoever answers the
-  auditor. Search every event, open a customer account or a single record, and see each change with its before and
-  after values.
+  auditor. Search every event, open a customer account or a single record, and see the before and after values you
+  send for the first 256 changes of each event.
 - **bullets:**
   - **Search** with `actor:usr_42 action:booking.* outcome:failure`, or write a guarded SQL `WHERE` expression.
   - **Entity pages** for every actor, tenant, executor and record, each with its own timeline.
-  - **Operation trees** show one request, the jobs it spawned and every record they changed.
-  - **Impersonation** is a first-class field: when support acts for a customer, both names are on the event.
+  - **Operation trees** show the events that share an operation id, from the request to the jobs it spawned.
+  - **Impersonation** is a first-class field: when support acts for a customer, the event records who acted for whom.
   - **Retention** per project, from 7 days to 10 years. Expired events are permanently deleted.
     <!-- source: packages/contracts/src/api.ts RETENTION_OPTIONS (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days) -->
 - **cta:** Take the product tour → `/product`

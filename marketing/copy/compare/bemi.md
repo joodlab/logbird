@@ -36,7 +36,7 @@ path: /compare/bemi
   | Databases | Any; Logbird doesn't read your database | PostgreSQL [B4, B5] |
   | Licence | MIT | Core: SSPL-1.0; ORM packages: LGPL-3.0 [B6, B7, B8] |
   | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: Docker Compose or Coolify, with published images" once public) | Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production [B9] |
-  | Hosted offering | Logbird Cloud: waitlist only | Bemi Cloud [B9] |
+  | Hosted offering | Logbird Cloud waitlist (when Cloud opens: early access for invited teams) | Bemi Cloud [B9] |
   | Data model | Recommended envelope: actor, executor, tenant, targets, changes, operation | `changes` table: database, schema, table, primary key, operation, before, after, context [B3] |
   | Query | Query language and guarded SQL `WHERE` mode in a console | SQL on the `changes` table, or ORM helpers (Prisma, Rails and others) [B3, B10, B11] |
   | Retention | Per project, 7 days to 10 years; hourly permanent deletion; self-host included | Automatic retention in Bemi Cloud; not included in the open-source self-hosted version [B3, B9] |

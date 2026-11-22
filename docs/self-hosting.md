@@ -248,6 +248,12 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 
 ## Upgrades and backups
 
+Run every `docker compose` command below with the active installation's invocation: its project (`-p`), env file
+(`--env-file`), Compose files (`-f`, including any override) and TLS profile. After a restore cutover that is the
+restored project's invocation (see the wrapper in Cut over below). A source-build installation keeps
+`docker-compose.build.yml` in that invocation: in step 5 it builds the four roles from the new revision one at a time
+instead of pulling, and the image-tag check doesn't apply.
+
 1. Block browser/SDK ingress and run `docker compose stop app server worker`.
    The worker has a five-minute grace period to finish its current job; wait for
    stop to complete and inspect logs if it needed a forced kill.

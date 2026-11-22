@@ -1,6 +1,6 @@
 ---
 title: Developers — Logbird
-description: Send audit events from TypeScript, Hono, TanStack Start, Vue, Nuxt or any HTTP client. Envelope guide, workers, delivery semantics and limits.
+description: Send audit events from TypeScript, Hono, TanStack Start, Nuxt or any HTTP client, and show history with the Vue helpers. Envelope guide, workers, delivery semantics and limits.
 path: /developers
 ---
 
@@ -22,7 +22,7 @@ path: /developers
 - **id:** `quickstart`
 - **eyebrow:** SDK quickstart
 - **heading:** Install, create a client, track an event.
-- **body:** The SDK has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It
+- **body:** The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It
   batches events, retries failures and gives each event an id and a timestamp if you don't.
   <!-- source: packages/sdk/README.md -->
 - **install (labelled "From source (not on npm yet)", shown once `WEB_GITHUB_PUBLIC=true`):**
@@ -58,17 +58,19 @@ path: /developers
     changes: [{ field: 'status', before: 'confirmed', after: 'cancelled' }],
   });
 
-  // flush() rejects only when retryable delivery (network, 429, 5xx) runs out of retries; the batch stays
-  // queued for the next flush. Permanent rejections don't reject: they arrive through onError and onDrop.
+  // flush() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send
+  // deadline passes. Unsettled events are then queued again, as far as the queue's capacity allows.
+  // Permanent rejections don't reject flush(): they arrive through onError and onDrop.
   await client.flush().catch((error) => console.error('audit delivery pending', error));
-  // On exit: stop accepting events and drain the queue. Rejects under the same condition as flush().
+  // On exit: stop accepting events and drain the queue. Can reject like flush().
   await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
   ```
 
 - **bullets:**
   - `track(event)` never throws and never waits for the network.
-  - `flush()` and `shutdown()` reject when retryable delivery (network, `429`, `5xx`) runs out of retries, and the batch
-    stays queued. Permanent rejections arrive through `onError` and `onDrop` instead.
+  - `flush()` and `shutdown()` can reject, for example when retryable delivery (network, `429`, `5xx`) runs out of
+    retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows.
+    Permanent rejections arrive through `onError` and `onDrop` instead.
     <!-- source: packages/sdk/src/index.ts send()/flush(); packages/sdk/README.md -->
   - Call `shutdown()` from your host's own exit hook. The SDK installs no process handlers.
   - Keep ingest keys on the server. Never ship one in a browser bundle.
@@ -253,7 +255,7 @@ path: /developers
 - **eyebrow:** Delivery semantics
 - **heading:** What happens between `track()` and the `202`.
 - **bullets:**
-  - **Batched.** Events go in batches of up to 100, or every second, whichever comes first.
+  - **Batched.** By default, events go in batches of up to 100, or every second, whichever comes first.
   - **Retried.** Rate limits (`429`), server errors and network failures are retried with exponential backoff and
     jitter. By default, five retries that make no progress end the attempt; a `503` that settles part of the batch
     counts as progress. A numeric `Retry-After` is honoured, capped at 60 seconds and the 5-minute send deadline.
@@ -292,7 +294,8 @@ path: /developers
   <!-- source: docs/SPEC.md §3 normalization, §5 -->
 - **bullets:**
   - Rate limits are shared by all keys of the same kind in a project, across replicas. Self-hosters can change them.
-  - Responses carry `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`. A `429` includes `Retry-After`.
+  - Authenticated responses carry `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` when the limiter can
+    account for the request. A `429` includes `Retry-After`.
   - An unusable `occurredAt` never drops the event. It is stored at receive time, the original value is kept, and
     the response lists a warning.
 - **visual:** none

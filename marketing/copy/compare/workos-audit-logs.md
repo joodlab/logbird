@@ -28,7 +28,7 @@ path: /compare/workos-audit-logs
   | --- | --- | --- |
   | Licence and source | MIT; source opens publicly soon <!-- public repo: MIT; source on GitHub --> | No source code or licence published [W1, W2] |
   | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: Docker Compose or Coolify, with published images" once public) | No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud. [W6] |
-  | Hosting model | Self-hosted when the source opens (MIT); Logbird Cloud waitlist <!-- public repo: Self-hosted, MIT; Logbird Cloud waitlist --> | Hosted by WorkOS [W2] |
+  | Hosting model | Self-hosted when the source opens (MIT); Logbird Cloud waitlist <!-- public repo: Self-hosted, MIT; when Cloud opens: Logbird Cloud early access (invited teams) --> | Hosted by WorkOS [W2] |
   | Schema | Only an `action` string is required; nothing to register | Event schemas must be configured per action before you emit; metadata JSON Schema validation is optional [W2, W7, W8] |
   | Required event fields | `action` | `organization_id`, `action`, `occurred_at`, `actor`, `targets`, `context` [W9] |
   | Search | Query language and guarded SQL `WHERE` mode in the console | Filter by actors, events, targets and dates in the Dashboard and Admin Portal [W1, W2] |
@@ -37,7 +37,6 @@ path: /compare/workos-audit-logs
   | Retention | Per project, 7 days to 10 years; can be lowered, with a preview and permanent deletion | Per organization; 30 days by default; can be raised up to 10 years; lowering isn't supported [W2, W11] |
   | Customer-facing viewer | None yet; read API plus headless Vue helpers | Admin Portal: view and export events [W3] |
   | Programmatic read | `GET /v1/events` with a project read key | Export API; Widgets GraphQL API to search one organization's events [W10, W12] |
-  | Storage engine | ClickHouse for events, Postgres for metadata | Not stated in public docs |
   | Pricing | Self-host free (MIT); Cloud pricing not set | $0/month listed on the product page; $125/month per SIEM connection; $99/month per million events stored (as of 2026-11-07) [W1, W13] |
 
 - **visual:** none
@@ -91,7 +90,7 @@ path: /compare/workos-audit-logs
     https://workos.com/docs/reference/audit-logs/retention/set
   - W12 — Widgets API, audit events (GraphQL). https://workos.com/docs/widgets-api/audit-logs/audit-events.md
   - W13 — Pricing page, Audit Logs section. https://workos.com/pricing
-- **unverified (left out of the table):** whether `context.location`, `context.user_agent` and actor or target
+- **unverified (left out of the table):** which storage engine holds the events; whether `context.location`, `context.user_agent` and actor or target
   sub-fields are each required; how the per-million-events charge relates to the 30-day default; event size and rate
   limits; Admin Portal link expiry and filter options; whether the Widgets GraphQL API is generally available; storage
   engine and data-residency options.

@@ -284,8 +284,8 @@ function DevelopersPage() {
           </div>
         }
       >
-        The SDK has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and
-        gives each event an id and a timestamp if you don't.
+        The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events,
+        retries failures and gives each event an id and a timestamp if you don't.
       </FeatureRow>
 
       <FeatureRow
@@ -449,8 +449,8 @@ function DevelopersPage() {
             <Bullets
               items={[
                 <>
-                  <strong className="font-medium text-foreground">Batched.</strong> Events go in batches of up to 100, or every second, whichever
-                  comes first.
+                  <strong className="font-medium text-foreground">Batched.</strong> By default, events go in batches of up to 100, or every second,
+                  whichever comes first.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Retried.</strong> Rate limits (<code>429</code>), server errors and network failures
@@ -507,8 +507,8 @@ function DevelopersPage() {
               items={[
                 'Rate limits are shared by all keys of the same kind in a project, across replicas. Self-hosters can change them.',
                 <>
-                  Responses carry <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code> and <code>RateLimit-Reset</code>. A <code>429</code>{' '}
-                  includes <code>Retry-After</code>.
+                  Authenticated responses carry <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code> and <code>RateLimit-Reset</code>. A{' '}
+                  <code>429</code> includes <code>Retry-After</code>.
                 </>,
                 <>
                   An unusable <code>occurredAt</code> never drops the event. It is stored at receive time, the original value is kept, and the

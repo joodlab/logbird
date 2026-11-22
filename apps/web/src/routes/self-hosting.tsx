@@ -8,7 +8,7 @@ import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { Steps } from '../components/marketing/steps';
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from '../lib/cloud';
-import { IMAGE_NAMESPACE, repoFile, SELF_HOST_VERSION, selfHostQuickstart } from '../lib/selfhost';
+import { repoFile, SELF_HOST_VERSION, selfHostQuickstart } from '../lib/selfhost';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/self-hosting')({ head: () => pageHead('/self-hosting'), component: SelfHostingPage });
@@ -90,7 +90,7 @@ function SelfHostingPage() {
             <p className="text-muted-foreground text-sm">
               {GITHUB_PUBLIC
                 ? SELF_HOST_VERSION
-                  ? `Compose pulls the published ${SELF_HOST_VERSION} images for amd64 and arm64 from ${IMAGE_NAMESPACE}.`
+                  ? `Compose pulls the published ${SELF_HOST_VERSION} images for amd64 and arm64 from GHCR.`
                   : 'Nothing has been released yet.'
                 : 'Source on GitHub — coming soon.'}
             </p>
@@ -101,7 +101,7 @@ function SelfHostingPage() {
         title="Your audit log, on your servers."
       />
 
-      {GITHUB_PUBLIC ? (
+      {GITHUB_PUBLIC && SELF_HOST_VERSION ? (
         <Section id="quickstart" labelledBy="quickstart-title">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
             <div className="flex flex-col gap-8">
@@ -118,7 +118,7 @@ function SelfHostingPage() {
                     <code>AUTH_LOG_SIGN_IN_CODES=true</code>.
                   </>,
                   "Create a workspace and a project. Copy the ingest key; it's shown once.",
-                  'Send an event with the request on the right.',
+                  'Set LOGBIRD_INGEST_KEY to the key you just copied, and send an event with the request on the right.',
                   <>
                     Expect <code>202</code>, and the event in the explorer.
                   </>,
@@ -160,11 +160,12 @@ function SelfHostingPage() {
           <div className="panel flex flex-col gap-4 p-8 md:p-10">
             <p className="eyebrow">Quickstart</p>
             <h2 className="h2" id="quickstart-title">
-              The quickstart is published when the repository opens.
+              {GITHUB_PUBLIC ? 'Nothing has been released yet.' : 'The quickstart is published when the repository opens.'}
             </h2>
             <p className="lead max-w-3xl">
-              On one VM: clone the repository, generate secrets, configure SMTP, pull the published images, start them with{' '}
-              <code>docker compose up -d --no-build</code> and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.
+              {GITHUB_PUBLIC
+                ? 'There are no published images yet. Build the four roles from source with the self-hosting guide, start them, then sign in and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.'
+                : 'On one VM: clone the repository, generate secrets, configure SMTP, start Logbird with Docker Compose and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.'}
             </p>
             <div>
               <SelfHostCta size="default" variant="outline" />
@@ -221,8 +222,8 @@ function SelfHostingPage() {
               title: 'Coolify',
               body: (
                 <>
-                  Point Coolify's Docker Compose build pack at <code>docker-compose.coolify.yml</code>. Coolify generates the secrets, pulls the
-                  published images and routes your domain to the console.
+                  Point Coolify's Docker Compose build pack at <code>docker-compose.coolify.yml</code>. Coolify generates the secrets,{' '}
+                  {SELF_HOST_VERSION ? 'pulls the published images' : 'builds the images'} and routes your domain to the console.
                 </>
               ),
               stack: (
@@ -309,7 +310,7 @@ function SelfHostingPage() {
               items={[
                 {
                   title: 'Stop writes',
-                  body: 'Block ingress and stop the console, server and worker. The worker gets five minutes to finish its current job: wait for the stop to complete, and check its logs if it had to be killed.',
+                  body: "Run every command in these steps with the installation's own Compose project, env file, -f files and profile (after a restore cutover, the restored project's). Block ingress and stop the console, server and worker. The worker gets five minutes to finish its current job: wait for the stop to complete, and check its logs if it had to be killed.",
                 },
                 {
                   title: 'Back up',
@@ -317,11 +318,11 @@ function SelfHostingPage() {
                 },
                 {
                   title: 'Pin the new version',
-                  body: 'Check out the release tag vX.Y.Z, then set LOGBIRD_VERSION=X.Y.Z, without the v, in the env file the installation runs with (.env, or the one you cut over to after a restore): its value overrides the Compose default, and a LOGBIRD_VERSION exported in your shell overrides both. Run docker compose config --images with the same project, env file and -f flags as the installation, and check all four logbird-* images end in :X.Y.Z.',
+                  body: "Check out the release tag vX.Y.Z, then set LOGBIRD_VERSION=X.Y.Z, without the v, in the env file the installation runs with (.env, or the one you cut over to after a restore): its value overrides the Compose default, and a LOGBIRD_VERSION exported in your shell overrides both. Run docker compose config --images and check all four logbird-* images end in :X.Y.Z. Built from source (docker-compose.build.yml)? Keep that override and build the four roles from the new revision instead; the image check doesn't apply.",
                 },
                 {
                   title: 'Pull, then start',
-                  body: "docker compose pull, then docker compose up -d --no-build, with those same flags. Migrations run first; if one fails, the new version doesn't start.",
+                  body: "docker compose pull (skip it for a source build), then docker compose up -d --no-build. Migrations run first; if one fails, the new version doesn't start.",
                 },
                 { title: 'Verify', body: 'Readiness, sign-in, your events, settings and keys, and the retention runs, before you reopen ingress.' },
               ]}
@@ -329,7 +330,8 @@ function SelfHostingPage() {
             />
             <ul className="flex flex-col gap-2 border-t pt-5 text-muted-foreground text-sm leading-relaxed">
               <li>
-                <code>docker compose down</code> keeps your data. <code>docker compose down -v</code> deletes it, permanently.
+                <code>docker compose down</code> keeps your data. <code>docker compose down -v</code> permanently deletes the Compose-managed volumes,
+                which hold the bundled Postgres, ClickHouse and Redis data.
               </li>
               <li>Restore into empty, separate storage first, and check counts before you switch over.</li>
             </ul>

@@ -11,9 +11,9 @@ path: /changelog
 - **id:** `intro`
 - **eyebrow:** Changelog
 - **heading (H1):** What changed, and when.
-- **body:** Two lists live here. **Releases** follow the repository's `CHANGELOG.md`: what changed in each version,
-  and anything you must do to upgrade. The **build log** is a short post for each day of work, showing what we shipped
-  with a real capture from the product.
+- **body:** Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the
+  repository's `CHANGELOG.md`; once the repository is public, each links to its full notes and upgrade steps. The
+  **build log** holds short updates on what we shipped, with a capture from the product when there is one.
   <!-- source: CHANGELOG.md (all sections "Unreleased") -->
 - **visual:** none
 

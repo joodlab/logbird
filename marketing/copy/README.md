@@ -157,8 +157,8 @@ These variants are **not** used anywhere on the site. The owner may approve them
   `docs/roadmap.md` P0-3). The public build shows the source install, labelled "From source (not on npm yet)".
 - **Docs links.** Pages link to repository docs (for example `docs/concepts.md`). Those links resolve once the
   repository is public or a docs site exists. Until then, the engineer can hide them or point them at `/developers`.
-- **Security contact.** `SECURITY.md` still lists `SECURITY_CONTACT_EMAIL (not configured)`. The security page needs
-  that address before launch.
+- **Security contact.** `SECURITY.md` sends reports through GitHub private vulnerability reporting, with a fallback
+  route. The website's own security mailbox is optional (`WEB_SECURITY_EMAIL`); without it, pages point to that route.
 
 ## Captures
 

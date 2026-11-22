@@ -183,7 +183,7 @@ function ProductPage() {
         ]}
         eyebrow="Follow anything"
         id="entities"
-        title="A page for every actor, tenant, worker and record."
+        title="A page for each actor, tenant, worker and record."
         visual={
           <ScreenshotFrame
             caption="A tenant's page: activity, top actions, outcomes, related entities and its timeline."
@@ -320,9 +320,9 @@ function ProductPage() {
         title="Show history inside your own product."
         visual={<SiteCode code={readSample} language="ts" title="Your backend" />}
       >
-        Give your customers a "History" tab. Your backend calls <code>GET /v1/events</code> with a read key and a query such as{' '}
-        <code>record:booking:bk_1042 tenant:biz_7</code>, then returns the page to your UI. Results are paginated with a cursor. The Vue, Nuxt and
-        TanStack Start packages include helpers for this.
+        Give your customers a "History" tab. Your backend calls <code>GET /v1/events</code> with a read key and a query for that record and tenant,
+        and checks that each returned event names that record, then returns the page to your UI. Results are paginated with a cursor. The Vue, Nuxt
+        and TanStack Start packages include helpers for this.
         <span className="mt-4 block">
           <ButtonLink to="/developers" variant="link">
             Read API on the developer page

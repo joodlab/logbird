@@ -54,7 +54,8 @@ path: /compare
 - **heading:** Our rules for these pages.
 - **bullets:**
   - Official sources only: product docs, pricing pages, licence files and repositories.
-  - Every claim has a link and the date we checked it.
+  - Each claim about another tool lists its sources, with the date we checked them. Logbird cells describe the current
+    release.
   - Anything we couldn't verify is left out of the tables and listed as unverified.
   - No logos. Product names are used only to identify the products, as their owners write them.
   - We say where Logbird has gaps, too.

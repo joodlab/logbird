@@ -274,7 +274,6 @@ const workos: Comparison = {
       them: "Export API; Widgets GraphQL API to search one organization's events",
       sourceIds: ['W10', 'W12'],
     },
-    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not stated in public docs', sourceIds: [] },
     {
       label: 'Pricing',
       logbird: LOGBIRD_PRICING,
@@ -324,7 +323,7 @@ const workos: Comparison = {
     src('W13', 'Pricing page, Audit Logs section', 'https://workos.com/pricing'),
   ],
   unverified:
-    'Whether `context.location`, `context.user_agent` and actor or target sub-fields are each required; how the per-million-events charge relates to the 30-day default; event size and rate limits; Admin Portal link expiry and filter options; whether the Widgets GraphQL API is generally available; storage engine and data-residency options.',
+    'Which storage engine holds the events; whether `context.location`, `context.user_agent` and actor or target sub-fields are each required; how the per-million-events charge relates to the 30-day default; event size and rate limits; Admin Portal link expiry and filter options; whether the Widgets GraphQL API is generally available; storage engine and data-residency options.',
 };
 
 const pangea: Comparison = {
@@ -387,7 +386,6 @@ const pangea: Comparison = {
       them: 'Embeddable React component, `@pangeacyber/react-mui-audit-log-viewer`, wired to your backend',
       sourceIds: ['P9'],
     },
-    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not stated in public docs', sourceIds: [] },
     {
       label: 'Pricing',
       logbird: LOGBIRD_PRICING,
@@ -454,7 +452,7 @@ const pangea: Comparison = {
     ),
   ],
   unverified:
-    "Whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (the public billing page describes credit-based pay-as-you-go with a monthly credit, but doesn't render the figures, which exist only in the page's script source, and signup now redirects to CrowdStrike); the signing and hash algorithms; the storage engine; whether `message` is required in the default template.",
+    "Which storage engine holds the events; whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (the public billing page describes credit-based pay-as-you-go with a monthly credit, but doesn't render the figures, which exist only in the page's script source, and signup now redirects to CrowdStrike); the signing and hash algorithms; the storage engine; whether `message` is required in the default template.",
 };
 
 const bemi: Comparison = {

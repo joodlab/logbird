@@ -38,7 +38,7 @@ path: /self-hosting
   when the repository opens." with the self-host CTA — see `README.md` § Self-host CTA rule):**
 
   ```sh
-  git clone --branch v<latest release> <WEB_GITHUB_URL>.git
+  git clone --branch v<latest release> <repository URL>.git logbird
   cd logbird
   sh scripts/selfhost-init.sh   # creates .env and generates secrets
   # Set SMTP in .env, or AUTH_LOG_SIGN_IN_CODES=true for a first local test.
@@ -52,7 +52,7 @@ path: /self-hosting
   1. Open `http://localhost:4600` and sign in with the code sent to your email, or printed in the server log if you set
      `AUTH_LOG_SIGN_IN_CODES=true`.
   2. Create a workspace and a project. Copy the ingest key; it's shown once.
-  3. Send an event:
+  3. Set `LOGBIRD_INGEST_KEY` to the key you just copied, and send an event:
 
      ```sh
      curl http://localhost:4600/v1/events \
@@ -95,7 +95,7 @@ path: /self-hosting
      the API and worker start.
      <!-- source: docs/self-hosting.md; docs/deployment.md -->
   2. **Coolify.** Point Coolify's Docker Compose build pack at `docker-compose.coolify.yml`. Coolify generates the
-     secrets, pulls the published images and routes your domain to the console.
+     secrets, pulls the published images (builds them before the first release) and routes your domain to the console.
      <!-- source: docs/coolify.md -->
   3. **Bring your own databases.** Use your own Postgres, ClickHouse and Redis (or Dragonfly) with
      `docker-compose.external.yml`. Use ClickHouse 26.9. Logbird creates its own restricted query user
@@ -145,7 +145,8 @@ path: /self-hosting
 - **eyebrow:** Upgrades and backups
 - **heading:** Upgrade to a pinned release, after a backup.
 - **steps:**
-  1. Stop writes: block ingress and stop the console, server and worker. The worker gets five minutes to finish its
+  1. Stop writes: run every command in these steps with the installation's own Compose project, env file, `-f` files
+     and profile (after a restore cutover, the restored project's). Block ingress and stop the console, server and worker. The worker gets five minutes to finish its
      current job: wait for the stop to complete, and check its logs if it had to be killed.
   2. Back up, with writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
      SHA-256 checksum file. Keep the original env file; record the Git revision (`git rev-parse HEAD`) and the images
@@ -153,13 +154,15 @@ path: /self-hosting
   3. Pin the new version: check out the release tag `vX.Y.Z`, then set `LOGBIRD_VERSION=X.Y.Z`, without the `v`, in
      the env file the installation runs with (`.env`, or the one you cut over to after a restore): its value overrides
      the Compose default, and a `LOGBIRD_VERSION` exported in your shell overrides both. Run
-     `docker compose config --images` with the same project, env file and `-f` flags as the installation, and check
-     all four `logbird-*` images end in `:X.Y.Z`.
-  4. `docker compose pull`, then `docker compose up -d --no-build`, with those same flags. Migrations run first; if one fails, the new
+     `docker compose config --images` and check all four `logbird-*` images end in `:X.Y.Z`. Built from source
+     (`docker-compose.build.yml`)? Keep that override and build the four roles from the new revision instead; the image
+     check doesn't apply.
+  4. `docker compose pull` (skip it for a source build), then `docker compose up -d --no-build`. Migrations run first; if one fails, the new
      version doesn't start.
   5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before reopening ingress.
 - **bullets:**
-  - `docker compose down` keeps your data. `docker compose down -v` deletes it, permanently.
+  - `docker compose down` keeps your data. `docker compose down -v` permanently deletes the Compose-managed volumes,
+    which hold the bundled Postgres, ClickHouse and Redis data.
   - Restore into empty, separate storage first, and check counts before you switch over.
   <!-- source: docs/self-hosting.md §Upgrades and backups -->
 - **cta:** Full self-hosting guide → `docs/self-hosting.md` (repo doc; link target pending)

@@ -15,20 +15,17 @@ export const CLONE_URL = GITHUB_URL ? cloneUrl(GITHUB_URL) : undefined;
 
 /** The quickstart for the latest release; before the first release there are no images, so it points at a source build. */
 export const selfHostQuickstart = SELF_HOST_VERSION
-  ? `git clone --branch v${SELF_HOST_VERSION} ${CLONE_URL}
+  ? `git clone --branch v${SELF_HOST_VERSION} ${CLONE_URL} logbird
 cd logbird
 sh scripts/selfhost-init.sh   # creates .env and generates secrets
 # Set SMTP in .env, or AUTH_LOG_SIGN_IN_CODES=true for a first local test.
 # Internet-facing? Also set AUTH_SIGNUP=restricted and AUTH_SIGNUP_DOMAINS.
 docker compose pull
 docker compose up -d --no-build`
-  : `git clone ${CLONE_URL}
+  : `git clone ${CLONE_URL} logbird
 cd logbird
 sh scripts/selfhost-init.sh   # creates .env and generates secrets
 # Nothing has been released yet, so there are no images: build from source (docs/self-hosting.md).`;
-
-/** The image namespace: the release workflow publishes `ghcr.io/<repository owner>/logbird-<role>`. */
-export const IMAGE_NAMESPACE = GITHUB_URL ? `ghcr.io/${new URL(GITHUB_URL).pathname.split('/')[1]}` : undefined;
 
 /** A file in the repository at the default branch, e.g. `docs/self-hosting.md`. */
 export const repoFile = (path: string) => `${GITHUB_URL}/blob/master/${path}`;
