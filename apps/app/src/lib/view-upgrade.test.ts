@@ -43,6 +43,8 @@ it('leaves a hand-typed lookalike exactly as written, even with a resolved Recor
   same({ name: 'Site 12 review', state });
   // Named through the API with the label's prefix but not the generated name: not the record page's own save.
   same({ name: 'Home page — manual review', state });
+  // The generated name, but with a description: the record page never wrote one.
+  same({ name: 'Home page — last 7 days', description: 'Hand-made review view', state });
   same({ name: 'Home page — last 30 days', state });
   // No Record label.
   same({ ...legacy, state: { ...state, labels: undefined } });
