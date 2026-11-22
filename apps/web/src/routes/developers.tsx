@@ -523,7 +523,7 @@ function DevelopersPage() {
       <FeatureRow
         eyebrow="Read API"
         id="read-api"
-        limit="A read key can read the whole project. A query filter is not authorization: your backend must check the tenant and record on every request, including each next page. The read API accepts the query language, not SQL mode. Tenant-scoped read tokens are on the roadmap."
+        limit="A read key can read the whole project. A query filter is not authorization: your backend must check the tenant and record on every request, including each next page. The read API accepts the query language, not SQL mode. Tenant-scoped read tokens are not in a published release yet."
         title="Read your own history back."
         visual={<SiteCode code={read} language="ts" title="Your backend" />}
       >

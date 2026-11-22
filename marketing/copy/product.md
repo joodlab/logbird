@@ -235,11 +235,9 @@ path: /product
 - **eyebrow:** On the roadmap
 - **heading:** What's on our roadmap.
 - **body:** These are candidates from our public roadmap, not features or commitments. Order and timing can change.
-- **bullets:** <!-- source: docs/roadmap.md (Customer-facing history; Later candidates), worded no stronger than it. Only items docs/roadmap.md or a milestone lists may appear here (maintainer rule, 2026-11-22). -->
-  - Tenant-scoped read tokens with enforced filters and field masks.
+- **bullets:** <!-- source: docs/roadmap.md (Customer-facing history; Later candidates), worded no stronger than it. Only items docs/roadmap.md or a milestone lists may appear here (maintainer rule, 2026-11-22), and not items already built: tenant-scoped read tokens and scoped exports are on master, unreleased, and not presented until their production proof. -->
   - Project-level redaction controls, behind the redaction your client already does.
   - Alerts on chosen actions.
   - Signed webhooks and archive exports.
-  - Scoped exports for one customer.
   - Single sign-on for the console.
 - **visual:** none

@@ -341,11 +341,9 @@ function ProductPage() {
         />
         <ul className="mt-10 grid gap-x-10 gap-y-3 md:grid-cols-2">
           {[
-            'Tenant-scoped read tokens with enforced filters and field masks.',
             'Project-level redaction controls, behind the redaction your client already does.',
             'Alerts on chosen actions.',
             'Signed webhooks and archive exports.',
-            'Scoped exports for one customer.',
             'Single sign-on for the console.',
           ].map((item) => (
             <li className="flex gap-3 border-b py-3 text-sm leading-relaxed" key={item}>

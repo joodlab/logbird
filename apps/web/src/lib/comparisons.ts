@@ -262,7 +262,7 @@ const workos: Comparison = {
     },
     {
       label: 'Streaming to SIEM',
-      logbird: 'No. Signed webhooks and archive exports are roadmap candidates',
+      logbird: 'No',
       them: 'Log Streams to seven destination types',
       sourceIds: ['W5'],
     },

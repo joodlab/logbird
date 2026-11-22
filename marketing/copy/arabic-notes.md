@@ -7,8 +7,9 @@ path: (not a page)
 # Arabic and bilingual notes
 
 The product and the site are **English-only for now**. No Arabic appears anywhere in the UI, on social cards or in the
-README: no bilingual lockup and no Arabic tagline beside the English one. Arabic will ship later as a real localization
-with Paraglide JS (inlang) and a language switcher (`docs/brand.md` §8). Keep these notes as the reference until then.
+README: no bilingual lockup and no Arabic tagline beside the English one. There is no Arabic localization, and it isn't on
+`docs/roadmap.md`. If one is ever built, `docs/brand.md` §8 describes the intended approach (Paraglide JS and a language
+switcher). Keep these notes as the reference.
 
 ## The fixed strings
 

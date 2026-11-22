@@ -75,11 +75,11 @@ path: /cloud
   - **Is the cloud a different product?** No. It runs the same codebase as the self-hosted version. One difference is
     already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL `WHERE` mode in the explorer
     is in both. <!-- source: docs/SPEC.md intro, §5.1.2; docs/roadmap.md -->
-  - **Can I move between self-host and cloud?** We'll document how to migrate before the cloud opens. There's no
-    migration tool today.
+  - **Can I move between self-host and cloud?** Not with a tool or a guide today. Both run the same codebase, but
+    there's no migration tool and no documented migration path yet.
   - **How much will it cost?** Pricing isn't set yet. Self-hosting is free under the MIT licence.
-  - **Will there be an SLA?** We'll publish service levels and limits together with the cloud's launch terms.
-    <!-- source: docs/roadmap.md P1-5 ("Published SLOs and limits") is a plan, not a commitment -->
+  - **Will there be an SLA?** There are no published service levels or limits yet.
+    <!-- docs/roadmap.md lists measured limits as a candidate with no date, so the page states the absence and stops (maintainer rule, 2026-11-22) -->
   - **What do you do with my waitlist email?** We store it to contact you about Logbird. No trackers. See
     the [privacy policy](/legal/privacy).
 - **items (when Cloud is open):**
@@ -90,12 +90,11 @@ path: /cloud
   - **Is the cloud a different product?** No. It runs the same codebase as the self-hosted version. One difference is
     already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL `WHERE` mode in the explorer
     is in both.
-  - **Can I move between self-host and cloud?** We'll document how to migrate before sign-ups open to everyone.
-    There's no migration tool today.
+  - **Can I move between self-host and cloud?** Not with a tool or a guide today. Both run the same codebase, but
+    there's no migration tool and no documented migration path yet.
   - **How much will it cost?** Logbird Cloud is free during early access, and pricing for later isn't set yet.
     Self-hosting is free under the MIT licence.
-  - **Will there be an SLA?** Not during early access. We'll publish service levels and limits when Logbird Cloud
-    launches.
+  - **Will there be an SLA?** Not during early access. There are no published service levels or limits yet.
   - **What do you do with the email I give you?** We store it to contact you about Logbird. No trackers. See the
     [privacy policy](/legal/privacy).
 - **visual:** none

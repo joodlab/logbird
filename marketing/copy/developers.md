@@ -325,7 +325,7 @@ path: /developers
 
 - **limit line:** A read key can read the whole project. A query filter is not authorization: your backend must
   check the tenant and record on every request, including each next page. The read API accepts the query language,
-  not SQL mode. Tenant-scoped read tokens are on the roadmap.
+  not SQL mode. Tenant-scoped read tokens are not in a published release yet.
   <!-- source: docs/integrations.md §Design; docs/query-language.md; docs/roadmap.md P1-1 -->
 - **visual:** code sample
 
