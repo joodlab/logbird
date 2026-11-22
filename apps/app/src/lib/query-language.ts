@@ -218,6 +218,32 @@ export function hasTopLevelOr(q: string): boolean {
   return (editableExpression(q)?.length ?? 0) > 1;
 }
 
+export type ScopedQuery =
+  /** Maps a server error position in `q` back onto the reader's text: `readerPosition = position - offset`. */
+  { q: string; offset: number; problem: null } | { q: null; offset: 0; problem: QueryError };
+
+/**
+ * A locked filter (an entity page's record, actor, tenant or executor; a support agent) AND everything the reader typed.
+ * The one function every "entity filter + user query" goes through: timelines, their facets, "Open in explorer", saved
+ * views and exports. The reader's query is combined only once it parses, and always as ONE parenthesised group, so no
+ * `OR`, negation or parenthesis in it can widen the base: `base (outcome:failure OR action:x)`, never
+ * `base outcome:failure OR action:x`. A query that does not parse is never combined (string repairs such as wrapping
+ * `a) OR (b` would balance it into an escape); the caller shows `problem` and sends nothing.
+ */
+export function scopedQuery(base: string, user: string): ScopedQuery {
+  const locked = base.trim();
+  if (!user.trim()) return { q: locked, offset: 0, problem: null };
+  // No locked filter: the reader's query alone, exactly as before (the server reports its own syntax errors).
+  if (!locked) return { q: user.trim(), offset: user.trimStart().length - user.length, problem: null };
+  try {
+    parseQueryExpression(user);
+  } catch (error) {
+    if (error instanceof QueryError) return { q: null, offset: 0, problem: error };
+    throw error;
+  }
+  return { q: `${locked} (${user})`, offset: locked.length + 2, problem: null };
+}
+
 /** AND two queries, wrapping a top-level OR so both sides constrain the whole search. */
 export function andQuery(a: string, b: string): string {
   const x = a.trim();

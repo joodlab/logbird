@@ -159,12 +159,16 @@ export const histogramQuery = (projectId: string, range: string, q: string, lang
     retry: shouldRetry,
   });
 
-export const facetQuery = (projectId: string, field: string, range: string, q: string, limit = 8, lang: QueryLang = 'query') =>
+export const facetQuery = (projectId: string, field: string, range: string, q: string, limit = 8, lang: QueryLang = 'query', by?: string) =>
   queryOptions({
-    queryKey: [...keys.project(projectId), 'facet', field, range, q, limit, q ? lang : 'query'] as const,
+    queryKey: [...keys.project(projectId), 'facet', field, range, q, limit, q ? lang : 'query', by ?? null] as const,
     queryFn: ({ signal }) => {
       const r = resolveRange(range);
-      return api.events.facets(projectId, { field, from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, limit }, signal);
+      return api.events.facets(
+        projectId,
+        { field, from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, limit, ...(by ? { by } : {}) },
+        signal,
+      );
     },
     placeholderData: keepPreviousInProject(projectId),
     staleTime: 30_000,

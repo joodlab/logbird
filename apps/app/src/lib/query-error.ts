@@ -1,5 +1,6 @@
 import { type QueryErrorDetails, type QueryLang, queryErrorDetailsSchema } from '@logbird/contracts';
 import { ApiRequestError } from './api/errors';
+import type { ScopedQuery } from './query-language';
 
 /** A search failure the query bar explains inline (instead of blanking the results). */
 export interface QueryProblem {
@@ -75,4 +76,17 @@ export function queryProblem(error: unknown, lang: QueryLang): QueryProblem | nu
     message: error.message,
     details: parsed.success ? parsed.data : { lang, reason: 'syntax', start: null, end: null, hint: null },
   };
+}
+
+/**
+ * The problem for a locked-filter search (`scopedQuery`): the reader's own parse error (nothing was sent), else a
+ * server-reported query problem with its positions mapped back onto the reader's text (null when they point into the
+ * locked filter itself).
+ */
+export function scopedQueryProblem(scoped: ScopedQuery, serverProblem: QueryProblem | null): QueryProblem | null {
+  if (scoped.problem) return { code: 'invalid_query', message: scoped.problem.message, details: scoped.problem.details };
+  if (!serverProblem?.details || scoped.offset === 0) return serverProblem;
+  const map = (position: number | null) => (position === null || position - scoped.offset < 0 ? null : position - scoped.offset);
+  const start = map(serverProblem.details.start);
+  return { ...serverProblem, details: { ...serverProblem.details, start, end: start === null ? null : map(serverProblem.details.end) } };
 }

@@ -25,7 +25,7 @@ import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIc
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
-import { andQuery, formatTerm } from '@/lib/query-language';
+import { formatTerm, scopedQuery } from '@/lib/query-language';
 import { ALL_RANGE, historyRange, rangeLabel } from '@/lib/range';
 import { useDocumentTitle } from '@/lib/use-document-title';
 import { useRange } from '@/lib/use-range';
@@ -65,7 +65,8 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
   // Out of a full history, links say "all" rather than this entity's computed window, so the next page is not narrowed.
   const linkRange = rangeChosen ? timeline.range : ALL_RANGE;
   // What History shows (the entity plus any filters typed or picked there): the explorer links and Save as view use it.
-  const historyQuery = andQuery(baseQuery, timeline.q);
+  // Null while the typed filter does not parse: nothing is combined, saved or opened then (scopedQuery).
+  const historyQuery = scopedQuery(baseQuery, timeline.q).q;
 
   if (profile.isError && !p) {
     const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
@@ -143,7 +144,7 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {timelineRange && own ? (
+            {timelineRange && own && historyQuery !== null ? (
               <>
                 <SaveEntityViewButton
                   displayId={displayId}
@@ -164,7 +165,8 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
                 </Button>
               </>
             ) : (
-              // Until the history's range is known, neither action could say what it saves or opens.
+              // Until the history's range is known, or while the typed filter does not parse, neither action could say
+              // what it saves or opens.
               <>
                 <Button disabled size="sm" variant="outline">
                   <BookmarkIcon />
@@ -230,9 +232,9 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
               <WhoSegmentedControl kind={kind} onWho={onWho} who={who} />
               <button
                 className="text-muted-foreground text-xs hover:text-foreground disabled:opacity-50"
-                disabled={!timelineRange}
+                disabled={!timelineRange || historyQuery === null}
                 onClick={() =>
-                  timelineRange
+                  timelineRange && historyQuery !== null
                     ? navigate({
                         to: '/p/$projectId/events',
                         params: { projectId },

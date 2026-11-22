@@ -1,17 +1,20 @@
 import { queryLangSchema } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { BookmarkIcon, LinkIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
+import { toast } from 'sonner';
 import { z } from 'zod';
 import { parseColumns, serializeColumns } from '@/components/explorer/columns';
 import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { SampleDataBanner } from '@/components/setup/sample-data-banner';
-import { eventsInfiniteQuery, histogramQuery, viewsQuery } from '@/lib/api/queries';
+import { api } from '@/lib/api/client';
+import { errorMessage } from '@/lib/api/errors';
+import { eventsInfiniteQuery, histogramQuery, keys, viewsQuery } from '@/lib/api/queries';
 import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
-import { useCopyViewLink } from '@/lib/views';
+import { upgradeRecordView, useCopyViewLink } from '@/lib/views';
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -42,7 +45,11 @@ function ExplorerPage() {
   const { range } = useRange();
   const navigate = useNavigate({ from: Route.fullPath });
   const views = useQuery(viewsQuery(projectId));
-  const savedView = search.view ? views.data?.find((v) => v.id === search.view) : undefined;
+  const storedView = search.view ? views.data?.find((v) => v.id === search.view) : undefined;
+  // A view saved from a record page before exact record matching opens in its exact form (viewSearch); the banner
+  // says so and the reader decides whether to save it. Nothing is written on load.
+  const upgrade = storedView ? upgradeRecordView(storedView.state) : undefined;
+  const savedView = storedView && upgrade ? { ...storedView, state: upgrade.state } : undefined;
   // The banner (and its Copy link) speaks for the view only while what is on screen is still that view: same query,
   // language and range. Narrowing it by picker, zoom or Back hides it.
   const view =
@@ -53,6 +60,18 @@ function ExplorerPage() {
       ? savedView
       : undefined;
   const copyLink = useCopyViewLink();
+  const queryClient = useQueryClient();
+  const saveUpgrade = useMutation({
+    mutationFn: (v: NonNullable<typeof view>) => api.views.create(projectId, { name: v.name, description: v.description, state: v.state }),
+    onSuccess: async (created) => {
+      await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
+      toast.success(`Saved “${created.name}” with the exact record filter`, {
+        description: 'The original view is unchanged; delete it from Saved views when you no longer need it.',
+      });
+      navigate({ search: (prev) => ({ ...prev, view: created.id }) });
+    },
+    onError: (error) => toast.error('Could not save the view', { description: errorMessage(error) }),
+  });
 
   const state: ExplorerState = {
     q: search.q ?? '',
@@ -96,8 +115,19 @@ function ExplorerPage() {
             <BookmarkIcon className="size-4 shrink-0 text-brand" />
             <span className="truncate font-medium">{view.name}</span>
             {view.description ? <span className="hidden truncate text-muted-foreground md:inline">— {view.description}</span> : null}
+            {upgrade?.upgraded ? (
+              <span className="truncate text-muted-foreground text-xs" data-testid="view-upgraded" role="status">
+                · Changed to match this record's type and id together (saved before exact record matching), not saved yet
+              </span>
+            ) : null}
           </span>
           <span className="flex shrink-0 items-center gap-1">
+            {upgrade?.upgraded ? (
+              <Button disabled={saveUpgrade.isPending} onClick={() => saveUpgrade.mutate(view)} size="xs" variant="outline">
+                <BookmarkIcon />
+                Save updated view
+              </Button>
+            ) : null}
             <Button data-testid="banner-copy-view-link" onClick={() => copyLink(projectId, view)} size="xs" variant="ghost">
               <LinkIcon />
               Copy link

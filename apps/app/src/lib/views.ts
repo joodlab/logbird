@@ -1,11 +1,11 @@
-import { decodeRecordPair, type EntityKind, encodeRecordPair, type SavedView } from '@logbird/contracts';
+import { decodeRecordPair, type EntityKind, encodeRecordPair, formatRecordTerm, type SavedView } from '@logbird/contracts';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { meQuery } from '@/lib/api/queries';
 import { splitTargetId, targetEntityId } from '@/lib/entities';
-import { canonicalField, fieldTerms } from '@/lib/query-language';
+import { canonicalField, fieldTerms, hasTopLevelOr } from '@/lib/query-language';
 
 export type ViewLabel = NonNullable<SavedView['state']['labels']>[number];
 export type ViewLabelField = ViewLabel['field'];
@@ -30,13 +30,45 @@ const RESOLVABLE: Partial<Record<string, ViewLabelField>> = {
 /** Bounded: one small entity lookup per term. */
 const MAX_RESOLVED_TERMS = 6;
 
+/**
+ * Views saved from a record page before exact record matching (#169) hold `target:<id> target.type:<type>` (which also
+ * matches the type on one target and the id on another) plus a Record label for that id. Opening one shows the exact
+ * `record:<type>:<id>` form instead; nothing is written until the reader saves it. Only that shape is rewritten: the
+ * pair must lead the query, be plain and positive, be ANDed with the rest (no top-level OR), and carry the Record label,
+ * so a hand-typed `target:` + `target.type:` query is left exactly as written.
+ */
+export function upgradeRecordView(state: SavedView['state']): { state: SavedView['state']; upgraded: boolean } {
+  const q = state.q ?? '';
+  const label = state.labels?.find((l) => l.field === 'target');
+  if (state.lang === 'sql' || !label || hasTopLevelOr(q)) return { state, upgraded: false };
+  const [first, second] = fieldTerms(q);
+  const simple = (t: typeof first) => t && !t.negated && !t.wildcard && (t.valueKind === 'plain' || t.valueKind === 'quoted') && t.value;
+  if (!simple(first) || !simple(second) || !first || !second) return { state, upgraded: false };
+  if (canonicalField(first.field ?? '') !== 'target' || canonicalField(second.field ?? '') !== 'target.type') return { state, upgraded: false };
+  if (q.slice(0, first.start).trim() || q.slice(first.end, second.start).trim() || first.value !== label.value) return { state, upgraded: false };
+  const type = second.value ?? '';
+  const id = first.value ?? '';
+  const rest = q.slice(second.end).trim();
+  const record = encodeRecordPair(type, id);
+  return {
+    upgraded: true,
+    state: {
+      ...state,
+      q: rest ? `${formatRecordTerm(type, id)} ${rest}` : formatRecordTerm(type, id),
+      labels: state.labels?.map((l) => (l === label ? { ...l, field: 'record' as const, value: record } : l)),
+    },
+  };
+}
+
 /** Explorer search params that open a saved view (and mark it open). */
 export function viewSearch(view: Pick<SavedView, 'id' | 'state'>) {
+  // An old record-page view opens in its exact form; the explorer banner says so and offers to save it.
+  const { state } = upgradeRecordView(view.state);
   return {
-    q: view.state.q || undefined,
-    lang: view.state.lang === 'sql' ? ('sql' as const) : undefined,
-    range: view.state.range,
-    cols: view.state.columns?.join(',') || undefined,
+    q: state.q || undefined,
+    lang: state.lang === 'sql' ? ('sql' as const) : undefined,
+    range: state.range,
+    cols: state.columns?.join(',') || undefined,
     view: view.id,
   };
 }

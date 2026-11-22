@@ -1,4 +1,4 @@
-import type { QueryLang } from '@logbird/contracts';
+import { encodeRecordPair, type FacetResponse, type QueryLang } from '@logbird/contracts';
 import { OutcomeDot } from '@logbird/ui/components/badges';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
@@ -13,7 +13,7 @@ import { placeholderKeys } from '@/lib/placeholders';
 import { altClickLabel, useIsMac } from '@/lib/platform';
 import { hasPresenceTerm, togglePresenceTerm, withPresence } from '@/lib/presence-filter';
 import { coreField } from '@/lib/query-catalog';
-import { andQuery, fieldTerms, hasTerm, queryFieldForFacet, removeTerm, toggleTerm } from '@/lib/query-language';
+import { fieldTerms, hasTerm, queryFieldForFacet, removeTerm, scopedQuery, toggleTerm } from '@/lib/query-language';
 import { hasSqlPredicate, isColumnPredicate, removeSqlConjuncts, sqlConjuncts, sqlString, toggleSqlPredicate } from '@/lib/sql-language';
 
 interface FacetSpec {
@@ -124,6 +124,16 @@ function presenceOps(field: string, lang: QueryLang): FacetOps {
   };
 }
 
+/**
+ * One row per (type, id) record from a `target` facet with `by: target.type`: the value is the encoded record pair a
+ * `record:` term takes, the label the record's name (or its id). Rows are ordered by count.
+ */
+export function recordPairValues(values: FacetResponse['values']): { value: string; label: string; count: number }[] {
+  return values
+    .flatMap((v) => (v.groups ?? []).map((g) => ({ value: encodeRecordPair(g.value, v.value), label: v.label || v.value, count: g.count })))
+    .sort((a, b) => b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
+}
+
 /** Facet groups with counts. Click includes a value, ⌥/Alt-click (or −) excludes it. */
 export function FacetSidebar({ projectId, range, q, lang = 'query', counts, staleReason, scope, onChange, className }: FacetSidebarProps) {
   const isMac = useIsMac();
@@ -189,7 +199,11 @@ function FacetGroup({
   onChange: (q: string) => void;
 }) {
   const queryField = queryFieldForFacet(spec.field);
-  const opsFor = (l: QueryLang) => (spec.presence ? presenceOps(queryField, l) : l === 'sql' ? sqlOps(queryField) : queryOps(queryField));
+  // The Record facet lists (type, id) pairs and filters with `record:<type>:<id>` (#169): two records that share an id
+  // never merge. SQL mode has no record field and keeps the id column.
+  const recordPairs = (l: QueryLang) => spec.field === 'target' && l === 'query';
+  const opsFor = (l: QueryLang) =>
+    spec.presence ? presenceOps(queryField, l) : l === 'sql' ? sqlOps(queryField) : queryOps(recordPairs(l) ? 'record' : queryField);
   const ops = opsFor(lang);
   const activeCount = ops.activeCount(q);
   const [open, setOpen] = useState(Boolean(spec.defaultOpen) || activeCount > 0);
@@ -201,13 +215,21 @@ function FacetGroup({
   // otherCount: its "any value" row is then exactly the listed values plus the overflow.
   const own = spec.presence ? withPresence(without, queryField, base.lang) : without;
   // The locked scope is query language; SQL mode is never offered together with one.
-  const scopedQ = scope && base.lang !== 'sql' ? andQuery(scope, own) : own;
-  const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
+  const scoped = scope && base.lang !== 'sql' ? scopedQuery(scope, own) : null;
+  // A reader query that does not parse is never combined with the locked scope (scopedQuery), so nothing is counted.
+  const scopedQ = scoped ? (scoped.q ?? '') : own;
+  // Record pairs: each id's top types, from one target tuple (the server pairs an id only with its own type).
+  const by = recordPairs(base.lang) ? 'target.type' : undefined;
+  const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang, by), enabled: open && !scoped?.problem });
   // Values from a previous search (a placeholder while this one loads) are never shown as this search's.
   const loadingValues = (facet.isPending || facet.isPlaceholderData) && !facet.isError;
-  const allValues = facet.isPlaceholderData ? [] : (facet.data?.values ?? []);
+  // A blocked count fetched nothing: values cached under its blank key are another search's.
+  const fetched = facet.isPlaceholderData || scoped?.problem ? [] : (facet.data?.values ?? []);
+  const allValues = by ? recordPairValues(fetched) : fetched;
   const values = spec.presence ? allValues.filter((v) => v.value !== '') : allValues;
-  const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facet.isPlaceholderData ? 0 : (facet.data?.otherCount ?? 0)) : 0;
+  const presentCount = spec.presence
+    ? values.reduce((n, v) => n + v.count, 0) + (facet.isPlaceholderData || scoped?.problem ? 0 : (facet.data?.otherCount ?? 0))
+    : 0;
   const max = Math.max(...values.map((v) => v.count), presentCount, 1);
   // Counts still belong to the previous query (keepPreviousData) until this group's own response arrives.
   const updating = facet.isPlaceholderData || (facet.isFetching && !facet.isPending);

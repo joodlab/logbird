@@ -215,7 +215,7 @@ export const api = {
       request(z.array(eventSchema), 'GET', pathFor(routes.events.live.path, { projectId }), { query: { ...query }, signal }),
     histogram: (projectId: string, query: RangeParams & { interval?: number }, signal?: AbortSignal) =>
       request(histogramResponseSchema, 'GET', pathFor(routes.events.histogram.path, { projectId }), { query: { ...query }, signal }),
-    facets: (projectId: string, query: RangeParams & { field: string; limit?: number }, signal?: AbortSignal) =>
+    facets: (projectId: string, query: RangeParams & { field: string; limit?: number; by?: string }, signal?: AbortSignal) =>
       request(facetResponseSchema, 'GET', pathFor(routes.events.facets.path, { projectId }), { query: { ...query }, signal }),
     /** Every event sharing `context.operationId`, oldest first. */
     operation: (projectId: string, operationId: string, signal?: AbortSignal) =>
