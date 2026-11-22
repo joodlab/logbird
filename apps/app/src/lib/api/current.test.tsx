@@ -104,8 +104,72 @@ function initializerAt(src: string, start: number): string {
   return src.slice(start);
 }
 
-/** A `placeholderData` property in an options object: `placeholderData: …` or the shorthand `placeholderData`. */
-const SETS_PLACEHOLDER = /\bplaceholderData\s*(?::|,|\})/;
+/**
+ * The source with comments, string contents, template text and regex literals blanked to spaces (line breaks and every
+ * offset kept), so brackets, `)` and words inside them never count as code. Template `${…}` expressions stay code.
+ */
+export function scrub(src: string): string {
+  const blank = (s: string) => s.replace(/[^\n]/g, ' ');
+  const templates: number[] = []; // brace depth at each open `${`
+  let out = '';
+  let depth = 0;
+  let prev = ''; // last significant character, to tell a regex literal from a division
+  let i = 0;
+  const skipQuoted = (from: number, isEnd: (j: number) => boolean) => {
+    let j = from;
+    while (j < src.length && !isEnd(j)) j += src[j] === '\\' ? 2 : 1;
+    return Math.min(j, src.length);
+  };
+  while (i < src.length) {
+    const c = src[i] as string;
+    const next = src[i + 1];
+    if (c === '/' && (next === '/' || next === '*')) {
+      const close = next === '/' ? src.indexOf('\n', i) : src.indexOf('*/', i + 2);
+      const end = close === -1 ? src.length : next === '/' ? close : close + 2;
+      out += blank(src.slice(i, end));
+      i = end;
+    } else if (c === "'" || c === '"') {
+      const end = skipQuoted(i + 1, (j) => src[j] === c || src[j] === '\n');
+      out += c + blank(src.slice(i + 1, end)) + (src[end] ?? '');
+      i = end + 1;
+      prev = c;
+    } else if (c === '`' || (c === '}' && templates.at(-1) === depth)) {
+      if (c === '}') templates.pop();
+      const end = skipQuoted(i + 1, (j) => src[j] === '`' || (src[j] === '$' && src[j + 1] === '{'));
+      out += c + blank(src.slice(i + 1, end));
+      if (src[end] === '$') {
+        out += '${';
+        templates.push(depth);
+        i = end + 2;
+        prev = '{';
+      } else {
+        out += src[end] ?? '';
+        i = end + 1;
+        prev = '`';
+      }
+    } else if (c === '/' && (prev === '' || '(,=:[!&|?{};'.includes(prev))) {
+      let inClass = false;
+      const end = skipQuoted(i + 1, (j) => {
+        if (src[j] === '[') inClass = true;
+        else if (src[j] === ']') inClass = false;
+        return src[j] === '\n' || (src[j] === '/' && !inClass);
+      });
+      out += `/${blank(src.slice(i + 1, end))}${src[end] ?? ''}`;
+      i = end + 1;
+      prev = '/';
+    } else {
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+      out += c;
+      if (!/\s/.test(c)) prev = c;
+      i++;
+    }
+  }
+  return out;
+}
+
+/** A `placeholderData` property in an options object (`placeholderData: …` or the shorthand), not a value named so. */
+const SETS_PLACEHOLDER = /[{,]\s*placeholderData\s*[:,}]/;
 
 /** Index just past the `)` that closes the call opening at `open` (an index of `(`), or -1. */
 function callEnd(text: string, open: number): number {
@@ -118,8 +182,10 @@ function callEnd(text: string, open: number): number {
 }
 /** `q(...)` and nothing after it (not `q(...).queryKey`). */
 function isWholeCall(init: string, q: string): boolean {
-  if (!init.startsWith(`${q}(`)) return false;
-  return init.slice(callEnd(init, q.length)).trim() === '';
+  const open = new RegExp(String.raw`^${q}\s*\(`).exec(init);
+  if (!open) return false;
+  const end = callEnd(init, open[0].length - 1);
+  return end > 0 && init.slice(end).trim() === '';
 }
 /** An object literal with `...q(...)` as one of its own (top-level) properties: the spread call ends at `,` or `}`. */
 function spreadsCall(init: string, q: string): boolean {
@@ -129,15 +195,21 @@ function spreadsCall(init: string, q: string): boolean {
     const c = init[i];
     if (c === '(' || c === '{' || c === '[') depth++;
     else if (c === ')' || c === '}' || c === ']') depth--;
-    else if (depth === 1 && init.startsWith(`...${q}(`, i)) {
-      const end = callEnd(init, i + 3 + q.length);
+    else if (depth === 1 && c === '.') {
+      // `...q(…)`, with any spacing or line breaks after the dots and before the parenthesis.
+      const spread = new RegExp(String.raw`^\.\.\.\s*${q}\s*\(`).exec(init.slice(i));
+      if (!spread) continue;
+      const end = callEnd(init, i + spread[0].length - 1);
       if (end > 0 && /^\s*[,}]/.test(init.slice(end))) return true;
     }
   }
   return false;
 }
 
-export function unguardedReads(src: string, queries: readonly string[]): string[] {
+export function unguardedReads(original: string, queries: readonly string[]): string[] {
+  // Match against code only; report the original lines (scrub keeps every offset).
+  const src = scrub(original);
+  const lines = original.split('\n');
   const declarations = [...src.matchAll(/(?:const|let)\s+(\{[^}]*\}|\w+)\s*=\s*/g)].map((m) => ({
     target: m[1] ?? '',
     init: initializerAt(src, (m.index ?? 0) + m[0].length),
@@ -161,7 +233,7 @@ export function unguardedReads(src: string, queries: readonly string[]): string[
     } else results.push(d.target);
   }
   src.split('\n').forEach((line, i) => {
-    for (const r of results) if (new RegExp(String.raw`\b${r}\.data\b`).test(line)) problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
+    for (const r of results) if (new RegExp(String.raw`\b${r}\.data\b`).test(line)) problems.push(`${r}.data on line ${i + 1}: ${lines[i]?.trim()}`);
   });
   return problems;
 }
@@ -241,6 +313,52 @@ describe('the guard catches direct reads', () => {
     ].join('\n');
     expect(unguardedReads(src, [])).toHaveLength(1);
   });
+  it('sees a spread through a comment or a line break after the dots', () => {
+    const commented = [
+      'const opts = { ...fieldsQuery(p, r) /* keep its cache policy */, enabled };',
+      'const result = useQuery(opts);',
+      'return result.data;',
+    ].join('\n');
+    expect(unguardedReads(commented, ['fieldsQuery'])).toHaveLength(1);
+    const broken = [
+      'const opts = {',
+      '  ...',
+      '    fieldsQuery(p, r),',
+      '  enabled,',
+      '};',
+      'const result = useQuery(opts);',
+      'return result.data;',
+    ].join('\n');
+    expect(unguardedReads(broken, ['fieldsQuery'])).toHaveLength(1);
+  });
+  it('ignores a parenthesis inside a quoted argument', () => {
+    const src = ["const opts = facetQuery(p, 'a)', range, q, 1);", 'const result = useQuery(opts);', 'return result.data;'].join('\n');
+    expect(unguardedReads(src, ['facetQuery'])).toHaveLength(1);
+  });
+  it('does not take a value named placeholderData for the property', () => {
+    const src = ['const project = useQuery({ ...projectQuery(p), initialData: placeholderData });', 'return project.data?.name;'].join('\n');
+    expect(unguardedReads(src, [])).toEqual([]);
+  });
+  // Source text under test holds template literals; `$` + `{` keeps the linter from reading them as this file's own.
+  const open = '${';
+  it('reads code only: strings and comments never count, template expressions do', () => {
+    const title = `const title = \`fields: ${open}list.data?.length}\`;`;
+    const src = [
+      '// const old = useQuery(fieldsQuery(p, r)); old.data',
+      'const list = useQuery(fieldsQuery(p, r));',
+      'const label = "list.data";',
+      title,
+    ].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual([`list.data on line 4: ${title}`]);
+  });
+  it('scrubs without moving anything', () => {
+    const src = `const a = 'x)'; // y(\nconst r = /[/]'/; const t = \`a${open}b('}')}c\`;`;
+    const out = scrub(src);
+    expect(out).toHaveLength(src.length);
+    expect(out.split('\n')).toHaveLength(2);
+    expect(out).not.toMatch(/x\)|y\(/);
+    expect(out).toContain("b(' ')");
+  });
   it('accepts reads through the helpers', () => {
     const src = [
       'const list = useInfiniteQuery(entityListQuery(p, k));',
@@ -261,8 +379,10 @@ describe('every consumer of a placeholder-enabled query reads it through current
   const root = join(import.meta.dirname, '..', '..');
   // Every file using a placeholder-enabled factory, or setting `placeholderData` on a query call itself.
   const files = sourceFiles(root).filter((file) => {
-    const src = readFileSync(file, 'utf8');
-    return queries.some((q) => src.includes(`${q}(`)) || /use(?:Infinite)?Query\([\s\S]*?\bplaceholderData\s*(?::|,|\})/.test(src);
+    const src = scrub(readFileSync(file, 'utf8'));
+    return (
+      queries.some((q) => new RegExp(String.raw`\b${q}\s*\(`).test(src)) || /use(?:Infinite)?Query\([\s\S]*?[{,]\s*placeholderData\s*[:,}]/.test(src)
+    );
   });
   it.each(files.map((f) => [relative(root, f).replaceAll('\\', '/'), f]))('%s', (_name, file) => {
     expect(unguardedReads(readFileSync(file, 'utf8'), queries)).toEqual([]);
