@@ -200,12 +200,15 @@ public class ResilienceTests
     }
 
     [Fact]
-    public void Trails_require_a_filter_and_reject_wildcard_values()
+    public void Trails_require_a_filter_and_match_a_star_literally()
     {
         Assert.Throws<ArgumentException>(() => EventSearch.ForTrail());
         Assert.Throws<ArgumentException>(() => EventSearch.ForTrail(query: "  "));
-        Assert.Throws<ArgumentException>(() => EventSearch.ForTrail(tenantId: "acct_*"));
-        Assert.Throws<ArgumentException>(() => EventSearch.ForTrail(targetId: "*"));
+
+        // A star in a selector is escaped, so it is matched as a character and never widens the trail to a prefix.
+        var bs = '\\';
+        Assert.Equal("tenant:\"acct_" + bs + "*\"", EventSearch.ForTrail(tenantId: "acct_*").Query);
+        Assert.Equal("target:\"" + bs + "*\"", EventSearch.ForTrail(targetId: "*").Query);
         Assert.Equal("(action:invoice.*)", EventSearch.ForTrail(query: "action:invoice.*").Query);
     }
 
