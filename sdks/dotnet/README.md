@@ -107,8 +107,10 @@ var options = new LogbirdOptions
   It never throws. Without a generic host (console apps, .NET Framework services), call
   `client.Flush(TimeSpan.FromSeconds(10))` or `Dispose()` before the process exits. Both run on the thread pool and
   cannot deadlock on a UI or ASP.NET synchronization context.
-- Disposing sends what is queued, waiting at most `ShutdownTimeout` (10 seconds). Events still unsent afterwards go
-  to `OnDrop` with `DropReason.Shutdown`.
+- Disposing sends what is queued, waiting at most `ShutdownTimeout` (10 seconds). Events still unsent afterwards,
+  including a batch whose request has not returned, go to `OnDrop` once each with `DropReason.Shutdown`. A late
+  response is then ignored. If that event did reach the server, replaying it from `OnDrop` is still safe, because
+  its id is the same.
 
 The queue lives in memory, so a crash loses events that were not yet sent. If an event must survive a crash, save
 it in your database in the same transaction as the change (an outbox), keep its id (`LogbirdClient.NewEventId()`),

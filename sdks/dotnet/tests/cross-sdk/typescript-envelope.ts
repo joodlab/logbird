@@ -50,12 +50,17 @@ client.track({
   metadata: { plan: 'pro', seats: 3, ratio: 1.5, nested: { ok: true, none: null } },
   schemaVersion: '1',
 });
+// The minimal envelope: the TypeScript SDK always adds empty context and metadata objects, and the server
+// fingerprints the parsed input, so the .NET SDK must send the same shape for a replay to match.
+client.track({ id: '0193f2b6-6c00-7abc-8def-0123456789ac', action: 'session.started', occurredAt: '2026-11-22T08:00:01.000Z' });
 await client.shutdown();
 globalThis.fetch = realFetch;
 
-const event = `${JSON.stringify(JSON.parse(body).events[0])}\n`;
-// Re-serializing the parsed event keeps key order and escapes, matching what the SDK sent.
-if (!body.includes(event.trim())) throw new Error('Unexpected TypeScript SDK body shape');
+const events: unknown[] = JSON.parse(body).events;
+// Re-serializing each parsed event keeps key order and escapes, matching what the SDK sent.
+const lines = events.map((event) => JSON.stringify(event));
+if (events.length !== 2 || !lines.every((line) => body.includes(line))) throw new Error('Unexpected TypeScript SDK body shape');
+const event = `${lines.join('\n')}\n`;
 if (process.argv.includes('--check')) {
   if (readFileSync(output, 'utf8') !== event) throw new Error(`${output} is stale: run this script without --check`);
   console.log('typescript-envelope.golden.txt matches the TypeScript SDK');

@@ -52,15 +52,22 @@ try {
         .filter(Boolean)
         .map((line) => line.split('=', 2) as [string, string]),
     );
-    const org = await prisma.organization.findUniqueOrThrow({ where: { id: values.LOGBIRD_IT_ORG_ID }, include: { projects: true } });
-    // Guard rail: only ever delete a workspace this script created.
-    if (!org.slug.startsWith(SLUG_PREFIX)) throw new Error(`refusing to delete workspace ${org.slug}`);
+    const org = await prisma.organization.findUniqueOrThrow({
+      where: { id: values.LOGBIRD_IT_ORG_ID },
+      include: { projects: { select: { id: true } }, members: { select: { id: true } } },
+    });
+    // Guard rails: only ever touch the workspace and project this script created, and only while nothing else lives there.
+    if (!org.slug.startsWith(SLUG_PREFIX)) throw new Error(`refusing to touch workspace ${org.slug}`);
+    const projectId = values.LOGBIRD_IT_PROJECT_ID;
+    if (org.projects.length !== 1 || org.projects[0]?.id !== projectId || org.members.length !== 0) {
+      throw new Error(`refusing to delete workspace ${org.slug}: it holds more than the recorded fixture project`);
+    }
     const ch = createClickHouseClient();
-    for (const project of org.projects) await withProjectLock(project.id, () => purgeProject(ch, project.id));
+    await withProjectLock(projectId, () => purgeProject(ch, projectId));
     await ch.close();
     await prisma.organization.delete({ where: { id: org.id } });
     rmSync(envFile);
-    console.log(`deleted fictional workspace ${org.slug} and ${org.projects.length} project(s)`);
+    console.log(`deleted fictional workspace ${org.slug} and its project ${projectId}`);
   }
 } finally {
   await prisma.$disconnect();

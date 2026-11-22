@@ -88,9 +88,24 @@ internal sealed class BatchSender
 
     public async Task<SendResult> SendAsync(QueuedEvent[] batch, CancellationToken stop)
     {
+        var state = new State(batch);
+        try
+        {
+            return await SendCoreAsync(state, stop).ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            // Never lose settlement already recorded: only still-pending events go back to the queue.
+            return state.Fail(new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name, e));
+        }
+    }
+
+    private async Task<SendResult> SendCoreAsync(State state, CancellationToken stop)
+    {
+        var batch = state.Batch;
+
         // Monotonic: a wall-clock step (NTP, suspend) must not shorten or extend the cap.
         var deadline = _elapsed() + MaxSendTime;
-        var state = new State(batch);
         var attempt = Enumerable.Range(0, batch.Length).ToArray();
         var body = EventJson.BuildBatchBody(batch, attempt);
         var retries = 0;
@@ -230,7 +245,11 @@ internal sealed class BatchSender
                 {
                     foreach (var index in state.PendingIndices())
                     {
-                        state.Reject(index);
+                        if (!state.TryReject(index))
+                        {
+                            continue;
+                        }
+
                         _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture));
                     }
 
@@ -299,15 +318,21 @@ internal sealed class BatchSender
                 continue;
             }
 
-            if (wire < 0 || wire >= attempt.Length || state.IsSettled(attempt[wire]))
+            if (wire < 0 || wire >= attempt.Length)
             {
                 continue;
             }
 
-            var index = attempt[(int)wire];
+            // Read everything that can throw before settling, so a malformed reason never settles an unreported event.
             var reason = reasonElement.GetString();
-            state.Reject(index);
-            codes.Add(rejection.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String ? code.GetString()! : "rejected");
+            var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? codeElement.GetString()! : "rejected";
+            var index = attempt[(int)wire];
+            if (!state.TryReject(index))
+            {
+                continue;
+            }
+
+            codes.Add(code);
             _drop(state.Batch[index], DropReason.Rejected, reason);
         }
 
@@ -482,25 +507,22 @@ internal sealed class BatchSender
         return true;
     }
 
+    /// <summary>Per-batch view over the events' own atomic states, so shutdown can take ownership of an event at any time.</summary>
     private sealed class State(QueuedEvent[] batch)
     {
-        private const byte Pending = 0;
-        private const byte Delivered = 1;
-        private const byte Settled = 2;
-        private readonly byte[] _states = new byte[batch.Length];
         private int _delivered;
 
         public QueuedEvent[] Batch { get; } = batch;
 
-        public bool IsSettled(long index) => _states[index] != Pending;
+        public bool IsSettled(long index) => !Batch[index].IsPending;
 
-        public void Reject(int index) => _states[index] = Settled;
+        /// <summary>Settles an event as rejected or dropped. False when it was already settled or abandoned by shutdown.</summary>
+        public bool TryReject(int index) => Batch[index].TrySettle();
 
         public void Deliver(int index)
         {
-            if (_states[index] == Pending)
+            if (Batch[index].TrySettle())
             {
-                _states[index] = Delivered;
                 _delivered++;
             }
         }
@@ -516,9 +538,9 @@ internal sealed class BatchSender
         public List<int> PendingIndices()
         {
             var pending = new List<int>();
-            for (var i = 0; i < _states.Length; i++)
+            for (var i = 0; i < Batch.Length; i++)
             {
-                if (_states[i] == Pending)
+                if (Batch[i].IsPending)
                 {
                     pending.Add(i);
                 }
@@ -529,9 +551,6 @@ internal sealed class BatchSender
 
         public SendResult Complete() => new([], null, _delivered);
 
-        public SendResult Fail(Exception failure)
-        {
-            return new SendResult(PendingIndices().ConvertAll(i => Batch[i]), failure, _delivered);
-        }
+        public SendResult Fail(Exception failure) => new(PendingIndices().ConvertAll(i => Batch[i]), failure, _delivered);
     }
 }

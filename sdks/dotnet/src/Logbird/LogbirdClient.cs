@@ -72,7 +72,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private readonly HttpClient? _ownedHttp;
     private readonly SemaphoreSlim _signal = new(0);
     private readonly CancellationTokenSource _stop = new();
-    private readonly List<(long Target, TaskCompletionSource<bool> Completion)> _waiters = [];
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly Task? _loop;
 
@@ -80,7 +79,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private int _disposed;
     private volatile bool _closing;
     private volatile bool _flushRequested;
-    private volatile int _inFlight;
     private long _firstQueuedAtTicks;
     private long _retryAtTicks;
     private int _consecutiveFailures;
@@ -143,7 +141,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         Interlocked.Read(ref _dropped),
         Interlocked.Read(ref _filtered),
         Interlocked.Read(ref _failedSends),
-        (_queue?.Count ?? 0) + _inFlight);
+        _queue?.Outstanding ?? 0);
 
     /// <summary>
     /// Creates a new event id (a UUIDv7, sortable by time). Use it when you store an event before sending it, so a
@@ -221,7 +219,14 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             var eventId = id;
             var eventJson = json;
             var eventAction = action;
-            var overflow = _queue!.Enqueue(sequence => new QueuedEvent(eventJson, eventId, eventAction, sequence), out var added, out var count);
+            var overflow = _queue!.Enqueue(sequence => new QueuedEvent(eventJson, eventId, eventAction, sequence), out var added, out var count, out var shutDown);
+            if (shutDown)
+            {
+                Drop(DropReason.Shutdown, eventId, eventAction, eventJson, "The client is shut down.");
+                Report(new ObjectDisposedException(nameof(LogbirdClient), "Logbird is shut down; the event was not recorded."));
+                return;
+            }
+
             if (added is not null)
             {
                 Interlocked.Increment(ref _tracked);
@@ -238,16 +243,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 }
             }
 
-            if (added is not null && _loop!.IsCompleted)
-            {
-                // Shutdown finished between the closing check and the enqueue: report instead of stranding the event.
-                foreach (var item in _queue.Clear())
-                {
-                    LogbirdMetrics.QueueLength.Add(-1);
-                    Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The client is shut down.");
-                }
-            }
-
             if (overflow is not null)
             {
                 if (added is not null)
@@ -255,6 +250,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                     LogbirdMetrics.QueueLength.Add(-1);
                 }
 
+                overflow.TrySettle();
                 Drop(DropReason.QueueFull, overflow.Id, overflow.Action, overflow.Json, "The queue is full.");
                 LogQueueFull();
             }
@@ -278,30 +274,25 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             return true;
         }
 
+        // From Logbird's own delivery flow (OnDrop, OnError, a logger or HTTP handler), waiting would wait on itself.
+        if (InsideLogbird.Value)
+        {
+            return false;
+        }
+
         try
         {
-            if (Volatile.Read(ref _disposed) == 1 && _loop!.IsCompleted)
-            {
-                return _queue.Count == 0;
-            }
-
-            var target = _queue.LastSequence;
-            if (_inFlight == 0 && _queue.Count == 0)
+            var completion = _queue.AddWaiter();
+            if (completion is null)
             {
                 return true;
-            }
-
-            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            lock (_waiters)
-            {
-                _waiters.Add((target, completion));
             }
 
             _flushRequested = true;
             Signal();
             if (_loop!.IsCompleted)
             {
-                CompleteWaiters(_ => true, _queue.Count == 0);
+                _queue.CompleteAllWaiters(_queue.Outstanding == 0);
             }
 
             using (cancellationToken.Register(() => completion.TrySetResult(false)))
@@ -317,8 +308,10 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     }
 
     /// <summary>
-    /// Stops accepting events and sends what is queued, waiting at most <see cref="LogbirdOptions.ShutdownTimeout"/>.
-    /// Events still queued afterwards are reported through <see cref="LogbirdOptions.OnDrop"/>. Never throws.
+    /// Stops accepting events and sends what is queued, waiting at most <see cref="LogbirdOptions.ShutdownTimeout"/>
+    /// (plus up to two seconds for a cancelled request to unwind). Events still unsent afterwards, including a batch
+    /// whose request has not returned, are reported once each through <see cref="LogbirdOptions.OnDrop"/>; a late
+    /// response is then ignored. Never throws.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -340,20 +333,26 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                     await Task.WhenAny(_loop, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
                 }
 
-                var left = _queue!.Clear();
-                foreach (var item in left)
+                // Shutdown takes ownership of everything unsent, in flight included; each event is reported exactly once.
+                var abandoned = 0;
+                foreach (var item in _queue!.Abandon())
                 {
+                    if (!item.TryAbandon())
+                    {
+                        continue;
+                    }
+
+                    abandoned++;
                     LogbirdMetrics.QueueLength.Add(-1);
                     Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
                 }
 
-                if (left.Count > 0)
+                _queue.CompleteAllWaiters(abandoned == 0);
+                if (abandoned > 0)
                 {
-                    LogShutdownDropped(_logger, left.Count);
-                    Report(new LogbirdDeliveryException($"{left.Count} audit event(s) were not sent before shutdown."));
+                    SafeLog(() => LogShutdownDropped(_logger, abandoned));
+                    Report(new LogbirdDeliveryException($"{abandoned} audit event(s) were not sent before shutdown."), log: false);
                 }
-
-                CompleteWaiters(_ => true, false);
             }
         }
         catch (Exception e)
@@ -371,7 +370,20 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     /// <see cref="LogbirdOptions.ShutdownTimeout"/> plus a few seconds. Safe on threads with a synchronization context
     /// (WinForms, WPF, classic ASP.NET): the work runs on the thread pool, so it cannot deadlock.
     /// </summary>
-    public void Dispose() => Task.Run(() => DisposeAsync().AsTask()).GetAwaiter().GetResult();
+    public void Dispose()
+    {
+        try
+        {
+            var task = Task.Run(() => DisposeAsync().AsTask());
+            task.Wait(_shutdownTimeout + TimeSpan.FromSeconds(5));
+        }
+        catch (Exception e)
+        {
+            Report(e);
+        }
+    }
+
+    internal static bool IsInsideDelivery => InsideLogbird.Value;
 
     private static HttpClient CreateHttpClient()
     {
@@ -456,11 +468,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 // Defensive: the loop must survive anything, or capture would silently stop.
                 Report(e);
-                await Task.Delay(_flushInterval).ConfigureAwait(false);
+                _queue!.CompleteAllWaiters(false);
+                await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
             }
         }
 
-        CompleteWaiters(_ => true, _queue!.Count == 0);
+        _queue!.CompleteAllWaiters(_queue.Outstanding == 0);
     }
 
     /// <summary>Sends until the queue is empty (or holds less than a full batch). Returns false when a batch failed after its retries.</summary>
@@ -478,15 +491,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 break;
             }
 
-            _inFlight = 1;
             var batch = _queue!.TakeBatch(_batchSize, MaxBatchBytes);
             if (batch.Length == 0)
             {
-                _inFlight = 0;
                 break;
             }
 
-            _inFlight = batch.Length;
             LogbirdMetrics.QueueLength.Add(-batch.Length);
             SendResult result;
             try
@@ -495,23 +505,32 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             }
             catch (Exception e)
             {
-                // Defensive: never lose a batch to an unexpected error; put all of it back.
-                result = new SendResult([.. batch], new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name, e), 0);
+                // Defensive (SendAsync catches everything): requeue only events nobody has settled.
+                result = new SendResult([.. batch.Where(item => item.IsPending)], new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name, e), 0);
             }
+
             if (result.Delivered > 0)
             {
                 Interlocked.Add(ref _delivered, result.Delivered);
                 LogbirdMetrics.Delivered.Add(result.Delivered);
             }
 
+            var overflow = _queue.FinishBatch(result.Failure is null ? [] : result.Unsettled);
+            if (overflow is null)
+            {
+                // Shutdown took ownership of this batch and reported it; ignore the late result.
+                return false;
+            }
+
             if (result.Failure is { } failure)
             {
-                var overflow = _queue.RequeueFront(result.Unsettled);
                 LogbirdMetrics.QueueLength.Add(result.Unsettled.Count - overflow.Count);
-                _inFlight = 0;
                 foreach (var item in overflow)
                 {
-                    Drop(DropReason.QueueFull, item.Id, item.Action, item.Json, "The queue is full.");
+                    if (item.TrySettle())
+                    {
+                        Drop(DropReason.QueueFull, item.Id, item.Action, item.Json, "The queue is full.");
+                    }
                 }
 
                 Interlocked.Increment(ref _failedSends);
@@ -526,22 +545,21 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 var now = _clock.Elapsed.Ticks;
                 Interlocked.Exchange(ref _retryAtTicks, now + backoff.Ticks);
                 Interlocked.Exchange(ref _firstQueuedAtTicks, now);
-                LogDeliveryFailed(_logger, result.Unsettled.Count, backoff.TotalSeconds, failure);
+
+                // Settle the flush waiters before any diagnostics, so a throwing logger or callback cannot hold them.
+                _queue.CompleteAllWaiters(false);
+                SafeLog(() => LogDeliveryFailed(_logger, result.Unsettled.Count, backoff.TotalSeconds, failure));
                 Report(failure, log: false);
-                CompleteWaiters(_ => true, false);
                 return false;
             }
 
-            _inFlight = 0;
             _consecutiveFailures = 0;
             Interlocked.Exchange(ref _retryAtTicks, 0);
-            var head = _queue.HeadSequence;
-            CompleteWaiters(target => target < head, true);
+            _queue.CompleteSatisfiedWaiters();
         }
 
-        var remaining = _queue!.HeadSequence;
-        CompleteWaiters(target => target < remaining, true);
-        if (remaining == long.MaxValue)
+        _queue!.CompleteSatisfiedWaiters();
+        if (_queue.Outstanding == 0)
         {
             Interlocked.Exchange(ref _firstQueuedAtTicks, _clock.Elapsed.Ticks);
         }
@@ -549,27 +567,15 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         return true;
     }
 
-    private void CompleteWaiters(Func<long, bool> predicate, bool result)
+    private static void SafeLog(Action log)
     {
-        List<TaskCompletionSource<bool>>? done = null;
-        lock (_waiters)
+        try
         {
-            for (var i = _waiters.Count - 1; i >= 0; i--)
-            {
-                if (predicate(_waiters[i].Target))
-                {
-                    (done ??= []).Add(_waiters[i].Completion);
-                    _waiters.RemoveAt(i);
-                }
-            }
+            log();
         }
-
-        if (done is not null)
+        catch
         {
-            foreach (var completion in done)
-            {
-                completion.TrySetResult(result);
-            }
+            // Logging must never break delivery.
         }
     }
 

@@ -13,12 +13,14 @@ namespace Logbird.Tests;
 /// </summary>
 public class CrossSdkTests
 {
+    private static readonly char[] LineFeed = [(char)10];
+
     private static string Chars(params int[] codes) => new(codes.Select(c => (char)c).ToArray());
 
     [Fact]
     public async Task The_wire_json_matches_the_typescript_sdk_byte_for_byte()
     {
-        var expected = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "typescript-envelope.golden.txt"), Encoding.UTF8).TrimEnd('\n');
+        var expected = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "typescript-envelope.golden.txt"), Encoding.UTF8).Split(LineFeed, StringSplitOptions.RemoveEmptyEntries);
         var server = new FakeServer();
         var options = new LogbirdOptions { Endpoint = new Uri("https://audit.example.invalid"), IngestKey = "lb_ingest_fictional" };
         options.Redaction.Enabled = false; // The TypeScript SDK redacts only when asked.
@@ -57,7 +59,12 @@ public class CrossSdkTests
             Metadata = { ["plan"] = "pro", ["seats"] = 3, ["ratio"] = 1.5, ["nested"] = new System.Text.Json.Nodes.JsonObject { ["ok"] = true, ["none"] = null } },
             SchemaVersion = "1",
         });
+        client.Track(new AuditEvent("session.started")
+        {
+            Id = "0193f2b6-6c00-7abc-8def-0123456789ac",
+            OccurredAt = new DateTimeOffset(2026, 11, 22, 8, 0, 1, TimeSpan.Zero),
+        });
         Assert.True(await client.FlushAsync());
-        Assert.Equal(expected, server.Requests.Single().RawEvents.Single());
+        Assert.Equal(expected, server.Requests.Single().RawEvents);
     }
 }

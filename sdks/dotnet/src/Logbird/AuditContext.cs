@@ -21,8 +21,5 @@ public sealed class AuditContext
     /// <summary>The client user agent.</summary>
     public string? UserAgent { get; set; }
 
-    internal bool IsEmpty
-        => OperationId is null && ParentEventId is null && RequestId is null && TraceId is null && Ip is null && UserAgent is null;
-
     internal AuditContext Clone() => (AuditContext)MemberwiseClone();
 }

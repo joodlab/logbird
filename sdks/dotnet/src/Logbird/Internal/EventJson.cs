@@ -115,22 +115,21 @@ internal static class EventJson
             json["changes"] = changes;
         }
 
-        if (e.ContextOrNull is { IsEmpty: false } context)
+        // Like the TypeScript SDK, context and metadata are always present (empty when unset). The server fingerprints
+        // the parsed input, so the same event replayed from either SDK must have the same shape.
+        var contextNode = new JsonObject();
+        if (e.ContextOrNull is { } context)
         {
-            var node = new JsonObject();
-            Add(node, "operationId", context.OperationId);
-            Add(node, "parentEventId", context.ParentEventId);
-            Add(node, "requestId", context.RequestId);
-            Add(node, "traceId", context.TraceId);
-            Add(node, "ip", context.Ip);
-            Add(node, "userAgent", context.UserAgent);
-            json["context"] = node;
+            Add(contextNode, "operationId", context.OperationId);
+            Add(contextNode, "parentEventId", context.ParentEventId);
+            Add(contextNode, "requestId", context.RequestId);
+            Add(contextNode, "traceId", context.TraceId);
+            Add(contextNode, "ip", context.Ip);
+            Add(contextNode, "userAgent", context.UserAgent);
         }
 
-        if (e.MetadataOrNull is { Count: > 0 } metadata)
-        {
-            json["metadata"] = metadata.DeepClone();
-        }
+        json["context"] = contextNode;
+        json["metadata"] = e.MetadataOrNull?.DeepClone() ?? new JsonObject();
 
         Add(json, "schemaVersion", e.SchemaVersion);
         return json;

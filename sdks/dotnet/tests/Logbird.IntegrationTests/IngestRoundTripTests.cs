@@ -235,3 +235,34 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         Assert.Equal(total, stored);
     }
 }
+
+public class CrossSdkReplayTests(ITestOutputHelper output)
+{
+    /// <summary>
+    /// An event first sent by the TypeScript SDK (tests/cross-sdk/send-typescript-event.ts) and replayed from C# with the
+    /// same id, action and timestamp must be an exact retry, not a duplicate_id_conflict.
+    /// </summary>
+    [LiveFact(requires: "LOGBIRD_IT_TS_EVENT")]
+    public async Task Replaying_a_typescript_event_from_csharp_is_an_exact_retry()
+    {
+        var id = Environment.GetEnvironmentVariable("LOGBIRD_IT_TS_EVENT_ID")!;
+        var at = DateTimeOffset.Parse(Environment.GetEnvironmentVariable("LOGBIRD_IT_TS_EVENT_AT")!, System.Globalization.CultureInfo.InvariantCulture);
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using (var client = new LogbirdClient(new LogbirdOptions
+        {
+            Endpoint = new Uri(LiveServer.Endpoint!),
+            IngestKey = LiveServer.IngestKey,
+            OnDrop = drops.Enqueue,
+        }))
+        {
+            client.Track(new AuditEvent("cross.sdk.replayed") { Id = id, OccurredAt = at });
+            Assert.True(await client.FlushAsync());
+            output.WriteLine($"replayed {id} from C#: {client.Stats}");
+            Assert.Equal(1, client.Stats.Delivered);
+        }
+
+        Assert.Empty(drops);
+        using var reader = LiveServer.Reader();
+        Assert.Equal(1, await LiveServer.CountAsync(reader, $"id:\"{id}\"", 1));
+    }
+}
