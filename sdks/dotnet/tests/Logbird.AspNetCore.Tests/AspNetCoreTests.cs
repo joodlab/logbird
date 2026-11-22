@@ -4,7 +4,10 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Security.Claims;
+using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 using Logbird.AspNetCore;
 using Logbird.Tests;
@@ -233,6 +236,72 @@ public class AspNetCoreTests
     }
 
     [Fact]
+    public async Task A_prepared_event_too_deep_to_copy_is_reported_and_the_callers_instance_is_left_alone()
+    {
+        JsonNode tree = new JsonObject { ["leaf"] = true };
+        for (var i = 0; i < 100_000; i++)
+        {
+            tree = new JsonObject { ["n"] = tree };
+        }
+
+        var prepared = new AuditEvent("deep") { Metadata = { ["tree"] = tree } };
+        var drops = new List<DropReason>();
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/deep", (IAuditLog audit) => Results.Text(audit.Record(prepared))),
+            options: o => o.OnDrop = d => { lock (drops) { drops.Add(d.Reason); } });
+        (await app.Http.PostAsync("/deep", null)).EnsureSuccessStatusCode();
+        await app.Client.FlushAsync();
+        Assert.Null(prepared.Id);
+        Assert.Null(prepared.Actor);
+        Assert.Null(prepared.Executor);
+        Assert.Empty(app.Server.Requests);
+        Assert.Equal(1, app.Client.Stats.Dropped);
+        // OnDrop runs on the client's background notifier.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            lock (drops)
+            {
+                if (drops.Count > 0)
+                {
+                    break;
+                }
+            }
+
+            await Task.Delay(20);
+        }
+
+        lock (drops)
+        {
+            Assert.Equal([DropReason.Invalid], drops);
+        }
+    }
+
+    [Fact]
+    public async Task Stopping_the_host_returns_when_the_hosts_budget_runs_out_even_if_the_server_hangs()
+    {
+        var server = new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task };
+        var client = new LogbirdClient(
+            new LogbirdOptions
+            {
+                Endpoint = new Uri("https://audit.example.invalid"),
+                IngestKey = "lb_ingest_fictional",
+                FlushInterval = TimeSpan.FromHours(1),
+                ShutdownTimeout = TimeSpan.FromSeconds(3),
+            },
+            new HttpClient(server));
+        client.Track(new AuditEvent("stuck.recorded"));
+        var shutdown = new LogbirdShutdown(client);
+        using var budget = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        var watch = Stopwatch.StartNew();
+        await shutdown.StopAsync(budget.Token);
+        // The host's 200 ms budget wins over the client's 3 s ShutdownTimeout; the client then finishes on its own.
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
+        await client.DisposeAsync();
+        Assert.Equal(1, client.Stats.Dropped);
+    }
+
+    [Fact]
     public async Task Stopping_the_host_sends_what_is_queued()
     {
         var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) =>
@@ -273,5 +342,24 @@ public class AspNetCoreTests
         Assert.Throws<ArgumentException>(() => new ServiceCollection().AddLogbird(missingKey.GetSection("Logbird")));
         var disabled = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Logbird:Enabled"] = "false" }).Build();
         new ServiceCollection().AddLogbird(disabled.GetSection("Logbird"));
+    }
+
+    [Theory]
+    [InlineData("Endpoint", "not a url lb_ingest_secret")]
+    [InlineData("Enabled", "lb_ingest_secret")]
+    [InlineData("BatchSize", "lb_ingest_secret")]
+    [InlineData("FlushInterval", "lb_ingest_secret")]
+    [InlineData("QueueFullBehavior", "lb_ingest_secret")]
+    public void A_malformed_setting_fails_at_startup_naming_the_setting_but_never_its_value(string key, string value)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Logbird:Endpoint"] = "https://audit.example.invalid",
+            ["Logbird:IngestKey"] = "lb_ingest_fictional",
+            ["Logbird:" + key] = value,
+        }).Build();
+        var error = Assert.Throws<ArgumentException>(() => new ServiceCollection().AddLogbird(configuration.GetSection("Logbird")));
+        Assert.Contains("'" + key + "'", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", error.ToString(), StringComparison.Ordinal);
     }
 }

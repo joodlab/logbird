@@ -108,7 +108,7 @@ public static class LogbirdServiceCollectionExtensions
         var options = new LogbirdOptions();
         if (section["Endpoint"] is { Length: > 0 } endpoint)
         {
-            options.Endpoint = new Uri(endpoint, UriKind.Absolute);
+            options.Endpoint = Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) ? uri : throw Invalid("Endpoint", "an absolute URL");
         }
 
         options.IngestKey = section["IngestKey"] ?? options.IngestKey;
@@ -124,7 +124,9 @@ public static class LogbirdServiceCollectionExtensions
         options.RequestTimeout = Time(section, "RequestTimeout") ?? options.RequestTimeout;
         if (section["QueueFullBehavior"] is { Length: > 0 } behavior)
         {
-            options.QueueFullBehavior = Enum.Parse<QueueFullBehavior>(behavior, ignoreCase: true);
+            options.QueueFullBehavior = Enum.TryParse<QueueFullBehavior>(behavior, ignoreCase: true, out var parsed)
+                ? parsed
+                : throw Invalid("QueueFullBehavior", "Block, DropNewest or DropOldest");
         }
 
         if (section["RedactKeys"] is { Length: > 0 } keys)
@@ -135,11 +137,20 @@ public static class LogbirdServiceCollectionExtensions
         return options;
     }
 
-    private static bool? Bool(IConfiguration section, string key) => section[key] is { Length: > 0 } value ? bool.Parse(value) : null;
+    private static bool? Bool(IConfiguration section, string key)
+        => section[key] is not { Length: > 0 } value ? null : bool.TryParse(value, out var result) ? result : throw Invalid(key, "true or false");
 
-    private static int? Int(IConfiguration section, string key) => section[key] is { Length: > 0 } value ? int.Parse(value, CultureInfo.InvariantCulture) : null;
+    private static int? Int(IConfiguration section, string key)
+        => section[key] is not { Length: > 0 } value ? null
+            : int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) ? result : throw Invalid(key, "a whole number");
 
-    private static TimeSpan? Time(IConfiguration section, string key) => section[key] is { Length: > 0 } value ? TimeSpan.Parse(value, CultureInfo.InvariantCulture) : null;
+    private static TimeSpan? Time(IConfiguration section, string key)
+        => section[key] is not { Length: > 0 } value ? null
+            : TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out var result) ? result : throw Invalid(key, "a time span such as 00:00:05");
+
+    // Names the setting but never echoes its value: a misplaced key or URL with credentials must not reach startup logs.
+    private static ArgumentException Invalid(string key, string expected)
+        => new($"Logbird configuration: '{key}' must be {expected}. The value is not shown.");
 }
 
 /// <summary>Adds the Logbird request context to the pipeline.</summary>
@@ -183,8 +194,14 @@ internal sealed class LogbirdShutdown(LogbirdClient client) : IHostedService
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        // DisposeAsync is bounded by ShutdownTimeout and reports anything unsent through OnDrop; it never throws.
-        var dispose = client.DisposeAsync().AsTask();
-        await Task.WhenAny(dispose, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
+        // DisposeAsync is bounded by ShutdownTimeout and reports anything unsent through OnDrop; it never throws. If the
+        // host's own shutdown budget runs out first, the host moves on and the client still finishes within ShutdownTimeout.
+        try
+        {
+            await client.DisposeAsync().AsTask().WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 }

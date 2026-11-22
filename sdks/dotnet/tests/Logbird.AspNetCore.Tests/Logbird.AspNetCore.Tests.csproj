@@ -11,6 +11,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\Logbird.AspNetCore\Logbird.AspNetCore.csproj" />
     <Compile Include="..\Logbird.Tests\FakeServer.cs" Link="FakeServer.cs" />
+    <Compile Include="..\Logbird.IntegrationTests\LiveServer.cs" Link="LiveServer.cs" />
   </ItemGroup>
 
   <ItemGroup>

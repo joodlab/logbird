@@ -91,19 +91,29 @@ internal sealed partial class RequestAuditLog(ILogbirdClient client, IHttpContex
     }
 
     // The caller's instance is never changed: reusing it for another Record must not reuse its id.
-    public string Record(AuditEvent auditEvent) => auditEvent is null ? string.Empty : RecordOwned(Copy(auditEvent));
+    public string Record(AuditEvent auditEvent) => RecordPrepared(client, auditEvent, RecordOwned);
 
-    internal static AuditEvent Copy(AuditEvent auditEvent)
+    /// <summary>Records a copy of a prepared event; the caller's instance is never changed.</summary>
+    internal static string RecordPrepared(ILogbirdClient client, AuditEvent? auditEvent, Func<AuditEvent, string> recordOwned)
     {
+        if (auditEvent is null)
+        {
+            return string.Empty;
+        }
+
+        AuditEvent copy;
         try
         {
-            return auditEvent.Clone();
+            copy = auditEvent.Clone();
         }
         catch (InvalidOperationException)
         {
-            // Too deep to copy safely: the client drops it as invalid and reports it.
-            return auditEvent;
+            // Too deep to copy safely. The client checks it without changing it, drops it as invalid and reports it.
+            client.Track(auditEvent);
+            return auditEvent.Id ?? string.Empty;
         }
+
+        return recordOwned(copy);
     }
 
     private string RecordOwned(AuditEvent auditEvent)
@@ -237,7 +247,7 @@ internal sealed class JobAuditLog(ILogbirdClient client, AuditCarrier? carrier, 
         return RecordOwned(auditEvent);
     }
 
-    public string Record(AuditEvent auditEvent) => auditEvent is null ? string.Empty : RecordOwned(RequestAuditLog.Copy(auditEvent));
+    public string Record(AuditEvent auditEvent) => RequestAuditLog.RecordPrepared(client, auditEvent, RecordOwned);
 
     private string RecordOwned(AuditEvent auditEvent)
     {

@@ -33,7 +33,12 @@ app.MapPut("/invoices/{id}", (string id, IAuditLog audit) =>
 - **Background jobs**: capture `audit.Carrier(parentEventId)` when you enqueue work, store it in the job payload
   (`AuditCarrierJsonContext` serializes it for trimmed and AOT apps), and record from the worker with
   `factory.ForJob(carrier, jobId, attempt)`. The worker's events keep the user as actor and the request's operation.
-- **Shutdown**: a hosted service sends what is queued when the host stops, bounded by `ShutdownTimeout`.
+- **Shutdown**: a hosted service sends what is queued when the host stops, bounded by `ShutdownTimeout` (10 seconds
+  by default; keep it below the host's `HostOptions.ShutdownTimeout`, 30 seconds by default). Hosted services stop in
+  reverse order of registration, so call `AddLogbird` before registering hosted services that record events while they
+  stop. An event recorded after Logbird has stopped is not sent; it is reported through `OnDrop` as `Shutdown`.
+- **Configuration errors** fail at startup and name the setting, never its value. Call `AddLogbird` once; later calls
+  do not change the registered client.
 - **HTTP client**: Logbird sends through the named `HttpClient` "Logbird" from `IHttpClientFactory`, which never
   follows redirects.
 
