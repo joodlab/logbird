@@ -352,6 +352,38 @@ public class FinalCycleTests
     }
 
     [Fact]
+    public async Task A_later_503_that_marks_an_earlier_credited_entry_unresolved_credits_the_other_duplicate()
+    {
+        static HttpResponseMessage Pending(CapturedRequest request, int unresolvedIndex, string[] acceptedIds)
+        {
+            var ids = request.Ids;
+            var details = new
+            {
+                accepted = acceptedIds.Length,
+                ids = acceptedIds,
+                rejected = Array.Empty<object>(),
+                warnings = Array.Empty<object>(),
+                indices = new[] { unresolvedIndex },
+                eventIds = new[] { ids[unresolvedIndex] },
+            };
+            return FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new { error = new { code = "ingest_pending", details } }));
+        }
+
+        // First: one A accepted, B unresolved (index 0 is credited, the details are incomplete, the body is kept).
+        // Then: index 0 unresolved, [A, B] accepted, which accounts for the second A and B.
+        var server = new FakeServer()
+            .Then(request => Pending(request, 2, ["dup"]))
+            .Then(request => Pending(request, 0, ["dup", request.Ids[2]]));
+        await using var client = Client(Options(), server);
+        client.Track(new AuditEvent("first") { Id = "dup" });
+        client.Track(new AuditEvent("second") { Id = "dup" });
+        client.Track(new AuditEvent("third"));
+        Assert.True(await client.FlushAsync());
+        Assert.Equal(3, client.Stats.Delivered);
+        Assert.Equal(2, server.Requests.Count);
+    }
+
+    [Fact]
     public async Task Missing_and_non_protocol_rejection_codes_become_other()
     {
         var errors = new ConcurrentQueue<Exception>();
