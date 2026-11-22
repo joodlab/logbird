@@ -23,6 +23,7 @@ import {
 } from 'react';
 import { ActionName } from '@/components/action-name';
 import { JobHint, SupportMarker } from '@/components/impersonation';
+import { TimeColumnHeader } from '@/components/time-zone-control';
 import { Timestamp } from '@/components/timestamp';
 import { eventSentence } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
@@ -36,7 +37,7 @@ const helper = createColumnHelper<typeof features, AuditEvent>();
 const columnDefs = EVENT_COLUMNS.map((c) =>
   helper.display({
     id: c.id,
-    header: c.label,
+    header: c.id === 'time' ? () => <TimeColumnHeader /> : c.label,
     cell: (ctx) => c.render(ctx.row.original),
     enableHiding: !c.required,
   }),

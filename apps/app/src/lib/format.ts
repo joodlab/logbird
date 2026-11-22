@@ -1,3 +1,5 @@
+import { consoleTimeZone } from './time-zone';
+
 const numberFmt = new Intl.NumberFormat('en-US');
 const compactFmt = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
 const pctFmt = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 1 });
@@ -15,63 +17,77 @@ export function delta(current: number, previous: number): number | null {
 }
 
 /**
- * Every absolute time in the console goes through these formatters: one zone (the browser's, resolved once) and
- * 24-hour clocks. The zone is labelled by name, never by the instant's own offset, so a session that spans a DST
- * change does not show "GMT+2" on one screen and "GMT+1" on another; tooltips add the UTC instant.
+ * Every absolute time in the console goes through these formatters: one zone (the browser's, or UTC when the reader
+ * chose it; see `lib/time-zone.ts`) and 24-hour clocks. The zone is labelled by name, never by the instant's own
+ * offset, so a session that spans a DST change does not show "GMT+2" on one screen and "GMT+1" on another; tooltips
+ * add the UTC instant.
  */
-export const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-const dateFormat = (locale: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(locale, { ...options, timeZone: TIME_ZONE });
+const formatters = new Map<string, Intl.DateTimeFormat>();
+/** A formatter in the current console zone, created once per zone. */
+function inZone(key: string, locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const zone = consoleTimeZone();
+  const id = `${zone}|${key}`;
+  let f = formatters.get(id);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { ...options, timeZone: zone });
+    formatters.set(id, f);
+  }
+  return f;
+}
+const timeFmt = () => inZone('time', 'en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const msFmt = () => inZone('ms', 'en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false });
+const dayFmt = () => inZone('day', 'en-US', { month: 'short', day: 'numeric' });
+const dayYearFmt = () => inZone('dayYear', 'en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const shortTimeFmt = () => inZone('shortTime', 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+const fullFmt = () =>
+  inZone('full', 'en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+const dateOnlyFmt = () => inZone('dateOnly', 'en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+const dayKeyFmt = () => inZone('dayKey', 'en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' });
+const dayTimeFmt = () => inZone('dayTime', 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+const monthYearFmt = () => inZone('monthYear', 'en-US', { year: 'numeric', month: 'short' });
+const partsFmt = () =>
+  inZone('parts', 'en-US', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hourCycle: 'h23',
+  });
 
-const timeFmt = dateFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-const msFmt = dateFormat('en-GB', {
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  fractionalSecondDigits: 3,
-  hour12: false,
-});
-const dayFmt = dateFormat('en-US', { month: 'short', day: 'numeric' });
-const shortTimeFmt = dateFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-const fullFmt = dateFormat('en-US', {
-  weekday: 'short',
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false,
-});
-const dateOnlyFmt = dateFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-const dayKeyFmt = dateFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' });
-const dayTimeFmt = dateFormat('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+/** The zone every console time is shown in ("Europe/Berlin", or "UTC"). */
+export const displayTimeZone = (): string => consoleTimeZone();
 
 type Instant = string | number | Date;
 const at = (v: Instant) => (v instanceof Date ? v : new Date(v));
 /** "2026-11-04" in the console zone: compare calendar days without the runtime's default zone. */
-export const localDayKey = (v: Instant): string => dayKeyFmt.format(at(v));
+export const localDayKey = (v: Instant): string => dayKeyFmt().format(at(v));
 /** "14:32" */
-export const formatClock = (v: Instant): string => shortTimeFmt.format(at(v));
+export const formatClock = (v: Instant): string => shortTimeFmt().format(at(v));
 /** "Nov 4" */
-export const formatMonthDay = (v: Instant): string => dayFmt.format(at(v));
-const monthYearFmt = dateFormat('en-US', { year: 'numeric', month: 'short' });
+export const formatMonthDay = (v: Instant): string => dayFmt().format(at(v));
 /** "Nov 2026" */
-export const formatMonthYear = (v: Instant): string => monthYearFmt.format(at(v));
+export const formatMonthYear = (v: Instant): string => monthYearFmt().format(at(v));
 /** "Nov 4, 14:32" */
-export const formatDayTime = (v: Instant): string => dayTimeFmt.format(at(v));
+export const formatDayTime = (v: Instant): string => dayTimeFmt().format(at(v));
 /** Milliseconds to add to a UTC instant to get console-zone wall-clock time (DST-aware). */
-const partsFmt = dateFormat('en-US', {
-  year: 'numeric',
-  month: 'numeric',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: 'numeric',
-  second: 'numeric',
-  hourCycle: 'h23',
-});
 export function zoneOffsetMs(v: Instant): number {
   const d = at(v);
-  const parts = Object.fromEntries(partsFmt.formatToParts(d).map((p) => [p.type, p.value]));
+  const parts = Object.fromEntries(
+    partsFmt()
+      .formatToParts(d)
+      .map((p) => [p.type, p.value]),
+  );
   const wall = Date.UTC(
     Number(parts.year),
     Number(parts.month) - 1,
@@ -83,20 +99,38 @@ export function zoneOffsetMs(v: Instant): number {
   return wall - Math.floor(d.getTime() / 1000) * 1000;
 }
 
-export const formatTime = (iso: string): string => timeFmt.format(new Date(iso));
-export const formatTimeMs = (iso: string): string => msFmt.format(new Date(iso));
-export const formatDay = (iso: string): string => dayFmt.format(new Date(iso));
+export const formatTime = (iso: string): string => timeFmt().format(new Date(iso));
+export const formatTimeMs = (iso: string): string => msFmt().format(new Date(iso));
+export const formatDay = (iso: string): string => dayFmt().format(new Date(iso));
 /** "Wed, Nov 4, 2026, 14:32:10 Europe/Berlin" */
-export const formatFull = (iso: string): string => `${fullFmt.format(new Date(iso))} ${TIME_ZONE}`;
-export const formatDate = (iso: string): string => dateOnlyFmt.format(new Date(iso));
+export const formatFull = (iso: string): string => `${fullFmt().format(new Date(iso))} ${consoleTimeZone()}`;
+export const formatDate = (iso: string): string => dateOnlyFmt().format(new Date(iso));
+/** "Wed, Nov 4, 2026, 15:32:10 Europe/Berlin" in a given zone, whatever the console zone is. */
+export function formatInZone(iso: string, zone: string): string {
+  const f = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: zone,
+  });
+  return `${f.format(new Date(iso))} ${zone}`;
+}
 /** "2026-11-04 14:32:10.123 UTC" — the unambiguous instant, for tooltips and copying. */
 export const formatUtc = (iso: string): string => `${new Date(iso).toISOString().replace('T', ' ').replace('Z', '')} UTC`;
 
-/** "Nov 4 · 14:32:10" in tables; time only when it happened today. */
+/**
+ * Tables: "Nov 4, 14:32:10" for every row (year added outside the current year), so rows from today and earlier read
+ * the same way and compare directly with exports. The zone is named once, in the column header.
+ */
 export function formatTimestamp(iso: string, now = Date.now()): string {
   const d = new Date(iso);
-  if (localDayKey(d) === localDayKey(now)) return timeFmt.format(d);
-  return `${dayFmt.format(d)}, ${shortTimeFmt.format(d)}`;
+  const sameYear = localDayKey(d).slice(0, 4) === localDayKey(now).slice(0, 4);
+  return `${(sameYear ? dayFmt() : dayYearFmt()).format(d)}, ${timeFmt().format(d)}`;
 }
 
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto', style: 'short' });

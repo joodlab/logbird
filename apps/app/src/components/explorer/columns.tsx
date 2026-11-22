@@ -23,7 +23,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
   {
     id: 'time',
     label: 'Time',
-    width: 108,
+    width: 132,
     required: true,
     defaultVisible: true,
     render: (e) => <Timestamp className="whitespace-nowrap font-mono text-[12px] text-muted-foreground" iso={e.timestamp} />,

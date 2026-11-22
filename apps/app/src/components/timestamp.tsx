@@ -1,6 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { cn } from '@logbird/ui/lib/utils';
-import { formatDate, formatFull, formatRelative, formatTimeMs, formatTimestamp, formatUtc } from '@/lib/format';
+import { displayTimeZone, formatDate, formatFull, formatInZone, formatRelative, formatTimeMs, formatTimestamp, formatUtc } from '@/lib/format';
+import { BROWSER_ZONE } from '@/lib/time-zone';
 
 const FORMATS = {
   /** "14:32:10" today, "Nov 4, 14:32" otherwise. */
@@ -16,8 +17,8 @@ const FORMATS = {
 } as const;
 
 /**
- * Every timestamp in the console renders in the viewer's local time zone; hovering shows the full
- * local time, the UTC instant and how long ago it was, so times can be compared across a team.
+ * Every timestamp in the console renders in the console zone (the browser's, or UTC when chosen); hovering shows the
+ * full time with its zone, the UTC instant, the local time in UTC mode, and how long ago it was.
  */
 export function Timestamp({
   iso,
@@ -36,7 +37,9 @@ export function Timestamp({
       <TooltipTrigger render={<time className={cn('tabular-nums', className)} dateTime={iso} />}>{FORMATS[format](iso)}</TooltipTrigger>
       <TooltipContent className="flex-col items-start gap-0.5">
         <span>{formatFull(iso)}</span>
+        {/* Both zones, whichever the console shows: the UTC instant (as in exports) and, in UTC mode, the local time. */}
         <span className="font-mono text-[11px] opacity-70">{formatUtc(iso)}</span>
+        {displayTimeZone() === 'UTC' && BROWSER_ZONE !== 'UTC' ? <span className="opacity-70">{formatInZone(iso, BROWSER_ZONE)}</span> : null}
         <span className="opacity-70">{formatRelative(iso)}</span>
       </TooltipContent>
     </Tooltip>
