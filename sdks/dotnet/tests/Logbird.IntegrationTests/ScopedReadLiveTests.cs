@@ -15,6 +15,9 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
     private const string Ip = "203.0.113.7";
     private const string UserAgent = "Fictional/1.0";
 
+    /// <summary>The <c>actor_email</c> mask: a keyed hash, never the address (docs/scoped-read-access.md).</summary>
+    private const string MaskedEmail = "^masked:[0-9a-f]{24}$";
+
     [LiveFact]
     public async Task A_viewer_token_reads_only_its_scope_with_masks_on_every_route()
     {
@@ -79,7 +82,7 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
             Assert.Equal(Ip, stored.Event.Context.Ip);
             Assert.Equal(UserAgent, stored.Event.Context.UserAgent);
             Assert.Equal(email, stored.Event.Actor?.Email);
-            Assert.NotEqual(JsonValueKind.Null, stored.Payload.ValueKind);
+            Assert.Equal(JsonValueKind.Object, stored.Payload.ValueKind);
         }
 
         var token = await reader.MintViewerTokenAsync(
@@ -129,7 +132,7 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
             {
                 Assert.True(string.IsNullOrEmpty(Text(row, "context", "ip")), "export ip");
                 Assert.True(string.IsNullOrEmpty(Text(row, "context", "userAgent")), "export user agent");
-                Assert.StartsWith("masked:", Text(row, "actor", "email"), StringComparison.Ordinal);
+                Assert.Matches(MaskedEmail, Text(row, "actor", "email"));
             }
 
             Assert.DoesNotContain(Ip, Encoding.UTF8.GetString(file.ToArray()), StringComparison.Ordinal);
@@ -149,7 +152,7 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
     {
         Assert.True(string.IsNullOrEmpty(e.Context.Ip), "ip");
         Assert.True(string.IsNullOrEmpty(e.Context.UserAgent), "user agent");
-        Assert.StartsWith("masked:", e.Actor!.Email, StringComparison.Ordinal);
+        Assert.Matches(MaskedEmail, e.Actor!.Email);
     }
 
     private static JsonElement Parse(string line)

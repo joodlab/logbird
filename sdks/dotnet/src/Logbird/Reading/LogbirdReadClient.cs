@@ -315,8 +315,9 @@ public sealed class LogbirdReadClient : IDisposable
     /// <summary>The payload of a <c>lbv1.&lt;base64url payload&gt;.&lt;mac&gt;</c> token, or null when it has another shape.</summary>
     private static ViewerTokenPayloadWire? ReadTokenPayload(string token)
     {
+        // Exactly the server's shape: unpadded base64url throughout, and a MAC of 32 bytes (HMAC-SHA256, 43 characters).
         var parts = token.Split('.');
-        if (parts.Length != 3 || parts[0] != "lbv1" || parts[1].Length == 0 || parts[2].Length == 0)
+        if (parts.Length != 3 || parts[0] != "lbv1" || !IsBase64Url(parts[1]) || parts[2].Length != 43 || !IsBase64Url(parts[2]))
         {
             return null;
         }
@@ -331,6 +332,25 @@ public sealed class LogbirdReadClient : IDisposable
         {
             return null;
         }
+    }
+
+    /// <summary>Unpadded base64url: only A–Z, a–z, 0–9, '-' and '_', and a length no encoding produces (4n + 1) is refused.</summary>
+    private static bool IsBase64Url(string text)
+    {
+        if (text.Length == 0 || text.Length % 4 == 1)
+        {
+            return false;
+        }
+
+        foreach (var c in text)
+        {
+            if (c is not ((>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-' or '_'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -439,6 +459,9 @@ public sealed class LogbirdReadClient : IDisposable
                         total += read;
                     }
 
+                    // Cancelling disposes the response, and some streams then report a clean end: a download cut short by
+                    // cancellation must never be reported as complete.
+                    cancellationToken.ThrowIfCancellationRequested();
                     return total;
                 }
             }

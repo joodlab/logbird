@@ -38,7 +38,17 @@ public class ScopedReadTests
     {
         var expires = exp ?? Expiry.ToUnixTimeSeconds();
         var payload = $$"""{"v":{{version}},"kid":"key_fictional","p":"proj_fictional","s":{{scopeJson}},"iat":{{expires - 600}},"exp":{{expires}},"jti":"jti_fictional"}""";
-        return "lbv1." + Base64Url(Encoding.UTF8.GetBytes(payload)) + ".fictional-mac";
+        return "lbv1." + Base64Url(Encoding.UTF8.GetBytes(payload)) + "." + Mac;
+    }
+
+    /// <summary>A MAC of the server's length (32 bytes as unpadded base64url); the client cannot verify it, only its shape.</summary>
+    private static readonly string Mac = Base64Url(Enumerable.Range(1, 32).Select(i => (byte)(i * 7)).ToArray());
+
+    /// <summary>The same token with its payload or MAC part changed.</summary>
+    private static string Reshape(string token, Func<string, string>? payload = null, string? mac = null)
+    {
+        var parts = token.Split('.');
+        return parts[0] + "." + (payload is null ? parts[1] : payload(parts[1])) + "." + (mac ?? parts[2]);
     }
 
     private static HttpResponseMessage Grant(string token, string scopeJson)
@@ -268,6 +278,16 @@ public class ScopedReadTests
             (Envelope("""{"tenantId":"biz_6"}"""), "scope_mismatch"),
             (Envelope("""{"tenantId":"biz_5","mask":["ip"]}"""), "scope_mismatch"),
             (Envelope(scope, exp: Expiry.ToUnixTimeSeconds() + 3600), "scope_mismatch"),
+
+            // Claims that match, in an envelope the server never produces.
+            (Reshape(Envelope(scope), payload: p => p.Insert(8, " ")), "invalid_response"),
+            (Reshape(Envelope(scope), payload: p => p + "=="), "invalid_response"),
+            (Reshape(Envelope(scope), payload: p => p.Replace('-', '+').Replace('_', '/') + "+/"), "invalid_response"),
+            (Reshape(Envelope(scope), mac: "!"), "invalid_response"),
+            (Reshape(Envelope(scope), mac: new string('!', 43)), "invalid_response"),
+            (Reshape(Envelope(scope), mac: Mac.Remove(42)), "invalid_response"),
+            (Reshape(Envelope(scope), mac: Mac + "A"), "invalid_response"),
+            (Reshape(Envelope(scope), mac: Mac.Remove(42) + "="), "invalid_response"),
         };
         foreach (var (token, code) in cases)
         {
@@ -347,10 +367,13 @@ public class ScopedReadTests
         Assert.Equal(0, Calls(server, "/v1/export"));
     }
 
-    [Fact]
-    public async Task Cancelling_ends_an_export_whose_stream_ignores_cancellation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cancelling_ends_an_export_whose_stream_ignores_cancellation(bool endsCleanlyWhenDisposed)
     {
-        var stalled = new StalledStream(Encoding.UTF8.GetBytes("""{"id":"evt_1"}""" + (char)10));
+        // Some streams fail their pending read when disposed; others report a clean end, which must not read as complete.
+        var stalled = new StalledStream(Encoding.UTF8.GetBytes("""{"id":"evt_1"}""" + (char)10), endsCleanlyWhenDisposed);
         var server = Server(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stalled) });
         using var reader = Reader(server);
         using var file = new MemoryStream();
@@ -365,7 +388,7 @@ public class ScopedReadTests
     }
 
     /// <summary>Returns its bytes, then stalls in a read that ignores cancellation and ends only when disposed.</summary>
-    private sealed class StalledStream(byte[] first) : Stream
+    private sealed class StalledStream(byte[] first, bool endsCleanlyWhenDisposed) : Stream
     {
         private readonly TaskCompletionSource<int> _stall = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _stalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -427,7 +450,15 @@ public class ScopedReadTests
 
         protected override void Dispose(bool disposing)
         {
-            _stall.TrySetException(new ObjectDisposedException(nameof(StalledStream)));
+            if (endsCleanlyWhenDisposed)
+            {
+                _stall.TrySetResult(0);
+            }
+            else
+            {
+                _stall.TrySetException(new ObjectDisposedException(nameof(StalledStream)));
+            }
+
             base.Dispose(disposing);
         }
     }
