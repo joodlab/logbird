@@ -816,9 +816,11 @@ function CreateKeyDialog({
                           onToggle={(e) => setNarrowOpen((e.target as HTMLDetailsElement).open)}
                           open={narrowOpen || set || invalid}
                         >
-                          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm font-medium text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
-                            <ChevronDownIcon className="-rotate-90 size-4 text-muted-foreground transition-transform group-open:rotate-0" />
-                            Narrow further <span className="font-normal text-muted-foreground">· one target, some actions, hidden fields</span>
+                          <summary className="flex cursor-pointer list-none items-start gap-1.5 rounded-sm font-medium text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+                            <ChevronDownIcon className="-rotate-90 mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-0" />
+                            <span>
+                              Narrow further <span className="font-normal text-muted-foreground">· one target, some actions, hidden fields</span>
+                            </span>
                           </summary>
                           <div className="flex min-w-0 flex-col gap-3">
                             <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
