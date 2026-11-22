@@ -240,7 +240,9 @@ export function useCompletions({
   const debouncing = debouncedPrefix !== rawPrefix;
   const narrowing = Boolean(valueField) && Boolean(rawPrefix) && !complete;
   const valuesLoading = Boolean(valueField) && (base.isFetching || (narrowing && (narrowed.isFetching || debouncing)));
-  const valuesStale = narrowing && (narrowed.isPlaceholderData || debouncing);
+  // The rows shown are not this prefix's own answer yet (debouncing, the previous prefix's kept list, or the unfiltered
+  // list standing in while the request is pending): dimmed and busy. A failed request shows the fallback as it is.
+  const valuesStale = narrowing && !narrowed.isError && (debouncing || current(narrowed) === undefined);
 
   /* ---------------- free text that names an entity (`rawd` → tenant:biz_2 Rawda Suites) ---------------- */
   const word =
@@ -256,7 +258,9 @@ export function useCompletions({
       placeholderData: (previous: SuggestResponse | undefined) => (previous?.field === field ? previous : undefined),
     })),
   });
-  const entityData = entityQueries.map((q) => q.data);
+  // The previous word's matches stay while the next word loads (or debounces): shown dimmed and busy, never as current.
+  const entityData = entityQueries.map((q) => shownDimmed(q));
+  const entitiesPending = Boolean(word) && (debouncedWord !== word || entityQueries.some((q) => q.isFetching));
   // biome-ignore lint/correctness/useExhaustiveDependencies: entityData is a fresh array each render; its items are stable query results
   const entities = useMemo(() => {
     const w = word.toLowerCase();
@@ -268,6 +272,7 @@ export function useCompletions({
         .map((v) => ({ field: d?.field ?? '', ...v })),
     );
   }, [word, ...entityData]);
+  const entitiesStale = entities.length > 0 && entitiesPending;
 
   return useMemo<Completions>(() => {
     const empty: Completions = { suggestions: [], hint: null, prefix: '', loading: false, stale: false, context, fixes };
@@ -296,8 +301,8 @@ export function useCompletions({
       suggestions,
       hint,
       prefix: 'prefix' in context ? context.prefix : '',
-      loading: valuesLoading || (open && fieldsLoading),
-      stale: valuesStale,
+      loading: valuesLoading || (open && (fieldsLoading || entitiesPending)),
+      stale: valuesStale || entitiesStale,
       context,
       fixes,
     };
@@ -314,6 +319,8 @@ export function useCompletions({
     valueField,
     valuesLoading,
     valuesStale,
+    entitiesPending,
+    entitiesStale,
     recent,
     views,
     entities,

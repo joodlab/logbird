@@ -122,11 +122,18 @@ const keyOf = (key: unknown, computed: unknown): string | undefined => {
   if (key.type === 'StringLiteral') return key.value as string;
   return !computed && key.type === 'Identifier' ? (key.name as string) : undefined;
 };
-const isQueryHook = (node: Node | undefined): node is Node => {
-  if (node?.type !== 'CallExpression') return false;
+/** The name of a called hook: `useQuery(...)` and `ReactQuery.useQuery(...)` → `useQuery`. */
+const hookName = (node: Node | undefined): string | undefined => {
+  if (node?.type !== 'CallExpression') return undefined;
   const callee = unwrap(node.callee);
-  const name = callee?.type === 'MemberExpression' ? nameOf(callee.property) : nameOf(callee);
-  return name === 'useQuery' || name === 'useInfiniteQuery';
+  return callee?.type === 'MemberExpression' ? nameOf(callee.property) : nameOf(callee);
+};
+const isQueryHook = (node: Node | undefined): node is Node => hookName(node) === 'useQuery' || hookName(node) === 'useInfiniteQuery';
+const isFunction = (node: unknown): node is Node => isNode(node) && (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression');
+/** What a function returns: its expression body, or the argument of each `return` in its block. */
+const returned = (fn: Node): unknown[] => {
+  const body = fn.body as Node;
+  return body.type === 'BlockStatement' ? [...walk(body)].filter((n) => n.type === 'ReturnStatement').map((n) => n.argument) : [body];
 };
 
 /**
@@ -177,19 +184,56 @@ export function unguardedReads(src: string, queries: readonly string[], jsx = tr
     isNode(pattern) &&
     pattern.type === 'ObjectPattern' &&
     (pattern.properties as Node[]).some((p) => p.type === 'ObjectProperty' && keyOf(p.key, p.computed) === 'data');
+  const isPlaceholderCall = (node: Node | undefined): boolean => isQueryHook(node) && isOptions((node.arguments as unknown[])[0]);
   for (const d of declarators) {
     const init = unwrap(d.init);
-    if (!isQueryHook(init) || !isOptions((init.arguments as unknown[])[0])) continue;
+    if (!init || !isPlaceholderCall(init)) continue;
     const name = nameOf(d.id);
     if (name) results.add(name);
     else if (destructuresData(d.id)) problems.add(`destructured data on ${at(d)}`);
   }
+  // `useQueries({ queries: [...] })` or `queries: list.map((x) => options)`: a list of results, read per element.
+  const isOptionsList = (node: unknown): boolean => {
+    const n = unwrap(node);
+    if (n?.type === 'ArrayExpression')
+      return (n.elements as unknown[]).some((e) => isOptions(isNode(e) && e.type === 'SpreadElement' ? e.argument : e));
+    if (n?.type !== 'CallExpression') return false;
+    const fn = (n.arguments as unknown[])[0];
+    return isFunction(fn) && returned(fn).some(isOptions);
+  };
+  const resultLists = new Set<string>();
+  for (const d of declarators) {
+    const init = unwrap(d.init);
+    const options = init && hookName(init) === 'useQueries' ? unwrap((init.arguments as unknown[])[0]) : undefined;
+    const list =
+      options?.type === 'ObjectExpression' ? (options.properties as Node[]).find((p) => keyOf(p.key, p.computed) === 'queries') : undefined;
+    const name = nameOf(d.id);
+    if (name && list && isOptionsList(list.value)) resultLists.add(name);
+  }
+  const isData = (n: Node) => (n.type === 'MemberExpression' || n.type === 'OptionalMemberExpression') && keyOf(n.property, n.computed) === 'data';
   for (const n of nodes) {
-    if (n.type === 'MemberExpression' || n.type === 'OptionalMemberExpression') {
-      const result = nameOf(n.object);
-      if (result && results.has(result) && keyOf(n.property, n.computed) === 'data') problems.add(`${result}.data on ${at(n)}`);
+    if (isData(n)) {
+      const object = unwrap(n.object);
+      const result = nameOf(object);
+      if (result && results.has(result)) problems.add(`${result}.data on ${at(n)}`);
+      // `useQuery(fieldsQuery(...)).data`: the result read in the same expression.
+      else if (isPlaceholderCall(object)) problems.add(`${hookName(object)}(…).data on ${at(n)}`);
+      // `results[0].data`
+      else if ((object?.type === 'MemberExpression' || object?.type === 'OptionalMemberExpression') && resultLists.has(nameOf(object.object) ?? '')) {
+        problems.add(`${nameOf(object.object)}[…].data on ${at(n)}`);
+      }
     } else if (n.type === 'VariableDeclarator' && results.has(nameOf(n.init) ?? '') && destructuresData(n.id)) {
       problems.add(`destructured data on ${at(n)}`);
+    } else if (n.type === 'CallExpression') {
+      // `results.map((q) => q.data)` (any method): the callback's first parameter is one result.
+      const callee = unwrap(n.callee);
+      const fn = (n.arguments as unknown[])[0];
+      if (callee?.type !== 'MemberExpression' || !resultLists.has(nameOf(callee.object) ?? '') || !isFunction(fn)) continue;
+      const param = (fn.params as Node[])[0];
+      if (destructuresData(param)) problems.add(`destructured data on ${at(fn)}`);
+      const element = nameOf(param);
+      if (!element) continue;
+      for (const m of walk(fn.body as Node)) if (isData(m) && nameOf(m.object) === element) problems.add(`${element}.data on ${at(m)}`);
     }
   }
   return [...problems];
@@ -369,6 +413,19 @@ describe('the guard catches direct reads', () => {
     ].join('\n');
     expect(unguardedReads(quoted, [])).toHaveLength(1);
     expect(usesPlaceholders(quoted, [], false)).toBe(true);
+  });
+  it('flags a result read in the same expression as its hook', () => {
+    expect(unguardedReads('const fields = useQuery(fieldsQuery(projectId, range)).data;', ['fieldsQuery'])).toHaveLength(1);
+    expect(unguardedReads('const name = useQuery(projectQuery(projectId)).data?.name;', ['fieldsQuery'])).toEqual([]);
+  });
+  it('reads useQueries results element by element', () => {
+    const queries = 'const lists = useQueries({ queries: FIELDS.map((f) => ({ ...suggestQuery(p, f, w), placeholderData: (prev) => prev })) });';
+    for (const read of ['const all = lists.map((q) => q.data);', 'const first = lists[0].data;', 'const all = lists.map(({ data }) => data);']) {
+      expect(unguardedReads([queries, read].join('\n'), []), read).toHaveLength(1);
+    }
+    expect(unguardedReads([queries, 'const all = lists.map((q) => shownDimmed(q));'].join('\n'), [])).toEqual([]);
+    const plain = 'const lists = useQueries({ queries: FIELDS.map((f) => suggestQuery(p, f, w)) });';
+    expect(unguardedReads([plain, 'const all = lists.map((q) => q.data);'].join('\n'), [])).toEqual([]);
   });
   it('flags data destructured from a result later', () => {
     const src = ['const fields = useQuery(fieldsQuery(p, r));', 'const { data, isFetching } = fields;'].join('\n');
