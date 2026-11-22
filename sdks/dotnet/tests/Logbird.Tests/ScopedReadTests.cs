@@ -34,15 +34,26 @@ public class ScopedReadTests
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     /// <summary>A token shaped like the server's (<c>lbv1.&lt;payload&gt;.&lt;mac&gt;</c>), carrying a scope and expiry.</summary>
-    private static string Envelope(string scopeJson, long? exp = null, string version = "1")
+    private static string Envelope(string scopeJson, long? exp = null, string version = "1", string jti = "jti_fictional")
     {
         var expires = exp ?? Expiry.ToUnixTimeSeconds();
-        var payload = $$"""{"v":{{version}},"kid":"key_fictional","p":"proj_fictional","s":{{scopeJson}},"iat":{{expires - 600}},"exp":{{expires}},"jti":"jti_fictional"}""";
+        var payload = $$"""{"v":{{version}},"kid":"key_fictional","p":"proj_fictional","s":{{scopeJson}},"iat":{{expires - 600}},"exp":{{expires}},"jti":"{{jti}}"}""";
         return "lbv1." + Base64Url(Encoding.UTF8.GetBytes(payload)) + "." + Mac;
     }
 
     /// <summary>A MAC of the server's length (32 bytes as unpadded base64url); the client cannot verify it, only its shape.</summary>
     private static readonly string Mac = Base64Url(Enumerable.Range(1, 32).Select(i => (byte)(i * 7)).ToArray());
+
+    /// <summary>A jti whose base64url text contains '-' (a run of 0x7E gives sextet 62 at every alignment).</summary>
+    private const string Tildes = "~~~~~~~~~~~~";
+
+    /// <summary>A forgiving decode: standard or url alphabet, whitespace ignored, padding completed.</summary>
+    private static string Lenient(string text)
+    {
+        var standard = text.Replace('-', '+').Replace('_', '/');
+        var core = standard.Replace(" ", string.Empty).TrimEnd('=');
+        return Convert.ToBase64String(Convert.FromBase64String(core + new string('=', (4 - (core.Length % 4)) % 4)));
+    }
 
     /// <summary>The same token with its payload or MAC part changed.</summary>
     private static string Reshape(string token, Func<string, string>? payload = null, string? mac = null)
@@ -271,24 +282,34 @@ public class ScopedReadTests
         var cases = new (string Token, string Code)[]
         {
             ("lb_read_fictionalkey", "invalid_response"),
-            ("lbv1.not-base64!.mac", "invalid_response"),
-            ("lbv1." + Base64Url(Encoding.UTF8.GetBytes("[]")) + ".mac", "invalid_response"),
-            ("lbv1." + Base64Url(Encoding.UTF8.GetBytes(scope)) + ".mac", "invalid_response"),
+            ("lbv1.not-base64!." + Mac, "invalid_response"),
+            ("lbv1." + Base64Url(Encoding.UTF8.GetBytes("[]")) + "." + Mac, "invalid_response"),
+            ("lbv1." + Base64Url(Encoding.UTF8.GetBytes(scope)) + "." + Mac, "invalid_response"),
             (Envelope(scope, version: "2"), "invalid_response"),
             (Envelope("""{"tenantId":"biz_6"}"""), "scope_mismatch"),
             (Envelope("""{"tenantId":"biz_5","mask":["ip"]}"""), "scope_mismatch"),
             (Envelope(scope, exp: Expiry.ToUnixTimeSeconds() + 3600), "scope_mismatch"),
 
-            // Claims that match, in an envelope the server never produces.
-            (Reshape(Envelope(scope), payload: p => p.Insert(8, " ")), "invalid_response"),
-            (Reshape(Envelope(scope), payload: p => p + "=="), "invalid_response"),
-            (Reshape(Envelope(scope), payload: p => p.Replace('-', '+').Replace('_', '/') + "+/"), "invalid_response"),
+            // Claims that match, in an envelope the server never produces (each payload is checked below to decode
+            // leniently to the very same claims, so only the shape check can refuse it).
+            (Reshape(Envelope(scope), payload: p => p.Insert(8, "    ")), "invalid_response"),
+            (Reshape(Envelope(scope), payload: p => p + new string('=', (4 - (p.Length % 4)) % 4)), "invalid_response"),
+            (Reshape(Envelope(scope, jti: Tildes), payload: p => p.Replace('-', '+').Replace('_', '/')), "invalid_response"),
             (Reshape(Envelope(scope), mac: "!"), "invalid_response"),
             (Reshape(Envelope(scope), mac: new string('!', 43)), "invalid_response"),
             (Reshape(Envelope(scope), mac: Mac.Remove(42)), "invalid_response"),
             (Reshape(Envelope(scope), mac: Mac + "A"), "invalid_response"),
             (Reshape(Envelope(scope), mac: Mac.Remove(42) + "="), "invalid_response"),
         };
+        // The three reshaped payloads differ from the server's text, yet a lenient decoder reads the server's bytes.
+        Assert.All(cases.Skip(8).Take(3), c =>
+        {
+            var payload = c.Token.Split('.')[1];
+            var original = Envelope(scope, jti: c.Token == cases[10].Token ? Tildes : "jti_fictional").Split('.')[1];
+            Assert.NotEqual(original, payload);
+            Assert.Equal(Lenient(original), Lenient(payload));
+        });
+
         foreach (var (token, code) in cases)
         {
             var server = Server(_ => Grant(token, scope));
