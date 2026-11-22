@@ -11,10 +11,11 @@ export const TOTAL_CAP = 10_001;
  */
 export function searchTotal(pages: readonly TotalPage[] | undefined, loaded = 0, hasMore = false): { count: number; exact: boolean } {
   if (!pages?.length) return { count: loaded, exact: !hasMore };
-  const proven = loaded + (hasMore ? 1 : 0);
+  // Every page's total is at least a lower bound; together with what is on screen, the largest one is the floor.
+  const floor = Math.max(loaded + (hasMore ? 1 : 0), ...pages.map((p) => p.total));
   const exact = pages.findLast((p) => p.totalExact !== false && p.total < TOTAL_CAP);
-  if (exact && exact.total >= proven) return { count: exact.total, exact: true };
-  return { count: Math.max(proven, ...pages.map((p) => p.total)), exact: false };
+  if (exact && exact.total >= floor) return { count: exact.total, exact: true };
+  return { count: floor, exact: false };
 }
 
 /** "1,234", "≥ 101" for a lower bound, "10,000+" at the cap. */

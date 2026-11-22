@@ -55,3 +55,16 @@ it('never shows a total below the rows on screen', () => {
   // An exact total below what is loaded is disproved.
   expect(searchTotal([{ total: 50, totalExact: true }], 80, false)).toEqual({ count: 80, exact: false });
 });
+
+it('lets a newer lower bound disprove an older exact total', () => {
+  expect(
+    searchTotal(
+      [
+        { total: 350, totalExact: true },
+        { total: 10_001, totalExact: false },
+      ],
+      200,
+      true,
+    ),
+  ).toEqual({ count: 10_001, exact: false });
+});

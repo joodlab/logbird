@@ -188,11 +188,14 @@ export function Explorer({
     return [...liveRows, ...paged.filter((e) => !seen.has(e.id))];
   }, [pages, liveRows]);
   // Search totals are capped for huge ranges; the histogram counts every match exactly.
-  const known = searchTotal(pages, pages?.reduce((n, p) => n + p.data.length, 0) ?? 0, events.hasNextPage);
+  const pagedCount = pages?.reduce((n, p) => n + p.data.length, 0) ?? 0;
+  const known = searchTotal(pages, pagedCount, events.hasNextPage);
   const searchCount = known.count;
   const histogramTotal =
     histogramData && (problem || !histogram.isPlaceholderData) ? histogramData.buckets.reduce((n, b) => n + b.total, 0) : undefined;
-  const total = (histogramTotal ?? searchCount) + liveRows.length;
+  // Live rows the pages do not already show (the table deduplicates them the same way).
+  const liveExtra = rows.length - pagedCount;
+  const total = (histogramTotal ?? searchCount) + liveExtra;
   // Without the histogram, the search total may be a lower bound (capped, or its count did not finish in time).
   const totalLowerBound = histogramTotal === undefined && !known.exact;
 

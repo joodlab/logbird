@@ -130,6 +130,41 @@ it('fails a row error at once, cancelling a stalled count instead of waiting for
   expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)).reason)).toEqual(['cancelled']);
   warn.mockRestore();
 });
+it('sends the row query before the count and retries rows alone if the count took the last slot', async () => {
+  const b = row('b', '2026-11-07T10:02:00.000Z');
+  const order: string[] = [];
+  let rowAttempts = 0;
+  const query = vi.fn(async (args: { query: string }) => {
+    order.push(isCount(args.query) ? 'count' : 'rows');
+    if (isCount(args.query)) return { json: () => new Promise(() => undefined), close: vi.fn() };
+    rowAttempts++;
+    if (rowAttempts === 1) throw new Error('Code: 202. DB::Exception: Too many simultaneous queries. (TOO_MANY_SIMULTANEOUS_QUERIES)');
+    return { json: async () => [b], close: vi.fn() };
+  });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const page = await searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 });
+  warn.mockRestore();
+  expect(order.slice(0, 2)).toEqual(['rows', 'count']);
+  expect(rowAttempts).toBe(2);
+  expect(page).toMatchObject({ total: 1, totalExact: false });
+  expect(page.data.map((e) => e.id)).toEqual(['b']);
+});
+it('does not log a cancellation for a count that already settled', async () => {
+  let rowCalls = 0;
+  const query = vi.fn(async (args: { query: string }) => {
+    if (isCount(args.query)) return { json: async () => [{ n: 3 }], close: vi.fn() };
+    rowCalls++;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    throw new Error('fictional late row failure');
+  });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  await expect(searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).rejects.toThrow(
+    'fictional late row failure',
+  );
+  expect(rowCalls).toBe(1);
+  expect(warn).not.toHaveBeenCalled();
+  warn.mockRestore();
+});
 it('returns no cursor for an empty page', async () => {
   const { ch } = client([], 0);
   expect(await searchEvents(ch, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).toMatchObject({ data: [], total: 0, nextCursor: null });

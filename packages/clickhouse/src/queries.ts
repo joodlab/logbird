@@ -195,7 +195,7 @@ type CountResult = { n: number; exact: boolean };
 function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }) {
   const controller = new AbortController();
   const fallback: CountResult = { n: 0, exact: false };
-  let stopped: 'budget' | 'cancelled' | undefined;
+  let stopped: 'budget' | 'cancelled' | 'settled' | undefined;
   let settle: (value: CountResult) => void = () => undefined;
   const deadline = new Promise<CountResult>((resolve) => {
     settle = resolve;
@@ -212,9 +212,11 @@ function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }) 
     try {
       const sql = `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`;
       const n = Number((await read<{ n: number }>(ch, sql, w.params, 1, false, undefined, controller.signal))[0]?.n ?? 0);
+      stopped ??= 'settled'; // a later cancel() is a no-op
       return { n, exact: n < COUNT_CAP };
     } catch (error) {
       if (!stopped) {
+        stopped = 'settled';
         const reason = error instanceof QueryError ? error.details.reason : 'error';
         console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason }));
       }
@@ -251,21 +253,27 @@ async function searchPage(
     params.cursorId = id;
     tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3)},{cursorId:String})`;
   }
-  // The count runs beside the rows and can never fail or delay them past its own short guard.
+  const readRows = () =>
+    read<EventRow>(
+      ch,
+      // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
+      // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
+      `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+      params,
+      10,
+      Boolean(exportClock),
+      execution,
+    );
+  // Rows first: their request is sent before the count's, so the count never takes ClickHouse's last query slot ahead
+  // of them. The count runs beside the rows and can never fail or delay them past its own short guard.
+  const pending = readRows();
   const counted = exportClock ? undefined : countMatches(ch, w);
-  const rows = await read<EventRow>(
-    ch,
-    // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
-    // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
-    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
-    params,
-    10,
-    Boolean(exportClock),
-    execution,
-  ).catch(async (error) => {
+  const rows = await pending.catch(async (error) => {
     // A failed row query must not wait for the count: cancelling settles it at once.
     counted?.cancel();
     await counted?.result;
+    // If the count still took the last slot, the rows get one retry on their own.
+    if (counted && /TOO_MANY_SIMULTANEOUS_QUERIES/.test(error instanceof Error ? error.message : String(error))) return readRows();
     throw error;
   });
   const hasMore = rows.length > q.limit,

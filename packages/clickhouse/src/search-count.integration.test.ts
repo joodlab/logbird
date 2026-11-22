@@ -127,12 +127,17 @@ it.runIf(process.env.CLICKHOUSE_URL && process.env.CLICKHOUSE_QUERY_USER)(
         ch,
         rows.flatMap((r) => (r.ok ? [r.row] : [])),
       );
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const started = Date.now();
       const page = await searchEvents(qc, p, { ...range, q: "action = 'qa.count'", lang: 'sql', limit: 10, order: 'desc' });
       const elapsed = Date.now() - started;
+      const reasons = warn.mock.calls.map(([line]) => JSON.parse(String(line))).filter((l) => l.event === 'search.count_unavailable');
+      warn.mockRestore();
       expect(page.data).toHaveLength(6);
       expect(page.totalExact).toBe(false);
       expect(elapsed).toBeLessThan(2500);
+      // The page gave up on the count for its time budget, not because the statement was rejected.
+      expect(reasons.map((l) => l.reason)).toEqual(['budget']);
       // Server side: wait for the count statement to end and record how. Disconnect cancellation of a readonly
       // statement is cooperative, so the server may finish it; it is bounded by the restricted profile's 10 s.
       let ended: { type: string; exception_code: number; query_duration_ms: number }[] = [];
@@ -147,7 +152,11 @@ it.runIf(process.env.CLICKHOUSE_URL && process.env.CLICKHOUSE_QUERY_USER)(
       }
       console.log(JSON.stringify({ event: 'qa.restricted_count_end', elapsedMs: elapsed, server: ended }));
       expect(ended).toHaveLength(1);
-      expect(ended[0]?.query_duration_ms).toBeLessThanOrEqual(10_500);
+      // It either ran to its end (cooperative cancellation did not trigger) or was cancelled/timed out — never a
+      // rejected statement. Duration is a measured example, bounded by the profile's 10 s guard.
+      expect([0, 159, 394]).toContain(ended[0]?.exception_code);
+      expect(ended[0]?.query_duration_ms).toBeGreaterThanOrEqual(900);
+      expect(ended[0]?.query_duration_ms).toBeLessThanOrEqual(11_000);
     } finally {
       await purgeProject(ch, p);
       await ch.close();
