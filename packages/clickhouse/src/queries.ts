@@ -174,8 +174,9 @@ export const COUNT_CAP = 10_001;
 async function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }): Promise<{ n: number; exact: boolean }> {
   try {
     const n = Number(
-      (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`, w.params, 1))[0]
-        ?.n ?? 0,
+      (
+        await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`, w.params, 1)
+      )[0]?.n ?? 0,
     );
     return { n, exact: n < COUNT_CAP };
   } catch (error) {

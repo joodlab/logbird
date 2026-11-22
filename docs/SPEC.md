@@ -316,8 +316,10 @@ project instead of failing the workspace; its progress is a placeholder (0, next
 firstEventAt null), not measured emptiness.
 
 Hot-path rules: always filter `project_id` + time range first; never `FINAL` on search; dedupe in the result
-set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` via `count()` with
-`max_execution_time` guard (fall back to "10k+").
+set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` via a distinct
+count capped at 10,001 with a one-second guard that runs beside the row query. Rows never fail
+because of the count: when the count is capped, times out or fails, `totalExact: false` marks `total` as a lower
+bound (at least the rows returned, plus one when there is a next page) and the console shows "≥ N" or "10,000+".
 
 ## 5. Server API
 

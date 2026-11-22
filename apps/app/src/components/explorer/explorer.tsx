@@ -448,7 +448,10 @@ export function Explorer({
               'Searching…'
             ) : (
               <>
-                <span className="font-medium text-foreground">{totalLowerBound ? (searchTotal > 10_000 ? '10,000+' : `≥ ${formatNumber(total)}`) : formatNumber(total)}</span> events · {rangeLabel(range)}
+                <span className="font-medium text-foreground">
+                  {totalLowerBound ? (searchTotal > 10_000 ? '10,000+' : `≥ ${formatNumber(total)}`) : formatNumber(total)}
+                </span>{' '}
+                events · {rangeLabel(range)}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
