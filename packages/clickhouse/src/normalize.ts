@@ -77,7 +77,12 @@ export function normalizeEvent(
     }
     const entries = Object.entries(object(v));
     if (entries.length && depth < 6) for (const [key, child] of entries) flatten(child, path ? `${path}.${key}` : key, depth + 1);
-    else
+    else if (isRawJson(v)) {
+      // An exact number is indexed whole (plain or unique scientific spelling) or not at all: a 2 KB prefix of its
+      // digits would match a different number.
+      const exact = numericId(v, 2048);
+      if (exact !== null) attributes[path] = exact;
+    } else
       attributes[path] = Buffer.from(value(v))
         .subarray(0, 2048)
         .toString('utf8')

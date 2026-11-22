@@ -20,6 +20,12 @@ const SAFE_EXPONENT_DIGITS = 15;
  * `exponent + shift` for an exponent of any length and a small shift (|shift| < 1e15, from a fraction length).
  * Linear in the exponent's length: only the last 16 digits change, plus a carry or borrow run.
  */
+/** Length of the run of `digit` at the end of `text`: one backward scan. */
+function trailingRun(text: string, digit: string): number {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === digit) end--;
+  return text.length - end;
+}
 function shiftExponent(exponent: string, shift: number): string {
   const negative = exponent.startsWith('-');
   const digits = exponent.replace(/^[+-]/, '').replace(/^0+/, '') || '0';
@@ -33,12 +39,12 @@ function shiftExponent(exponent: string, shift: number): string {
   let low = tail;
   if (low >= limit) {
     low -= limit;
-    const nines = /9*$/.exec(prefix)?.[0].length ?? 0;
+    const nines = trailingRun(prefix, '9');
     const before = prefix.slice(0, prefix.length - nines);
     prefix = `${before ? `${before.slice(0, -1)}${Number(before.at(-1)) + 1}` : '1'}${'0'.repeat(nines)}`;
   } else if (low < 0n) {
     low += limit;
-    const zeros = /0*$/.exec(prefix)?.[0].length ?? 0;
+    const zeros = trailingRun(prefix, '0');
     const before = prefix.slice(0, prefix.length - zeros);
     prefix = `${before.slice(0, -1)}${Number(before.at(-1)) - 1}${'9'.repeat(zeros)}`;
   }
@@ -250,7 +256,8 @@ export function roundDeepRawNumbers(value: unknown, maxDepth = EXACT_NUMBER_MAX_
     else if (node !== null && typeof node === 'object' && !seen.has(node)) {
       seen.add(node);
       if (depth > maxDepth) deep = true;
-      for (const child of Object.values(node)) stack.push([child, depth + 1]);
+      // Only containers and raw numbers are pending work; ordinary primitive leaves are skipped.
+      for (const child of Object.values(node)) if (child !== null && typeof child === 'object') stack.push([child, depth + 1]);
     }
   }
   if (!(deep && raw)) return false;

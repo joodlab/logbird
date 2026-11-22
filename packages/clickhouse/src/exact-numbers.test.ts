@@ -177,3 +177,12 @@ it('keeps the deep-rounding warning when re-normalizing, and survives cyclic cal
   cyclic.self = cyclic;
   expect(normalizeEvent(cyclic, ctx)).toMatchObject({ ok: false, reason: 'event must be JSON serializable' });
 });
+
+it('indexes an exact numeric attribute whole or not at all, never as a prefix', () => {
+  const huge = `1${'2'.repeat(2048)}`; // 2,049 significant digits
+  const { row } = normalize(wire(`{"action":"x","metadata":{"huge":${huge},"sparse":1e3000,"small":12345678901234567891}}`));
+  expect(row.attributes['metadata.huge']).toBeUndefined();
+  expect(row.attributes['metadata.sparse']).toBe('1e3000');
+  expect(row.attributes['metadata.small']).toBe('12345678901234567891');
+  expect(row.payload).toContain(`"huge":${huge}`);
+});

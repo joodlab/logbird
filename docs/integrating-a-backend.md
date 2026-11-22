@@ -88,8 +88,9 @@ decimals, and returns them as JSON numbers with those digits (the spelling may c
 `metadata.orderId:9007199254740993`. Entity ids may be numbers, so integer primary keys
 work as sent. A numeric id is stored as the plain decimal text of its exact value (`42`,
 `42.0` and `4.2e1` are all stored as `"42"`); if that is longer than 256 characters, as
-its scientific spelling (`1e300`); a number with more than 256 significant digits is not
-indexed (never truncated), and such a target is left out of the record columns. A string id is indexed as sent, with surrounding whitespace
+its scientific spelling (`1e300`); if that is also longer than 256 characters, the id is
+not indexed (never truncated), and such a target is left out of the record columns.
+Numeric attribute values follow the same rule with a 2 KB limit. A string id is indexed as sent, with surrounding whitespace
 trimmed and a 256-character cap (the original payload always keeps it exactly). An event
 nested more than 1,000 levels deep stores its long numbers as doubles and gets a warning. An event's own `id` must be a string (a numeric event id gets a fresh id
 and a warning).
@@ -100,8 +101,8 @@ From TypeScript, send such ids **as strings** (`String(row.id)` from a `bigint` 
 database driver's string mode). The TypeScript SDK copies events through JSON, so it does
 not carry `JSON.rawJSON` values or other exact-number wrappers; use strings. Backends with
 exact 64-bit types (.NET `long` and `decimal`, Java `long`, Go `int64`) can send numbers
-directly over HTTP. Logbird never rounds a number it receives; what a client rounded before
-sending cannot be recovered.
+directly over HTTP. Apart from the deep-nesting exception above, Logbird never rounds a number it receives;
+what a client rounded before sending cannot be recovered.
 
 An event first stored before this release that contains such a number had its digits
 rounded; a retry of it now answers `duplicate_id_conflict` (its content differs from what

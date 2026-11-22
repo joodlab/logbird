@@ -158,3 +158,12 @@ it('shifts exponents of any length exactly, with carries and borrows', () => {
   expect(canonicalDecimal(`1e${big}`)).toBe(canonicalDecimal(`1E+${big}`));
   expect(canonicalDecimal(`10e${big}`)).toBe(`1e${big.slice(0, -1)}1`);
 });
+
+it('carries and borrows through million-digit exponent runs in linear time', () => {
+  const start = Date.now();
+  const carry = canonicalDecimal(`50e${'9'.repeat(1_000_016)}`);
+  expect(carry).toBe(`5e1${'0'.repeat(1_000_016)}`);
+  const borrow = canonicalDecimal(`0.5e1${'0'.repeat(1_000_016)}`);
+  expect(borrow).toBe(`5e${'9'.repeat(1_000_016)}`);
+  expect(Date.now() - start).toBeLessThan(1000);
+});
