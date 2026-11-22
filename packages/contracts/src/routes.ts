@@ -71,6 +71,7 @@ export const routes = {
   entities: {
     list: { method: 'GET', path: '/api/projects/:projectId/entities', auth: 'session' },
     profile: { method: 'GET', path: '/api/projects/:projectId/entities/:kind/:entityId', auth: 'session' },
+    metadata: { method: 'GET', path: '/api/projects/:projectId/entities/:kind/:entityId/metadata', auth: 'session' },
   },
   fields: { method: 'GET', path: '/api/projects/:projectId/fields', auth: 'session' },
   /** Value autocomplete for the query bar (suggestQuerySchema → SuggestResponse, ./query.ts). */

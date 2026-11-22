@@ -82,7 +82,10 @@ it('denies anonymous and foreign-project requests through every concrete route; 
         action: index ? marker : 'allowed.event',
         actor: { id: 'shared-actor', name: index ? marker : 'Allowed' },
         tenant: { id: 'shared-tenant' },
-        targets: [{ type: 'record', id: 'shared-record' }],
+        targets: [
+          { type: 'record:section', id: 'shared-record', name: index ? marker : 'Allowed section' },
+          { type: 'record', id: 'section:shared-record', name: index ? marker : 'Allowed record' },
+        ],
         context: { operationId: 'shared-operation' },
         metadata: { isolation: index ? marker : 'allowed' },
       });
@@ -148,6 +151,28 @@ it('denies anonymous and foreign-project requests through every concrete route; 
       ['read', readKey],
     ] as const) {
       await prisma.apiKey.create({ data: { projectId: allowed, name: 'QA matrix', kind, hash: key.hash, prefix: key.prefix } });
+    }
+    const compositeId = encodeURIComponent('record:section:shared-record');
+    const entityPath = `/api/projects/${allowed}/entities/target/${compositeId}`;
+    for (const [type, name] of [
+      ['record:section', 'Allowed section'],
+      ['record', 'Allowed record'],
+    ] as const) {
+      const response = await request(`${entityPath}/metadata?targetType=${encodeURIComponent(type)}`, 'GET', actor.cookie);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ kind: 'target', id: 'record:section:shared-record', type, name });
+    }
+    const unknownPath = `/api/projects/${allowed}/entities/target/${encodeURIComponent('record:section:missing')}`;
+    const targetType = encodeURIComponent('record:section');
+    const profileMissing = await request(`${unknownPath}?targetType=${targetType}`, 'GET', actor.cookie);
+    const metadataMissing = await request(`${unknownPath}/metadata?targetType=${targetType}`, 'GET', actor.cookie);
+    expect(profileMissing.status).toBe(404);
+    expect(metadataMissing.status).toBe(404);
+    expect(await metadataMissing.json()).toEqual(await profileMissing.json());
+    for (const key of [ingestKey, readKey]) {
+      const response = await request(`${entityPath}/metadata?targetType=record`, 'GET', '', undefined, key.secret);
+      expect(response.status).toBe(401);
+      await response.text();
     }
     for (const [method, pattern, policy] of consoleMatrix.filter(([, path]) => path.startsWith('/v1/'))) {
       const ingestRoute = policy === 'ingest-key';

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { parse } from '@babel/parser';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -86,47 +87,165 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/**
- * Direct `.data` reads of a placeholder-enabled query's result. Each `const x = useQuery(...)` (or `useInfiniteQuery`)
- * built from such a query, directly or through an options variable, may be read only through `current(x)` or
- * `shownDimmed(x)`: any `x.data` is a finding. No heuristics about branches: the helpers are the only way in.
- */
-/** The text of a declaration's initializer: from `start` to the first `;` or line break outside brackets. */
-function initializerAt(src: string, start: number): string {
-  let depth = 0;
-  for (let i = start; i < src.length; i++) {
-    const c = src[i];
-    if (c === '(' || c === '{' || c === '[') depth++;
-    else if (c === ')' || c === '}' || c === ']') depth--;
-    else if (depth <= 0 && (c === ';' || c === '\n')) return src.slice(start, i);
-  }
-  return src.slice(start);
+type Node = { type: string; loc?: { start: { line: number } } | null; [key: string]: unknown };
+const isNode = (value: unknown): value is Node => typeof value === 'object' && value !== null && typeof (value as Node).type === 'string';
+
+/** The syntax tree of a source file (TypeScript, with JSX for .tsx), so comments, strings and JSX text are never code. */
+function syntaxTree(src: string, jsx: boolean): Node {
+  return parse(src, { sourceType: 'module', errorRecovery: true, plugins: jsx ? ['typescript', 'jsx'] : ['typescript'] }) as unknown as Node;
 }
 
-export function unguardedReads(src: string, queries: readonly string[]): string[] {
-  const declarations = [...src.matchAll(/(?:const|let)\s+(\{[^}]*\}|\w+)\s*=\s*/g)].map((m) => ({
-    target: m[1] ?? '',
-    init: initializerAt(src, (m.index ?? 0) + m[0].length),
-  }));
-  // Options that carry a placeholder-enabled query anywhere in their initializer (`{ enabled, ...fieldsQuery(...) }`).
-  const sources = [...queries];
-  for (const d of declarations)
-    if (/^\w+$/.test(d.target) && !/^use(?:Infinite)?Query\(/.test(d.init) && sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(d.init)))
-      sources.push(d.target);
-  const built = (init: string) => /^use(?:Infinite)?Query\(/.test(init) && sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(init));
-  const problems: string[] = [];
-  const results: string[] = [];
-  for (const d of declarations) {
-    if (!built(d.init)) continue;
-    // Destructuring `data` out of the result reads it directly.
-    if (d.target.startsWith('{')) {
-      if (/\bdata\b/.test(d.target)) problems.push(`destructured data: ${d.target} = ${d.init.split('\n')[0]}`);
-    } else results.push(d.target);
+/** Every node of the tree, depth first. */
+function* walk(node: Node): Generator<Node> {
+  yield node;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'loc' || key === 'extra' || key.endsWith('Comments')) continue;
+    for (const child of Array.isArray(value) ? value : [value]) if (isNode(child)) yield* walk(child);
   }
-  src.split('\n').forEach((line, i) => {
-    for (const r of results) if (new RegExp(String.raw`\b${r}\.data\b`).test(line)) problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
-  });
-  return problems;
+}
+
+/** The expression under TypeScript wrappers and parentheses: `x as T`, `x satisfies T`, `x!`, `<T>x`, `(x)`. */
+function unwrap(node: unknown): Node | undefined {
+  let n = isNode(node) ? node : undefined;
+  while (n && ['TSAsExpression', 'TSSatisfiesExpression', 'TSNonNullExpression', 'TSTypeAssertion', 'ParenthesizedExpression'].includes(n.type)) {
+    n = isNode(n.expression) ? n.expression : undefined;
+  }
+  return n;
+}
+const nameOf = (node: unknown): string | undefined => {
+  const n = unwrap(node);
+  return n?.type === 'Identifier' ? (n.name as string) : undefined;
+};
+/** A property's key when it is written out (`data`, `'data'`, `['data']`), not computed from a variable. */
+const keyOf = (key: unknown, computed: unknown): string | undefined => {
+  if (!isNode(key)) return undefined;
+  if (key.type === 'StringLiteral') return key.value as string;
+  return !computed && key.type === 'Identifier' ? (key.name as string) : undefined;
+};
+/** The name of a called hook: `useQuery(...)` and `ReactQuery.useQuery(...)` → `useQuery`. */
+const hookName = (node: Node | undefined): string | undefined => {
+  if (node?.type !== 'CallExpression') return undefined;
+  const callee = unwrap(node.callee);
+  return callee?.type === 'MemberExpression' ? nameOf(callee.property) : nameOf(callee);
+};
+const isQueryHook = (node: Node | undefined): node is Node => hookName(node) === 'useQuery' || hookName(node) === 'useInfiniteQuery';
+const isFunction = (node: unknown): node is Node => isNode(node) && (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression');
+/** What a function returns: its expression body, or the argument of each `return` in its block. */
+const returned = (fn: Node): unknown[] => {
+  const body = fn.body as Node;
+  return body.type === 'BlockStatement' ? [...walk(body)].filter((n) => n.type === 'ReturnStatement').map((n) => n.argument) : [body];
+};
+
+/**
+ * Direct `.data` reads of a placeholder-enabled query's result. Each `useQuery(...)` (or `useInfiniteQuery`) whose
+ * options come from a placeholder-enabled factory (directly, spread into an object, or through options variables), or
+ * that set `placeholderData` themselves, may be read only through `current(x)` or `shownDimmed(x)`: any `x.data` (or
+ * destructured `data`) is a finding. No heuristics about branches: the helpers are the only way in. The guard walks
+ * the syntax tree, so comments, strings, JSX text, regex literals and line breaks neither hide nor invent a read.
+ */
+export function unguardedReads(src: string, queries: readonly string[], jsx = true): string[] {
+  const tree = syntaxTree(src, jsx);
+  const lines = src.split('\n');
+  const at = (node: Node) => {
+    const line = node.loc?.start.line ?? 0;
+    return `line ${line}: ${lines[line - 1]?.trim()}`;
+  };
+  const factories = new Set(queries);
+  const optionVariables = new Set<string>();
+  // Options: a whole factory call (not `factory(...).queryKey`), a known options variable, or an object literal that
+  // spreads one of those or sets `placeholderData` itself (`placeholderData: x` or the shorthand; not a value so named).
+  const isOptions = (node: unknown): boolean => {
+    const n = unwrap(node);
+    if (!n) return false;
+    if (n.type === 'CallExpression') return factories.has(nameOf(n.callee) ?? '');
+    if (n.type === 'Identifier') return optionVariables.has(n.name as string);
+    if (n.type === 'ConditionalExpression') return isOptions(n.consequent) || isOptions(n.alternate);
+    if (n.type !== 'ObjectExpression') return false;
+    return (n.properties as Node[]).some((p) =>
+      p.type === 'SpreadElement' ? isOptions(p.argument) : keyOf(p.key, p.computed) === 'placeholderData',
+    );
+  };
+  const nodes = [...walk(tree)];
+  const declarators = nodes.filter((n) => n.type === 'VariableDeclarator');
+  // Options variables, in any order and through any number of steps (`base = factory()`, `opts = { ...base }`).
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const d of declarators) {
+      const name = nameOf(d.id);
+      if (name && !optionVariables.has(name) && !isQueryHook(unwrap(d.init)) && isOptions(d.init)) {
+        optionVariables.add(name);
+        grew = true;
+      }
+    }
+  }
+  const problems = new Set<string>();
+  const results = new Set<string>();
+  const destructuresData = (pattern: unknown) =>
+    isNode(pattern) &&
+    pattern.type === 'ObjectPattern' &&
+    (pattern.properties as Node[]).some((p) => p.type === 'ObjectProperty' && keyOf(p.key, p.computed) === 'data');
+  const isPlaceholderCall = (node: Node | undefined): boolean => isQueryHook(node) && isOptions((node.arguments as unknown[])[0]);
+  for (const d of declarators) {
+    const init = unwrap(d.init);
+    if (!init || !isPlaceholderCall(init)) continue;
+    const name = nameOf(d.id);
+    if (name) results.add(name);
+    else if (destructuresData(d.id)) problems.add(`destructured data on ${at(d)}`);
+  }
+  // `useQueries({ queries: [...] })` or `queries: list.map((x) => options)`: a list of results, read per element.
+  const isOptionsList = (node: unknown): boolean => {
+    const n = unwrap(node);
+    if (n?.type === 'ArrayExpression')
+      return (n.elements as unknown[]).some((e) => isOptions(isNode(e) && e.type === 'SpreadElement' ? e.argument : e));
+    if (n?.type !== 'CallExpression') return false;
+    const fn = (n.arguments as unknown[])[0];
+    return isFunction(fn) && returned(fn).some(isOptions);
+  };
+  const resultLists = new Set<string>();
+  for (const d of declarators) {
+    const init = unwrap(d.init);
+    const options = init && hookName(init) === 'useQueries' ? unwrap((init.arguments as unknown[])[0]) : undefined;
+    const list =
+      options?.type === 'ObjectExpression' ? (options.properties as Node[]).find((p) => keyOf(p.key, p.computed) === 'queries') : undefined;
+    const name = nameOf(d.id);
+    if (name && list && isOptionsList(list.value)) resultLists.add(name);
+  }
+  const isData = (n: Node) => (n.type === 'MemberExpression' || n.type === 'OptionalMemberExpression') && keyOf(n.property, n.computed) === 'data';
+  for (const n of nodes) {
+    if (isData(n)) {
+      const object = unwrap(n.object);
+      const result = nameOf(object);
+      if (result && results.has(result)) problems.add(`${result}.data on ${at(n)}`);
+      // `useQuery(fieldsQuery(...)).data`: the result read in the same expression.
+      else if (isPlaceholderCall(object)) problems.add(`${hookName(object)}(…).data on ${at(n)}`);
+      // `results[0].data`
+      else if ((object?.type === 'MemberExpression' || object?.type === 'OptionalMemberExpression') && resultLists.has(nameOf(object.object) ?? '')) {
+        problems.add(`${nameOf(object.object)}[…].data on ${at(n)}`);
+      }
+    } else if (n.type === 'VariableDeclarator' && results.has(nameOf(n.init) ?? '') && destructuresData(n.id)) {
+      problems.add(`destructured data on ${at(n)}`);
+    } else if (n.type === 'CallExpression') {
+      // `results.map((q) => q.data)` (any method): the callback's first parameter is one result.
+      const callee = unwrap(n.callee);
+      const fn = (n.arguments as unknown[])[0];
+      if (callee?.type !== 'MemberExpression' || !resultLists.has(nameOf(callee.object) ?? '') || !isFunction(fn)) continue;
+      const param = (fn.params as Node[])[0];
+      if (destructuresData(param)) problems.add(`destructured data on ${at(fn)}`);
+      const element = nameOf(param);
+      if (!element) continue;
+      for (const m of walk(fn.body as Node)) if (isData(m) && nameOf(m.object) === element) problems.add(`${element}.data on ${at(m)}`);
+    }
+  }
+  return [...problems];
+}
+
+/** Whether a file uses a placeholder-enabled factory or sets `placeholderData` on any options object. */
+function usesPlaceholders(src: string, queries: readonly string[], jsx: boolean): boolean {
+  for (const n of walk(syntaxTree(src, jsx))) {
+    if (n.type === 'CallExpression' && queries.includes(nameOf(n.callee) ?? '')) return true;
+    if ((n.type === 'ObjectProperty' || n.type === 'ObjectMethod') && keyOf(n.key, n.computed) === 'placeholderData') return true;
+  }
+  return false;
 }
 
 describe('the guard catches direct reads', () => {
@@ -153,7 +272,7 @@ describe('the guard catches direct reads', () => {
       'if (!fields.isPlaceholderData) {',
       '// placeholder: shown dimmed',
     ]) {
-      const src = ['const fields = useQuery(fieldsQuery(p, r));', before, 'render(fields.data);'].join('\n');
+      const src = ['const fields = useQuery(fieldsQuery(p, r));', before, 'render(fields.data);', before.endsWith('{') ? '}' : ''].join('\n');
       expect(unguardedReads(src, ['fieldsQuery']), before).toHaveLength(1);
     }
   });
@@ -173,6 +292,145 @@ describe('the guard catches direct reads', () => {
     const destructured = 'const { data } = useQuery({ staleTime: 1, ...fieldsQuery(projectId, range) });';
     expect(unguardedReads(destructured, ['fieldsQuery'])).toHaveLength(1);
   });
+  it('treats a call-site placeholderData as placeholder-enabled (the retention preview pattern)', () => {
+    const src = [
+      'const preview = useQuery({ ...retentionQuery(id, days), enabled, placeholderData: keepPreviousData });',
+      'return preview.data?.count;',
+    ].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toHaveLength(1);
+  });
+  it('does not take a value that merely mentions a factory for options', () => {
+    const src = [
+      'const enabled = !!client.getQueryData(fieldsQuery(p, r).queryKey);',
+      'const project = useQuery({ ...projectQuery(p), enabled });',
+      'return project.data?.name;',
+    ].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual([]);
+  });
+  it("does not take a factory's query key for options", () => {
+    const src = [
+      'const key = fieldsQuery(p, r).queryKey;',
+      'const project = useQuery({ ...projectQuery(p), enabled: Boolean(key.length) });',
+      'return project.data?.name;',
+    ].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual([]);
+  });
+  it('treats a shorthand call-site placeholderData as placeholder-enabled', () => {
+    const src = [
+      'const placeholderData = keepPreviousData;',
+      'const preview = useQuery({ ...retentionQuery(id, days), placeholderData });',
+      'return preview.data?.count;',
+    ].join('\n');
+    expect(unguardedReads(src, [])).toHaveLength(1);
+  });
+  it('sees a spread through a comment or a line break after the dots', () => {
+    const commented = [
+      'const opts = { ...fieldsQuery(p, r) /* keep its cache policy */, enabled };',
+      'const result = useQuery(opts);',
+      'return result.data;',
+    ].join('\n');
+    expect(unguardedReads(commented, ['fieldsQuery'])).toHaveLength(1);
+    const broken = [
+      'const opts = {',
+      '  ...',
+      '    fieldsQuery(p, r),',
+      '  enabled,',
+      '};',
+      'const result = useQuery(opts);',
+      'return result.data;',
+    ].join('\n');
+    expect(unguardedReads(broken, ['fieldsQuery'])).toHaveLength(1);
+  });
+  it('ignores a parenthesis inside a quoted argument', () => {
+    const src = ["const opts = facetQuery(p, 'a)', range, q, 1);", 'const result = useQuery(opts);', 'return result.data;'].join('\n');
+    expect(unguardedReads(src, ['facetQuery'])).toHaveLength(1);
+  });
+  it('does not take a value named placeholderData for the property', () => {
+    const src = ['const project = useQuery({ ...projectQuery(p), initialData: placeholderData });', 'return project.data?.name;'].join('\n');
+    expect(unguardedReads(src, [])).toEqual([]);
+  });
+  // Source text under test holds template literals; `$` + `{` keeps the linter from reading them as this file's own.
+  const open = '${';
+  it('reads code only: strings and comments never count, template expressions do', () => {
+    const title = `const title = \`fields: ${open}list.data?.length}\`;`;
+    const src = [
+      '// const old = useQuery(fieldsQuery(p, r)); old.data',
+      'const list = useQuery(fieldsQuery(p, r));',
+      'const label = "list.data";',
+      title,
+    ].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual([`list.data on line 4: ${title}`]);
+  });
+  it('sees reads next to JSX text, URLs, regex literals and non-null division', () => {
+    for (const line of [
+      "return <p>Today's fields: {result.data?.length}</p>;",
+      'return <p>See https://example.org for {result.data?.length} fields.</p>;',
+      "return /'/.test(label) && result.data?.length;",
+      'return count! / result.data.total;',
+    ]) {
+      const src = ['const result = useQuery(fieldsQuery(p, r));', line].join('\n');
+      expect(unguardedReads(src, ['fieldsQuery']), line).toEqual([`result.data on line 2: ${line}`]);
+    }
+  });
+  it('does not take JSX text that spells a read for one', () => {
+    const src = ['const result = useQuery(fieldsQuery(p, r));', 'return <code>result.data</code>;'].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual([]);
+  });
+  it('follows a spread of an options variable, and options objects that set placeholderData', () => {
+    const spread = [
+      'const base = fieldsQuery(p, r);',
+      'const options = { ...base, enabled };',
+      'const fields = useQuery(options);',
+      'return fields.data;',
+    ];
+    expect(unguardedReads(spread.join('\n'), ['fieldsQuery'])).toHaveLength(1);
+    const extracted = [
+      'const options = {',
+      "  queryKey: ['preview'],",
+      '  queryFn: loadPreview,',
+      '  placeholderData: keepPreviousData,',
+      '};',
+      'const preview = useQuery(options);',
+      'return preview.data;',
+    ].join('\n');
+    expect(unguardedReads(extracted, [])).toHaveLength(1);
+    // The file filter selects it too: placeholderData before the query call.
+    expect(usesPlaceholders(extracted, [], false)).toBe(true);
+  });
+  it('reads a regex after an arrow and a quoted placeholderData key', () => {
+    const arrow = [
+      'const opts = {',
+      '  select: (data) => /[\'"]/.test(JSON.stringify(data)),',
+      '  ...fieldsQuery(p, r),',
+      '};',
+      'const result = useQuery(opts);',
+      'return result.data;',
+    ].join('\n');
+    expect(unguardedReads(arrow, ['fieldsQuery'])).toHaveLength(1);
+    const quoted = [
+      "const result = useQuery({ queryKey: ['preview'], queryFn: loadPreview, 'placeholderData': keepPreviousData });",
+      'return result.data;',
+    ].join('\n');
+    expect(unguardedReads(quoted, [])).toHaveLength(1);
+    expect(usesPlaceholders(quoted, [], false)).toBe(true);
+  });
+  it('flags a result read in the same expression as its hook', () => {
+    expect(unguardedReads('const fields = useQuery(fieldsQuery(projectId, range)).data;', ['fieldsQuery'])).toHaveLength(1);
+    expect(unguardedReads('const name = useQuery(projectQuery(projectId)).data?.name;', ['fieldsQuery'])).toEqual([]);
+  });
+  it('reads useQueries results element by element', () => {
+    const queries = 'const lists = useQueries({ queries: FIELDS.map((f) => ({ ...suggestQuery(p, f, w), placeholderData: (prev) => prev })) });';
+    for (const read of ['const all = lists.map((q) => q.data);', 'const first = lists[0].data;', 'const all = lists.map(({ data }) => data);']) {
+      expect(unguardedReads([queries, read].join('\n'), []), read).toHaveLength(1);
+    }
+    expect(unguardedReads([queries, 'const all = lists.map((q) => shownDimmed(q));'].join('\n'), [])).toEqual([]);
+    const plain = 'const lists = useQueries({ queries: FIELDS.map((f) => suggestQuery(p, f, w)) });';
+    expect(unguardedReads([plain, 'const all = lists.map((q) => q.data);'].join('\n'), [])).toEqual([]);
+  });
+  it('flags data destructured from a result later', () => {
+    const src = ['const fields = useQuery(fieldsQuery(p, r));', 'const { data, isFetching } = fields;'].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual(['destructured data on line 2: const { data, isFetching } = fields;']);
+  });
   it('accepts reads through the helpers', () => {
     const src = [
       'const list = useInfiniteQuery(entityListQuery(p, k));',
@@ -191,8 +449,9 @@ describe('every consumer of a placeholder-enabled query reads it through current
     );
   });
   const root = join(import.meta.dirname, '..', '..');
-  const files = sourceFiles(root).filter((file) => queries.some((q) => readFileSync(file, 'utf8').includes(`${q}(`)));
+  // Every file using a placeholder-enabled factory, or setting `placeholderData` on a query call itself.
+  const files = sourceFiles(root).filter((file) => usesPlaceholders(readFileSync(file, 'utf8'), queries, file.endsWith('.tsx')));
   it.each(files.map((f) => [relative(root, f).replaceAll('\\', '/'), f]))('%s', (_name, file) => {
-    expect(unguardedReads(readFileSync(file, 'utf8'), queries)).toEqual([]);
+    expect(unguardedReads(readFileSync(file, 'utf8'), queries, file.endsWith('.tsx'))).toEqual([]);
   });
 });

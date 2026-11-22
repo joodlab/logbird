@@ -18,8 +18,8 @@ import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
-import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
-import { andQuery } from '@/lib/query-language';
+import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
+import { andQuery, scopedQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { ALL_RANGE, absoluteRange, isValidRange, rangeInSentence, rangeLabel, resolveRange } from '@/lib/range';
 import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
@@ -110,8 +110,11 @@ function ProjectExplorer({
   const rangeName = rangeLabelOverride ?? rangeLabel(range);
   const complete = rangeComplete || range === ALL_RANGE;
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
-  // The base filter (an entity or support agent) must constrain all of `q`, even one with a top-level OR.
-  const effectiveQ = andQuery(baseQuery ?? '', q);
+  // The base filter (an entity or support agent) must constrain all of `q`: `scopedQuery` combines it only when `q`
+  // parses, as one group. A `q` that does not parse is never sent (`blocked`); the bar shows its parse error.
+  const scoped = scopedQuery(baseQuery ?? '', q);
+  const blocked = scoped.problem !== null;
+  const effectiveQ = scoped.q ?? '';
   const queryBar = useRef<QueryInputHandle>(null);
   const results = useRef<HTMLDivElement>(null);
   const eventsTable = useRef<EventsTableHandle>(null);
@@ -128,13 +131,13 @@ function ProjectExplorer({
   // The keyboard cursor, by event id: it stays on its event when live tail prepends rows.
   const [cursorId, setCursorId] = useState<string | null>(null);
 
-  const events = useInfiniteQuery(eventsInfiniteQuery(projectId, range, effectiveQ, lang));
+  const events = useInfiniteQuery({ ...eventsInfiniteQuery(projectId, range, effectiveQ, lang), enabled: !blocked });
   // Round bucket sizes (30 min for 24 h, 3 h for 7 d) so bars line up with the axis ticks.
-  const histogram = useQuery(histogramQuery(projectId, range, effectiveQ, lang));
+  const histogram = useQuery({ ...histogramQuery(projectId, range, effectiveQ, lang), enabled: !blocked });
 
   /* ---------------- query errors ---------------- */
   // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
-  const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
+  const problem = scopedQueryProblem(scoped, queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang));
   const lastGood = useRef<{
     pages?: SearchResponse[];
     histogram?: HistogramResponse;
@@ -148,13 +151,15 @@ function ProjectExplorer({
     resultKey?: string;
   }>({});
   // Only settled results become "last good" (a placeholder is another search's data).
-  const scope = `${range}|${baseQuery ?? ''}`;
-  const eventsNow = current(events);
+  // The project is part of it: a fallback never shows another project's rows, even if this component stays mounted.
+  const scope = JSON.stringify([projectId, range, baseQuery ?? '']);
+  // A blocked search fetched nothing: whatever is cached under its blank key is never this search's (nor last good).
+  const eventsNow = blocked ? undefined : current(events);
   if (eventsNow && !events.isError) {
     lastGood.current.pages = eventsNow.pages;
     lastGood.current.pagesScope = scope;
   }
-  if (events.isSuccess && !events.isPlaceholderData) {
+  if (!blocked && events.isSuccess && !events.isPlaceholderData) {
     lastGood.current.base = baseQuery ?? '';
     lastGood.current.query = { q, lang };
     lastGood.current.range = range;
@@ -164,7 +169,7 @@ function ProjectExplorer({
   // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
   // between two entity profiles, where `q` stays empty but `baseQuery` changes).
   const resultKey = lastGood.current.resultKey;
-  const histogramNow = current(histogram);
+  const histogramNow = blocked ? undefined : current(histogram);
   if (histogramNow && !histogram.isError) {
     lastGood.current.histogram = histogramNow;
     lastGood.current.histogramScope = scope;

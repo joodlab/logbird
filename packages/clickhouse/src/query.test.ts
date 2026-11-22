@@ -1,8 +1,46 @@
+import { formatRecordTerm, quoteQueryValue } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { normalizeEvent } from './normalize';
 import { compileQuery, parseQuery, QueryError } from './query';
 
+const literalValues = ['a\tb', 'a\nb', 'a\rb', '"', '\\', ':', 'a b', ' surrounded ', '*', '(', ')', 'OR', 'العربية', '🦜'];
+
 describe('query language', () => {
+  it('round-trips generated exact field values through compilation', () => {
+    for (const value of [...literalValues, 'team*', 'a*b', 'a*b*', 'a\\*']) {
+      for (const field of ['actor', 'tenant', 'target']) {
+        const q = `${field}:${quoteQueryValue(value)}`;
+        expect(compileQuery(q).params, q).toEqual({ q0: value });
+        expect(compileQuery(q).sql, q).toContain(' = {q0:String}');
+      }
+    }
+  });
+
+  it.each([
+    [String.raw`tenant:team\*`, 'team*'],
+    [String.raw`tenant:"team\*"`, 'team*'],
+    [String.raw`tenant:\*`, '*'],
+    [String.raw`tenant:"\*"`, '*'],
+    [String.raw`tenant:team\*west`, 'team*west'],
+    [String.raw`tenant:id:team\*`, 'id:team*'],
+  ])('matches escaped stars exactly in %s', (q, value) => {
+    expect(compileQuery(q)).toEqual({ sql: '(tenant_id = {q0:String})', params: { q0: value } });
+  });
+
+  it('retains unescaped wildcards in quoted values and mixed groups', () => {
+    expect(compileQuery('tenant:"team*"')).toEqual(compileQuery('tenant:team*'));
+    expect(compileQuery(String.raw`tenant:"team\\*"`)).toEqual({ sql: '(startsWith(tenant_id, {q0:String}))', params: { q0: 'team\\' } });
+    expect(compileQuery(String.raw`tenant:(team\* OR "org*")`)).toEqual({
+      sql: '((tenant_id = {q0:String}) OR (startsWith(tenant_id, {q1:String})))',
+      params: { q0: 'team*', q1: 'org' },
+    });
+  });
+
+  it('preserves backslashes in bare attribute keys', () => {
+    expect(compileQuery(String.raw`attr.note\*:yes`).params).toEqual({ q0: 'note\\*', q1: 'yes' });
+    expect(compileQuery(String.raw`_exists_:note\*`).params).toEqual({ q0: 'note\\*' });
+  });
+
   it.each([
     [
       'action:hotel.* -env:staging',
@@ -82,6 +120,62 @@ describe('query language', () => {
   });
   it('keeps internal stars literal', () => expect(compileQuery('action:a*b').params.q0).toBe('a*b'));
 });
+
+describe('record selector', () => {
+  it.each([
+    ['record:site:12', 'site', '12'],
+    ['record:order:A:1', 'order', 'A:1'],
+    [String.raw`record:order\:archived:A1`, 'order:archived', 'A1'],
+    [String.raw`record:"order\\:archived:A1"`, 'order:archived', 'A1'],
+    [String.raw`record:order\\:A1`, 'order\\', 'A1'],
+    ['record:page:/home/', 'page', '/home/'],
+    ['record:"order:A:1"', 'order', 'A:1'],
+    ['record:"page:home page"', 'page', 'home page'],
+    ['record:page:OR', 'page', 'OR'],
+    ['record:page:*', 'page', '*'],
+    [String.raw`record:page:home\*`, 'page', 'home*'],
+    [String.raw`record:"page\*:home\*"`, 'page*', 'home*'],
+    [String.raw`record:"order:a\\b\"c"`, 'order', 'a\\b"c'],
+  ])('matches a paired target with %s', (q, type, id) => {
+    expect(compileQuery(q)).toEqual({
+      sql: '(has(target_ids, {recordId0:String}) AND arrayExists((t, i) -> t = {recordType0:String} AND i = {recordId0:String}, target_types, target_ids))',
+      params: { recordType0: type, recordId0: id },
+    });
+  });
+
+  it('round-trips generated selectors across punctuation, whitespace and Unicode', () => {
+    const types = ['order', 'order:archived', 'trailing\\', String.raw`slash\:colon`, '"a type"', 'مَلَفّ:📃', ':start', '/type/'];
+    const ids = [...literalValues, 'A1', ':A:1', 'a\\b', 'a*b*', 'a\\*', '"quote" and space', '/home/', '(nested)'];
+    for (const type of types) {
+      for (const id of ids) {
+        const q = formatRecordTerm(type, id);
+        expect(compileQuery(q).params, q).toEqual({ recordType0: type, recordId0: id });
+      }
+    }
+  });
+
+  it('negates the whole group and binds distinct pairs', () => {
+    const q = compileQuery('-record:(page:1 OR site:7)');
+    expect(q.sql).toMatch(/^NOT \(.*arrayExists.* OR .*arrayExists.*\)$/);
+    expect(q.params).toEqual({ recordType0: 'page', recordId0: '1', recordType1: 'site', recordId1: '7' });
+  });
+
+  it('supports presence and negated presence', () => {
+    expect(compileQuery('record:*')).toEqual({ sql: '(notEmpty(target_ids))', params: {} });
+    expect(compileQuery('NOT _exists_:record')).toEqual({ sql: 'NOT ((notEmpty(target_ids)))', params: {} });
+  });
+
+  it.each([
+    ['record:', 'syntax', 7, 7],
+    ['record:site', 'type', 7, 11],
+    ['😀 record:"site"', 'type', 10, 16],
+  ])('reports a helpful error span for %s', (q, reason, start, end) => {
+    expect(() => compileQuery(q)).toThrow(
+      expect.objectContaining({ details: { lang: 'query', reason, start, end, hint: expect.stringContaining('record:<type>:<id>') } }),
+    );
+  });
+});
+
 describe('normalization', () => {
   const ctx = { projectId: 'p', receivedAt: new Date('2026-11-04T00:00:00Z') };
   it('accepts empty action and malformed recommended fields', () => {

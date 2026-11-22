@@ -388,6 +388,11 @@ UTC multiples of their size, so ≥ 1h buckets start on whole hours (24h → 15m
 recent first; `name` is A→Z (unnamed entities by id). `nextCursor` is an opaque keyset cursor
 bound to its sort.
 
+`GET /api/projects/:projectId/entities/:kind/:entityId/metadata` returns `kind`, `id`, `type` and `name` for an
+exact entity under the same session and project access rules as the profile. For targets, pass the composite
+entity ID and the original `targetType` to disambiguate pairs that share a key. An unknown entity returns 404.
+The console uses this lookup to name saved-view labels without running profile summaries.
+
 Session-authenticated `GET /api/projects/:projectId/setup` reports the computed integration checklist;
 `GET /api/workspace/setup` summarizes active-workspace projects and resumable onboarding.
 Postgres facts are fresh; ClickHouse facts may be cached for 30 seconds after a real first event.
@@ -615,6 +620,7 @@ tenant:biz_7  tenant.name:"Azure Hotels"  executor:crm-worker  executor.type:wor
 executor.name:"CRM worker"  actor.email:lina@example.com  impersonator:usr_1
 parent:evt_123  job:456
 target:hotel_123  target.type:hotel  operation:op_101  request:req_abc  trace:…  source:channel-manager
+record:hotel:hotel_123             exact type and id on the same target; record:* means any target
 attr.metadata.plan:pro             attribute map lookup (wildcard * allowed at end)
 impersonator:*  -tenant:*          field:* = field present (non-empty value); -field:* = missing.
                                   Works for every core column and attribute key; x* stays a prefix match
@@ -644,6 +650,7 @@ a AND b,  NOT a                   explicit AND / NOT keywords (upper-case), same
 Attribute values are strings; with comparisons/ranges they are read as numbers
 (`toFloat64OrNull(attributes[k])`), or as dates when the bound is a date. Rows whose value does not convert never
 match. Array fields (`target`, `target.type`, `target.name`, `changes.field`) match when any element matches.
+`record:<type>:<id>` checks a single target for both fields, splitting the value on its first unescaped colon. See [record selector escaping](query-language.md#query-language-langquery-default).
 
 Errors: HTTP 422 `invalid_query`, `details` = `QueryErrorDetails` (`lang`, `reason`, `start`/`end` UTF-16 offsets,
 `hint`), e.g. `attempt:>abc` → reason `type`, span of `abc`, hint `attempt is a number`.

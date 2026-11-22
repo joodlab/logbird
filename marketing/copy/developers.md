@@ -83,7 +83,7 @@ path: /developers
 - **eyebrow:** No SDK? Use HTTP.
 - **heading:** One request, one to a thousand events.
 - **body:** `POST /v1/events` accepts one event, a JSON array, or `{ "events": [...] }`. Authenticate with an ingest
-  key. A `202` means ClickHouse has the rows.
+  key. A `202` lists the stored event IDs in `ids` and rejected events in `rejected`.
   <!-- source: docs/SPEC.md §2, §5 -->
 - **code sample:**
 
@@ -102,7 +102,7 @@ path: /developers
 - **id:** `envelope`
 - **eyebrow:** The envelope
 - **heading:** Six fields that make an audit log useful.
-- **body:** Logbird stores anything you send. These recommended fields become indexed columns, each one fills a page
+- **body:** Only an `action` string is required, and each event must fit the ingest limits. These recommended fields become indexed columns, each one fills a page
   in the console, and the conformance score tells you how many of them an event has.
   <!-- source: docs/concepts.md; docs/SPEC.md §3 -->
 - **table:**
@@ -251,12 +251,16 @@ path: /developers
   - **Batched.** Events go in batches of up to 100, or every second, whichever comes first.
   - **Retried.** Rate limits (`429`), server errors and network failures are retried with exponential backoff and
     jitter, up to 5 times. A numeric `Retry-After` is honoured.
-  - **Acknowledged after storage.** The server answers `202` only once ClickHouse has the rows.
-  - **At least once.** A retry after a lost response can store an event twice. Counts may include duplicates.
+  - **Acknowledged after storage.** On `202`, `ids` lists the accepted events and `rejected` names the entries that
+    failed. An accepted event was written to ClickHouse by this request or an earlier identical one.
+  - **At least once, stored once.** The SDK gives every event an id before it queues it, so a retry after a lost
+    response reuses the stored event while the project retains it. Raw HTTP clients should send their own string `id`: a missing, blank or non-string id gets a new generated id on every retry. A string id is rejected with `invalid_event_id` if it contains NUL or an unpaired surrogate, or exceeds 256 UTF-16 code units after trimming.
   - **Bounded under outage.** The queue holds up to 10,000 events by default. When it's full, `dropPolicy: 'oldest'`
     (the default) or `'newest'` decides what goes, and `onDrop` reports each event dropped.
   - **In memory.** A crash before the server acknowledges can lose pending events. Call `shutdown()` on exit.
-  - **Partial batches.** Events without an `action` are rejected one by one, and the rest are stored.
+  - **Partial batches.** Each event is checked on its own. Rejected events, such as one without an `action` or an id
+    conflict, are listed in `rejected`. On `202` the rest are accepted. When a `503` lists the
+    unsettled events, retry only those; otherwise retry the whole batch with the same ids.
     Permanent errors other than `429` drop the batch and report it through `onError` and `onDrop`, without rejecting
     `flush()`.
   <!-- source: packages/sdk/README.md (defaults: 100 rows, 1000 ms, 5 retries; maxQueueSize 10,000); docs/SPEC.md §2; docs/integrations.md -->

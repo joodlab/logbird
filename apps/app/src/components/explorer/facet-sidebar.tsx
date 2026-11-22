@@ -1,4 +1,4 @@
-import type { QueryLang } from '@logbird/contracts';
+import { encodeRecordPair, type FacetResponse, type QueryLang } from '@logbird/contracts';
 import { OutcomeDot } from '@logbird/ui/components/badges';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
@@ -14,7 +14,7 @@ import { placeholderKeys } from '@/lib/placeholders';
 import { altClickLabel, useIsMac } from '@/lib/platform';
 import { hasPresenceTerm, togglePresenceTerm, withPresence } from '@/lib/presence-filter';
 import { coreField } from '@/lib/query-catalog';
-import { andQuery, fieldTerms, hasTerm, queryFieldForFacet, removeTerm, toggleTerm } from '@/lib/query-language';
+import { fieldTerms, hasTerm, queryFieldForFacet, removeTerm, scopedQuery, toggleTerm } from '@/lib/query-language';
 import { hasSqlPredicate, isColumnPredicate, removeSqlConjuncts, sqlConjuncts, sqlString, toggleSqlPredicate } from '@/lib/sql-language';
 
 interface FacetSpec {
@@ -83,9 +83,9 @@ interface FacetOps {
   activeCount: (q: string) => number;
   /** The query without this field's own filters (so sibling values keep their counts). */
   without: (q: string) => string;
-  included: (q: string, value: string) => boolean;
-  excluded: (q: string, value: string) => boolean;
-  toggle: (q: string, value: string, mode: 'include' | 'exclude') => string;
+  included: (q: string, value: string, presence?: boolean) => boolean;
+  excluded: (q: string, value: string, presence?: boolean) => boolean;
+  toggle: (q: string, value: string, mode: 'include' | 'exclude', presence?: boolean) => string;
 }
 
 function queryOps(field: string): FacetOps {
@@ -119,10 +119,26 @@ function presenceOps(field: string, lang: QueryLang): FacetOps {
   const base = lang === 'sql' ? sqlOps(field) : queryOps(field);
   return {
     ...base,
-    included: (q, v) => hasPresenceTerm(q, field, { value: v, negated: false }, lang),
-    excluded: (q, v) => hasPresenceTerm(q, field, { value: v, negated: true }, lang),
-    toggle: (q, v, mode) => togglePresenceTerm(q, field, v, mode, lang),
+    included: (q, v, presence) => hasPresenceTerm(q, field, { value: presence ? null : v, negated: false }, lang),
+    excluded: (q, v, presence) => hasPresenceTerm(q, field, { value: presence ? null : v, negated: true }, lang),
+    toggle: (q, v, mode, presence) => togglePresenceTerm(q, field, presence ? null : v, mode, lang),
   };
+}
+
+/**
+ * One row per (type, id) record from a `target` facet with `by: target.type`: the value is the encoded record pair a
+ * `record:` term takes. The label is the record's name only when the id belongs to one type: the facet's name is per
+ * id, so records of different types sharing an id show their id (their type shows beside it) rather than one borrowed
+ * name. Rows are ordered by count.
+ */
+export function recordPairValues(values: FacetResponse['values']): { value: string; label: string; count: number }[] {
+  return values
+    .flatMap((v) => {
+      const groups = v.groups ?? [];
+      const label = groups.length === 1 && (v.groupsOtherCount ?? 0) === 0 ? v.label || v.value : v.value;
+      return groups.map((g) => ({ value: encodeRecordPair(g.value, v.value), label, count: g.count }));
+    })
+    .sort((a, b) => b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
 }
 
 /** Facet groups with counts. Click includes a value, ⌥/Alt-click (or −) excludes it. */
@@ -190,7 +206,11 @@ function FacetGroup({
   onChange: (q: string) => void;
 }) {
   const queryField = queryFieldForFacet(spec.field);
-  const opsFor = (l: QueryLang) => (spec.presence ? presenceOps(queryField, l) : l === 'sql' ? sqlOps(queryField) : queryOps(queryField));
+  // The Record facet lists (type, id) pairs and filters with `record:<type>:<id>` (#169): two records that share an id
+  // never merge. SQL mode has no record field and keeps the id column.
+  const recordPairs = (l: QueryLang) => spec.field === 'target' && l === 'query';
+  const opsFor = (l: QueryLang) =>
+    spec.presence ? presenceOps(queryField, l) : l === 'sql' ? sqlOps(queryField) : queryOps(recordPairs(l) ? 'record' : queryField);
   const ops = opsFor(lang);
   const activeCount = ops.activeCount(q);
   const [open, setOpen] = useState(Boolean(spec.defaultOpen) || activeCount > 0);
@@ -202,12 +222,18 @@ function FacetGroup({
   // otherCount: its "any value" row is then exactly the listed values plus the overflow.
   const own = spec.presence ? withPresence(without, queryField, base.lang) : without;
   // The locked scope is query language; SQL mode is never offered together with one.
-  const scopedQ = scope && base.lang !== 'sql' ? andQuery(scope, own) : own;
-  const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
+  const scoped = scope && base.lang !== 'sql' ? scopedQuery(scope, own) : null;
+  // A reader query that does not parse is never combined with the locked scope (scopedQuery), so nothing is counted.
+  const scopedQ = scoped ? (scoped.q ?? '') : own;
+  // Record pairs: each id's top types, from one target tuple (the server pairs an id only with its own type).
+  const by = recordPairs(base.lang) ? 'target.type' : undefined;
+  const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang, by), enabled: open && !scoped?.problem });
   // Values from a previous search (a placeholder while this one loads) are never shown as this search's.
   const loadingValues = (facet.isPending || facet.isPlaceholderData) && !facet.isError;
-  const facetNow = current(facet);
-  const allValues = facetNow?.values ?? [];
+  // A blocked count fetched nothing: values cached under its blank key are another search's.
+  const facetNow = scoped?.problem ? undefined : current(facet);
+  const fetched = facetNow?.values ?? [];
+  const allValues = by ? recordPairValues(fetched) : fetched;
   const values = spec.presence ? allValues.filter((v) => v.value !== '') : allValues;
   const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facetNow?.otherCount ?? 0) : 0;
   const max = Math.max(...values.map((v) => v.count), presentCount, 1);
@@ -217,10 +243,10 @@ function FacetGroup({
   const dimmed = stale || facet.isPlaceholderData || failed;
 
   const renderRow = (v: { value: string; label: string; count: number }, presenceRow = false) => {
-    const included = ops.included(q, v.value);
-    const excluded = ops.excluded(q, v.value);
+    const included = ops.included(q, v.value, presenceRow);
+    const excluded = ops.excluded(q, v.value, presenceRow);
     return (
-      <div className="group/facet relative flex items-center" key={v.value}>
+      <div className="group/facet relative flex items-center" key={presenceRow ? 'any' : `value:${v.value}`}>
         <button
           aria-pressed={included}
           className={cn(
@@ -228,7 +254,7 @@ function FacetGroup({
             included && 'bg-brand/10 text-foreground',
             excluded && 'text-muted-foreground line-through decoration-outcome-failure/60',
           )}
-          onClick={(e) => onChange(ops.toggle(q, v.value, e.altKey ? 'exclude' : 'include'))}
+          onClick={(e) => onChange(ops.toggle(q, v.value, e.altKey ? 'exclude' : 'include', presenceRow))}
           title={
             presenceRow
               ? `${v.label} — click for only these events, ${altClickLabel(isMac)} to hide them`
@@ -280,7 +306,7 @@ function FacetGroup({
                   'absolute end-1 text-muted-foreground opacity-0 hover:bg-background hover:text-outcome-failure focus-visible:opacity-100 group-hover/facet:opacity-100 dark:hover:bg-background',
                   excluded && 'text-outcome-failure opacity-100',
                 )}
-                onClick={() => onChange(ops.toggle(q, v.value, 'exclude'))}
+                onClick={() => onChange(ops.toggle(q, v.value, 'exclude', presenceRow))}
                 size="icon-xs"
                 variant="ghost"
               />

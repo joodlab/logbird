@@ -18,7 +18,7 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { CheckCircle2Icon, KeyRoundIcon, Loader2Icon, PlusIcon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
+import { CheckCircle2Icon, ChevronDownIcon, KeyRoundIcon, Loader2Icon, PlusIcon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
 import { type ComponentProps, type ReactNode, useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -68,15 +68,23 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
 });
 
 const KIND_COPY = {
-  ingest: { label: 'Ingest', hint: 'Can only send events (POST /v1/events). Use in your services.', short: 'sends events only' },
+  // `hint`: the full sentence (list tooltips); `card`: one short line on the create form's choice cards.
+  ingest: {
+    label: 'Ingest',
+    hint: 'Can only send events (POST /v1/events). Use in your services.',
+    card: 'Sends events only. For your services.',
+    short: 'sends events only',
+  },
   read: {
     label: 'Read',
     hint: 'Reads every event in this project and mints viewer tokens for any tenant. Keep it on your server.',
+    card: 'Reads every event. Keep it on your server.',
     short: 'reads every event',
   },
   'scoped-read': {
     label: 'Scoped read',
     hint: 'Reads only one tenant’s events (optionally one target and some actions, with fields hidden). The server enforces it.',
+    card: 'Reads one tenant’s events only.',
     short: 'reads one tenant only',
   },
 } as const;
@@ -483,12 +491,52 @@ function RollKeyDialog({
   );
 }
 
-/** A labelled text field with its limit (and any error) under it, before submit. */
+/**
+ * The line under a field: its short purpose by default, its limits while it is focused, its error once invalid. The
+ * limits stay in the field's accessible description throughout (visually hidden when not shown), so a screen reader
+ * hears them on focus; the dialog stays short until someone is filling a field in.
+ */
+function FieldHint({
+  id,
+  purpose,
+  limits,
+  error,
+  focused,
+}: {
+  id: string;
+  purpose?: ReactNode;
+  limits: ReactNode;
+  error?: string;
+  focused: boolean;
+}) {
+  return (
+    <>
+      {error ? (
+        <p className="text-destructive text-xs" id={`${id}-hint`}>
+          {error}
+        </p>
+      ) : purpose ? (
+        // Hidden visually (not removed) while the limits show, so the field's description never points at nothing.
+        <p className={focused ? 'sr-only' : 'text-muted-foreground text-xs'} id={`${id}-hint`}>
+          {purpose}
+        </p>
+      ) : null}
+      <p className={focused && !error ? 'text-muted-foreground text-xs' : 'sr-only'} id={`${id}-limits`}>
+        {limits}
+      </p>
+    </>
+  );
+}
+/** The field's description: its hint line when it has one (purpose or error), and its limits. */
+const describedBy = (id: string, hasHint = true) => (hasHint ? `${id}-hint ${id}-limits` : `${id}-limits`);
+
+/** A labelled text field with its purpose, its limits while focused, and its error (see `FieldHint`). */
 function TextField({
   id,
   label,
   optional,
-  hint,
+  purpose,
+  limits,
   error,
   multiline,
   ...props
@@ -496,22 +544,25 @@ function TextField({
   id: string;
   label: string;
   optional?: boolean;
-  hint: ReactNode;
+  purpose?: ReactNode;
+  limits: ReactNode;
   error: string | undefined;
   multiline?: boolean;
   value: string;
   placeholder?: string;
   onChange: (value: string) => void;
 }) {
-  const hintId = `${id}-hint`;
+  const [focused, setFocused] = useState(false);
   const common = {
-    'aria-describedby': hintId,
+    'aria-describedby': describedBy(id, Boolean(error || purpose)),
     'aria-invalid': Boolean(error) || undefined,
     autoCapitalize: 'off',
     autoComplete: 'off',
     className: 'font-mono',
     id,
+    onBlur: () => setFocused(false),
     onChange: (e: { target: { value: string } }) => props.onChange(e.target.value),
+    onFocus: () => setFocused(true),
     placeholder: props.placeholder,
     spellCheck: false,
     value: props.value,
@@ -523,9 +574,7 @@ function TextField({
         {optional ? <span className="font-normal text-muted-foreground"> · optional</span> : null}
       </Label>
       {multiline ? <Textarea {...common} rows={2} /> : <Input {...common} />}
-      <p className={cn('text-xs', error ? 'text-destructive' : 'text-muted-foreground')} id={hintId}>
-        {error ?? hint}
-      </p>
+      <FieldHint error={error} focused={focused} id={id} limits={limits} purpose={purpose} />
     </div>
   );
 }
@@ -549,6 +598,8 @@ function CreateKeyDialog({
 }) {
   const queryClient = useQueryClient();
   const nameInput = useRef<HTMLInputElement>(null);
+  const [nameFocused, setNameFocused] = useState(false);
+  const [narrowOpen, setNarrowOpen] = useState(false);
   const ids = useId();
   const [createdHere, setCreated] = useState<IssuedKey | null>(null);
   const created = rolled ?? createdHere;
@@ -584,6 +635,7 @@ function CreateKeyDialog({
         onClosed();
         secretGuard.reset();
         form.reset();
+        setNarrowOpen(false);
         create.reset();
       }, 200);
     }
@@ -679,17 +731,23 @@ function CreateKeyDialog({
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="key-name">Name</Label>
                     <Input
-                      aria-describedby="key-name-hint"
+                      aria-describedby={describedBy('key-name')}
                       aria-invalid={Boolean(message) || undefined}
                       id="key-name"
+                      onBlur={() => setNameFocused(false)}
+                      onFocus={() => setNameFocused(true)}
                       onChange={(e) => field.handleChange(e.target.value)}
                       placeholder="Production API"
                       ref={nameInput}
                       value={field.state.value}
                     />
-                    <p className={cn('text-xs', message ? 'text-destructive' : 'text-muted-foreground')} id="key-name-hint">
-                      {message ?? 'Up to 64 characters. Name it after what will use it.'}
-                    </p>
+                    <FieldHint
+                      error={message}
+                      focused={nameFocused}
+                      id="key-name"
+                      limits="Up to 64 characters."
+                      purpose="Name it after what will use it."
+                    />
                   </div>
                 );
               }}
@@ -710,7 +768,7 @@ function CreateKeyDialog({
                           {KIND_COPY[kind].label}
                           <span className="sr-only"> — </span>
                         </span>
-                        <span className="text-muted-foreground text-xs">{KIND_COPY[kind].hint}</span>
+                        <span className="text-muted-foreground text-xs">{KIND_COPY[kind].card}</span>
                       </RadioChoice>
                     ))}
                   </RadioGroup>
@@ -723,15 +781,15 @@ function CreateKeyDialog({
                   <fieldset className="flex min-w-0 flex-col gap-3 rounded-lg border p-3">
                     <legend className="px-1 font-medium text-sm">What it can read</legend>
                     <p className="-mt-1 text-muted-foreground text-xs">
-                      Use ids exactly as Logbird stored them, as shown on a tenant’s page and matched by <code>tenant:&lt;id&gt;</code>. Events
-                      without a tenant are never visible to this key. The API enforces the whole scope on every read; when the restricted query user
-                      is configured, the database also enforces the tenant.
+                      Ids exactly as stored, as on a tenant’s page. The API enforces the scope on every read (and the database the tenant, when the
+                      restricted query user is configured).
                     </p>
                     <form.Field name="tenantId">
                       {(field) => (
                         <TextField
                           error={fieldErrorMessage(field.state.meta.errors)}
-                          hint={`Required. Up to ${SCOPE_LIMITS.tenantId} characters, ${SCOPE_ID_RULE}.`}
+                          limits={`Up to ${SCOPE_LIMITS.tenantId} characters, ${SCOPE_ID_RULE}.`}
+                          purpose="Required. Events without a tenant are never visible to this key."
                           id={`${ids}-tenant`}
                           label="Tenant id"
                           onChange={field.handleChange}
@@ -740,76 +798,118 @@ function CreateKeyDialog({
                         />
                       )}
                     </form.Field>
-                    <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-                      <form.Field name="targetType">
-                        {(field) => (
-                          <TextField
-                            error={fieldErrorMessage(field.state.meta.errors)}
-                            hint={`Up to ${SCOPE_LIMITS.targetType} characters, ${SCOPE_ID_RULE}.`}
-                            id={`${ids}-target-type`}
-                            label="Target type"
-                            onChange={field.handleChange}
-                            optional
-                            placeholder="website"
-                            value={field.state.value}
-                          />
-                        )}
-                      </form.Field>
-                      <form.Field name="targetId">
-                        {(field) => (
-                          <TextField
-                            error={fieldErrorMessage(field.state.meta.errors)}
-                            hint={`Up to ${SCOPE_LIMITS.targetId} characters, ${SCOPE_ID_RULE}. Only events with a target of this type and id.`}
-                            id={`${ids}-target-id`}
-                            label="Target id"
-                            onChange={field.handleChange}
-                            optional
-                            placeholder="site_42"
-                            value={field.state.value}
-                          />
-                        )}
-                      </form.Field>
-                    </div>
-                    <form.Field name="actionPrefixes">
-                      {(field) => (
-                        <TextField
-                          error={fieldErrorMessage(field.state.meta.errors)}
-                          hint={`One per line, up to ${SCOPE_LIMITS.actionPrefixes}, each up to ${SCOPE_LIMITS.actionPrefix} characters, ${SCOPE_ID_RULE}. Only actions that start with one of them.`}
-                          id={`${ids}-actions`}
-                          label="Action prefixes"
-                          multiline
-                          onChange={field.handleChange}
-                          optional
-                          placeholder={'booking.\nauth.'}
-                          value={field.state.value}
-                        />
-                      )}
-                    </form.Field>
-                    <form.Field name="masks">
-                      {(field) => (
-                        <fieldset className="flex min-w-0 flex-col gap-1.5">
-                          <legend className="font-medium text-sm">
-                            Hide <span className="font-normal text-muted-foreground">· optional</span>
-                          </legend>
-                          {SCOPE_MASKS.map((mask) => (
-                            // biome-ignore lint/a11y/noLabelWithoutControl: the Base UI checkbox inside is the control.
-                            <label className="flex items-start gap-2 text-sm" key={mask}>
-                              <Checkbox
-                                checked={field.state.value.includes(mask)}
-                                className="mt-0.5"
-                                onCheckedChange={(checked) =>
-                                  field.handleChange(checked ? [...field.state.value, mask] : field.state.value.filter((m) => m !== mask))
-                                }
-                              />
+                    {/* One target, some actions, hidden fields: optional, so closed until wanted (it opens itself when any of them
+                        has a value or an error). The summary below always shows the whole scope. */}
+                    <form.Subscribe
+                      selector={(st) => ({
+                        set: Boolean(st.values.targetType || st.values.targetId || st.values.actionPrefixes.trim() || st.values.masks.length),
+                        invalid: Boolean(
+                          st.fieldMeta.targetType?.errors.length ||
+                            st.fieldMeta.targetId?.errors.length ||
+                            st.fieldMeta.actionPrefixes?.errors.length,
+                        ),
+                      })}
+                    >
+                      {({ set, invalid }) => {
+                        // Never hides an error: a field with an error keeps the panel open. A plain button (not a native
+                        // <summary>) so the open state is ours alone and cannot drift from what React renders.
+                        const open = narrowOpen || invalid;
+                        return (
+                          <div className="flex min-w-0 flex-col gap-3" data-testid="narrow-further">
+                            <button
+                              aria-controls={`${ids}-narrow`}
+                              aria-expanded={open}
+                              className="group flex items-start gap-1.5 rounded-sm text-start font-medium text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                              data-open={open || undefined}
+                              onClick={() => setNarrowOpen(invalid ? true : !open)}
+                              type="button"
+                            >
+                              <ChevronDownIcon className="-rotate-90 mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-data-[open]:rotate-0" />
                               <span>
-                                {MASK_LABEL[mask]} <span className="text-muted-foreground text-xs">· {MASK_HINT[mask]}</span>
+                                Narrow further{' '}
+                                <span className="font-normal text-muted-foreground">
+                                  {set && !open ? '· set: see the summary below' : '· one target, some actions, hidden fields'}
+                                </span>
                               </span>
-                            </label>
-                          ))}
-                          <p className="text-muted-foreground text-xs">Hiding any field also hides each event’s raw payload.</p>
-                        </fieldset>
-                      )}
-                    </form.Field>
+                            </button>
+                            <div className="flex min-w-0 flex-col gap-3" hidden={!open} id={`${ids}-narrow`}>
+                              <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                                <form.Field name="targetType">
+                                  {(field) => (
+                                    <TextField
+                                      error={fieldErrorMessage(field.state.meta.errors)}
+                                      limits={`Up to ${SCOPE_LIMITS.targetType} characters, ${SCOPE_ID_RULE}.`}
+                                      id={`${ids}-target-type`}
+                                      label="Target type"
+                                      onChange={field.handleChange}
+                                      optional
+                                      placeholder="website"
+                                      value={field.state.value}
+                                    />
+                                  )}
+                                </form.Field>
+                                <form.Field name="targetId">
+                                  {(field) => (
+                                    <TextField
+                                      error={fieldErrorMessage(field.state.meta.errors)}
+                                      limits={`Up to ${SCOPE_LIMITS.targetId} characters, ${SCOPE_ID_RULE}.`}
+                                      purpose="Only events with a target of this type and id."
+                                      id={`${ids}-target-id`}
+                                      label="Target id"
+                                      onChange={field.handleChange}
+                                      optional
+                                      placeholder="site_42"
+                                      value={field.state.value}
+                                    />
+                                  )}
+                                </form.Field>
+                              </div>
+                              <form.Field name="actionPrefixes">
+                                {(field) => (
+                                  <TextField
+                                    error={fieldErrorMessage(field.state.meta.errors)}
+                                    limits={`One per line, up to ${SCOPE_LIMITS.actionPrefixes}, each up to ${SCOPE_LIMITS.actionPrefix} characters, ${SCOPE_ID_RULE}.`}
+                                    purpose="Only actions that start with one of these."
+                                    id={`${ids}-actions`}
+                                    label="Action prefixes"
+                                    multiline
+                                    onChange={field.handleChange}
+                                    optional
+                                    placeholder={'booking.\nauth.'}
+                                    value={field.state.value}
+                                  />
+                                )}
+                              </form.Field>
+                              <form.Field name="masks">
+                                {(field) => (
+                                  <fieldset className="flex min-w-0 flex-col gap-1.5">
+                                    <legend className="font-medium text-sm">
+                                      Hide <span className="font-normal text-muted-foreground">· optional</span>
+                                    </legend>
+                                    {SCOPE_MASKS.map((mask) => (
+                                      // biome-ignore lint/a11y/noLabelWithoutControl: the Base UI checkbox inside is the control.
+                                      <label className="flex items-start gap-2 text-sm" key={mask}>
+                                        <Checkbox
+                                          checked={field.state.value.includes(mask)}
+                                          className="mt-0.5"
+                                          onCheckedChange={(checked) =>
+                                            field.handleChange(checked ? [...field.state.value, mask] : field.state.value.filter((m) => m !== mask))
+                                          }
+                                        />
+                                        <span>
+                                          {MASK_LABEL[mask]} <span className="text-muted-foreground text-xs">· {MASK_HINT[mask]}</span>
+                                        </span>
+                                      </label>
+                                    ))}
+                                    <p className="text-muted-foreground text-xs">Hiding any field also hides each event’s raw payload.</p>
+                                  </fieldset>
+                                )}
+                              </form.Field>
+                            </div>
+                          </div>
+                        );
+                      }}
+                    </form.Subscribe>
                   </fieldset>
                 ) : null
               }
@@ -821,7 +921,8 @@ function CreateKeyDialog({
                     {(field) => (
                       <TextField
                         error={fieldErrorMessage(field.state.meta.errors)}
-                        hint={`Where viewer tokens minted with this key may be used. One per line, up to ${SCOPE_LIMITS.embedOrigins}: ${ORIGIN_RULE} Leave empty for server-to-server use only.`}
+                        limits={`One per line, up to ${SCOPE_LIMITS.embedOrigins}: ${ORIGIN_RULE}`}
+                        purpose="Where its viewer tokens may be used. Leave empty for servers only."
                         id={`${ids}-origins`}
                         label="Browser origins"
                         multiline

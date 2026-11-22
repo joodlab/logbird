@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ReadScope } from '@logbird/contracts';
+import { pairedTargetSql } from './target-pair';
 
 /**
  * A read scope (#138) as a mandatory SQL predicate. Callers AND it OUTSIDE the compiled user filter, so nothing in `q`
@@ -23,7 +24,7 @@ export function scopePredicate(scope: ReadScope | null | undefined): { sql: stri
   const parts = ['tenant_id = {scope_tenant:String}'];
   const params: Record<string, string> = { scope_tenant: scope.tenantId };
   if (scope.target) {
-    parts.push('arrayExists((t, i) -> t = {scope_target_type:String} AND i = {scope_target_id:String}, target_types, target_ids)');
+    parts.push(`(${pairedTargetSql('scope_target_type', 'scope_target_id')})`);
     params.scope_target_type = scope.target.type;
     params.scope_target_id = scope.target.id;
   }

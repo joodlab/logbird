@@ -39,6 +39,7 @@ export const consoleMatrix = [
   ['GET', '/api/projects/:projectId/overview', 'project'],
   ['GET', '/api/projects/:projectId/entities', 'project'],
   ['GET', '/api/projects/:projectId/entities/:kind/:entityId', 'project'],
+  ['GET', '/api/projects/:projectId/entities/:kind/:entityId/metadata', 'project'],
   ['GET', '/api/projects/:projectId/fields', 'project'],
   ['GET', '/api/projects/:projectId/suggest', 'project'],
   ['GET', '/api/projects/:projectId/views', 'project'],

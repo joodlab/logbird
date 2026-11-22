@@ -3,7 +3,9 @@ import type {
   AuditEvent,
   Entity,
   EntityKind,
+  EntityMetadata,
   EntityProfile,
+  EntityProfileQuery,
   EntitySort,
   EventDetail,
   ExportQuery,
@@ -33,7 +35,7 @@ import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
-import { columns, compileQuery, QueryError } from './query';
+import { columns, compileQuery, QueryError, recordTargetPredicate } from './query';
 import { rollupSql } from './rollup-sql';
 import { CursorError, cursorBinding, scopePredicate } from './scope';
 import { freezeSqlClock, sqlSyntaxError, validateSql } from './sql-guard';
@@ -47,6 +49,7 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
   return { sql: frozen.sql, params: { ...frozen.params, [sqlExpression]: q.q ?? '' } };
 }
 
+type CompiledFilter = Awaited<ReturnType<typeof filter>>;
 type Params = Record<string, unknown>;
 export type ExportExecution = {
   signal: AbortSignal;
@@ -151,13 +154,7 @@ export function timeRange(q: RangeQuery, now = Date.now()) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-export async function where(
-  ch: ClickHouseClient,
-  projectId: string,
-  q: RangeQuery,
-  compiled?: Awaited<ReturnType<typeof filter>>,
-  scope?: ReadScope | null,
-) {
+export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: CompiledFilter, scope?: ReadScope | null) {
   const c = compiled ?? (await filter(ch, q));
   const s = scopePredicate(scope);
   // The scope is ANDed outside the user's filter: nothing inside `(c.sql)` can widen it.
@@ -427,8 +424,13 @@ export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: st
     )
   ).map(toEvent);
 }
-export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<typeof histogramQuerySchema>): Promise<HistogramResponse> {
-  const w = await where(ch, p, q),
+export async function histogram(
+  ch: ClickHouseClient,
+  p: string,
+  q: z.infer<typeof histogramQuerySchema>,
+  compiled?: CompiledFilter,
+): Promise<HistogramResponse> {
+  const w = await where(ch, p, q, compiled),
     range = timeRange(q),
     interval = q.interval ?? pickHistogramInterval(Date.parse(range.to) - Date.parse(range.from));
   const step = interval * 1000;
@@ -497,8 +499,9 @@ export async function facets(
   p: string,
   q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
   scope?: ReadScope | null,
+  compiled?: CompiledFilter,
 ): Promise<FacetResponse> {
-  const w = await where(ch, p, q, undefined, scope);
+  const w = await where(ch, p, q, compiled, scope);
   const one = facetLevel(q.field, 1);
   // Only the top `limit` groups leave ClickHouse; the window sum (computed before LIMIT) keeps otherCount exact.
   const rows = await read<{ value: string; label: string; count: number; total: number }>(
@@ -541,8 +544,8 @@ async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
     )[0] ?? { events: 0, actors: 0, tenants: 0, failureRate: 0, avgConformance: 0 }
   );
 }
-async function top(ch: ClickHouseClient, p: string, q: RangeQuery, col: string, label: string, type = "''") {
-  const w = await where(ch, p, q);
+async function top(ch: ClickHouseClient, p: string, q: RangeQuery, col: string, label: string, type = "''", compiled?: CompiledFilter) {
+  const w = await where(ch, p, q, compiled);
   return read<{ id: string; label: string; type: string; count: number }>(
     ch,
     `SELECT ${col} id,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),id) label,argMax(${type},timestamp) type,count() count FROM events WHERE ${w.sql} AND ${col}!='' GROUP BY id ORDER BY count DESC,id LIMIT 10`,
@@ -651,45 +654,104 @@ function entityCursor(s: string, sort: EntitySort): [string, string, string] {
   }
   throw new Error('Invalid cursor');
 }
-function sqlLiteral(s: string) {
-  return `'${s.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+
+const ENTITY_NAMES = 'kind,entity_id id,anyLast(type) type,anyLast(name) name';
+const ENTITY_BY_ID = 'FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id';
+
+function ambiguousTarget(kind: EntityKind, id: string) {
+  return kind === 'target' && id.indexOf(':') !== id.lastIndexOf(':');
 }
-function entityFilter(kind: EntityKind, id: string) {
-  return kind === 'target'
-    ? `target.type:${JSON.stringify(id.slice(0, id.indexOf(':')))} target:${JSON.stringify(id.slice(id.indexOf(':') + 1))}`
-    : `${kind}:${JSON.stringify(id)}`;
+
+/** Read the display metadata only. The composite rollup key cannot distinguish pairs containing colons. */
+export async function entityMetadata(
+  ch: ClickHouseClient,
+  p: string,
+  kind: EntityKind,
+  id: string,
+  targetType?: string,
+): Promise<EntityMetadata | null> {
+  const ambiguous = ambiguousTarget(kind, id);
+  const rollup =
+    ambiguous && targetType !== undefined
+      ? undefined
+      : (await read<EntityMetadata>(ch, `SELECT ${ENTITY_NAMES} ${ENTITY_BY_ID}`, { p, kind, id }))[0];
+  if (kind !== 'target') return rollup ?? null;
+  const type = targetType ?? rollup?.type;
+  if (type === undefined || !id.startsWith(`${type}:`)) return null;
+  if (!ambiguous) return rollup ?? null;
+
+  const pair = recordTargetPredicate(type, id.slice(type.length + 1));
+  const [event] = await read<EntityMetadata>(
+    ch,
+    `SELECT 'target' kind, {id:String} id, {recordType:String} type,
+       arrayFirst((n, t, i) -> t = {recordType:String} AND i = {recordId:String}, target_names, target_types, target_ids) name
+     FROM events WHERE project_id={p:String} AND (${pair.sql}) ORDER BY timestamp DESC,event_id DESC LIMIT 1`,
+    { p, id, ...pair.params },
+  );
+  return event ?? null;
 }
-export async function entityProfile(ch: ClickHouseClient, p: string, kind: EntityKind, id: string, q: RangeQuery): Promise<EntityProfile | null> {
-  const raw = (
-    await read<Entity>(
-      ch,
-      'SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id',
-      { p, kind, id },
-    )
-  )[0];
-  const entity = raw ? { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) } : undefined;
-  if (!entity) return null;
-  const entitySql =
-    kind === 'target'
-      ? `has(target_ids,${sqlLiteral(id.slice(id.indexOf(':') + 1))}) AND has(target_types,${sqlLiteral(id.slice(0, id.indexOf(':')))})`
-      : `${kind}_id = ${sqlLiteral(id)}`;
-  const scoped = { ...q, q: q.lang === 'sql' ? `(${q.q || '1'}) AND (${entitySql})` : `${q.q ? `(${q.q})` : ''} ${entityFilter(kind, id)}` };
+
+export async function entityProfile(
+  ch: ClickHouseClient,
+  p: string,
+  kind: EntityKind,
+  id: string,
+  q: EntityProfileQuery,
+): Promise<EntityProfile | null> {
+  const ambiguous = ambiguousTarget(kind, id);
+  const rollup =
+    ambiguous && q.targetType !== undefined
+      ? undefined
+      : (
+          await read<Entity>(ch, `SELECT ${ENTITY_NAMES},min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events ${ENTITY_BY_ID}`, {
+            p,
+            kind,
+            id,
+          })
+        )[0];
+  if (!ambiguous && !rollup) return null;
+  const targetType = kind === 'target' ? (q.targetType ?? rollup?.type) : undefined;
+  if (kind === 'target' && (targetType === undefined || !id.startsWith(`${targetType}:`))) return null;
+
+  // Compose trusted predicates after SQL-mode validation. Use separate bindings
+  // from the user filter, which may itself include record terms.
+  const userFilter = await filter(ch, q);
+  const entityFilter =
+    targetType !== undefined
+      ? recordTargetPredicate(targetType, id.slice(targetType.length + 1))
+      : { sql: `${kind}_id = {entityId:String}`, params: { entityId: id } };
+  // The rollup loses the pair when several types and ids share a composite key.
+  const raw = ambiguous
+    ? (
+        await read<Entity>(
+          ch,
+          `SELECT 'target' kind, {id:String} id, {recordType:String} type,
+           argMax(arrayFirst((n, t, i) -> t = {recordType:String} AND i = {recordId:String}, target_names, target_types, target_ids), (timestamp,event_id)) name,
+           min(timestamp) firstSeen, max(timestamp) lastSeen, count() events
+         FROM events WHERE project_id={p:String} AND (${entityFilter.sql}) HAVING count() > 0`,
+          { p, id, ...entityFilter.params },
+        )
+      )[0]
+    : rollup;
+  if (!raw) return null;
+  const entity = { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) };
+  const scoped = { sql: `(${userFilter.sql}) AND (${entityFilter.sql})`, params: { ...userFilter.params, ...entityFilter.params } };
+  const w = await where(ch, p, q, scoped);
   const [series, topActions, outcomes] = await Promise.all([
-    histogram(ch, p, scoped),
-    top(ch, p, scoped, 'action', 'action'),
-    facets(ch, p, { ...scoped, field: 'outcome', limit: 100 }),
+    histogram(ch, p, q, scoped),
+    top(ch, p, q, 'action', 'action', "''", scoped),
+    facets(ch, p, { ...q, field: 'outcome', limit: 100 }, undefined, scoped),
   ]);
   const related: EntityProfile['related'] = [];
   for (const k of ['actor', 'tenant', 'executor', 'target'] as const) {
     if (k === kind) continue;
-    const w = await where(ch, p, scoped),
-      target = k === 'target',
+    const target = k === 'target',
       idCol = target ? "concat(t.1,':',t.2)" : `${k}_id`,
       nameCol = target ? 't.3' : `${k}_name`,
       typeCol = target ? 't.1' : k === 'tenant' ? "''" : `${k}_type`;
     const rs = await read<{ id: string; name: string; type: string; count: number }>(
       ch,
-      `SELECT ${idCol} id,any(${nameCol}) name,any(${typeCol}) type,count() count FROM events ${target ? 'ARRAY JOIN arrayZip(target_types,target_ids,target_names) AS t' : ''} WHERE ${w.sql} AND ${idCol}!='' GROUP BY id ORDER BY count DESC LIMIT 10`,
+      `SELECT ${idCol} id,any(${nameCol}) name,${target ? typeCol : `any(${typeCol})`} type,count() count FROM events ${target ? 'ARRAY JOIN arrayZip(target_types,target_ids,target_names) AS t' : ''} WHERE ${w.sql} AND ${idCol}!='' GROUP BY id${target ? ',type' : ''} ORDER BY count DESC LIMIT 10`,
       w.params,
     );
     related.push(...rs.map((r) => ({ ...r, kind: k, count: Number(r.count) })));

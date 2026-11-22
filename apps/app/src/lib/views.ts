@@ -1,26 +1,82 @@
-import type { EntityKind, SavedView } from '@logbird/contracts';
+import { decodeRecordPair, type EntityKind, encodeRecordPair, formatRecordTerm, parseQueryExpression, type SavedView } from '@logbird/contracts';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { meQuery } from '@/lib/api/queries';
-import { splitTargetId } from '@/lib/entities';
-import { canonicalField, fieldTerms } from '@/lib/query-language';
+import { splitTargetId, targetEntityId } from '@/lib/entities';
+import { andQuery, canonicalField, fieldTerms, hasTopLevelOr, removeTerm } from '@/lib/query-language';
 
 export type ViewLabel = NonNullable<SavedView['state']['labels']>[number];
 export type ViewLabelField = ViewLabel['field'];
+type ViewLabelTerm = Pick<ViewLabel, 'field' | 'value'>;
 
 const FIELD_NAMES: Record<ViewLabelField, string> = {
   actor: 'Actor',
   tenant: 'Tenant',
   executor: 'Executor',
   target: 'Record',
+  record: 'Record',
   impersonator: 'Support',
 };
 
-const RESOLVABLE: Partial<Record<string, ViewLabelField>> = { actor: 'actor', tenant: 'tenant', executor: 'executor', target: 'target' };
+const RESOLVABLE: Partial<Record<string, ViewLabelField>> = {
+  actor: 'actor',
+  tenant: 'tenant',
+  executor: 'executor',
+  target: 'target',
+  record: 'record',
+};
 /** Bounded: one small entity lookup per term. */
 const MAX_RESOLVED_TERMS = 6;
+
+/**
+ * What a saved query's loose record pair means, decided from the query alone: a `target:` term together with a
+ * `target.type:` term matches the id and the type separately (on any targets), so the results can include events where
+ * another record shares the id or the type. Old record pages wrote exactly this; a view built by hand can too, and the
+ * statement is equally true for both. `exact` is the same query with the pair as one `record:<type>:<id>` term, offered
+ * only when that is unambiguous: one positive, plain `target:` and one positive, plain `target.type:`, both at the top
+ * level of a query without a top-level OR. Otherwise it is null and only the explanation applies. Null overall when the
+ * query has no such pair (or is SQL).
+ */
+export function loosePairNotice(q: string, lang: 'query' | 'sql' | undefined): { exact: string | null } | null {
+  if (lang === 'sql' || !q.trim()) return null;
+  const terms = fieldTerms(q);
+  const targets = terms.filter((t) => canonicalField(t.field ?? '') === 'target');
+  const types = terms.filter((t) => canonicalField(t.field ?? '') === 'target.type');
+  const topLevel = new Set(fieldTerms(q, true).map((t) => t.start));
+  // The statement is about terms that select ids and types: at the top level of the query (never inside a group, whose
+  // negation or OR could change what the term means), positive, and naming a value (plain, quoted, a prefix wildcard or a
+  // regex; not a presence check such as `target:*`, `_exists_:target` or a value group). Without one of each, the query
+  // has no loose pair and nothing is said.
+  const selects = (t: (typeof terms)[number]) =>
+    topLevel.has(t.start) &&
+    !t.negated &&
+    (t.valueKind === 'plain' || t.valueKind === 'quoted' || t.valueKind === 'regex') &&
+    !(t.wildcard && t.value === '*');
+  // Every target and target-type term must be such a term: any other one (excluded, grouped, a presence check) could
+  // narrow or contradict the pair, so the note would claim too much.
+  if (!targets.length || !types.length || !targets.every(selects) || !types.every(selects)) return null;
+  const [id, type] = [targets[0], types[0]];
+  // An empty quoted id or type (`target:""`) is a real value too.
+  const simple = (t: (typeof terms)[number] | undefined) =>
+    t !== undefined &&
+    t.value !== undefined &&
+    (t.value !== '' || t.valueKind === 'quoted') &&
+    !t.negated &&
+    !t.wildcard &&
+    (t.valueKind === 'plain' || t.valueKind === 'quoted') &&
+    topLevel.has(t.start);
+  if (targets.length !== 1 || types.length !== 1 || !simple(id) || !simple(type) || hasTopLevelOr(q)) return { exact: null };
+  const rest = removeTerm(removeTerm(q, 'target'), 'target.type').trim();
+  const exact = andQuery(formatRecordTerm(type?.value ?? '', id?.value ?? ''), rest);
+  try {
+    parseQueryExpression(exact);
+  } catch {
+    return { exact: null };
+  }
+  return { exact };
+}
 
 /** Explorer search params that open a saved view (and mark it open). */
 export function viewSearch(view: Pick<SavedView, 'id' | 'state'>) {
@@ -44,18 +100,39 @@ export function viewHref(
 }
 
 /** Plain field:value terms of `q` (query language only) whose value can be named: actor, tenant, executor, target. */
-export function nameableTerms(q: string, lang: 'query' | 'sql' = 'query'): { field: ViewLabelField; value: string }[] {
+export function nameableTerms(q: string, lang: 'query' | 'sql' = 'query'): ViewLabelTerm[] {
   if (lang !== 'query' || !q.trim()) return [];
   const seen = new Set<string>();
-  const out: { field: ViewLabelField; value: string }[] = [];
+  const out: ViewLabelTerm[] = [];
   for (const token of fieldTerms(q)) {
-    if (token.negated || !token.value || (token.valueKind !== 'plain' && token.valueKind !== 'quoted')) continue;
+    if (token.negated || token.wildcard || !token.value || (token.valueKind !== 'plain' && token.valueKind !== 'quoted')) continue;
     const field = RESOLVABLE[canonicalField(token.field ?? '')] ?? RESOLVABLE[token.field ?? ''];
-    if (!field || seen.has(`${field}:${token.value}`)) continue;
-    seen.add(`${field}:${token.value}`);
-    out.push({ field, value: token.value });
+    if (!field) continue;
+    const pair = field === 'record' ? decodeRecordPair(token.value) : undefined;
+    if (pair === null) continue;
+    const value = pair ? encodeRecordPair(pair.type, pair.id) : token.value;
+    const key = `${field}:${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ field, value });
   }
   return out.slice(0, MAX_RESOLVED_TERMS);
+}
+
+export async function resolveViewLabel(projectId: string, term: ViewLabelTerm, signal?: AbortSignal): Promise<ViewLabel | undefined> {
+  let name: string | undefined;
+  let id = term.value;
+  if (term.field === 'record') {
+    const pair = decodeRecordPair(term.value);
+    if (!pair) return undefined;
+    id = pair.id;
+    const metadata = await api.entities.metadata(projectId, 'target', targetEntityId(pair.type, pair.id), pair.type, signal);
+    name = metadata.name;
+  } else {
+    const { data } = await api.entities.list(projectId, { kind: term.field as EntityKind, q: id, limit: 10 }, signal);
+    name = data.find((entity) => (term.field === 'target' ? splitTargetId(entity.id, entity.type).id : entity.id) === id)?.name;
+  }
+  return name && name !== id ? { ...term, label: name.slice(0, 200) } : undefined;
 }
 
 /** "Tenant: Bayt Al Rimal" chips for the labels whose term is still in `q`. Labels equal to their raw id are dropped. */
@@ -76,18 +153,12 @@ export function useResolvedViewLabels(projectId: string, q: string, lang: 'query
   const results = useQueries({
     queries: terms.map((term) => ({
       queryKey: ['view-label', projectId, term.field, term.value] as const,
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        api.entities.list(projectId, { kind: term.field as EntityKind, q: term.value, limit: 10 }, signal),
+      queryFn: async ({ signal }: { signal: AbortSignal }) => (await resolveViewLabel(projectId, term, signal)) ?? null,
       staleTime: 5 * 60_000,
       retry: false,
     })),
   });
-  return terms.flatMap((term, i) => {
-    const match = results[i]?.data?.data.find((entity) =>
-      term.field === 'target' ? splitTargetId(entity.id).id === term.value : entity.id === term.value,
-    );
-    return match?.name && match.name !== term.value ? [{ ...term, label: match.name }] : [];
-  });
+  return results.flatMap(({ data }) => (data ? [data] : []));
 }
 
 /** Copy a view's link and say who can open it (OPS-18). */

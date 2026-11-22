@@ -2,7 +2,7 @@ import type { QueryLang, SavedView, SuggestResponse } from '@logbird/contracts';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { awaiting, current } from '@/lib/api/current';
+import { awaiting, current, shownDimmed } from '@/lib/api/current';
 import { fieldsQuery, SUGGEST_LIMIT, suggestQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';
 import {
@@ -61,6 +61,8 @@ export interface Completions {
   /** What the user typed for the current completion (Enter accepts only partial matches). */
   prefix: string;
   loading: boolean;
+  /** The value suggestions are the previous prefix's, kept while this prefix loads: show them dimmed and busy. */
+  stale: boolean;
   context: QueryCompletion | SqlCompletion;
   /** Lucene / KQL spellings found in the draft (query language only). */
   fixes: QueryFix[];
@@ -232,8 +234,16 @@ export function useCompletions({
     // Keep the previous list while the next prefix loads, but never across fields.
     placeholderData: (previous: SuggestResponse | undefined) => (previous?.field === valueField ? previous : undefined),
   });
-  const valuesData = rawPrefix && !complete ? (narrowed.data ?? base.data) : base.data;
-  const valuesLoading = Boolean(valueField) && (base.isFetching || (Boolean(rawPrefix) && !complete && narrowed.isFetching));
+  // The previous prefix's suggestions stay while the next prefix loads (same field only), with the loading indicator on.
+  const valuesData = rawPrefix && !complete ? (shownDimmed(narrowed) ?? base.data) : base.data;
+  // While the prefix is still being debounced, the list shown is the previous prefix's too: stale and loading.
+  const debouncing = debouncedPrefix !== rawPrefix;
+  const narrowing = Boolean(valueField) && Boolean(rawPrefix) && !complete;
+  const valuesLoading = Boolean(valueField) && (base.isFetching || (narrowing && (narrowed.isFetching || debouncing)));
+  // The rows shown are not this prefix's own answer yet (debouncing, the previous prefix's kept list, or the unfiltered
+  // list standing in while the request is pending): dimmed and busy. A settled failure for this prefix shows the fallback
+  // as it is; while a new prefix debounces, an earlier prefix's failure does not count.
+  const valuesStale = narrowing && (debouncing || (!narrowed.isError && current(narrowed) === undefined));
 
   /* ---------------- free text that names an entity (`rawd` → tenant:biz_2 Rawda Suites) ---------------- */
   const word =
@@ -249,7 +259,9 @@ export function useCompletions({
       placeholderData: (previous: SuggestResponse | undefined) => (previous?.field === field ? previous : undefined),
     })),
   });
-  const entityData = entityQueries.map((q) => q.data);
+  // The previous word's matches stay while the next word loads (or debounces): shown dimmed and busy, never as current.
+  const entityData = entityQueries.map((q) => shownDimmed(q));
+  const entitiesPending = Boolean(word) && (debouncedWord !== word || entityQueries.some((q) => q.isFetching));
   // biome-ignore lint/correctness/useExhaustiveDependencies: entityData is a fresh array each render; its items are stable query results
   const entities = useMemo(() => {
     const w = word.toLowerCase();
@@ -261,9 +273,10 @@ export function useCompletions({
         .map((v) => ({ field: d?.field ?? '', ...v })),
     );
   }, [word, ...entityData]);
+  const entitiesStale = entities.length > 0 && entitiesPending;
 
   return useMemo<Completions>(() => {
-    const empty: Completions = { suggestions: [], hint: null, prefix: '', loading: false, context, fixes };
+    const empty: Completions = { suggestions: [], hint: null, prefix: '', loading: false, stale: false, context, fixes };
     if (!open) return empty;
     const values = valuesData?.field === valueField ? (valuesData?.values ?? []) : [];
     const call = lang === 'sql' ? sqlCallAt(draft, caret) : null;
@@ -289,11 +302,31 @@ export function useCompletions({
       suggestions,
       hint,
       prefix: 'prefix' in context ? context.prefix : '',
-      loading: valuesLoading || (open && fieldsLoading),
+      loading: valuesLoading || (open && (fieldsLoading || entitiesPending)),
+      stale: valuesStale || entitiesStale,
       context,
       fixes,
     };
-  }, [open, context, draft, caret, lang, fixes, attributes, coverage, valuesData, valueField, valuesLoading, recent, views, entities, fieldsLoading]);
+  }, [
+    open,
+    context,
+    draft,
+    caret,
+    lang,
+    fixes,
+    attributes,
+    coverage,
+    valuesData,
+    valueField,
+    valuesLoading,
+    valuesStale,
+    entitiesPending,
+    entitiesStale,
+    recent,
+    views,
+    entities,
+    fieldsLoading,
+  ]);
 }
 
 interface Input {
@@ -681,12 +714,12 @@ function queryValueItems(input: Input, context: Extract<QueryCompletion, { kind:
     items.push(snippet('phrase', '"…"', 'Exact value with spaces or symbols', '""', 1));
     if (type !== 'text') {
       items.push(snippet('group', '(a OR b)', 'Any of these values', '()', 1));
-      items.push(snippet('regex', '/regex/', 'RE2 regex on the whole value', '//', 1));
+      if (type !== 'record') items.push(snippet('regex', '/regex/', 'RE2 regex on the whole value', '//', 1));
     }
     if (type === 'attr') {
       items.push(snippet('gt', '>', 'Compare as a number or date', '>', 0, true), snippet('range', '[a TO b]', 'Numeric or date range', '[ TO ]', 5));
     }
-  } else if (p && !context.quoted && !p.endsWith('*') && type !== 'text' && !context.op) {
+  } else if (p && !context.quoted && !p.endsWith('*') && type !== 'text' && type !== 'record' && !context.op) {
     const term = `${quoteIfNeeded(p) === p ? p : ''}*`;
     if (term !== '*') items.push(snippet('prefix', term, `Starts with “${p}”`, term));
   }

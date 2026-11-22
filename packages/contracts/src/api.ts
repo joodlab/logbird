@@ -126,11 +126,10 @@ export const FACET_FIELDS = [
   'target.type',
   'source',
 ] as const;
-/** Every query-language field key and alias (`QUERY_FIELDS`), all of which can be faceted (#140). */
-export const FACETABLE_FIELDS = [...new Set([...FACET_FIELDS, ...QUERY_FIELDS.flatMap((f) => [f.key, ...(f.aliases ?? [])])])] as [
-  string,
-  ...string[],
-];
+/** Facets group stored fields. Virtual selectors such as record: are available in q. */
+export const FACETABLE_FIELDS = [
+  ...new Set([...FACET_FIELDS, ...QUERY_FIELDS.filter(({ column }) => column).flatMap(({ key, aliases }) => [key, ...(aliases ?? [])])]),
+] as [string, ...string[]];
 /** Any envelope field, or any attribute key as `attr.<path>` or `attributes.<path>` (array-valued attributes count each element). */
 export const facetFieldSchema = z.union([
   z.enum(FACETABLE_FIELDS),
@@ -237,6 +236,16 @@ export const entityListQuerySchema = z.object({
   cursor: z.string().optional(),
 });
 export const entityListResponseSchema = z.object({ data: z.array(entitySchema), nextCursor: z.string().nullable() });
+
+export const entityMetadataQuerySchema = z.object({
+  /** For targets, selects the original type when more than one pair can share the composite entity id. */
+  targetType: z.string().max(64).optional(),
+});
+export const entityMetadataSchema = entitySchema.pick({ kind: true, id: true, type: true, name: true });
+export type EntityMetadata = z.infer<typeof entityMetadataSchema>;
+
+export const entityProfileQuerySchema = rangeQuerySchema.extend(entityMetadataQuerySchema.shape);
+export type EntityProfileQuery = z.infer<typeof entityProfileQuerySchema>;
 
 export const entityProfileSchema = z.object({
   entity: entitySchema,
@@ -454,7 +463,7 @@ export const savedViewSchema = z.object({
     labels: z
       .array(
         z.object({
-          field: z.enum(['actor', 'tenant', 'executor', 'target', 'impersonator']),
+          field: z.enum(['actor', 'tenant', 'executor', 'target', 'record', 'impersonator']),
           value: z.string().max(512),
           label: z.string().max(200),
         }),
