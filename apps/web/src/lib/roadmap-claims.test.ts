@@ -29,6 +29,9 @@ const ROADMAP_ITEMS = [
   'Signed webhooks and archive exports.', // § Later candidates
   'Single sign-on for the console.', // § Later candidates: "Console SSO"
 ];
+const ROADMAP_HEADING = "What's on our roadmap.";
+/** docs/roadmap.md: "These are candidates, not delivery commitments." */
+const ROADMAP_INTRODUCTION = 'These are candidates from our public roadmap, not features or commitments. Order and timing can change.';
 const REPOSITORY_STATE = 'Source on GitHub — coming soon';
 const LOOSE = /\b(planned|plans? to|we plan|coming|upcoming|on the way|later this year|will ship|will support)\b/i;
 /**
@@ -88,17 +91,21 @@ describe('roadmap claims', () => {
     expect([...found]).toEqual([]);
   }, 180_000);
 
-  it('the /product roadmap list holds exactly the approved items', async () => {
+  it('the /product roadmap section says exactly the approved heading, introduction and items', async () => {
     const [page] = await renderPages(['/product'], STATES.public);
     const html = page?.html ?? '';
-    const section = html.slice(html.indexOf('id="roadmap-title"'));
-    const list = section.slice(section.indexOf('<ul'), section.indexOf('</ul>'));
-    const items = [...list.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)].map(([, inner]) =>
-      (inner ?? '')
-        .replace(/<[^>]+>/g, '')
+    const plain = (fragment: string) =>
+      fragment
+        .replace(/<[^>]+>/g, ' ')
         .replaceAll('&#x27;', "'")
-        .trim(),
-    );
+        .replace(/\s+/g, ' ')
+        .trim();
+    const headingAt = html.indexOf('id="roadmap-title"');
+    const section = html.slice(html.indexOf('>', headingAt) + 1);
+    // The heading and introduction, word for word: "plans" or "what we plan to build" would promote candidates.
+    expect(plain(section.slice(0, section.indexOf('<ul')))).toBe(`${ROADMAP_HEADING} ${ROADMAP_INTRODUCTION}`);
+    const list = section.slice(section.indexOf('<ul'), section.indexOf('</ul>'));
+    const items = [...list.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)].map(([, inner]) => plain(inner ?? ''));
     // A built feature, or anything docs/roadmap.md doesn't list, fails here even under the approved heading.
     expect(items).toEqual(ROADMAP_ITEMS);
   });
