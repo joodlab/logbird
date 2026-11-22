@@ -218,10 +218,11 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       expect(row.metadata.emailHash).toMatch(/^[a-f0-9]{64}$/);
       expect(row.context.ip).toMatch(/^203\.0\.113\.8[0-2]$/);
       expect(row.targets[0].name).toMatch(/@example.test$/); // Stored member address is an allowed display fallback.
-      // Compare whole alphanumeric tokens, not substrings: event ids embed the failure window's end in epoch milliseconds
-      // (5-minute boundaries such as 1795377000000) and hex HMACs, either of which can contain "000000". A stored code is
-      // a token of its own (a value, or `otp=000000` in prose); a window end or a 64-character HMAC is one longer token.
-      const tokens = JSON.stringify(row).split(/[^A-Za-z0-9]+/);
+      // Compare whole alphanumeric tokens of every stored value, not substrings of the serialized row: event ids embed
+      // the failure window's end in epoch milliseconds (a 13-digit token such as 1795377000000) and 64-character hex
+      // HMACs, either of which can contain "000000". A stored code is a token of its own (a value, or `otp=000000` in
+      // prose, also after a line break); values are split before any JSON escaping.
+      const tokens = valueTokens(row);
       for (const code of attemptedCodes) expect(tokens, `audit row must not contain the attempted code ${code}`).not.toContain(code);
     }
     const exported = await request(owner.cookie, `${path}/export?format=jsonl`);
@@ -272,3 +273,11 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     await prisma.user.deleteMany({ where: { id: { in: users } } });
   }
 }, 360_000);
+
+/** Every alphanumeric token of every string or number value in `value`, at any depth (keys included). */
+function valueTokens(value: unknown): string[] {
+  if (typeof value === 'string' || typeof value === 'number') return String(value).split(/[^A-Za-z0-9]+/);
+  if (Array.isArray(value)) return value.flatMap(valueTokens);
+  if (value && typeof value === 'object') return Object.entries(value).flatMap(([key, child]) => [...valueTokens(key), ...valueTokens(child)]);
+  return [];
+}
