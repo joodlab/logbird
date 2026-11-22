@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseJsonExact } from '@logbird/contracts';
 import { expect, it } from 'vitest';
 import { canonicalFingerprint, eventFingerprint, retryFingerprint } from './identity';
-import { normalizeEvent } from './normalize';
+import { DEEP_NUMBERS_REASON, normalizeEvent } from './normalize';
 
 const ctx = { projectId: 'fictional-exact', receivedAt: new Date('2026-11-22T12:00:00Z') };
 const wire = (text: string) => parseJsonExact(text);
@@ -164,23 +164,22 @@ it('never truncates a long numeric id: plain if it fits, else unique scientific,
   ]);
 });
 
-it('stores long numbers as doubles with a warning only for events nested deeper than the exactness bound', () => {
-  const deep = `{"action":"x","metadata":{"n":12345678901234567891,"deep":${'['.repeat(1100)}1${']'.repeat(1100)}}}`;
-  const result = normalize(wire(deep));
-  expect(result.warning).toContain('Nested deeper than 1000 levels');
-  expect(result.row.attributes['metadata.n']).toBe('12345678901234567000');
+it('rejects an event that holds a long number nested deeper than the exactness bound, never rounding it', () => {
+  const deep = (n: string) => `{"action":"x","metadata":{"n":${n},"deep":${'['.repeat(1100)}1${']'.repeat(1100)}}}`;
+  for (const n of ['12345678901234567891', '9007199254740993', '1e400'])
+    expect(normalizeEvent(wire(deep(n)), ctx)).toEqual({ ok: false, reason: DEEP_NUMBERS_REASON });
+  expect(DEEP_NUMBERS_REASON).toBe('invalid_event: numbers nested deeper than 1,000 levels cannot be stored exactly');
+  // The long number itself may be deep, too.
+  expect(normalizeEvent(wire(`{"action":"x","deep":${'['.repeat(1100)}9007199254740993${']'.repeat(1100)}}`), ctx)).toMatchObject({ ok: false });
+  // Deep nesting with only numbers a double keeps is stored as before; so is a long number in a shallow event.
+  expect(normalize(wire(deep('42'))).warning).toBeNull();
   const shallow = normalize(wire('{"action":"x","metadata":{"n":12345678901234567891,"deep":[[[1]]]}}'));
   expect(shallow.warning).toBeNull();
   expect(shallow.row.attributes['metadata.n']).toBe('12345678901234567891');
 });
 
-it('keeps the deep-rounding warning when re-normalizing, and survives cyclic caller objects', () => {
+it('survives cyclic caller objects', () => {
   expect(normalize(wire('{"action":"x"}')).warning).toBeNull();
-  expect(
-    normalizeEvent({ action: 'x' }, { ...ctx, numbersRounded: true }).ok && normalizeEvent({ action: 'x' }, { ...ctx, numbersRounded: true }),
-  ).toMatchObject({
-    warning: expect.stringContaining('Nested deeper than 1000 levels'),
-  });
   const cyclic: Record<string, unknown> = { action: 'x' };
   cyclic.self = cyclic;
   expect(normalizeEvent(cyclic, ctx)).toMatchObject({ ok: false, reason: 'event must be JSON serializable' });

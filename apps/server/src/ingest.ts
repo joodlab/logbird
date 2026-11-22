@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
-import { DEEP_NUMBERS_WARNING, normalizeEvent, projectMaintenance, resolveTimestamp } from '@logbird/clickhouse';
+import { normalizeEvent, projectMaintenance, resolveTimestamp } from '@logbird/clickhouse';
 import { ingestPendingDetailsSchema, ingestResponseSchema, parseJsonExact } from '@logbird/contracts';
 import { findIngestProject, prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { logIngestRecoveryFailure, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
@@ -75,9 +75,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
       if (previous.problem !== next.problem || previous.valid !== next.valid) {
         // Rare timestamp-validity boundary: reuse normalization, including warnings and conformance.
         const warning = warnings.findIndex((item) => item.index === candidate.index);
-        // The input was already rounded by the first pass when it was nested too deep; keep that warning.
-        const numbersRounded = warnings[warning]?.reason.includes(DEEP_NUMBERS_WARNING) === true;
-        const normalized = normalizeEvent(candidate.input, { projectId, receivedAt: acceptedAt, sdk, numbersRounded });
+        const normalized = normalizeEvent(candidate.input, { projectId, receivedAt: acceptedAt, sdk });
         if (!normalized.ok) throw new Error('Validated event changed during acceptance');
         candidate.row = { ...normalized.row, event_id: candidate.row.event_id };
         if (warning >= 0) warnings.splice(warning, 1);

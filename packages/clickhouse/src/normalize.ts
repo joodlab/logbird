@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { canonicalDecimal, EXACT_NUMBER_MAX_DEPTH, isRawJson, plainDecimal, rawJsonText, roundDeepRawNumbers } from '@logbird/contracts';
+import { canonicalDecimal, EXACT_NUMBER_MAX_DEPTH, hasDeepRawNumbers, isRawJson, plainDecimal, rawJsonText } from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
@@ -60,11 +60,8 @@ function attemptOf(v: unknown, legacy: boolean): number {
 }
 // Characters a JSON number is spelled with: a composite value cut inside one must not keep its partial digits.
 const numberChar = (c: string | undefined) => c !== undefined && /[\d.eE+-]/.test(c);
-export const DEEP_NUMBERS_WARNING = `Nested deeper than ${EXACT_NUMBER_MAX_DEPTH} levels: long numbers were stored as doubles.`;
-export function normalizeEvent(
-  input: unknown,
-  ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean; numbersRounded?: boolean },
-) {
+export const DEEP_NUMBERS_REASON = `invalid_event: numbers nested deeper than ${EXACT_NUMBER_MAX_DEPTH.toLocaleString('en-US')} levels cannot be stored exactly`;
+export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {
   // Only identifiers index numbers (integer primary keys); other text columns keep string-only semantics.
   const text = (v: unknown, cap = 512) => textOf(v, cap, false);
   const idText = (v: unknown, cap = 256) => textOf(v, cap, !ctx.legacyColumns);
@@ -76,10 +73,10 @@ export function normalizeEvent(
   if (typeof e.action !== 'string') return { ok: false as const, reason: 'action must be a string' };
   if (typeof e.id === 'string' && (e.id.includes('\u0000') || /[\uD800-\uDFFF]/u.test(e.id) || e.id.trim().length > 256))
     return { ok: false as const, reason: 'invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL' };
-  // Exactness is bounded by depth: deeper than this, long numbers are stored as doubles (as JSON.parse gives) and the
-  // caller is warned; stringifying raw values that deep would overflow the stack.
-  // `numbersRounded`: a re-normalization of an input this function already rounded keeps the warning.
-  const roundedDeep = roundDeepRawNumbers(input) || ctx.numbersRounded === true;
+  // Exactness is bounded by depth (stringifying raw values deeper would overflow the stack). An event that holds a
+  // number a double cannot keep that deep is rejected on its own, never rounded: a rounded payload would let a changed
+  // digit match as an exact retry.
+  if (hasDeepRawNumbers(input)) return { ok: false as const, reason: DEEP_NUMBERS_REASON };
   let payload: string;
   try {
     payload = JSON.stringify(input);
@@ -174,7 +171,6 @@ export function normalizeEvent(
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
-      roundedDeep ? DEEP_NUMBERS_WARNING : null,
       isNumber(e.id) ? 'Numeric id is not a stable event id; send a string id for safe retries.' : null,
     ]
       .filter(Boolean)

@@ -243,10 +243,11 @@ export function parseJsonExactIterative(text: string): unknown {
 /** Nesting depth up to which raw numbers are kept: deeper, JSON.stringify with raw values overflows the stack. */
 export const EXACT_NUMBER_MAX_DEPTH = 1000;
 /**
- * When `value` nests deeper than EXACT_NUMBER_MAX_DEPTH and holds raw JSON numbers, replace them in place with plain
- * doubles (what JSON.parse gives) and return true. Iterative, so depth itself never overflows.
+ * True when `value` nests deeper than EXACT_NUMBER_MAX_DEPTH and holds a raw JSON number (one a double cannot keep).
+ * Such an event is rejected rather than rounded: rounding would let a changed digit match as an exact retry.
+ * Iterative and read-only, so depth itself never overflows.
  */
-export function roundDeepRawNumbers(value: unknown, maxDepth = EXACT_NUMBER_MAX_DEPTH): boolean {
+export function hasDeepRawNumbers(value: unknown, maxDepth = EXACT_NUMBER_MAX_DEPTH): boolean {
   let deep = false;
   let raw = false;
   // Visited set: caller-owned graphs may contain cycles (they then fail serialization as before).
@@ -262,22 +263,5 @@ export function roundDeepRawNumbers(value: unknown, maxDepth = EXACT_NUMBER_MAX_
       for (const child of Object.values(node)) if (child !== null && typeof child === 'object') stack.push([child, depth + 1]);
     }
   }
-  if (!(deep && raw)) return false;
-  const visited = new WeakSet<object>();
-  const nodes: unknown[] = [value];
-  while (nodes.length) {
-    const node = nodes.pop();
-    if (node === null || typeof node !== 'object' || isRawJson(node) || visited.has(node)) continue;
-    visited.add(node);
-    const record = node as Record<string, unknown>;
-    const frozen = Object.isFrozen(record);
-    for (const key of Object.keys(record)) {
-      const child = record[key];
-      // Raw values only come from parseJsonExact trees, which are never frozen; leave a frozen caller object as is.
-      if (isRawJson(child)) {
-        if (!frozen) record[key] = Number(child.rawJSON);
-      } else nodes.push(child);
-    }
-  }
-  return true;
+  return deep && raw;
 }
