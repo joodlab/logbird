@@ -17,6 +17,7 @@ import { Route as CloudRouteImport } from './routes/cloud'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as DevelopersRouteImport } from './routes/developers'
 import { Route as OpenSourceRouteImport } from './routes/open-source'
+import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as ProductRouteImport } from './routes/product'
 import { Route as SecurityRouteImport } from './routes/security'
 import { Route as SelfHostingRouteImport } from './routes/self-hosting'
@@ -29,6 +30,7 @@ import { Route as CompareRetracedRouteImport } from './routes/compare.retraced'
 import { Route as CompareWorkosAuditLogsRouteImport } from './routes/compare.workos-audit-logs'
 import { Route as LegalPrivacyRouteImport } from './routes/legal.privacy'
 import { Route as LegalTermsRouteImport } from './routes/legal.terms'
+import { Route as UseCasesComplianceEvidenceRouteImport } from './routes/use-cases.compliance-evidence'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -68,6 +70,11 @@ const DevelopersRoute = DevelopersRouteImport.update({
 const OpenSourceRoute = OpenSourceRouteImport.update({
   id: '/open-source',
   path: '/open-source',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProductRoute = ProductRouteImport.update({
@@ -130,6 +137,12 @@ const LegalTermsRoute = LegalTermsRouteImport.update({
   path: '/legal/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UseCasesComplianceEvidenceRoute =
+  UseCasesComplianceEvidenceRouteImport.update({
+    id: '/use-cases/compliance-evidence',
+    path: '/use-cases/compliance-evidence',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -140,6 +153,7 @@ export interface FileRoutesByFullPath {
   '/contact': typeof ContactRoute
   '/developers': typeof DevelopersRoute
   '/open-source': typeof OpenSourceRoute
+  '/pricing': typeof PricingRoute
   '/product': typeof ProductRoute
   '/security': typeof SecurityRoute
   '/self-hosting': typeof SelfHostingRoute
@@ -150,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/compare/workos-audit-logs': typeof CompareWorkosAuditLogsRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/blog/': typeof BlogIndexRoute
   '/compare/': typeof CompareIndexRoute
 }
@@ -162,6 +177,7 @@ export interface FileRoutesByTo {
   '/contact': typeof ContactRoute
   '/developers': typeof DevelopersRoute
   '/open-source': typeof OpenSourceRoute
+  '/pricing': typeof PricingRoute
   '/product': typeof ProductRoute
   '/security': typeof SecurityRoute
   '/self-hosting': typeof SelfHostingRoute
@@ -172,6 +188,7 @@ export interface FileRoutesByTo {
   '/compare/workos-audit-logs': typeof CompareWorkosAuditLogsRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/blog': typeof BlogIndexRoute
   '/compare': typeof CompareIndexRoute
 }
@@ -185,6 +202,7 @@ export interface FileRoutesById {
   '/contact': typeof ContactRoute
   '/developers': typeof DevelopersRoute
   '/open-source': typeof OpenSourceRoute
+  '/pricing': typeof PricingRoute
   '/product': typeof ProductRoute
   '/security': typeof SecurityRoute
   '/self-hosting': typeof SelfHostingRoute
@@ -195,6 +213,7 @@ export interface FileRoutesById {
   '/compare/workos-audit-logs': typeof CompareWorkosAuditLogsRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/blog/': typeof BlogIndexRoute
   '/compare/': typeof CompareIndexRoute
 }
@@ -209,6 +228,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/developers'
     | '/open-source'
+    | '/pricing'
     | '/product'
     | '/security'
     | '/self-hosting'
@@ -219,6 +239,7 @@ export interface FileRouteTypes {
     | '/compare/workos-audit-logs'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/use-cases/compliance-evidence'
     | '/blog/'
     | '/compare/'
   fileRoutesByTo: FileRoutesByTo
@@ -231,6 +252,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/developers'
     | '/open-source'
+    | '/pricing'
     | '/product'
     | '/security'
     | '/self-hosting'
@@ -241,6 +263,7 @@ export interface FileRouteTypes {
     | '/compare/workos-audit-logs'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/use-cases/compliance-evidence'
     | '/blog'
     | '/compare'
   id:
@@ -253,6 +276,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/developers'
     | '/open-source'
+    | '/pricing'
     | '/product'
     | '/security'
     | '/self-hosting'
@@ -263,6 +287,7 @@ export interface FileRouteTypes {
     | '/compare/workos-audit-logs'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/use-cases/compliance-evidence'
     | '/blog/'
     | '/compare/'
   fileRoutesById: FileRoutesById
@@ -276,6 +301,7 @@ export interface RootRouteChildren {
   ContactRoute: typeof ContactRoute
   DevelopersRoute: typeof DevelopersRoute
   OpenSourceRoute: typeof OpenSourceRoute
+  PricingRoute: typeof PricingRoute
   ProductRoute: typeof ProductRoute
   SecurityRoute: typeof SecurityRoute
   SelfHostingRoute: typeof SelfHostingRoute
@@ -286,6 +312,7 @@ export interface RootRouteChildren {
   CompareWorkosAuditLogsRoute: typeof CompareWorkosAuditLogsRoute
   LegalPrivacyRoute: typeof LegalPrivacyRoute
   LegalTermsRoute: typeof LegalTermsRoute
+  UseCasesComplianceEvidenceRoute: typeof UseCasesComplianceEvidenceRoute
   BlogIndexRoute: typeof BlogIndexRoute
   CompareIndexRoute: typeof CompareIndexRoute
 }
@@ -346,6 +373,13 @@ declare module '@tanstack/react-router' {
       path: '/open-source'
       fullPath: '/open-source'
       preLoaderRoute: typeof OpenSourceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/product': {
@@ -432,6 +466,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LegalTermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/use-cases/compliance-evidence': {
+      id: '/use-cases/compliance-evidence'
+      path: '/use-cases/compliance-evidence'
+      fullPath: '/use-cases/compliance-evidence'
+      preLoaderRoute: typeof UseCasesComplianceEvidenceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -444,6 +485,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContactRoute: ContactRoute,
   DevelopersRoute: DevelopersRoute,
   OpenSourceRoute: OpenSourceRoute,
+  PricingRoute: PricingRoute,
   ProductRoute: ProductRoute,
   SecurityRoute: SecurityRoute,
   SelfHostingRoute: SelfHostingRoute,
@@ -454,6 +496,7 @@ const rootRouteChildren: RootRouteChildren = {
   CompareWorkosAuditLogsRoute: CompareWorkosAuditLogsRoute,
   LegalPrivacyRoute: LegalPrivacyRoute,
   LegalTermsRoute: LegalTermsRoute,
+  UseCasesComplianceEvidenceRoute: UseCasesComplianceEvidenceRoute,
   BlogIndexRoute: BlogIndexRoute,
   CompareIndexRoute: CompareIndexRoute,
 }

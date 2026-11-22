@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 
 export interface Step {
   title: string;
@@ -55,53 +55,43 @@ export function Steps({ items, vertical = false }: { items: Step[]; vertical?: b
   );
 }
 
-/** Architecture at a glance: the README's mermaid diagram as accessible HTML. */
-export function Architecture() {
-  const node = 'panel flex flex-col gap-1 px-4 py-3';
-  const arrow = 'hidden self-center text-[var(--subtle)] md:block';
+interface ArchitectureNode {
+  name: string;
+  /** Continues the name in the dashed boxes, so a store's role starts with its own separator. */
+  role: string;
+}
+
+/** Architecture at a glance: the README's mermaid diagram as accessible HTML. Words: content/home.ts (architecture). */
+export function Architecture({ flow, stores, caption }: { flow: ArchitectureNode[]; stores: ArchitectureNode[]; caption: string }) {
+  const nodeClass = 'panel flex flex-col gap-1 px-4 py-3';
+  const arrowClass = 'hidden self-center text-[var(--subtle)] md:block';
   return (
     <figure className="flex flex-col gap-3">
       <div className="grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-stretch">
-        <div className={node}>
-          <span className="font-medium text-sm">Your product</span>
-          <span className="text-muted-foreground text-xs">SDK or HTTP, ingest key</span>
-        </div>
-        <span aria-hidden="true" className={arrow}>
-          →
-        </span>
-        <div className={node}>
-          <span className="font-medium text-sm">Logbird API</span>
-          <span className="text-muted-foreground text-xs">Validates, answers 202 after the write</span>
-        </div>
-        <span aria-hidden="true" className={arrow}>
-          →
-        </span>
-        <div className={`${node} border-brand/50`}>
-          <span className="font-medium text-sm">ClickHouse</span>
-          <span className="text-muted-foreground text-xs">Events, rollups, entity pages</span>
-        </div>
-        <span aria-hidden="true" className={arrow}>
-          →
-        </span>
-        <div className={node}>
-          <span className="font-medium text-sm">Console and read API</span>
-          <span className="text-muted-foreground text-xs">Your team, and your own backend</span>
-        </div>
+        {flow.map((node, index) => (
+          <Fragment key={node.name}>
+            {index > 0 ? (
+              <span aria-hidden="true" className={arrowClass}>
+                →
+              </span>
+            ) : null}
+            {/* The store in the middle of the flow, where events live, carries the brand edge. */}
+            <div className={index === 2 ? `${nodeClass} border-brand/50` : nodeClass}>
+              <span className="font-medium text-sm">{node.name}</span>
+              <span className="text-muted-foreground text-xs">{node.role}</span>
+            </div>
+          </Fragment>
+        ))}
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-dashed px-4 py-3 text-sm">
-          <span className="font-medium">Postgres</span>
-          <span className="text-muted-foreground"> · workspaces, projects, members, hashed keys</span>
-        </div>
-        <div className="rounded-xl border border-dashed px-4 py-3 text-sm">
-          <span className="font-medium">Retention worker</span>
-          <span className="text-muted-foreground"> · deletes expired events every hour, on Redis or Dragonfly</span>
-        </div>
+        {stores.map((store) => (
+          <div className="rounded-xl border border-dashed px-4 py-3 text-sm" key={store.name}>
+            <span className="font-medium">{store.name}</span>
+            <span className="text-muted-foreground">{store.role}</span>
+          </div>
+        ))}
       </div>
-      <figcaption className="sr-only">
-        Your product sends events to the Logbird API, which writes them to ClickHouse. The console and the read API read from ClickHouse. Postgres
-        stores workspaces, projects and hashed keys. A retention worker deletes expired events every hour.
-      </figcaption>
+      <figcaption className="sr-only">{caption}</figcaption>
     </figure>
   );
 }

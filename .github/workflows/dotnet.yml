@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'sdks/dotnet/**'
+      - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
       - '.github/workflows/dotnet.yml'
   push:
     branches: [master]
     paths:
       - 'sdks/dotnet/**'
+      - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
       - '.github/workflows/dotnet.yml'
 

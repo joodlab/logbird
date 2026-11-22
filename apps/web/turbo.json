@@ -11,6 +11,7 @@
         "WEB_ORG_NAME",
         "WEB_SECURITY_EMAIL",
         "WEB_CONTACT_EMAIL",
+        "WEB_CHECKOUT_URL",
         "WEB_PRIVACY_EMAIL",
         "WEB_LEGAL_ADDRESS",
         "WEB_GOVERNING_LAW",
@@ -37,7 +38,8 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/apps/app/server/site-paths.ts",
         "$TURBO_ROOT$/apps/app/public/brand/**",
-        "$TURBO_ROOT$/CHANGELOG.md"
+        "$TURBO_ROOT$/CHANGELOG.md",
+        "$TURBO_ROOT$/marketing/copy/**"
       ]
     }
   }

@@ -6,6 +6,7 @@ import { FeatureRow, MiniFeature } from '../components/marketing/feature-row';
 import { ClipFrame, ScreenshotFrame } from '../components/marketing/frame';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
+import { roadmap } from '../content/roadmap';
 import { ACCESS_CTA } from '../lib/cloud';
 import { pageHead } from '../lib/seo';
 
@@ -28,7 +29,9 @@ const page = await readAuditTrail(
     range: { from: '2026-01-01T00:00:00Z', to: new Date().toISOString() },
   }),
 );
-// page.data: events; page.nextCursor: pass back as \`cursor\` for the next page`;
+// Keep only events where one target is this booking (type and id on the same target).
+const events = page.data.filter((event) => event.targets.some((t) => t.type === 'booking' && t.id === 'bk_1042'));
+// page.nextCursor: pass back as \`cursor\` for the next page`;
 
 const toc = [
   ['explorer', 'Explorer'],
@@ -97,15 +100,16 @@ function ProductPage() {
         title="Every event, in one table."
         visual={<ClipFrame caption="Type a query, open an event, follow its operation." id="investigate" label="Explorer" />}
       >
-        Pick a time range, type a query, and narrow it down with facets. Drag across the chart to zoom. Click a row to open the full event. Everything
-        lives in the URL, so a link shows a teammate exactly what you see.
+        Pick a time range, type a query, and narrow it down with facets. Drag across the chart to zoom. Click a row to open the full event. The query,
+        time range and columns live in the URL, so a link opens the same search for a teammate. A relative range such as the last hour resolves when
+        they open it. Share an absolute range to preserve the time window, or a downloaded export to preserve the results.
       </FeatureRow>
 
       <FeatureRow
         bullets={[
           'Fields are suggested from what your project actually sends, with how often each one appears.',
           'Errors point at the exact token and say what was expected, for example "attempt is a number".',
-          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes and the first 2 KiB of each value. Search limits apply to the index. You can inspect the full parsed event as JSON.',
+          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 custom attributes, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.',
         ]}
         eyebrow="Search"
         id="search"
@@ -182,7 +186,7 @@ function ProductPage() {
         ]}
         eyebrow="Follow anything"
         id="entities"
-        title="A page for every actor, tenant, worker and record."
+        title="A page for each actor, tenant, worker and record."
         visual={
           <ScreenshotFrame
             caption="A tenant's page: activity, top actions, outcomes, related entities and its timeline."
@@ -192,8 +196,9 @@ function ProductPage() {
           />
         }
       >
-        Every actor, tenant, executor and record in your events gets its own page. Each one shows an activity chart, its top actions, its outcome
-        split, related entities and a full timeline. Directory pages list them all, most active first, with fuzzy search.
+        Actors, tenants, executors and records in your events get their own pages (records from the first 64 targets of each event). Each one shows an
+        activity chart, its top actions, its outcome split, related entities and a full timeline. Directory pages list them all, most active first,
+        with fuzzy search.
       </FeatureRow>
 
       <FeatureRow
@@ -216,7 +221,7 @@ function ProductPage() {
 
       <FeatureRow
         bullets={[
-          'Before and after values for every changed field.',
+          'The before and after values you send, for the first 256 changes.',
           'The causation breadcrumb, with a link to the whole operation.',
           'Context ids (request, trace, IP), the indexed attributes, and the full parsed event as JSON.',
           'Copy a link, or copy the event as a curl command.',
@@ -272,7 +277,7 @@ function ProductPage() {
         bullets={[
           'Onboarding picks up where you left off.',
           '"Send a test event" and "Load sample data" show the console before you integrate. Sample data is 2000 fictional events over seven days; it never counts as setup, and you can remove it.',
-          'A conformance score on every event, and a Fields page that shows every field you send and how often.',
+          'A conformance score on every event, and a Fields page that shows coverage for the single-value core fields and the attributes your events carry in the selected range.',
         ]}
         eyebrow="Setup that checks itself"
         id="setup"
@@ -286,8 +291,9 @@ function ProductPage() {
           />
         }
       >
-        Send your first event and the setup page notices on its own. It then checks each part of your integration against your real events: actors,
-        tenants, executors, targets, operation ids, retention and team invitations. For each gap it links to the events that are missing that field.
+        Send your first event and the setup page notices on its own. It then checks your integration against your real events: for actors, tenants,
+        executors and targets it shows the coverage and links to the events missing each one; for operation ids it shows the coverage and links to the
+        events that have one. Reviewing retention and inviting your team are separate checklist items.
       </FeatureRow>
 
       <FeatureRow
@@ -295,7 +301,7 @@ function ProductPage() {
         id="retention"
         limit="Retention deletes are permanent. There's no archive and no undo. The count can change between preview and deletion."
         reverse
-        title="Keep events exactly as long as you decide."
+        title="Keep events as long as you decide, then delete them."
         visual={
           <ScreenshotFrame
             caption="Lowering retention: the preview shows what will be deleted, and you confirm by typing the project's slug."
@@ -317,9 +323,9 @@ function ProductPage() {
         title="Show history inside your own product."
         visual={<SiteCode code={readSample} language="ts" title="Your backend" />}
       >
-        Give your customers a "History" tab. Your backend calls <code>GET /v1/events</code> with a read key and a query such as{' '}
-        <code>target:bk_1042 tenant:biz_7</code>, then returns the page to your UI. Results are paginated with a cursor. The Vue, Nuxt and TanStack
-        Start packages include helpers for this.
+        Give your customers a "History" tab. Your backend calls <code>GET /v1/events</code> with a read key and a query for that record and tenant,
+        and checks that each returned event names that record, then returns the page to your UI. Results are paginated with a cursor. The Vue, Nuxt
+        and TanStack Start packages include helpers for this.
         <span className="mt-4 block">
           <ButtonLink to="/developers" variant="link">
             Read API on the developer page
@@ -328,21 +334,9 @@ function ProductPage() {
       </FeatureRow>
 
       <Section labelledBy="roadmap-title">
-        <SectionHeader
-          eyebrow="On the roadmap"
-          id="roadmap-title"
-          lead="These are plans, not features. Order and timing can change."
-          title="What we plan to build next."
-        />
+        <SectionHeader eyebrow={roadmap.eyebrow} id="roadmap-title" lead={roadmap.lead} title={roadmap.title} />
         <ul className="mt-10 grid gap-x-10 gap-y-3 md:grid-cols-2">
-          {[
-            "Tenant-scoped read tokens, so a browser can read one customer's history without a project-wide key.",
-            'Per-project redaction rules, applied before events are stored.',
-            'Alert rules on chosen actions, by email or webhook.',
-            'Webhooks and streaming export for SIEM and long-term archives.',
-            'Per-tenant export on the read API.',
-            'SSO (OIDC) for the console.',
-          ].map((item) => (
+          {roadmap.items.map((item) => (
             <li className="flex gap-3 border-b py-3 text-sm leading-relaxed" key={item}>
               <span aria-hidden="true" className="mt-1.5 size-2 shrink-0 rounded-full border border-dashed border-muted-foreground" />
               {item}

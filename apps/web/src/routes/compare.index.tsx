@@ -10,7 +10,7 @@ export const Route = createFileRoute('/compare/')({ head: () => pageHead('/compa
 // Copy: marketing/copy/compare/README.md. Change wording there first.
 const method = [
   'Official sources only: product docs, pricing pages, licence files and repositories.',
-  'Every claim has a link and the date we checked it.',
+  'Each claim about another tool lists its sources, with the date we checked them. Logbird cells describe the current release.',
   "Anything we couldn't verify is left out of the tables and listed as unverified.",
   'No logos. Product names are used only to identify the products, as their owners write them.',
   'We say where Logbird has gaps, too.',
@@ -21,7 +21,7 @@ function CompareIndexPage() {
     <>
       <PageHero
         eyebrow="Compare"
-        lead={`There's more than one good way to keep an audit trail. These pages compare Logbird with other tools, using only facts we could check in their official docs, pricing pages and repositories. Each page says where the other tool is the better fit. We checked every fact on ${longDate(ACCESSED)} and list every source. If something has changed, tell us and we'll fix it.`}
+        lead={`There's more than one good way to keep an audit trail. These pages compare Logbird with other tools, using only facts we could check in their official docs, pricing pages and repositories. Each page says where the other tool is the better fit. We checked every fact about the other tools on ${longDate(ACCESSED)} and list every source. If something has changed, tell us and we'll fix it.`}
         title="How Logbird compares."
       />
 
