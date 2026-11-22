@@ -29,8 +29,11 @@ export interface SiteState {
   checkoutUrl?: string;
 }
 
-/** See SiteState.scopedReadLive. Stays false until the maintainer confirms the production proof (#138). */
-export const SCOPED_READ_LIVE = false;
+/**
+ * See SiteState.scopedReadLive. On since 2026-11-23: v0.2.0 runs on production and the maintainer confirmed the
+ * scoped-read production proof (31/31, #138).
+ */
+export const SCOPED_READ_LIVE = true;
 
 export const SITE: SiteState = {
   repoPublic: GITHUB_PUBLIC,

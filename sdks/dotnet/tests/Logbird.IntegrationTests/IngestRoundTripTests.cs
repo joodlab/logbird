@@ -173,12 +173,89 @@ public class IngestRoundTripTests(ITestOutputHelper output)
     }
 
     [LiveFact]
+    public async Task Record_trails_match_a_target_type_and_id_together_for_any_text()
+    {
+        // record:<type>:<id> exists from 0.2.0 (#182), and the read client refuses to send a record trail to an older server.
+        var version = await LiveServer.ServerVersionAsync();
+        if (version < new Version(0, 2, 0))
+        {
+            output.WriteLine($"server {version}: record trails need 0.2.0; skipped");
+            return;
+        }
+
+        var run = Guid.NewGuid().ToString("N").Substring(0, 8);
+        var bs = '\\';
+        var cases = new (string Type, string Id)[]
+        {
+            ("invoice", "inv" + (char)9 + run + (char)10 + "line"),
+            ("quote" + (char)34 + "type", "a " + (char)34 + "quoted" + (char)34 + " " + run),
+            ("back" + bs + "slash", "c:" + bs + "path" + bs + run),
+            ("ns:kind", "x:y:" + run),
+            ("star*", "prefix" + run + "*"),
+            ("請求書", "番号-" + run + " ✓"),
+        };
+        var expected = new Dictionary<(string Type, string Id), string>();
+        var crossed = new Dictionary<(string Type, string Id), string>();
+        await using (var client = new LogbirdClient(LiveServer.Options()))
+        {
+            foreach (var (type, id) in cases)
+            {
+                var match = LogbirdClient.NewEventId();
+                expected[(type, id)] = match;
+                client.Track(new AuditEvent("record.checked") { Id = match }.Target(type, id));
+
+                // The same id under another type, and the same type with a longer id: a record trail matches neither.
+                client.Track(new AuditEvent("record.decoy").Target("decoy", id));
+                client.Track(new AuditEvent("record.decoy").Target(type, id + "-other"));
+
+                // One event with both halves on different targets: a server matching type and id separately would return it.
+                var cross = LogbirdClient.NewEventId();
+                crossed[(type, id)] = cross;
+                client.Track(new AuditEvent("record.cross_decoy") { Id = cross }.Target(type, id + "-other").Target("decoy", id));
+            }
+
+            Assert.True(await client.FlushAsync());
+            Assert.Equal(cases.Length * 4, client.Stats.Delivered);
+        }
+
+        using var reader = LiveServer.Reader();
+        foreach (var (type, id) in cases)
+        {
+            await LiveServer.WaitForEventAsync(reader, expected[(type, id)]);
+            var crossedEvent = (await LiveServer.WaitForEventAsync(reader, crossed[(type, id)])).Event;
+            Assert.Equal(2, crossedEvent.Targets.Count);
+            var found = new List<string>();
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            do
+            {
+                found.Clear();
+                await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: id, targetType: type, from: DateTimeOffset.UtcNow.AddHours(-1))))
+                {
+                    found.Add(e.Id);
+                }
+            }
+            while (found.Count == 0 && DateTime.UtcNow < deadline && await Delay());
+
+            Assert.Equal([expected[(type, id)]], found);
+        }
+
+        output.WriteLine($"server {version}: {cases.Length} record trails matched exactly; same-id, longer-id and crossed decoys excluded");
+
+        static async Task<bool> Delay()
+        {
+            await Task.Delay(250);
+            return true;
+        }
+    }
+
+    [LiveFact]
     public async Task Large_integers_and_decimals_round_trip_with_exact_digits()
     {
-        // Servers up to at least 0.1.3 round integers above 2^53 in the stored payload and attributes (issue #168). The
-        // bytes this SDK sends are exact (see RobustnessTests). Set LOGBIRD_IT_EXACT_NUMBERS=1 against a server with the fix.
+        // Servers before 0.2.0 round integers above 2^53 in the stored payload and attributes (issue #168, fixed by #184).
+        // The bytes this SDK sends are exact (see RobustnessTests). The server-side checks run on 0.2.0 and later, or with
+        // LOGBIRD_IT_EXACT_NUMBERS=1 against a server built from master before its version moves.
         var version = await LiveServer.ServerVersionAsync();
-        var serverKeepsDigits = Environment.GetEnvironmentVariable("LOGBIRD_IT_EXACT_NUMBERS") == "1";
+        var serverKeepsDigits = version >= new Version(0, 2, 0) || Environment.GetEnvironmentVariable("LOGBIRD_IT_EXACT_NUMBERS") == "1";
         var id = LogbirdClient.NewEventId();
         await using (var client = new LogbirdClient(LiveServer.Options()))
         {
@@ -197,7 +274,7 @@ public class IngestRoundTripTests(ITestOutputHelper output)
             + $"attributes snowflake={detail.Event.Attributes["metadata.snowflake"]} amount={detail.Event.Attributes["metadata.amount"]}");
         if (!serverKeepsDigits)
         {
-            output.WriteLine("server-side digit checks skipped until the exact-number fix (#168) ships; set LOGBIRD_IT_EXACT_NUMBERS=1 to run them");
+            output.WriteLine("server-side digit checks skipped: they need 0.2.0 (the exact-number fix); set LOGBIRD_IT_EXACT_NUMBERS=1 against a server from master");
             return;
         }
 
@@ -236,7 +313,7 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         var stored = await LiveServer.WaitForEventAsync(reader, id);
         output.WriteLine($"server {await LiveServer.ServerVersionAsync()} stored actor id \"{stored.Event.Actor?.Id}\"; warnings: {string.Join(" | ", warnings.Select(w => w.Reason))}");
 
-        // The exact-identifier rule ships after the exact-number fix; until then the server may trim.
+        // Opt-in until the server's exact-identifier rule ships: Logbird up to 0.2.x indexes the id trimmed (issue #269).
         if (Environment.GetEnvironmentVariable("LOGBIRD_IT_ENTITY_IDS") == "1")
         {
             Assert.Equal(" user_42 ", stored.Event.Actor?.Id);
