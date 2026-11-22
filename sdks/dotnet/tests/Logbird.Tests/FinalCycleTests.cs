@@ -390,9 +390,10 @@ public class FinalCycleTests
             => FakeServer.Json(HttpStatusCode.Accepted, JsonSerializer.Serialize(new { accepted = request.Ids.Length, ids = request.Ids, rejected = Array.Empty<object>() }));
 
         // [X] is held open; then [A, B] gets a 503 that accepts A and leaves B unresolved, which completes a flush covering
-        // X and A while the send goes on; B's retry is held open, so the send cannot return before the assertion.
+        // X and A while the send goes on. The retry for B waits in the sender's backoff (the injectable delay) until the
+        // assertion has run, so the sender cannot advance in between.
         var releaseX = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseB = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRetry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = new FakeServer()
             .ThenAsync(async request =>
             {
@@ -415,12 +416,8 @@ public class FinalCycleTests
                     },
                 },
             })))
-            .ThenAsync(async request =>
-            {
-                await releaseB.Task;
-                return Accept(request);
-            });
-        await using var client = Client(Options(), server);
+            .Then(Accept);
+        await using var client = new LogbirdClient(Options(), new HttpClient(server), logger: null, delay: (_, _) => releaseRetry.Task);
         client.Track(new AuditEvent("x"));
         var flushX = client.FlushAsync();
         await WaitUntil(() => server.Requests.Count == 1);
@@ -431,16 +428,49 @@ public class FinalCycleTests
         releaseX.SetResult(true);
         Assert.True(await flushX);
 
-        Assert.Same(flushA, await Task.WhenAny(flushA, Task.Delay(TimeSpan.FromSeconds(10))));
-        Assert.True(await flushA);
+        try
+        {
+            Assert.Same(flushA, await Task.WhenAny(flushA, Task.Delay(TimeSpan.FromSeconds(10))));
+            Assert.True(await flushA);
 
-        // B's retry is now held at the server, so the send has not returned: X and A must already be counted.
-        await WaitUntil(() => server.Requests.Count == 3);
-        Assert.Equal(2, client.Stats.Delivered);
+            // Read at once: the sender is parked before B's retry, so X and A must already be counted.
+            Assert.Equal(2, client.Stats.Delivered);
+            Assert.Equal(2, server.Requests.Count);
+        }
+        finally
+        {
+            releaseRetry.TrySetResult(true);
+        }
 
-        releaseB.SetResult(true);
         Assert.True(await client.FlushAsync());
         Assert.Equal(3, client.Stats.Delivered);
+        Assert.Equal(3, server.Requests.Count);
+    }
+
+    [Fact]
+    public void Settling_counts_under_the_queue_lock_so_an_immediate_flush_already_sees_the_count()
+    {
+        var queue = new Internal.EventQueue(10, QueueFullBehavior.DropOldest, _ => { });
+        queue.Enqueue(sequence => new Internal.QueuedEvent([1], "evt_1", "a", sequence), out _, out _, out _);
+        var batch = queue.TakeBatch(10, 1_000_000);
+        var gate = typeof(Internal.EventQueue).GetField("_gate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(queue)!;
+
+        var counted = 0;
+        var heldWhileCounting = false;
+        Assert.True(queue.Settle(batch[0], () =>
+        {
+            heldWhileCounting = Monitor.IsEntered(gate);
+            counted++;
+        }));
+        Assert.True(heldWhileCounting);
+
+        // Nothing is outstanding, so a flush takes AddWaiter's immediate path, and the count is already there.
+        Assert.Null(queue.AddWaiter());
+        Assert.Equal(1, counted);
+
+        // Settling again neither succeeds nor counts again.
+        Assert.False(queue.Settle(batch[0], () => counted++));
+        Assert.Equal(1, counted);
     }
 
     private static async Task WaitUntil(Func<bool> condition)
