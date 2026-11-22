@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { actorLabel, directChildren, eventSentence, humanizeNoun } from './events';
+import { actorLabel, causedCount, directChildren, eventSentence, humanizeNoun } from './events';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -223,5 +223,18 @@ describe('directChildren', () => {
       at('root', '2026-11-05T10:00:00.000Z', 'root'),
     ];
     expect(directChildren(events, 'root').map((e) => e.id)).toEqual(['x', 'y']);
+  });
+});
+
+describe('causedCount', () => {
+  const ctx = (parentEventId: string) => ({ operationId: '', parentEventId, requestId: '', traceId: '', ip: '', userAgent: '' });
+
+  it('is the stored child count for a normal event', () => {
+    expect(causedCount({ childCount: 3 }, { id: 'root', context: ctx('') })).toBe(3);
+  });
+
+  it('does not count an event that names itself as its parent', () => {
+    expect(causedCount({ childCount: 1 }, { id: 'self', context: ctx('self') })).toBe(0);
+    expect(causedCount({ childCount: 4 }, { id: 'self', context: ctx('self') })).toBe(3);
   });
 });

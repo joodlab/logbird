@@ -229,3 +229,11 @@ export function directChildren(events: readonly AuditEvent[], eventId: string): 
     .filter((c) => c.context.parentEventId === eventId && c.id !== eventId)
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.id.localeCompare(b.id));
 }
+
+/**
+ * How many other events name this one as their parent. The server counts every stored event with
+ * `parentEventId = id`, which includes the event itself when it (wrongly) names itself as its parent.
+ */
+export function causedCount(detail: { childCount: number }, e: Pick<AuditEvent, 'id' | 'context'>): number {
+  return Math.max(0, detail.childCount - (e.context.parentEventId === e.id ? 1 : 0));
+}

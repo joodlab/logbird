@@ -191,6 +191,15 @@ export function formatTerm(field: string, value: string, negated = false): strin
 }
 
 /**
+ * A term that matches exactly `value`, for ids the console links to. A value ending in `*` would otherwise be a prefix
+ * search (even quoted), so it becomes an anchored regex with every metacharacter escaped.
+ */
+export function formatExactTerm(field: string, value: string): string {
+  if (!value.endsWith('*')) return formatTerm(field, value);
+  return `${field}:/${value.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&')}/`;
+}
+
+/**
  * Drop operators and groups that removing a term left dangling — `(a OR b)` minus `a` and `b` must
  * not become `( OR )`, which the server rightly rejects.
  */

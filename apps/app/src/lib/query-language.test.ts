@@ -3,6 +3,7 @@ import {
   andQuery,
   canonicalField,
   excludeTerm,
+  formatExactTerm,
   formatTerm,
   hasTopLevelOr,
   highlightQuery,
@@ -343,5 +344,17 @@ describe('removeTerm with a unary NOT', () => {
     expect(removeTerm('action:y NOT actor:x -tenant:t', 'actor')).toBe('action:y -tenant:t');
     expect(removeTerm('NOT (actor:a OR actor:b) action:y', 'actor')).toBe('action:y');
     expect(removeTerm('NOT actor:x action:y', 'action')).toBe('NOT actor:x');
+  });
+});
+
+describe('formatExactTerm', () => {
+  it('keeps ordinary ids as plain or quoted terms', () => {
+    expect(formatExactTerm('parent', 'evt_1')).toBe('parent:evt_1');
+    expect(formatExactTerm('operation', 'op with space')).toBe('operation:"op with space"');
+  });
+
+  it('turns a trailing star into an anchored literal regex instead of a prefix search', () => {
+    expect(formatExactTerm('parent', 'batch*')).toBe(String.raw`parent:/batch\*/`);
+    expect(formatExactTerm('id', 'a.b/c(1)*')).toBe(String.raw`id:/a\.b\/c\(1\)\*/`);
   });
 });

@@ -39,9 +39,10 @@ import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, operationQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
-import { actorAttributeHint, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
+import { actorAttributeHint, causedCount, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
-import { formatTerm } from '@/lib/query-language';
+import { formatExactTerm, formatTerm } from '@/lib/query-language';
+import { absoluteRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
 
 interface EventSheetProps {
@@ -191,16 +192,17 @@ function TargetList({ targets, projectId, onFilter }: { targets: AuditEvent['tar
           ) : null}
         </li>
       ))}
-      {hidden > 0 ? (
+      {targets.length > TARGET_PREVIEW ? (
         <li>
           <Button
+            aria-expanded={expanded}
             className="w-full justify-start rounded-none rounded-b-lg px-3 text-muted-foreground"
-            onClick={() => setExpanded(true)}
+            onClick={() => setExpanded((v) => !v)}
             size="sm"
             variant="ghost"
           >
-            <ChevronDownIcon />
-            Show {hidden} more
+            <ChevronDownIcon className={cn('transition-transform', expanded && 'rotate-180')} />
+            {expanded ? 'Show fewer' : `Show ${hidden} more`}
           </Button>
         </li>
       ) : null}
@@ -216,61 +218,72 @@ const CHILD_LOOKUP_MAX_OPERATION = 1000;
 /**
  * Direct children of an event (events whose `context.parentEventId` is this event), read from its operation so the
  * operation page opens from the same cache. Children outside the operation, or in a very large one, are reached
- * through an explorer `parent:` search instead.
+ * through an explorer `parent:` search over everything since the event instead.
  */
 function ChildEvents({ detail, event: e, projectId, indent }: { detail: EventDetail; event: AuditEvent; projectId: string; indent: number }) {
   const operationId = e.context.operationId;
+  const total = causedCount(detail, e);
   const lookup = Boolean(operationId) && detail.operationSize <= CHILD_LOOKUP_MAX_OPERATION;
   const op = useQuery({ ...operationQuery(projectId, operationId ?? ''), enabled: lookup });
-  const children = directChildren(op.data ?? [], e.id);
+  // Only a lookup that ran and succeeded counts: a disabled or failed query may still hold older cached data.
+  const loaded = lookup && op.isSuccess;
+  const loading = lookup && op.isPending;
+  const children = loaded ? directChildren(op.data, e.id) : [];
   const shown = children.slice(0, CHILD_PREVIEW);
-  // Children recorded under another operation (or none loaded) are still reachable by searching their parent id.
-  const missing = detail.childCount - shown.length;
-  const allLabel = `View all ${detail.childCount}`;
+  const allInOperation = loaded && children.length === total;
+  // The count spans all stored history, so the search starts a day before this event (children follow their parent;
+  // the day absorbs clock skew between services) and runs to now, whatever range the explorer had.
+  const searchRange = absoluteRange(Date.parse(e.timestamp) - 86_400_000, Date.now());
   return (
     <>
-      {lookup && op.isPending
-        ? Array.from({ length: Math.min(detail.childCount, CHILD_PREVIEW) }, (_, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton rows.
-            <li className="py-[3px]" key={i} style={{ paddingInlineStart: indent }}>
-              <Skeleton className="h-4 w-3/4" />
-            </li>
-          ))
-        : shown.map((c) => (
-            <li className="flex items-center gap-2 text-[13px]" key={c.id} style={{ paddingInlineStart: indent }}>
-              <OutcomeDot outcome={c.outcome} />
-              <Link
-                className="min-w-0 truncate py-[3px] hover:underline"
-                dir="auto"
-                params={{ projectId }}
-                search={(prev) => ({ ...prev, ev: c.id })}
-                to="/p/$projectId/events"
-              >
-                {eventSentence(c)}
-              </Link>
-              <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={c.timestamp} />
-            </li>
-          ))}
-      {missing > 0 && !(lookup && op.isPending) ? (
+      {loading ? (
+        <li aria-live="polite" className="py-[3px]" style={{ paddingInlineStart: indent }}>
+          <span className="sr-only">Loading the events this event caused</span>
+          <span aria-hidden className="flex flex-col gap-1.5">
+            {Array.from({ length: Math.min(total, CHILD_PREVIEW) }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton rows.
+              <Skeleton className="h-4 w-3/4" key={i} />
+            ))}
+          </span>
+        </li>
+      ) : (
+        shown.map((c) => (
+          <li className="flex items-center gap-2 text-[13px]" key={c.id} style={{ paddingInlineStart: indent }}>
+            <OutcomeDot outcome={c.outcome} />
+            <Link
+              className="min-w-0 truncate py-[3px] hover:underline"
+              dir="auto"
+              params={{ projectId }}
+              search={(prev) => ({ ...prev, ev: c.id })}
+              to="/p/$projectId/events"
+            >
+              <span className="sr-only">{c.outcome}: </span>
+              {eventSentence(c)}
+            </Link>
+            <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={c.timestamp} />
+          </li>
+        ))
+      )}
+      {total > shown.length && !loading ? (
         <li className="flex items-center gap-2 pt-1 text-xs" style={{ paddingInlineStart: indent }}>
-          {operationId && children.length === detail.childCount ? (
+          {allInOperation && operationId ? (
             <Link
               className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
               params={{ projectId, operationId }}
               search={{ focus: e.id }}
               to="/p/$projectId/operations/$operationId"
             >
-              {allLabel} in the operation
+              View all {total} in the operation
               <ArrowRightIcon className="size-3" />
             </Link>
           ) : (
             <Link
               className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
               params={{ projectId }}
-              search={(prev) => ({ range: prev.range, q: formatTerm('parent', e.id) })}
+              search={{ range: searchRange, q: formatExactTerm('parent', e.id) }}
               to="/p/$projectId/events"
             >
-              {allLabel} in the explorer
+              {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
               <ArrowRightIcon className="size-3" />
             </Link>
           )}
@@ -442,11 +455,10 @@ function EventDetailBody({
   const link = useCopy();
   const curl = useCopy();
   const shareUrl =
-    typeof window === 'undefined' ? '' : `${window.location.origin}/p/${projectId}/events?q=${encodeURIComponent(`id:${e.id}`)}&ev=${e.id}`;
-  // `{}` / `[]` carry nothing to read here (the raw payload below keeps them).
-  const attributes = Object.entries(e.attributes)
-    .filter(([, v]) => v !== '{}' && v !== '[]')
-    .sort(([a], [b]) => a.localeCompare(b));
+    typeof window === 'undefined'
+      ? ''
+      : `${window.location.origin}/p/${projectId}/events?q=${encodeURIComponent(formatExactTerm('id', e.id))}&ev=${encodeURIComponent(e.id)}`;
+  const attributes = Object.entries(e.attributes).sort(([a], [b]) => a.localeCompare(b));
   const ctx = e.context;
 
   return (
@@ -658,7 +670,7 @@ function EventDetailBody({
           </Section>
         ) : null}
 
-        {ctx.parentEventId || ctx.operationId ? (
+        {ctx.parentEventId || ctx.operationId || (detail && causedCount(detail, e) > 0) ? (
           <Section title="Causation">
             {detailLoading ? (
               <Skeleton className="h-8 w-full" />
@@ -688,13 +700,13 @@ function EventDetailBody({
                 <li className="flex items-center gap-2 font-medium text-[13px]" style={{ paddingInlineStart: (detail?.parents.length ?? 0) * 14 }}>
                   <OutcomeDot outcome={e.outcome} />
                   <span className="min-w-0 truncate">This event</span>
-                  {detail && detail.childCount > 0 ? (
+                  {detail && causedCount(detail, e) > 0 ? (
                     <span className="shrink-0 font-normal text-muted-foreground text-xs">
-                      caused {detail.childCount} event{detail.childCount === 1 ? '' : 's'}
+                      caused {causedCount(detail, e)} event{causedCount(detail, e) === 1 ? '' : 's'}
                     </span>
                   ) : null}
                 </li>
-                {detail && detail.childCount > 0 && projectId ? (
+                {detail && causedCount(detail, e) > 0 && projectId ? (
                   <ChildEvents detail={detail} event={e} indent={(detail.parents.length + 1) * 14} projectId={projectId} />
                 ) : null}
                 {ctx.parentEventId && (detail?.parents.length ?? 0) === 0 ? (
@@ -707,11 +719,11 @@ function EventDetailBody({
 
         <Section title="Context">
           <dl className="flex flex-col">
-            <KV label="Event id" onFilter={onFilter} term={formatTerm('id', e.id)} value={e.id} />
-            <KV label="Operation" onFilter={onFilter} term={formatTerm('operation', ctx.operationId)} value={ctx.operationId} />
-            <KV label="Parent event" onFilter={onFilter} term={formatTerm('id', ctx.parentEventId)} value={ctx.parentEventId} />
-            <KV label="Request" onFilter={onFilter} term={formatTerm('request', ctx.requestId)} value={ctx.requestId} />
-            <KV label="Trace" onFilter={onFilter} term={formatTerm('trace', ctx.traceId)} value={ctx.traceId} />
+            <KV label="Event id" onFilter={onFilter} term={formatExactTerm('id', e.id)} value={e.id} />
+            <KV label="Operation" onFilter={onFilter} term={formatExactTerm('operation', ctx.operationId)} value={ctx.operationId} />
+            <KV label="Parent event" onFilter={onFilter} term={formatExactTerm('id', ctx.parentEventId)} value={ctx.parentEventId} />
+            <KV label="Request" onFilter={onFilter} term={formatExactTerm('request', ctx.requestId)} value={ctx.requestId} />
+            <KV label="Trace" onFilter={onFilter} term={formatExactTerm('trace', ctx.traceId)} value={ctx.traceId} />
             <KV label="IP" value={ctx.ip} />
             <KV label="User agent" mono={false} value={ctx.userAgent} />
             <KV

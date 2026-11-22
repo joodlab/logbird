@@ -20,7 +20,7 @@ import { useSetCrumb } from '@/lib/crumbs';
 import { eventSentence } from '@/lib/events';
 import { formatDuration, formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
-import { formatTerm } from '@/lib/query-language';
+import { formatExactTerm } from '@/lib/query-language';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/operations/$operationId')({
   validateSearch: z.object({ focus: z.string().optional(), ev: z.string().optional() }),
@@ -116,7 +116,7 @@ function OperationPage() {
               render={
                 <Link
                   params={{ projectId }}
-                  search={(prev) => ({ range: prev.range, q: formatTerm('operation', operationId) })}
+                  search={(prev) => ({ range: prev.range, q: formatExactTerm('operation', operationId) })}
                   to="/p/$projectId/events"
                 />
               }
@@ -154,7 +154,7 @@ function OperationPage() {
           render={
             <Link
               params={{ projectId }}
-              search={(prev) => ({ range: prev.range, q: formatTerm('operation', operationId) })}
+              search={(prev) => ({ range: prev.range, q: formatExactTerm('operation', operationId) })}
               to="/p/$projectId/events"
             />
           }
