@@ -82,7 +82,13 @@ export async function read<T>(
           ...(exportBudget && !isQueryClient(ch)
             ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
             : {}),
-          ...(isQueryClient(ch) ? { SQL_logbird_project: project as string } : {}),
+          // Scoped reads bind their tenant (the scope predicate's parameter) so the row policy enforces it too (#138).
+          ...(isQueryClient(ch)
+            ? {
+                SQL_logbird_project: project as string,
+                SQL_logbird_tenant: typeof query_params.scope_tenant === 'string' ? query_params.scope_tenant : '',
+              }
+            : {}),
         },
       })
     ).json<T>();

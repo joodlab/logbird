@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClickHouseClient, createQueryClickHouseClient, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
-import { entityProfile, listFields, liveEvents, overview, projectStats, purgeProject } from './queries';
+import { entityProfile, listFields, liveEvents, overview, projectStats, purgeProject, searchEvents } from './queries';
 
 /**
  * This suite probes the row policies the migrations install on the `logbird` database (and writes a probe table and
@@ -192,5 +192,83 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
     const stats = await projectStats(restricted!, projects);
     expect(Object.keys(stats).sort()).toEqual([...projects].sort());
     expect(Object.values(stats).map((s) => s.eventsLast24h)).toEqual([1, 1]);
+  });
+});
+
+describe.runIf(enabled)('#138 phase 2: database-enforced tenant binding for scoped reads (real ClickHouse)', () => {
+  const tenantProject = `row-policy-tenant-${randomUUID()}`;
+  beforeAll(async () => {
+    const rows = ['t1', 't2', ''].map((tenant, n) => {
+      const row = normalizeEvent(
+        { id: `tenant-${n}`, action: 'row.policy.tenant', tenant: tenant ? { id: tenant } : undefined, occurredAt: now.toISOString() },
+        { projectId: tenantProject, receivedAt: now },
+      );
+      if (!row.ok) throw new Error('Fixture normalization failed');
+      return row.row;
+    });
+    await insertEvents(main!, rows);
+  });
+  afterAll(async () => {
+    if (main) await purgeProject(main, tenantProject);
+  }, 120_000);
+  const tenants = async (settings: Record<string, string>, predicate = '1 OR 1') =>
+    (
+      await (
+        await restricted!.query({
+          query: `SELECT tenant_id FROM logbird.events WHERE ${predicate} ORDER BY tenant_id`,
+          clickhouse_settings: { SQL_logbird_project: tenantProject, ...settings },
+          format: 'JSONEachRow',
+        })
+      ).json<{ tenant_id: string }>()
+    ).map((r) => r.tenant_id);
+
+  it('installs the tenant-aware policy on every table', async () => {
+    const policies = await (
+      await main!.query({
+        query: "SELECT table, select_filter FROM system.row_policies WHERE short_name = 'logbird_project_isolation' AND database = 'logbird'",
+        format: 'JSONEachRow',
+      })
+    ).json<{ table: string; select_filter: string }>();
+    expect(policies.map((p) => p.table).sort()).toEqual([...tables].sort());
+    for (const policy of policies) expect(policy.select_filter).toContain('SQL_logbird_tenant');
+  });
+
+  it('binds events to the tenant even when the query has no tenant predicate, and leaves unscoped reads unchanged', async () => {
+    expect(await tenants({ SQL_logbird_tenant: 't1' })).toEqual(['t1']);
+    expect(await tenants({ SQL_logbird_tenant: 't1' }, "tenant_id = 't2' OR tenant_id = ''")).toEqual([]);
+    expect(await tenants({ SQL_logbird_tenant: 't2' })).toEqual(['t2']);
+    expect(await tenants({ SQL_logbird_tenant: 'nobody' })).toEqual([]);
+    // Unscoped: explicitly empty, or not sent at all (profile default) — every tenant of the bound project.
+    expect(await tenants({ SQL_logbird_tenant: '' })).toEqual(['', 't1', 't2']);
+    expect(await tenants({})).toEqual(['', 't1', 't2']);
+  });
+
+  it.each(tables.filter((t) => t !== 'events'))('%s (no tenant column) shows nothing to a tenant-bound session', async (table) => {
+    const count = async (settings: Record<string, string>) =>
+      Number(
+        (
+          await (
+            await restricted!.query({
+              query: `SELECT count() n FROM logbird.${table}`,
+              clickhouse_settings: { SQL_logbird_project: tenantProject, ...settings },
+              format: 'JSONEachRow',
+            })
+          ).json<{ n: number }>()
+        )[0]?.n,
+      );
+    expect(await count({ SQL_logbird_tenant: 't1' })).toBe(0);
+    expect(await count({})).toBeGreaterThanOrEqual(0);
+  });
+
+  it('the application read path binds the scope tenant automatically', async () => {
+    const page = await searchEvents(
+      restricted!,
+      tenantProject,
+      { from: new Date(now.getTime() - 1000).toISOString(), to: new Date(now.getTime() + 1000).toISOString(), limit: 10, order: 'desc' },
+      undefined,
+      { tenantId: 't1' },
+    );
+    expect(page.data.map((e) => e.tenant?.id)).toEqual(['t1']);
+    expect(page.total).toBe(1);
   });
 });
