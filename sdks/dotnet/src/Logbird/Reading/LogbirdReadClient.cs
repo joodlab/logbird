@@ -122,38 +122,45 @@ public sealed class LogbirdReadClient : IDisposable
         }
 
         // One probe for all callers: created once, started once, and not tied to any caller's token (each caller waits under
-        // its own, so cancelling one search never fails another). A failed or unreadable probe is forgotten.
+        // its own, so cancelling one search never fails another). A probe that fails or finds no readable version forgets
+        // itself when it completes, even if no caller is still waiting, so the next search asks again.
         var probe = Volatile.Read(ref _serverVersion);
         if (probe is null)
         {
-            var created = new Lazy<Task<Version?>>(ReadServerVersionAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+            Lazy<Task<Version?>>? created = null;
+            created = new Lazy<Task<Version?>>(() => ProbeAsync(created!), LazyThreadSafetyMode.ExecutionAndPublication);
             probe = Interlocked.CompareExchange(ref _serverVersion, created, null) ?? created;
         }
 
-        Version? version;
-        try
-        {
-            version = await WaitAsync(probe.Value, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            _ = Interlocked.CompareExchange(ref _serverVersion, null, probe);
-            throw;
-        }
-
+        var version = await WaitAsync(probe.Value, cancellationToken).ConfigureAwait(false);
         if (version is null)
         {
-            _ = Interlocked.CompareExchange(ref _serverVersion, null, probe);
             throw new LogbirdApiException(null, "server_version_unknown", "This trail needs Logbird 0.2.0 or later, and the server's version could not be read; it was not sent.");
         }
 
         if (version < new Version(0, 2, 0))
         {
             throw new LogbirdApiException(null, "server_too_old", "This trail needs Logbird 0.2.0 or later (record: and literal * or carriage returns); the server reports " + version + ", so it was not sent.");
+        }
+    }
+
+    /// <summary>Runs one version read; a failed or unreadable read removes this probe (and only this one) from the cache.</summary>
+    private async Task<Version?> ProbeAsync(Lazy<Task<Version?>> self)
+    {
+        try
+        {
+            var version = await ReadServerVersionAsync().ConfigureAwait(false);
+            if (version is null)
+            {
+                _ = Interlocked.CompareExchange(ref _serverVersion, null, self);
+            }
+
+            return version;
+        }
+        catch
+        {
+            _ = Interlocked.CompareExchange(ref _serverVersion, null, self);
+            throw;
         }
     }
 

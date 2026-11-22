@@ -108,6 +108,55 @@ public class TrailServerVersionTests
     }
 
     [Fact]
+    public async Task A_failed_probe_is_forgotten_even_when_its_only_caller_was_cancelled()
+    {
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var probes = 0;
+        var server = new FakeServer
+        {
+            Fallback = async request =>
+            {
+                if (request.Request.RequestUri!.AbsolutePath == "/openapi.json")
+                {
+                    // The first read is held, then finds no version; the next one finds a current server.
+                    if (Interlocked.Increment(ref probes) == 1)
+                    {
+                        await release.Task;
+                        return FakeServer.Json(HttpStatusCode.OK, "{\"info\":{}}");
+                    }
+
+                    return FakeServer.Json(HttpStatusCode.OK, "{\"info\":{\"version\":\"0.2.0\"}}");
+                }
+
+                return FakeServer.Json(HttpStatusCode.OK, "{\"data\":[],\"nextCursor\":null,\"total\":0,\"tookMs\":1}");
+            },
+        };
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "lb_read_fictional" }, new HttpClient(server));
+        var search = EventSearch.ForTrail(targetId: "inv_1", targetType: "invoice");
+        using (var cancel = new CancellationTokenSource())
+        {
+            var cancelled = reader.SearchAsync(search, cancel.Token);
+            cancel.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+        }
+
+        // With no caller left, the probe finishes with no readable version and must forget itself.
+        release.SetResult(true);
+        var cache = typeof(LogbirdReadClient).GetField("_serverVersion", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+        {
+            while (cache.GetValue(reader) is not null)
+            {
+                await Task.Delay(10);
+            }
+        });
+
+        await reader.SearchAsync(search);
+        Assert.Equal(2, Calls(server, "/openapi.json"));
+        Assert.Equal(1, Calls(server, "/v1/events"));
+    }
+
+    [Fact]
     public async Task Other_searches_never_ask_for_the_version()
     {
         var server = Server("0.1.3");
