@@ -1,7 +1,7 @@
 import type { HistogramResponse } from '@logbird/contracts';
 import { ChartContainer, ChartTooltip } from '@logbird/ui/components/ui/chart';
 import { cn } from '@logbird/ui/lib/utils';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from 'recharts';
 import { formatAxis } from '@/lib/format';
 import { OutcomeTooltip } from './chart-tooltip';
@@ -33,6 +33,8 @@ export function EventHistogram({ data, height = 120, onZoom: onZoomProp, classNa
   const interval = data?.interval ?? 60;
   const axis = useMemo(() => bucketTicks(rows, interval), [rows, interval]);
   const [drag, setDrag] = useState<{ start: number; end: number } | null>(null);
+  // The bar the keyboard (arrow keys) last moved to, read from the tooltip: Enter or Space zooms to it.
+  const active = useRef<number | null>(null);
 
   const pointTs = (state: ChartPointerState | null | undefined): number | null => {
     if (!state) return null;
@@ -62,11 +64,16 @@ export function EventHistogram({ data, height = 120, onZoom: onZoomProp, classNa
       ) : null}
       <ChartContainer
         className={cn('aspect-auto w-full transition-opacity', stale ? 'opacity-45' : loading && 'opacity-60')}
+        onKeyDown={(event) => {
+          if (!onZoom || (event.key !== 'Enter' && event.key !== ' ') || active.current === null) return;
+          event.preventDefault();
+          onZoom(active.current, active.current + interval * 1000);
+        }}
         config={outcomeChartConfig}
         style={{ height }}
       >
         <BarChart
-          aria-label="Events per interval by outcome. Arrow keys move between bars."
+          aria-label={`Events per interval by outcome. Arrow keys move between bars.${onZoom ? ' Enter zooms to the bar.' : ''}`}
           barCategoryGap={1}
           className={onZoom ? 'cursor-crosshair' : undefined}
           data={rows}
@@ -88,15 +95,16 @@ export function EventHistogram({ data, height = 120, onZoom: onZoomProp, classNa
           <XAxis axisLine={false} dataKey="ts" interval={0} tickFormatter={axis.format} tickLine={false} tickMargin={6} ticks={axis.ticks} />
           <YAxis allowDecimals={false} axisLine={false} tickCount={3} tickFormatter={formatAxis} tickLine={false} width={40} />
           <ChartTooltip
-            content={({ active, payload }) =>
-              active && !drag ? (
+            content={({ active: isActive, payload }) => {
+              active.current = isActive ? ((payload?.[0]?.payload as { ts?: number } | undefined)?.ts ?? null) : null;
+              return isActive && !drag ? (
                 <OutcomeTooltip
-                  hint={onZoom ? 'Drag to zoom · click to focus this bar' : undefined}
+                  hint={onZoom ? 'Drag to zoom · click or Enter to focus this bar' : undefined}
                   interval={interval}
                   row={payload?.[0]?.payload}
                 />
-              ) : null
-            }
+              ) : null;
+            }}
             cursor={{ fill: 'var(--foreground)', fillOpacity: 0.05 }}
             isAnimationActive={false}
           />

@@ -23,6 +23,8 @@ import { placeholderKeys } from '@/lib/placeholders';
 import { formatExactTerm } from '@/lib/query-language';
 import { absoluteRange } from '@/lib/range';
 
+const NOT_IN_OPERATION = new ApiRequestError(404, 'not_found', 'Event not found in this operation');
+
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/operations/$operationId')({
   validateSearch: z.object({ focus: z.string().optional(), ev: z.string().optional() }),
   staticData: { crumb: 'Operations' },
@@ -85,18 +87,30 @@ function OperationPage() {
   const op = useQuery(operationQuery(projectId, operationId));
   useSetCrumb(operationId);
   const nodes = useMemo(() => buildTree(op.data ?? []), [op.data]);
-  const t0 = nodes.length ? Math.min(...nodes.map((n) => n.start)) : 0;
-  const t1 = nodes.length ? Math.max(...nodes.map((n) => n.end)) : 0;
-  const total = Math.max(1, t1 - t0);
   const events = op.data ?? [];
-  // Every event of the operation, including any the tree cannot place (a parent cycle); the upper bound is exclusive.
+  // Events whose parents form a cycle (A names B, B names A) have no root to hang from: the tree cannot place them.
+  const unplaced = useMemo(() => {
+    const placed = new Set(nodes.map((n) => n.event.id));
+    const seen = new Set<string>();
+    return (op.data ?? [])
+      .filter((e) => !placed.has(e.id) && !seen.has(e.id) && Boolean(seen.add(e.id)))
+      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  }, [nodes, op.data]);
+  // Summaries and the explorer link cover every event of the operation, placed in the tree or not.
   const times = events.map((ev) => Date.parse(ev.timestamp));
-  const spanRange = times.length ? absoluteRange(Math.min(...times), Math.max(...times) + 1) : undefined;
+  const t0 = times.length ? Math.min(...times) : 0;
+  const t1 = times.length ? Math.max(...times) : 0;
+  const total = Math.max(1, t1 - t0);
+  // The upper bound is exclusive.
+  const spanRange = times.length ? absoluteRange(t0, t1 + 1) : undefined;
+  const titleEvent = nodes[0]?.event ?? unplaced[0];
   const failures = events.filter((e) => e.outcome === 'failure' || e.outcome === 'denied').length;
   const executors = [...new Map(events.filter((e) => e.executor?.id).map((e) => [e.executor?.id, e.executor])).values()];
   const actors = [...new Map(events.filter((e) => e.actor).map((e) => [e.actor?.id, e.actor])).values()];
   const selectedId = search.ev;
-  const selectedIndex = nodes.findIndex((n) => n.event.id === selectedId);
+  // The drawer steps through the tree, then any events the tree could not place.
+  const ordered = [...nodes.map((n) => n.event), ...unplaced];
+  const selectedIndex = ordered.findIndex((e) => e.id === selectedId);
   const highlight = search.focus;
 
   // The server answers an unknown operation id with an empty list, older servers with 404.
@@ -148,8 +162,8 @@ function OperationPage() {
           <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
             <GitBranchIcon className="size-3.5" /> Operation
           </span>
-          <h1 className="line-clamp-2 font-semibold text-xl tracking-tight" title={nodes[0] ? eventSentence(nodes[0].event) : undefined}>
-            {nodes[0] ? eventSentence(nodes[0].event) : <Skeleton className="h-7 w-80" />}
+          <h1 className="line-clamp-2 font-semibold text-xl tracking-tight" title={titleEvent ? eventSentence(titleEvent) : undefined}>
+            {titleEvent ? eventSentence(titleEvent) : <Skeleton className="h-7 w-80" />}
           </h1>
           <CopyValue className="text-muted-foreground" value={operationId} />
         </div>
@@ -183,7 +197,7 @@ function OperationPage() {
           ['Events', op.data ? formatNumber(events.length) : ''],
           ['Duration', op.data ? formatDuration(t1 - t0) : ''],
           ['Problems', op.data ? formatNumber(failures) : ''],
-          ['Started', nodes[0] ? <Timestamp iso={new Date(t0).toISOString()} key="started" /> : ''],
+          ['Started', times.length ? <Timestamp iso={new Date(t0).toISOString()} key="started" /> : ''],
           ['Executors', op.data ? formatNumber(executors.length) : ''],
         ].map(([label, value]) => (
           <div className="flex flex-col gap-1 bg-card px-4 py-3" key={String(label)}>
@@ -318,20 +332,57 @@ function OperationPage() {
             })}
           </ul>
         )}
+        {unplaced.length > 0 ? (
+          <div className="border-t px-4 py-3">
+            <p className="text-muted-foreground text-xs">
+              {unplaced.length === 1 ? 'This event' : `These ${unplaced.length} events`} could not be placed in the tree: their parent links form a
+              cycle (each names another one as its parent), so none of them is a root. Listed in time order.
+            </p>
+            <ul aria-label="Events not placed in the tree" className="mt-2 flex flex-col">
+              {unplaced.map((e) => (
+                <li key={e.id}>
+                  <button
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] hover:bg-muted/60',
+                      e.id === selectedId && 'bg-brand/[0.07]',
+                    )}
+                    onClick={() => navigate({ search: (prev) => ({ ...prev, ev: e.id }), replace: true })}
+                    type="button"
+                  >
+                    <OutcomeDot outcome={e.outcome} />
+                    <bdi className="min-w-0 flex-1 truncate" dir="auto">
+                      {eventSentence(e)}
+                    </bdi>
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">names {e.context.parentEventId} as parent</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </section>
 
       <EventSheet
-        event={selectedIndex >= 0 ? (nodes[selectedIndex]?.event ?? null) : null}
+        event={selectedIndex >= 0 ? (ordered[selectedIndex] ?? null) : null}
+        // An id that is not in this operation (expired, mistyped, or from another one) gets a clear state, not a blank drawer.
+        missingError={op.isSuccess && selectedId && selectedIndex < 0 ? NOT_IN_OPERATION : undefined}
+        missingDescription={
+          <>
+            <span className="break-all font-mono text-foreground">{selectedId}</span> is not one of this operation's events. Close this panel to
+            return to its tree, or search for the id in the explorer.
+          </>
+        }
+        missingId={selectedId}
         onNext={
-          selectedIndex >= 0 && selectedIndex < nodes.length - 1
-            ? () => navigate({ search: (prev) => ({ ...prev, ev: nodes[selectedIndex + 1]?.event.id }), replace: true })
+          selectedIndex >= 0 && selectedIndex < ordered.length - 1
+            ? () => navigate({ search: (prev) => ({ ...prev, ev: ordered[selectedIndex + 1]?.id }), replace: true })
             : undefined
         }
         onOpenChange={(open) => {
           if (!open) navigate({ search: (prev) => ({ ...prev, ev: undefined }), replace: true });
         }}
         onPrev={
-          selectedIndex > 0 ? () => navigate({ search: (prev) => ({ ...prev, ev: nodes[selectedIndex - 1]?.event.id }), replace: true }) : undefined
+          selectedIndex > 0 ? () => navigate({ search: (prev) => ({ ...prev, ev: ordered[selectedIndex - 1]?.id }), replace: true }) : undefined
         }
         open={Boolean(selectedId)}
         projectId={projectId}

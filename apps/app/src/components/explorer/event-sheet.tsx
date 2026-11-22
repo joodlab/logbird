@@ -41,7 +41,7 @@ import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import { actorAttributeHint, causedCount, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
-import { andQuery, formatExactTerm, formatTerm } from '@/lib/query-language';
+import { andQuery, formatExactTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
 
@@ -61,6 +61,8 @@ interface EventSheetProps {
   missingError?: unknown;
   /** The id that was asked for, named in the not-found message. */
   missingId?: string;
+  /** Replaces the whole not-found description (e.g. the operation page: the event exists, but not in this operation). */
+  missingDescription?: ReactNode;
   /**
    * Where focus goes when the sheet closes. The sheet opens from state (URL `?event=`), so it has no trigger to return
    * to by itself: pass the row that opened it.
@@ -79,6 +81,7 @@ export function EventSheet({
   fetchDetail = true,
   missingError,
   missingId,
+  missingDescription,
   finalFocus,
 }: EventSheetProps) {
   const detail = useQuery({ ...eventQuery(projectId ?? '', event?.id ?? ''), enabled: open && fetchDetail && Boolean(projectId && event) });
@@ -108,10 +111,12 @@ export function EventSheet({
                 <EmptyState
                   className="w-full"
                   description={
-                    <>
-                      No event {missingId ? <span className="break-all font-mono text-foreground">{missingId}</span> : 'with this id'} is stored in
-                      this project. It may be past the project's retention window, or the link has a typo.
-                    </>
+                    missingDescription ?? (
+                      <>
+                        No event {missingId ? <span className="break-all font-mono text-foreground">{missingId}</span> : 'with this id'} is stored in
+                        this project. It may be past the project's retention window, or the link has a typo.
+                      </>
+                    )
                   }
                   icon={SearchXIcon}
                   title="Event not found"
@@ -180,7 +185,7 @@ function TargetList({ targets, projectId, onFilter }: { targets: AuditEvent['tar
               <span className="truncate font-mono">{t.id}</span>
             </span>
           </div>
-          <FilterButton onFilter={onFilter} term={formatTerm('target', t.id)} />
+          <FilterButton onFilter={onFilter} term={formatExactTerm('target', t.id)} />
           {projectId ? (
             <Button
               aria-label={`Follow ${t.name || t.id}`}
@@ -675,7 +680,7 @@ function EventDetailBody({
                 {projectId ? <EntityLink id={e.tenant.id} kind="tenant" name={e.tenant.name} projectId={projectId} /> : <span>{e.tenant.name}</span>}
                 <span className="hidden truncate font-mono text-muted-foreground text-xs sm:inline">{e.tenant.id}</span>
               </div>
-              <FilterButton onFilter={onFilter} term={formatTerm('tenant', e.tenant.id)} />
+              <FilterButton onFilter={onFilter} term={formatExactTerm('tenant', e.tenant.id)} />
             </div>
           ) : null}
         </Section>
@@ -777,7 +782,14 @@ function EventDetailBody({
                 ) : null}
                 {ctx.parentEventId === e.id ? (
                   <li className="text-muted-foreground text-xs">This event names itself as its parent, so it has no parent to show.</li>
-                ) : ctx.parentEventId && (detail?.parents.length ?? 0) === 0 ? (
+                ) : ctx.parentEventId && detailError ? (
+                  <li className="text-muted-foreground text-xs">
+                    Could not load this event's parents.{' '}
+                    <button className="font-medium text-foreground underline-offset-2 hover:underline" onClick={onRetry} type="button">
+                      Try again
+                    </button>
+                  </li>
+                ) : ctx.parentEventId && detail && detail.parents.length === 0 ? (
                   <li className="text-muted-foreground text-xs">Parent {ctx.parentEventId} is not stored (outside retention or never sent).</li>
                 ) : null}
               </ol>
@@ -809,7 +821,7 @@ function EventDetailBody({
           <Section title={`Attributes · ${attributes.length}`}>
             <dl className="flex flex-col">
               {attributes.map(([k, v]) => (
-                <KV key={k} label={k} onFilter={onFilter} term={formatTerm(`attr.${k}`, v)} value={v} />
+                <KV key={k} label={k} onFilter={onFilter} term={formatExactTerm(`attr.${k}`, v)} value={v} />
               ))}
             </dl>
           </Section>
