@@ -140,9 +140,17 @@ it('stores a numeric id as the plain decimal of its exact value, one spelling pe
 
 it('never truncates a long numeric id: plain if it fits, else unique scientific, else not indexed', () => {
   const ids = (n: string) => normalize(wire(`{"action":"x","actor":{"id":${n}},"targets":[{"type":"order","id":${n}}]}`)).row;
-  expect(ids('1e255')).toMatchObject({ actor_id: `1${'0'.repeat(255)}`, target_ids: [`1${'0'.repeat(255)}`] });
+  // Plain adds at most 32 zeros to the digits; past that the unique scientific spelling, whatever the sent spelling.
+  expect(ids('1e32')).toMatchObject({ actor_id: `1${'0'.repeat(32)}`, target_ids: [`1${'0'.repeat(32)}`] });
+  expect(ids(`1${'0'.repeat(32)}`).actor_id).toBe(`1${'0'.repeat(32)}`);
+  expect(ids('1e33')).toMatchObject({ actor_id: '1e33', target_ids: ['1e33'] });
+  expect(ids(`1${'0'.repeat(33)}`).actor_id).toBe('1e33');
   expect(ids('1e256')).toMatchObject({ actor_id: '1e256', target_ids: ['1e256'] });
   expect(ids('2e256').target_ids).toEqual(['2e256']);
+  // Indexed numbers are strictly shorter than the column: a longer string id truncated to 256 can never equal one.
+  expect(ids('1'.repeat(255)).actor_id).toBe('1'.repeat(255));
+  expect(ids('1'.repeat(256)).actor_id).toBe('');
+  expect(normalize(wire(`{"action":"x","actor":{"id":"${'1'.repeat(300)}"}}`)).row.actor_id).toBe('1'.repeat(256));
   // Two 257-significant-digit ids that share their first 256 digits must not merge: neither is indexed, and such a
   // target leaves the record columns entirely (no shared `order:` record).
   expect([ids(`${'1'.repeat(256)}1`).actor_id, ids(`${'1'.repeat(256)}2`).actor_id]).toEqual(['', '']);
@@ -200,10 +208,15 @@ it('indexes ordinary numeric attributes as plain decimals, legacy columns unchan
 });
 
 it('indexes a rejected numeric timestamp whole, so two long values never match each other', () => {
-  const a = normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(256)}1}`)).row.attributes['logbird.occurredAt.rejected'];
-  const b = normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(256)}2}`)).row.attributes['logbird.occurredAt.rejected'];
-  expect(a).toBe(`${'1'.repeat(256)}1`);
-  expect(b).toBe(`${'1'.repeat(256)}2`);
+  const a = normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(200)}1}`)).row.attributes['logbird.occurredAt.rejected'];
+  const b = normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(200)}2}`)).row.attributes['logbird.occurredAt.rejected'];
+  expect(a).toBe(`${'1'.repeat(200)}1`);
+  expect(b).toBe(`${'1'.repeat(200)}2`);
+  // Same cap as a rejected string: a 256-digit number is not indexed, so it never equals a truncated long string.
+  expect(normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(256)}}`)).row.attributes['logbird.occurredAt.rejected']).toBeUndefined();
+  expect(normalize(wire(`{"action":"x","occurredAt":"${'1'.repeat(300)}"}`)).row.attributes['logbird.occurredAt.rejected']).toBe(
+    '1'.repeat(256),
+  );
   expect(normalize(wire('{"action":"x","occurredAt":"yesterday"}')).row.attributes['logbird.occurredAt.rejected']).toBe('yesterday');
 });
 
@@ -213,4 +226,63 @@ it('never leaves a caller-supplied rejected-timestamp attribute when the number 
   expect(row.attributes['logbird.occurredAt.rejected']).toBeUndefined();
   const small = normalize(wire('{"action":"x","logbird":{"occurredAt":{"rejected":"42"}},"occurredAt":"yesterday"}')).row;
   expect(small.attributes['logbird.occurredAt.rejected']).toBe('yesterday');
+});
+
+it('compares pre-v1 claims as the old parser read them: a JSON number never matches a stored string of digits it lost', () => {
+  const legacy = (text: string, parse: (t: string) => unknown = wire) =>
+    retryFingerprint(parse(text), ctx.projectId, ctx.receivedAt, 'e1', 'legacy-claim');
+  const number = '{"id":"e1","action":"x","metadata":{"n":9007199254740993}}';
+  // The retry reads exactly as JSON.parse did before exact numbers.
+  expect(legacy(number)).toBe(legacy(number, JSON.parse));
+  // The original claim stored the string "9007199254740993"; the old parser read the number as …992 and rejected it.
+  expect(legacy(number)).not.toBe(legacy('{"id":"e1","action":"x","metadata":{"n":"9007199254740993"}}'));
+  expect(legacy(number)).toBe(legacy('{"id":"e1","action":"x","metadata":{"n":9007199254740992}}'));
+});
+
+it('bounds how far a compact number expands in the search columns', () => {
+  const { row } = normalize(wire('{"action":"x","metadata":{"a":1e+2047,"b":1e-2040,"c":1e21},"tenant":{"id":1e+200}}'));
+  expect(row.attributes).toMatchObject({ 'metadata.a': '1e2047', 'metadata.b': '1e-2040', 'metadata.c': '1000000000000000000000' });
+  expect(row.tenant_id).toBe('1e200');
+});
+
+it('numbers extra target fields by the position of the target in the record columns', () => {
+  const { row } = normalize(
+    wire(`{"action":"x","targets":[{"type":"order","id":${'1'.repeat(300)},"note":"dropped"},{"type":"page","id":"p1","note":"kept"}]}`),
+  );
+  expect(row.target_ids).toEqual(['p1']);
+  expect(row.attributes['targets.0.note']).toBe('kept');
+  expect(row.attributes['targets.1.note']).toBeUndefined();
+  expect(row.payload).toContain('"note":"dropped"');
+});
+
+it('never keeps the partial digits of a number cut by the composite-value cap', () => {
+  const head = `[${'"a",'.repeat(511)}`; // 2,045 bytes before the number
+  const cut = (n: string) => normalize(wire(`{"action":"x","metadata":{"list":${head}${n}]}}`)).row.attributes['metadata.list'] ?? '';
+  const a = cut('12345678901234567891');
+  expect(a.length).toBeLessThanOrEqual(2048);
+  expect(a.endsWith(',')).toBe(true);
+  expect(a).toBe(cut('12399999999999999999'));
+  // A value that fits is kept whole.
+  expect(normalize(wire('{"action":"x","metadata":{"list":[12345678901234567891]}}')).row.attributes['metadata.list']).toBe(
+    '[12345678901234567891]',
+  );
+});
+
+it('truncates executor.attempt from its exact decimal value, clamped like before', () => {
+  const attempt = (n: string) => normalize(wire(`{"action":"x","executor":{"type":"job","attempt":${n}}}`)).row.job_attempt;
+  expect(attempt('1.99999999999999999')).toBe(1);
+  expect(attempt('3')).toBe(3);
+  expect(attempt('2.5')).toBe(2);
+  expect(attempt('65534.99999999999999999')).toBe(65_534);
+  expect(attempt('1e400')).toBe(65_535);
+  expect(attempt('-1.99999999999999999')).toBe(0);
+  expect(attempt('0.99999999999999999999')).toBe(0);
+  expect(attempt('1e-400')).toBe(0);
+});
+
+it('drops a caller-supplied rejected-timestamp attribute when no timestamp was rejected', () => {
+  for (const occurredAt of ['', ',"occurredAt":"2026-11-22T11:00:00Z"']) {
+    const { row } = normalize(wire(`{"action":"x","logbird":{"occurredAt":{"rejected":"42"}}${occurredAt}}`));
+    expect(row.attributes['logbird.occurredAt.rejected']).toBeUndefined();
+  }
 });

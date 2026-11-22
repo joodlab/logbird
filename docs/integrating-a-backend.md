@@ -87,11 +87,17 @@ decimals, and returns them as JSON numbers with those digits (the spelling may c
 `19.90` comes back as `19.9`, `1e3` as `1000`). Search matches them exactly:
 `metadata.orderId:9007199254740993`. Entity ids may be numbers, so integer primary keys
 work as sent. A numeric id is stored as the plain decimal text of its exact value (`42`,
-`42.0` and `4.2e1` are all stored as `"42"`); if that is longer than 256 characters, as
-its scientific spelling (`1e300`); if that is also longer than 256 characters, the id is
-not indexed (never truncated), and such a target is left out of the record columns.
-Numeric attribute values follow the same rule with a 2 KB limit. A string id is indexed as sent, with surrounding whitespace
-trimmed and a 256-character cap (the original payload always keeps it exactly). An event
+`42.0` and `4.2e1` are all stored as `"42"`) when that adds at most 32 zeros to its
+digits and is shorter than 256 characters; otherwise as its scientific spelling (`1e33`,
+`1e300`) when that is shorter than 256 characters; otherwise the id is not indexed (never
+truncated), and such a target, with its extra fields, is left out of the record columns
+and attributes. The spelling depends only on the value, never on how it was sent.
+Numeric attribute values follow the same rule with a 2,048-character limit. A composite
+attribute value (an array, or an object deeper than the flattening limit) is indexed as
+its first 2 KB; a number cut by that limit is left out of the indexed copy instead of
+keeping partial digits. The normalized `executor.attempt` is the whole part of its exact
+value. A string id is indexed as sent, with surrounding whitespace trimmed and a
+256-character cap (the original payload always keeps it exactly). An event
 nested more than 1,000 levels deep stores its long numbers as doubles and gets a warning. An event's own `id` must be a string (a numeric event id gets a fresh id
 and a warning).
 

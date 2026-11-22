@@ -77,9 +77,11 @@ export function isExactNumber(source: string, value: number) {
 
 /**
  * Plain decimal text of a number's exact value, one spelling per value: `42`, `42.0` and `4.2e1` give `42`;
- * `-0.00123` gives `-0.00123`. Null when not a finite number or when the plain form would exceed `maxLength`.
+ * `-0.00123` gives `-0.00123`. Null when not a finite number, when the plain form would exceed `maxLength`, or when
+ * it would add more than `maxPadding` characters (zeros and the point) to the significant digits: `1e+2047` is 7
+ * characters but 2,048 plain. The bound depends on the value, never on how it was spelled.
  */
-export function plainDecimal(value: unknown, maxLength = 1024): string | null {
+export function plainDecimal(value: unknown, maxLength = 1024, maxPadding = Number.POSITIVE_INFINITY): string | null {
   const source = isRawJson(value) ? value.rawJSON : typeof value === 'number' && Number.isFinite(value) ? String(value) : null;
   const canonical = source === null ? null : canonicalDecimal(source);
   if (canonical === null) return null;
@@ -91,7 +93,7 @@ export function plainDecimal(value: unknown, maxLength = 1024): string | null {
   const point = digits.length + exp;
   // Exact output length, checked before any padding is allocated.
   const length = sign.length + (exp >= 0 ? digits.length + exp : point > 0 ? digits.length + 1 : 2 - point + digits.length);
-  if (length > maxLength) return null;
+  if (length > maxLength || length - sign.length - digits.length > maxPadding) return null;
   if (exp >= 0) return `${sign}${digits}${'0'.repeat(exp)}`;
   return point > 0 ? `${sign}${digits.slice(0, point)}.${digits.slice(point)}` : `${sign}0.${'0'.repeat(-point)}${digits}`;
 }

@@ -84,8 +84,15 @@ export function retryFingerprint(input: unknown, projectId: string, receivedAt: 
     // event, so it is never matched at double precision (a retry across the upgrade is a duplicate_id_conflict).
     return canonicalFingerprint(input, timestamp);
   }
-  // Unversioned claims hashed 3a1541f columns: keep their numeric-id indexing frozen.
-  const result = normalizeEvent(input, { projectId, receivedAt, legacyColumns: true });
+  // Unversioned claims hashed 3a1541f columns: keep their numeric-id indexing frozen. Those columns came from JSON.parse,
+  // so the input is re-read as doubles first: a JSON number never reaches them with digits the old parser dropped.
+  let frozen: unknown;
+  try {
+    frozen = JSON.parse(JSON.stringify(input));
+  } catch {
+    return null;
+  }
+  const result = normalizeEvent(frozen, { projectId, receivedAt, legacyColumns: true });
   if (!result.ok) return null;
   result.row.event_id = eventId;
   return legacyEventFingerprint(result.row);

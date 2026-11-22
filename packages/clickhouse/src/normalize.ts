@@ -24,21 +24,42 @@ const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|
 // Numbers (ids from integer keys, numeric names) are indexed by their exact decimal text, like a string would be.
 // Legacy (pre-v1) receipt fingerprints froze the old columns, where a number indexed as ''.
 const textOf = (v: unknown, cap: number, numbers: boolean): string => {
-  // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42"); when that is
-  // longer than the column, as its canonical scientific spelling (1e256), which is unique per value. Only a number
-  // with more significant digits than the column holds is not indexed: truncating could merge distinct ids.
+  // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42"); when that
+  // pads too much or does not fit the column, as its canonical scientific spelling (1e256), which is unique per value.
+  // A number whose digits do not fit is not indexed: truncating could merge distinct ids.
   if (typeof v !== 'string') return (numbers ? numericId(v, cap) : null) ?? '';
   return capText(wellFormed(v.trim()), cap);
 };
+// A plain decimal adds at most this many zeros (and the point) to the significant digits, so a compact spelling such
+// as 1e+2047 never expands to kilobytes per row; past it the value keeps its unique scientific spelling.
+const PLAIN_PADDING = 32;
+// Indexed numbers are strictly shorter than their column: a longer string truncated to the cap fills it exactly, so it
+// can never equal an indexed number.
 function numericId(v: unknown, cap: number): string | null {
-  const plain = plainDecimal(v, cap);
+  const plain = plainDecimal(v, cap - 1, PLAIN_PADDING);
   if (plain !== null) return plain;
   const text = rawJsonText(v);
   const scientific = text === null ? null : canonicalDecimal(text);
-  return scientific !== null && scientific.length <= cap ? scientific : null;
+  return scientific !== null && scientific.length < cap ? scientific : null;
 }
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
+// executor.attempt truncated toward zero from the exact decimal (1.99999999999999999 is 1, not 2), clamped to UInt16
+// as JSON.parse gave (1e400 is 65535, negatives 0). Legacy (pre-v1) columns keep the double conversion.
+function attemptOf(v: unknown, legacy: boolean): number {
+  if (!isNumber(v)) return 0;
+  if (legacy || !isRawJson(v)) return Math.min(65_535, Math.max(0, Math.trunc(Number(isRawJson(v) ? v.rawJSON : v)) || 0));
+  const canonical = canonicalDecimal(v.rawJSON);
+  if (canonical === null || canonical === '0' || canonical.startsWith('-')) return 0;
+  const e = canonical.indexOf('e');
+  const digits = canonical.slice(0, e);
+  const integer = digits.length + Number(canonical.slice(e + 1));
+  if (integer <= 0) return 0;
+  if (integer > 5) return 65_535;
+  return Math.min(65_535, Number(digits.slice(0, integer).padEnd(integer, '0')));
+}
+// Characters a JSON number is spelled with: a composite value cut inside one must not keep its partial digits.
+const numberChar = (c: string | undefined) => c !== undefined && /[\d.eE+-]/.test(c);
 export const DEEP_NUMBERS_WARNING = `Nested deeper than ${EXACT_NUMBER_MAX_DEPTH} levels: long numbers were stored as doubles.`;
 export function normalizeEvent(
   input: unknown,
@@ -77,17 +98,24 @@ export function normalizeEvent(
     }
     const entries = Object.entries(object(v));
     if (entries.length && depth < 6) for (const [key, child] of entries) flatten(child, path ? `${path}.${key}` : key, depth + 1);
-    else if (isRawJson(v) || (typeof v === 'number' && Number.isFinite(v) && !ctx.legacyColumns)) {
+    else if (!ctx.legacyColumns && (isRawJson(v) || (typeof v === 'number' && Number.isFinite(v)))) {
       // A number is indexed whole, as the plain decimal of its value (0.0000001, not 1e-7) or else its unique scientific
       // spelling, or not at all: a 2 KB prefix of its digits would match a different number. Legacy (pre-v1) columns
       // keep JSON.stringify spelling.
       const exact = numericId(v, 2048);
       if (exact !== null) attributes[path] = exact;
-    } else
-      attributes[path] = Buffer.from(value(v))
-        .subarray(0, 2048)
-        .toString('utf8')
-        .replace(/\uFFFD$/, '');
+    } else {
+      const bytes = Buffer.from(value(v));
+      let cut = bytes.subarray(0, 2048).toString('utf8').replace(/\uFFFD$/, '');
+      // A composite value cut inside a number drops that number's partial digits: a prefix of its digits would match a
+      // different number. One backward scan; legacy columns keep the plain cut.
+      if (!ctx.legacyColumns && bytes.length > 2048 && numberChar(String.fromCharCode(bytes[2048] ?? 0))) {
+        let end = cut.length;
+        while (end > 0 && numberChar(cut[end - 1])) end--;
+        cut = cut.slice(0, end);
+      }
+      attributes[path] = cut;
+    }
   };
   const known: Record<string, string[]> = {
     actor: ['type', 'id', 'name', 'email'],
@@ -117,7 +145,9 @@ export function normalizeEvent(
   // A numeric target id too long to index is left out of the record columns (the payload keeps it): an empty id would
   // make every such target one shared `type:` record.
   const recordTargets = ctx.legacyColumns ? targets : targets.filter((t) => !(isNumber(t.id) && idText(t.id) === ''));
-  targets.forEach((t, i) => {
+  // Extra target fields are numbered by the target's position in the record columns, so `targets.N.*` always describes
+  // targets[N] of the normalized event. A left-out target's extra fields stay in the payload only.
+  recordTargets.forEach((t, i) => {
     for (const [k, v] of Object.entries(t)) if (!['type', 'id', 'name'].includes(k)) flatten(v, `targets.${i}.${k}`, 3);
   });
   if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
@@ -132,11 +162,12 @@ export function normalizeEvent(
   const { timestamp: date, problem: occurredAtProblem, valid: occurredAtValid } = resolveTimestamp(e.occurredAt, ctx.receivedAt);
   if (occurredAtProblem) {
     // A rejected numeric timestamp is indexed whole like any number (two long values never share a prefix match).
-    const rejected = isNumber(e.occurredAt) && !ctx.legacyColumns ? numericId(e.occurredAt, 2048) : capText(wellFormed(value(e.occurredAt)), 256);
+    // Same column cap as a rejected string, so a truncated long string never equals an indexed number.
+    const rejected = isNumber(e.occurredAt) && !ctx.legacyColumns ? numericId(e.occurredAt, 256) : capText(wellFormed(value(e.occurredAt)), 256);
     // Always replace a caller-supplied value of this reserved key, even when the number cannot be indexed.
     if (rejected !== null) attributes['logbird.occurredAt.rejected'] = rejected;
     else delete attributes['logbird.occurredAt.rejected'];
-  }
+  } else if (!ctx.legacyColumns) delete attributes['logbird.occurredAt.rejected']; // reserved: only Logbird sets it
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
@@ -167,10 +198,7 @@ export function normalizeEvent(
     executor_id: idText(executor.id),
     executor_name: text(executor.name),
     job_id: idText(executor.jobId),
-    // Same clamp as JSON.parse gave: 1e400 is Infinity → 65535, NaN → 0.
-    job_attempt: isNumber(executor.attempt)
-      ? Math.min(65_535, Math.max(0, Math.trunc(Number(isRawJson(executor.attempt) ? executor.attempt.rawJSON : executor.attempt)) || 0))
-      : 0,
+    job_attempt: attemptOf(executor.attempt, ctx.legacyColumns === true),
     tenant_id: idText(tenant.id),
     tenant_name: text(tenant.name),
     source: text(e.source, 128),
