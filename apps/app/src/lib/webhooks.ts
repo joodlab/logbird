@@ -43,7 +43,7 @@ export function displayUrl(url: string): { host: string; path: string } {
 /** Overlap windows offered when rotating a secret (seconds); the API takes 0 to 604,800 and defaults to a day. */
 export const OVERLAP_CHOICES = [
   { seconds: 0, label: 'No overlap', detail: 'The old secret stops signing now. Use it if the old secret leaked.' },
-  { seconds: 3_600, label: '1 hour', detail: 'Enough to deploy a receiver that already reads the new secret.' },
+  { seconds: 3600, label: '1 hour', detail: 'Enough to deploy a receiver that already reads the new secret.' },
   { seconds: 86_400, label: '24 hours', detail: 'Recommended. Both secrets sign deliveries for a day while you deploy.' },
   { seconds: 604_800, label: '7 days', detail: 'The longest overlap: for receivers you cannot redeploy quickly.' },
 ] as const;

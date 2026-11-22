@@ -9,12 +9,13 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings'
 
 /**
  * Project settings: what belongs to this project. Members, invite links and workspace activity belong to the workspace
- * (Workspace settings, /workspace). Webhooks and Alerts join here when they ship.
+ * (Workspace settings, /workspace). Alerts join here when they ship.
  */
 const TABS = [
   { to: '/p/$projectId/settings', label: 'General' },
   { to: '/p/$projectId/settings/retention', label: 'Retention' },
   { to: '/p/$projectId/settings/keys', label: 'API keys' },
+  { to: '/p/$projectId/settings/webhooks', label: 'Webhooks' },
   { to: '/p/$projectId/settings/danger', label: 'Danger zone', danger: true },
 ] as const;
 
