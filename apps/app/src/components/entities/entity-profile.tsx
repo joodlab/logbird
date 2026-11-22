@@ -144,7 +144,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
             />
             <Button
               nativeButton={false}
-              render={<Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: baseQuery })} to="/p/$projectId/events" />}
+              render={
+                <Link params={{ projectId }} search={(prev) => ({ range: timelineRange ?? prev.range, q: baseQuery })} to="/p/$projectId/events" />
+              }
               size="sm"
               variant="outline"
             >

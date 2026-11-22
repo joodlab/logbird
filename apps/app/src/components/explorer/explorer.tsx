@@ -451,7 +451,8 @@ export function Explorer({
               'Searching…'
             ) : (
               <>
-                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span> events · {rangeName}
+                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span>{' '}
+                {!totalCapped && total === 1 ? 'event' : 'events'} · {rangeName}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
