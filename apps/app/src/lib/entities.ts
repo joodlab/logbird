@@ -1,6 +1,5 @@
-import type { EntityKind } from '@logbird/contracts';
+import { type EntityKind, formatRecordTerm } from '@logbird/contracts';
 import { Bot, Building2, Cog, type LucideIcon, Package, User } from 'lucide-react';
-import { formatTerm } from './query-language';
 
 /**
  * URL segment ↔ entity kind. The `/workers` URL is kept for compatibility, but the UI calls every executor
@@ -57,9 +56,12 @@ export function sectionForKind(kind: EntityKind): EntitySection {
 }
 
 /** Query that selects every event involving the entity. Target ids are "<type>:<id>". */
-export function entityQuery(kind: EntityKind, id: string): string {
+export function entityQuery(kind: EntityKind, id: string, targetType?: string): string {
   if (kind === 'target') {
-    if (id.includes(':')) return formatTerm('record', id);
+    if (id.includes(':')) {
+      const pair = splitTargetId(id, targetType);
+      return formatRecordTerm(pair.type, pair.id);
+    }
     return `target:${quote(id)}`;
   }
   return `${kind}:${quote(id)}`;
@@ -73,9 +75,10 @@ export function targetEntityId(type: string, id: string): string {
   return `${type}:${id}`;
 }
 
-export function splitTargetId(entityId: string): { type: string; id: string } {
+export function splitTargetId(entityId: string, type?: string): { type: string; id: string } {
+  if (type !== undefined && entityId.startsWith(`${type}:`)) return { type, id: entityId.slice(type.length + 1) };
   const sep = entityId.indexOf(':');
-  return sep > 0 ? { type: entityId.slice(0, sep), id: entityId.slice(sep + 1) } : { type: '', id: entityId };
+  return sep >= 0 ? { type: entityId.slice(0, sep), id: entityId.slice(sep + 1) } : { type: '', id: entityId };
 }
 
 /** Icon for an actor/executor *type*. */

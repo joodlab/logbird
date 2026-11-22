@@ -183,17 +183,22 @@ export const dataRoutes = new Hono<AppEnv>()
   .get('/projects/:projectId/entities', doc('Entities', s.entityListResponseSchema), query(s.entityListQuerySchema), async (c) =>
     c.json(s.entityListResponseSchema.parse(await ch.listEntities(clickhouse, c.get('project').id, c.req.valid('query')))),
   )
-  .get('/projects/:projectId/entities/:kind/:entityId', doc('Entity profile', s.entityProfileSchema), query(s.rangeQuerySchema), async (c) => {
-    const kind = s.entityKindSchema.safeParse(c.req.param('kind'));
-    if (!kind.success) throw new ApiError(422, 'validation_error', 'Invalid entity kind.');
-    return c.json(
-      s.entityProfileSchema.parse(
-        found(
-          await ch.entityProfile(queryClient(c.req.valid('query')), c.get('project').id, kind.data, c.req.param('entityId'), c.req.valid('query')),
+  .get(
+    '/projects/:projectId/entities/:kind/:entityId',
+    doc('Entity profile', s.entityProfileSchema),
+    query(s.entityProfileQuerySchema),
+    async (c) => {
+      const kind = s.entityKindSchema.safeParse(c.req.param('kind'));
+      if (!kind.success) throw new ApiError(422, 'validation_error', 'Invalid entity kind.');
+      return c.json(
+        s.entityProfileSchema.parse(
+          found(
+            await ch.entityProfile(queryClient(c.req.valid('query')), c.get('project').id, kind.data, c.req.param('entityId'), c.req.valid('query')),
+          ),
         ),
-      ),
-    );
-  })
+      );
+    },
+  )
   .get('/projects/:projectId/suggest', doc('Suggest field values', s.suggestResponseSchema), query(s.suggestQuerySchema), async (c) =>
     c.json(s.suggestResponseSchema.parse(await ch.suggestValues(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )

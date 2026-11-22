@@ -5,6 +5,7 @@
  * Only constructs with an unambiguous SQL equivalent are translated; anything else (free text, phrases,
  * the `description` text field) returns null so the caller can ask instead of guessing.
  */
+import { decodeRecordPair, scanBareRecordValue } from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 import { type QueryToken, tokenize } from './query-language';
 import { sqlString } from './sql-language';
@@ -51,12 +52,13 @@ function equals(t: Target, value: string): string | null {
 
 function recordValueToSql(raw: string): string | null {
   const quoted = raw.startsWith('"');
-  if (quoted ? !/^"(?:[^"\\]|\\[\s\S])*"$/.test(raw) : /[\s()"<>[\]{}]|^\/|&&|\|\|/.test(raw)) return null;
+  if (quoted ? !/^"(?:[^"\\]|\\[\s\S])*"$/.test(raw) : raw.startsWith('/') || scanBareRecordValue(raw, 0) !== raw.length) return null;
   const value = quoted ? raw.slice(1, -1).replace(/\\([\s\S])/g, '$1') : raw;
   if (!quoted && value === '*') return 'notEmpty(target_ids)';
-  const separator = value.indexOf(':');
-  if (separator < 0) return null;
-  return `arrayExists((t, i) -> t = ${sqlString(value.slice(0, separator))} AND i = ${sqlString(value.slice(separator + 1))}, target_types, target_ids)`;
+  const pair = decodeRecordPair(value);
+  if (!pair) return null;
+  const id = sqlString(pair.id);
+  return `(has(target_ids, ${id}) AND arrayExists((t, i) -> t = ${sqlString(pair.type)} AND i = ${id}, target_types, target_ids))`;
 }
 
 function recordTermToSql(token: QueryToken): string | null {

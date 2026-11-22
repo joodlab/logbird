@@ -1,5 +1,5 @@
-import type { AuditEvent } from '@logbird/contracts';
-import { describe, expect, it } from 'vitest';
+import { type AuditEvent, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
+import { describe, expect, it, vi } from 'vitest';
 import { mustConfirmSecretClose } from '@/components/one-time-secret';
 import { entityViewName } from '@/components/views/save-entity-view-button';
 import { ApiRequestError } from './api/errors';
@@ -8,7 +8,7 @@ import { actorAttributeHint, outcomeWasSent, parentActor } from './events';
 import { sortProjectsByActivity } from './projects';
 import { queryProblem, queryProblemText } from './query-error';
 import { describeUserAgent } from './user-agent';
-import { labelChips, nameableTerms, viewHref } from './views';
+import { labelChips, nameableTerms, resolveViewLabel, viewHref } from './views';
 
 const syntax = (q: string, hint: string, start: number) =>
   queryProblem(
@@ -165,5 +165,39 @@ describe('OPS-17/18 saved views', () => {
     ];
     expect(labelChips(q, labels).map((c) => c.text)).toEqual(['Record: Order One']);
     expect(labelChips('target:"A:1" target.type:order', labels).map((c) => c.text)).toEqual(['Record: Legacy label']);
+    const archivedQuery = entityQuery('target', 'order:archived:A1', 'order:archived');
+    const regularQuery = entityQuery('target', 'order:archived:A1', 'order');
+    expect(archivedQuery).toBe(String.raw`record:"order\\:archived:A1"`);
+    expect(regularQuery).toBe('record:"order:archived:A1"');
+    const [archived] = nameableTerms(String.raw`record:order\:archived:A1`);
+    if (!archived) throw new Error('Missing archived record term');
+    const archivedLabel = { ...archived, label: 'Archived order' };
+    expect(labelChips(archivedQuery, [archivedLabel]).map((c) => c.text)).toEqual(['Record: Archived order']);
+    expect(labelChips(regularQuery, [archivedLabel])).toEqual([]);
+  });
+
+  it('resolves a long record label via the exact profile', async () => {
+    const type = 't'.repeat(64);
+    const id = 'i'.repeat(150);
+    const entityId = `${type}:${id}`;
+    const now = '2026-11-22T00:00:00.000Z';
+    const fetch = vi.fn().mockResolvedValue(
+      Response.json({
+        entity: { kind: 'target', id: entityId, type, name: 'Long record', firstSeen: now, lastSeen: now, events: 1 },
+        series: { interval: 60, buckets: [] },
+        topActions: [],
+        outcomes: {},
+        related: [],
+      }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const [term] = nameableTerms(formatRecordTerm(type, id));
+      if (!term) throw new Error('Missing long record term');
+      expect(await resolveViewLabel('demo', term)).toEqual({ field: 'record', value: encodeRecordPair(type, id), label: 'Long record' });
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual([`/api/projects/demo/entities/target/${encodeURIComponent(entityId)}?targetType=${type}`]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

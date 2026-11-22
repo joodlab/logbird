@@ -5,6 +5,7 @@
  * query bar, drive autocomplete, and add/remove filter terms from facets, charts and entity pages
  * without destroying what the user typed.
  */
+import { scanBareRecordValue } from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 
 export type TokenKind = 'field' | 'text' | 'phrase' | 'operator' | 'paren' | 'space';
@@ -35,7 +36,7 @@ const OPERATORS = new Set(['OR', 'AND', 'NOT']);
 function unquote(value: string): string {
   if (value.startsWith('"')) {
     const inner = value.endsWith('"') && value.length > 1 ? value.slice(1, -1) : value.slice(1);
-    return inner.replace(/\\(.)/g, '$1');
+    return inner.replace(/\\([\s\S])/g, '$1');
   }
   return value;
 }
@@ -83,7 +84,7 @@ function scanPlain(input: string, i: number): number {
 }
 
 /** Lex the value after `key:` starting at `i`. */
-function scanValue(input: string, i: number): { end: number; kind: ValueKind; op?: string } {
+function scanValue(input: string, i: number, record: boolean): { end: number; kind: ValueKind; op?: string } {
   const ch = input[i];
   if (ch === '"') return { end: scanDelimited(input, i, '"'), kind: 'quoted' };
   if (ch === '/') return { end: scanDelimited(input, i, '/'), kind: 'regex' };
@@ -94,7 +95,7 @@ function scanValue(input: string, i: number): { end: number; kind: ValueKind; op
   if (ch === '(') return { end: scanGroup(input, i), kind: 'group' };
   const op = /^(>=|<=|>|<)/.exec(input.slice(i))?.[0];
   if (op) return { end: scanPlain(input, i + op.length), kind: 'compare', op };
-  return { end: scanPlain(input, i), kind: 'plain' };
+  return { end: record ? scanBareRecordValue(input, i) : scanPlain(input, i), kind: 'plain' };
 }
 
 /** Tokenize a query. Concatenating every token's `raw` reproduces the input exactly. */
@@ -119,7 +120,7 @@ export function tokenize(input: string): QueryToken[] {
     const key = KEY_RE.exec(rest);
     if (key) {
       const valueStart = i + key[0].length;
-      const v = scanValue(input, valueStart);
+      const v = scanValue(input, valueStart, key[2] === 'record');
       const raw = input.slice(i, v.end);
       const valueRaw = input.slice(valueStart + (v.op?.length ?? 0), v.end);
       tokens.push({

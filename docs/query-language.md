@@ -24,7 +24,13 @@ Logbird searches one authorized project within a half-open UTC time range. The d
 
 Arrays (target, target.type, target.name, changes.field) match any element. Attribute comparisons convert strings with toFloat64OrNull, or parseDateTime64BestEffortOrNull for date bounds; invalid conversions do not match. String fields do not support ordered comparisons. Quote values containing whitespace or grammar punctuation; quoted strings accept backslash escapes.
 
-Use `record:<type>:<id>` to filter a record's history. The first colon in the value separates the type from the id, so use types without colons. For example, `record:"order:A:1"` matches the order with id `A:1`, and `record:"page:home page"` matches the page with id `home page`. Record pairs match exactly and support negation and value groups, such as `-record:(page:1 OR site:7)`. `record:*` and `_exists_:record` match events with any target. Use `attr.record` to search a custom attribute named `record`.
+Use `record:<type>:<id>` to filter a record's history. The first unescaped colon separates the type from the id. Within the type, `\:` means a literal colon and `\\` means a literal backslash. Everything after the separator is the literal id. For example, `record:order\:archived:A1` matches type `order:archived` and id `A1`, while `record:order:archived:A1` matches type `order` and id `archived:A1`.
+
+Quote the whole pair if it contains whitespace or grammar punctuation such as parentheses. The standard quoted-string rules apply first, where a backslash quotes the next character. Then record-pair escaping applies. For example, `record:"order\\:archived:A1"` matches type `order:archived` and id `A1`, and `record:"page:home (west)"` matches id `home (west)`. `record:page:/home/` and `record:page:home*` match those exact ids.
+
+Record pairs support negation and value groups, such as `-record:(page:1 OR site:7)`. `record:*` and `_exists_:record` match events with any target. Use `attr.record` to search a custom attribute named `record`.
+
+The record directory and unscoped record suggestions still group targets by the stored `type:id` key. Pairs that share a key appear together in the directory. A record link from an event carries its original type, and each record profile and timeline uses the exact pair it opened.
 
 `target:12 target.type:site` checks the arrays independently, so it also matches an event with targets `page:12` and `site:7`. Existing saved views using those terms keep this behavior. Use `record:site:12` for the paired match.
 

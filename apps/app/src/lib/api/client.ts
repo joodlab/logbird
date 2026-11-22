@@ -5,6 +5,7 @@ import {
   createApiKeyResponseSchema,
   createProjectResponseSchema,
   type EntityKind,
+  type EntityProfileQuery,
   type EntitySort,
   type ExportQuery,
   entityListResponseSchema,
@@ -62,7 +63,7 @@ export function withQuery(path: string, query?: Query): string {
   if (!query) return path;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === '') continue;
+    if (value === undefined || value === null || (value === '' && key !== 'targetType')) continue;
     params.set(key, String(value));
   }
   const qs = params.toString();
@@ -231,7 +232,7 @@ export const api = {
       query: { kind: EntityKind; q?: string; type?: string; sort?: EntitySort; limit?: number; cursor?: string },
       signal?: AbortSignal,
     ) => request(entityListResponseSchema, 'GET', pathFor(routes.entities.list.path, { projectId }), { query: { ...query }, signal }),
-    profile: (projectId: string, kind: EntityKind, entityId: string, query: RangeParams, signal?: AbortSignal) =>
+    profile: (projectId: string, kind: EntityKind, entityId: string, query: EntityProfileQuery, signal?: AbortSignal) =>
       request(entityProfileSchema, 'GET', pathFor(routes.entities.profile.path, { projectId, kind, entityId }), { query: { ...query }, signal }),
   },
 

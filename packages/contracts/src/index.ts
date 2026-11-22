@@ -4,6 +4,7 @@ export * from './console';
 export * from './events';
 export * from './invitations';
 export * from './query';
+export * from './record-selector';
 export * from './routes';
 export * from './setup';
 export * from './webhooks';

@@ -1482,6 +1482,14 @@
             }
           },
           {
+            "in": "query",
+            "name": "targetType",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "projectId",
             "required": true,

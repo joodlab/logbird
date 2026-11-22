@@ -1,4 +1,6 @@
-/** Structural public read types, checked against contracts in read.test.ts; no runtime dependencies. */
+import { formatRecordTerm } from '@logbird/contracts/record-selector';
+
+/** Structural public read types, checked against contracts in read.test.ts. */
 export interface SearchQuery {
   from?: string;
   to?: string;
@@ -53,7 +55,7 @@ export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
   const target = input.target;
   const terms = [
     input.q ? `(${input.q})` : '',
-    target?.type ? `record:${quote(`${target.type}:${target.id}`)}` : target ? `target:${quote(target.id)}` : '',
+    target?.type !== undefined ? formatRecordTerm(target.type, target.id) : target ? `target:${quote(target.id)}` : '',
     input.actor ? `actor:${quote(input.actor)}` : '',
     input.tenant ? `tenant:${quote(input.tenant)}` : '',
   ].filter(Boolean);

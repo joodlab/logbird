@@ -1,3 +1,4 @@
+import { formatRecordTerm } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { normalizeEvent } from './normalize';
 import { compileQuery, parseQuery, QueryError } from './query';
@@ -87,6 +88,10 @@ describe('record selector', () => {
   it.each([
     ['record:site:12', 'site', '12'],
     ['record:order:A:1', 'order', 'A:1'],
+    [String.raw`record:order\:archived:A1`, 'order:archived', 'A1'],
+    [String.raw`record:"order\\:archived:A1"`, 'order:archived', 'A1'],
+    [String.raw`record:order\\:A1`, 'order\\', 'A1'],
+    ['record:page:/home/', 'page', '/home/'],
     ['record:"order:A:1"', 'order', 'A:1'],
     ['record:"page:home page"', 'page', 'home page'],
     ['record:page:OR', 'page', 'OR'],
@@ -94,9 +99,20 @@ describe('record selector', () => {
     [String.raw`record:"order:a\\b\"c"`, 'order', 'a\\b"c'],
   ])('matches a paired target with %s', (q, type, id) => {
     expect(compileQuery(q)).toEqual({
-      sql: '(arrayExists((t, i) -> t = {recordType0:String} AND i = {recordId0:String}, target_types, target_ids))',
+      sql: '(has(target_ids, {recordId0:String}) AND arrayExists((t, i) -> t = {recordType0:String} AND i = {recordId0:String}, target_types, target_ids))',
       params: { recordType0: type, recordId0: id },
     });
+  });
+
+  it('round-trips generated selectors across punctuation, whitespace and Unicode', () => {
+    const types = ['order', 'order:archived', 'trailing\\', String.raw`slash\:colon`, '"a type"', 'مَلَفّ:📃', ':start', '/type/'];
+    const ids = ['A1', ':A:1', 'a\\b', '"quote" and space', '/home/', '(nested)', '*', 'الغرفة-🏨', 'a\nb'];
+    for (const type of types) {
+      for (const id of ids) {
+        const q = formatRecordTerm(type, id);
+        expect(compileQuery(q).params, q).toEqual({ recordType0: type, recordId0: id });
+      }
+    }
   });
 
   it('negates the whole group and binds distinct pairs', () => {

@@ -1,3 +1,5 @@
+import { compileQuery } from '@logbird/clickhouse';
+import { formatRecordTerm } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { sqlColumn } from './query-catalog';
 import { translateQueryToSql } from './query-translate';
@@ -279,14 +281,32 @@ describe('translateQueryToSql', () => {
   });
 
   it('translates exact record pairs, presence and grouped negation', () => {
-    expect(translateQueryToSql('record:"order:A:1"')).toBe("(arrayExists((t, i) -> t = 'order' AND i = 'A:1', target_types, target_ids))");
+    expect(translateQueryToSql('record:"order:A:1"')).toBe(
+      "(has(target_ids, 'A:1') AND arrayExists((t, i) -> t = 'order' AND i = 'A:1', target_types, target_ids))",
+    );
     expect(translateQueryToSql('-record:(site:12 OR "page:home ( OR ) page")')).toBe(
-      "NOT (arrayExists((t, i) -> t = 'site' AND i = '12', target_types, target_ids) OR arrayExists((t, i) -> t = 'page' AND i = 'home ( OR ) page', target_types, target_ids))",
+      "NOT ((has(target_ids, '12') AND arrayExists((t, i) -> t = 'site' AND i = '12', target_types, target_ids)) OR (has(target_ids, 'home ( OR ) page') AND arrayExists((t, i) -> t = 'page' AND i = 'home ( OR ) page', target_types, target_ids)))",
     );
     expect(translateQueryToSql('NOT _exists_:record')).toBe('NOT notEmpty(target_ids)');
     expect(translateQueryToSql('record:site')).toBeNull();
     expect(translateQueryToSql('record:"site:12')).toBeNull();
     expect(translateQueryToSql('record:(/site:12/)')).toBeNull();
+  });
+
+  it.each([
+    ['record:page:/home/', 'page', '/home/'],
+    [String.raw`record:page:/a\d+.*/`, 'page', String.raw`/a\d+.*/`],
+    ['record:page:home*', 'page', 'home*'],
+    ['record:page:*', 'page', '*'],
+    ['record:"page:section(2)"', 'page', 'section(2)'],
+    ['record:"page:/home/(.*)/"', 'page', '/home/(.*)/'],
+    [String.raw`record:order\:archived:A1`, 'order:archived', 'A1'],
+    [formatRecordTerm('نَوْع:\\', 'مُعرِّف🪴 "a"'), 'نَوْع:\\', 'مُعرِّف🪴 "a"'],
+  ])('translates the same literal pair as the compiler for %s', (q, type, id) => {
+    const compiled = compileQuery(q);
+    expect(compiled.params).toEqual({ recordType0: type, recordId0: id });
+    const sql = compiled.sql.replace(/\{(recordType0|recordId0):String\}/g, (_, key) => sqlString(String(compiled.params[key])));
+    expect(translateQueryToSql(q)).toBe(sql);
   });
 
   it('gives up on free text and the description field', () => {

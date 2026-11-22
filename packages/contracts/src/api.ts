@@ -198,6 +198,12 @@ export const entityListQuerySchema = z.object({
 });
 export const entityListResponseSchema = z.object({ data: z.array(entitySchema), nextCursor: z.string().nullable() });
 
+export const entityProfileQuerySchema = rangeQuerySchema.extend({
+  /** For targets, selects the original type when more than one pair can share the composite entity id. */
+  targetType: z.string().max(64).optional(),
+});
+export type EntityProfileQuery = z.infer<typeof entityProfileQuerySchema>;
+
 export const entityProfileSchema = z.object({
   entity: entitySchema,
   series: histogramResponseSchema, // activity over requested range

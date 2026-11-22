@@ -9,4 +9,5 @@ it('keeps structural read types aligned with public contracts and quotes selecto
     '(action:record.* OR action:other) AND target:"a\\" OR actor:other"',
   );
   expect(trailQuery({ target: { type: 'order', id: 'A:1' } }).q).toBe('record:"order:A:1"');
+  expect(trailQuery({ target: { type: String.raw`order\:archived`, id: 'A:"1"' } }).q).toBe(String.raw`record:"order\\\\\\:archived:A:\"1\""`);
 });

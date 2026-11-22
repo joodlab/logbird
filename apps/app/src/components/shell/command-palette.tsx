@@ -162,8 +162,9 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                   onSelect={() =>
                     go(() =>
                       navigate({
-                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId',
+                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId',
                         params: { projectId: projectId ?? '', entityId: e.id },
+                        search: e.kind === 'target' ? { targetType: e.type } : {},
                       }),
                     )
                   }

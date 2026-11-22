@@ -10,13 +10,16 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
   const f = QUERY_FIELDS.find((f) => f.key === q.field || f.aliases?.includes(q.field));
   if (f?.suggest === 'none') return { field: q.field, values: [], complete: true };
   const record = f?.type === 'record';
+  const recordValue = (type: string, id: string) =>
+    `concat(replaceAll(replaceAll(${type}, {recordSlash:String}, {recordDoubleSlash:String}), ':', {recordEscapedColon:String}), ':', ${id})`;
   const scoped = !!(q.q?.trim() || q.from || q.to);
   const params: Record<string, unknown> = {
     p,
     prefix: q.prefix ?? '',
     limit: q.limit + 1,
     key: q.field.replace(/^(attr|attributes)\./, ''),
-    kind: record ? 'target' : (f?.key ?? q.field).split('.')[0],
+    kind: (f?.key ?? q.field).split('.')[0],
+    ...(record ? { recordSlash: '\\', recordDoubleSlash: '\\\\', recordEscapedColon: '\\:' } : {}),
   };
   let source: string;
   let sample: string | undefined;
@@ -32,7 +35,7 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
     sample = `SELECT * FROM events WHERE project_id={project:String} AND timestamp>={from:DateTime64(3)} AND timestamp<{to:DateTime64(3)}${sparse} ORDER BY timestamp DESC,event_id DESC LIMIT 50001`;
     const events = `(SELECT * FROM (${sample}) LIMIT 50000)`;
     const value = record
-      ? "concat(target.1,':',target.2)"
+      ? recordValue('target.1', 'target.2')
       : !column
         ? 'attributes[{key:String}]'
         : f?.type === 'array'
@@ -44,6 +47,10 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
     const label = record ? 'target.3' : named && ['actor', 'impersonator', 'tenant', 'executor'].includes(kind ?? '') ? `${kind}_name` : value;
     const join = record ? 'ARRAY JOIN arrayZip(target_types,target_ids,target_names) AS target' : '';
     source = `SELECT ${value} value,anyLast(${label}) label,count() count FROM ${events} ${join} WHERE (${w.sql}) ${!f ? 'AND mapContains(attributes,{key:String})' : ''} GROUP BY value`;
+  } else if (record) {
+    source = `SELECT ${recordValue('record_type', 'substring(entity_id,length(record_type)+2)')} value,label,count
+      FROM (SELECT entity_id,anyLast(type) record_type,anyLast(name) label,sum(events) count
+        FROM entities WHERE project_id={p:String} AND kind='target' GROUP BY entity_id)`;
   } else if (f.suggest === 'entities') {
     const name = f.key.endsWith('.name'),
       type = f.key.endsWith('.type');

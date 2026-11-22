@@ -35,20 +35,21 @@ interface EntityProfileProps {
   projectId: string;
   section: EntitySection;
   entityId: string;
+  targetType?: string;
   timeline: ExplorerState;
   onTimelineChange: (patch: Partial<ExplorerState>) => void;
 }
 
-export function EntityProfile({ projectId, section, entityId, timeline, onTimelineChange }: EntityProfileProps) {
+export function EntityProfile({ projectId, section, entityId, targetType, timeline, onTimelineChange }: EntityProfileProps) {
   const meta = ENTITY_SECTIONS[section];
   const kind = meta.kind;
-  const profile = useQuery(entityProfileQuery(projectId, kind, entityId, timeline.range));
+  const profile = useQuery(entityProfileQuery(projectId, kind, entityId, timeline.range, targetType));
   const navigate = useNavigate();
   const p = profile.data;
-  const displayId = kind === 'target' ? splitTargetId(entityId).id : entityId;
+  const displayId = kind === 'target' ? splitTargetId(entityId, targetType ?? p?.entity.type).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
-  const baseQuery = entityQuery(kind, entityId);
+  const baseQuery = kind === 'target' && !p ? '' : entityQuery(kind, entityId, p?.entity.type);
   const support = useSupportCounts(projectId, kind, entityId, baseQuery, timeline.range);
   const lang = timeline.lang ?? 'query';
   const who = whoFilter(timeline.q, lang);
@@ -129,25 +130,26 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               <CopyValue className="text-muted-foreground" value={displayId} />
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <SaveEntityViewButton
-              entityId={entityId}
-              kind={kind}
-              name={p?.entity.name || displayId}
-              projectId={projectId}
-              query={baseQuery}
-              range={timeline.range}
-            />
-            <Button
-              nativeButton={false}
-              render={<Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: baseQuery })} to="/p/$projectId/events" />}
-              size="sm"
-              variant="outline"
-            >
-              <Rows3Icon />
-              Open in explorer
-            </Button>
-          </div>
+          {baseQuery ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <SaveEntityViewButton
+                displayId={displayId}
+                name={p?.entity.name || displayId}
+                projectId={projectId}
+                query={baseQuery}
+                range={timeline.range}
+              />
+              <Button
+                nativeButton={false}
+                render={<Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: baseQuery })} to="/p/$projectId/events" />}
+                size="sm"
+                variant="outline"
+              >
+                <Rows3Icon />
+                Open in explorer
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         <StatTileGrid className="grid-cols-2 sm:grid-cols-4">
@@ -245,6 +247,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
           {(support?.support ?? 0) > 0 || who !== 'all' ? <WhoSegmentedControl kind={kind} onWho={onWho} who={who} /> : null}
           <button
             className="text-muted-foreground text-xs hover:text-foreground"
+            disabled={!baseQuery}
             onClick={() =>
               navigate({
                 to: '/p/$projectId/events',
@@ -258,14 +261,16 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
           </button>
         </div>
         <div className="flex h-[640px] min-h-0 flex-col">
-          <Explorer
-            baseLabel={`${kind}: ${p?.entity.name || displayId}`}
-            baseQuery={baseQuery}
-            embedded
-            onChange={onTimelineChange}
-            projectId={projectId}
-            state={timeline}
-          />
+          {baseQuery ? (
+            <Explorer
+              baseLabel={`${kind}: ${p?.entity.name || displayId}`}
+              baseQuery={baseQuery}
+              embedded
+              onChange={onTimelineChange}
+              projectId={projectId}
+              state={timeline}
+            />
+          ) : null}
         </div>
       </section>
     </div>
@@ -287,9 +292,10 @@ function Related({ projectId, related }: { projectId: string; related: Profile['
                 <EntityProfileLink
                   className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[13px] outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
                   id={r.id}
-                  key={`${r.kind}:${r.id}`}
+                  key={JSON.stringify([r.kind, r.type, r.id])}
                   kind={r.kind}
                   projectId={projectId}
+                  type={r.type}
                 >
                   <EntityAvatar
                     icon={showIcon ? typeIcon(r.kind, r.type) : undefined}

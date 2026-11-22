@@ -487,7 +487,7 @@ a AND b,  NOT a                   explicit AND / NOT keywords (upper-case), same
 Attribute values are strings; with comparisons/ranges they are read as numbers
 (`toFloat64OrNull(attributes[k])`), or as dates when the bound is a date. Rows whose value does not convert never
 match. Array fields (`target`, `target.type`, `target.name`, `changes.field`) match when any element matches.
-`record:<type>:<id>` checks a single target for both fields, splitting the value on its first colon.
+`record:<type>:<id>` checks a single target for both fields, splitting the value on its first unescaped colon. See [record selector escaping](query-language.md#query-language-langquery-default).
 
 Errors: HTTP 422 `invalid_query`, `details` = `QueryErrorDetails` (`lang`, `reason`, `start`/`end` UTF-16 offsets,
 `hint`), e.g. `attempt:>abc` → reason `type`, span of `abc`, hint `attempt is a number`.

@@ -4,6 +4,7 @@ import type {
   Entity,
   EntityKind,
   EntityProfile,
+  EntityProfileQuery,
   EntitySort,
   EventDetail,
   ExportQuery,
@@ -464,23 +465,50 @@ function entityCursor(s: string, sort: EntitySort): [string, string, string] {
   }
   throw new Error('Invalid cursor');
 }
-export async function entityProfile(ch: ClickHouseClient, p: string, kind: EntityKind, id: string, q: RangeQuery): Promise<EntityProfile | null> {
-  const raw = (
-    await read<Entity>(
-      ch,
-      'SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id',
-      { p, kind, id },
-    )
-  )[0];
-  const entity = raw ? { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) } : undefined;
-  if (!entity) return null;
-  const userFilter = await filter(ch, q);
+export async function entityProfile(
+  ch: ClickHouseClient,
+  p: string,
+  kind: EntityKind,
+  id: string,
+  q: EntityProfileQuery,
+): Promise<EntityProfile | null> {
+  const ambiguous = kind === 'target' && id.indexOf(':') !== id.lastIndexOf(':');
+  const rollup =
+    ambiguous && q.targetType !== undefined
+      ? undefined
+      : (
+          await read<Entity>(
+            ch,
+            'SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id',
+            { p, kind, id },
+          )
+        )[0];
+  if (!ambiguous && !rollup) return null;
+  const targetType = kind === 'target' ? (q.targetType ?? rollup?.type) : undefined;
+  if (kind === 'target' && (targetType === undefined || !id.startsWith(`${targetType}:`))) return null;
+
   // Compose trusted predicates after SQL-mode validation. Use separate bindings
   // from the user filter, which may itself include record terms.
+  const userFilter = await filter(ch, q);
   const entityFilter =
-    kind === 'target'
-      ? recordTargetPredicate(entity.type, id.slice(entity.type.length + 1))
+    targetType !== undefined
+      ? recordTargetPredicate(targetType, id.slice(targetType.length + 1))
       : { sql: `${kind}_id = {entityId:String}`, params: { entityId: id } };
+  // The rollup loses the pair when several types and ids share a composite key.
+  const raw = ambiguous
+    ? (
+        await read<Entity>(
+          ch,
+          `SELECT 'target' kind, {id:String} id, {recordType:String} type,
+           argMax(arrayFirst((n, t, i) -> t = {recordType:String} AND i = {recordId:String}, target_names, target_types, target_ids), (timestamp,event_id)) name,
+           min(timestamp) firstSeen, max(timestamp) lastSeen, count() events
+         FROM events WHERE project_id={p:String} AND (${entityFilter.sql}) HAVING count() > 0`,
+          { p, id, ...entityFilter.params },
+        )
+      )[0]
+    : rollup;
+  if (!raw) return null;
+  const entity = { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) };
   const scoped = { sql: `(${userFilter.sql}) AND (${entityFilter.sql})`, params: { ...userFilter.params, ...entityFilter.params } };
   const w = await where(ch, p, q, scoped);
   const [series, topActions, outcomes] = await Promise.all([
@@ -497,7 +525,7 @@ export async function entityProfile(ch: ClickHouseClient, p: string, kind: Entit
       typeCol = target ? 't.1' : k === 'tenant' ? "''" : `${k}_type`;
     const rs = await read<{ id: string; name: string; type: string; count: number }>(
       ch,
-      `SELECT ${idCol} id,any(${nameCol}) name,any(${typeCol}) type,count() count FROM events ${target ? 'ARRAY JOIN arrayZip(target_types,target_ids,target_names) AS t' : ''} WHERE ${w.sql} AND ${idCol}!='' GROUP BY id ORDER BY count DESC LIMIT 10`,
+      `SELECT ${idCol} id,any(${nameCol}) name,${target ? typeCol : `any(${typeCol})`} type,count() count FROM events ${target ? 'ARRAY JOIN arrayZip(target_types,target_ids,target_names) AS t' : ''} WHERE ${w.sql} AND ${idCol}!='' GROUP BY id${target ? ',type' : ''} ORDER BY count DESC LIMIT 10`,
       w.params,
     );
     related.push(...rs.map((r) => ({ ...r, kind: k, count: Number(r.count) })));

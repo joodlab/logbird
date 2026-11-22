@@ -1,4 +1,4 @@
-import { QUERY_FIELDS, type QueryErrorDetails } from '@logbird/contracts';
+import { decodeRecordPair, QUERY_FIELDS, type QueryErrorDetails, scanBareRecordValue } from '@logbird/contracts';
 export class QueryError extends Error {
   constructor(
     message: string,
@@ -17,7 +17,7 @@ export function recordTargetPredicate(type: string, id: string, index?: number) 
   const typeParam = `recordType${index ?? ''}`;
   const idParam = `recordId${index ?? ''}`;
   return {
-    sql: `arrayExists((t, i) -> t = {${typeParam}:String} AND i = {${idParam}:String}, target_types, target_ids)`,
+    sql: `has(target_ids, {${idParam}:String}) AND arrayExists((t, i) -> t = {${typeParam}:String} AND i = {${idParam}:String}, target_types, target_ids)`,
     params: { [typeParam]: type, [idParam]: id },
   };
 }
@@ -28,15 +28,12 @@ export type Term = { field: string; value: string; negate: boolean; start: numbe
 function fail(reason: QueryErrorDetails['reason'], start: number, end: number, hint: string): never {
   throw new QueryError(reason === 'syntax' ? `Invalid query syntax: ${hint}` : hint, { lang: 'query', reason, start, end, hint });
 }
-function tokenize(q: string): Token[] {
+function queryLexer(q: string) {
   if (Buffer.byteLength(q) > 4096) fail('too_complex', 0, q.length, 'Query exceeds 4096 bytes');
-  const tokens: Token[] = [];
   let i = 0;
-  while (i < q.length) {
-    if (/\s/.test(q[i]!)) {
-      i++;
-      continue;
-    }
+  return (record = false): Token | undefined => {
+    while (i < q.length && /\s/.test(q[i]!)) i++;
+    if (i === q.length) return undefined;
     // Only inspect outside quoted/regex tokens, so literal punctuation stays literal.
     const dialect = /^(?:([\w.]+)\s+(!=|=)\s*("(?:[^"\\]|\\.)*"|[^\s()]+)|(!)(?=[\w.]+:)|(&&|\|\|))/.exec(q.slice(i));
     if (dialect) {
@@ -62,14 +59,12 @@ function tokenize(q: string): Token[] {
     }
     const start = i,
       c = q[i++]!;
-    if ('():[]{}<>'.includes(c)) {
+    if ('()[]{}<>'.includes(c) || (!record && c === ':')) {
       const v = (c === '<' || c === '>') && q[i] === '=' ? c + q[i++] : c;
-      tokens.push({ kind: v, value: v, start, end: i });
-      continue;
+      return { kind: v, value: v, start, end: i };
     }
-    if (c === '-' && (start === 0 || /[\s(]/.test(q[start - 1]!))) {
-      tokens.push({ kind: 'NOT', value: c, start, end: i });
-      continue;
+    if (!record && c === '-' && (start === 0 || /[\s(]/.test(q[start - 1]!))) {
+      return { kind: 'NOT', value: c, start, end: i };
     }
     if (c === '"' || c === '/') {
       let value = '',
@@ -86,24 +81,32 @@ function tokenize(q: string): Token[] {
         } else value += ch;
       }
       if (!closed) fail('syntax', start, i, c === '"' ? 'Unterminated quoted query' : 'Unterminated regex');
-      tokens.push({ kind: c === '/' ? 'regex' : 'value', value, start, end: i });
-      continue;
+      return { kind: c === '/' ? 'regex' : 'value', value, start, end: i };
     }
-    while (i < q.length && !/[\s():[\]{}<>]/.test(q[i]!) && !['&&', '||'].includes(q.slice(i, i + 2))) i++;
+    if (record) i = scanBareRecordValue(q, start);
+    else while (i < q.length && !/[\s():[\]{}<>]/.test(q[i]!) && !['&&', '||'].includes(q.slice(i, i + 2))) i++;
     const value = q.slice(start, i);
-    tokens.push({ kind: ['AND', 'OR', 'NOT', 'TO'].includes(value) ? value : 'value', value, start, end: i });
-  }
-  return tokens;
+    return { kind: !record && ['AND', 'OR', 'NOT', 'TO'].includes(value) ? value : 'value', value, start, end: i };
+  };
 }
 // Parsing and compilation share spans; no user value is emitted into SQL.
-export function compileQuery(q = '', now = Date.now()) {
-  const tokens = tokenize(q),
-    params: Record<string, string | number> = {};
-  let at = 0,
-    terms = 0,
+function compile(q: string, now: number, tokens?: Token[]) {
+  const nextToken = queryLexer(q);
+  const params: Record<string, string | number> = {};
+  let buffered: Token | undefined;
+  let terms = 0,
     parameter = 0,
     recordIndex = 0;
-  const peek = () => tokens[at];
+  const peek = (record = false) => {
+    buffered ??= nextToken(record);
+    return buffered;
+  };
+  const take = (record = false) => {
+    const token = peek(record);
+    buffered = undefined;
+    if (token) tokens?.push({ ...token });
+    return token;
+  };
   const error = (hint: string, t = peek()) => fail('syntax', t?.start ?? q.length, t?.end ?? q.length, hint);
   const bind = (value: string | number, type = 'String') => {
     const key = `q${parameter++}`;
@@ -111,18 +114,16 @@ export function compileQuery(q = '', now = Date.now()) {
     return `{${key}:${type}}`;
   };
   function value(joinColons = true, record = false): Token {
-    const t = tokens[at++];
-    if (!t || (!['value', 'regex'].includes(t.kind) && !(record && (t.kind === ':' || (tokens[at]?.start === t.end && tokens[at]?.kind === ':')))))
-      return error(record ? RECORD_HINT : 'Expected value', t);
-    if (joinColons) {
-      let afterColon = t.kind === ':';
+    const t = take(record);
+    if (!t || !['value', 'regex'].includes(t.kind)) return error(record ? RECORD_HINT : 'Expected value', t);
+    if (joinColons && !record) {
+      let afterColon = false;
       for (let next = peek(); next?.start === t.end; next = peek()) {
-        const part = next.kind === 'value' || (record && ['AND', 'OR', 'NOT', 'TO'].includes(next.kind));
-        if (next.kind !== ':' && !(afterColon && part)) break;
+        if (next.kind !== ':' && !(afterColon && next.kind === 'value')) break;
         t.value += next.value;
         t.end = next.end;
         afterColon = next.kind === ':';
-        at++;
+        take();
       }
     }
     return t;
@@ -131,9 +132,9 @@ export function compileQuery(q = '', now = Date.now()) {
     if (countTerm && ++terms > 64) fail('too_complex', token.start, token.end, 'Query exceeds 64 terms');
     if (field === 'record') {
       if (token.kind === 'presence' || (token.kind === 'value' && token.value === '*' && q[token.start] !== '"')) return 'notEmpty(target_ids)';
-      const separator = token.value.indexOf(':');
-      if (token.kind === 'regex' || separator < 0) fail('type', token.start, token.end, RECORD_HINT);
-      const record = recordTargetPredicate(token.value.slice(0, separator), token.value.slice(separator + 1), recordIndex++);
+      const pair = token.kind === 'regex' ? null : decodeRecordPair(token.value);
+      if (!pair) fail('type', token.start, token.end, RECORD_HINT);
+      const record = recordTargetPredicate(pair.type, pair.id, recordIndex++);
       Object.assign(params, record.params);
       return record.sql;
     }
@@ -196,23 +197,23 @@ export function compileQuery(q = '', now = Date.now()) {
     return test;
   }
   function fieldValue(field: string, depth: number): string {
-    const t = peek();
     const record = field === 'record';
+    const t = peek(record);
     if (!t) return error(record ? RECORD_HINT : 'Expected field value');
     if (record && ['>', '>=', '<', '<=', '[', '{'].includes(t.kind)) fail('type', t.start, t.end, RECORD_HINT);
     if (['>', '>=', '<', '<='].includes(t.kind)) {
-      at++;
+      take();
       return predicate(field, value(), t.kind);
     }
     if (t.kind === '[' || t.kind === '{') {
-      at++;
+      take();
       const lower = value();
       if (peek()?.kind !== 'TO') error('Expected TO');
-      at++;
+      take();
       const upper = value(),
         close = peek();
       if (!close || ![']', '}'].includes(close.kind)) error('Expected closing range bracket');
-      at++;
+      take();
       const parts: string[] = [];
       if (lower.value !== '*') parts.push(predicate(field, lower, t.kind === '[' ? '>=' : '>'));
       if (upper.value !== '*') parts.push(predicate(field, upper, close?.kind === ']' ? '<=' : '<', lower.value === '*'));
@@ -220,14 +221,14 @@ export function compileQuery(q = '', now = Date.now()) {
     }
     if (t.kind === '(') {
       if (depth >= 16) fail('too_complex', t.start, t.end, 'Query exceeds 16 nesting levels');
-      at++;
+      take();
       const members = [value(true, record)];
       while (peek()?.kind === 'OR') {
-        at++;
+        take();
         members.push(value(true, record));
       }
       if (peek()?.kind !== ')') error('Expected closing value group parenthesis');
-      at++;
+      take();
       const info = QUERY_FIELDS.find((f) => f.key === field || f.aliases?.includes(field));
       if (info && ['string', 'text'].includes(info.type) && members.every((m) => m.kind === 'value' && !m.value.endsWith('*'))) {
         terms += members.length;
@@ -242,20 +243,20 @@ export function compileQuery(q = '', now = Date.now()) {
     const t = peek();
     if (!t) return error('Expected term');
     if (t.kind === 'NOT') {
-      at++;
+      take();
       return `NOT (${atom(depth)})`;
     }
     if (t.kind === '(') {
       if (depth >= 16) fail('too_complex', t.start, t.end, 'Query exceeds 16 nesting levels');
-      at++;
+      take();
       const sql = disjunction(depth + 1);
       if (peek()?.kind !== ')') error('Expected closing parenthesis');
-      at++;
+      take();
       return `(${sql})`;
     }
     const v = value(false);
     if (peek()?.kind === ':') {
-      at++;
+      take();
       if (v.value === '_exists_') {
         const field = value(false);
         return `(${predicate(field.value, { ...field, kind: field.value === 'record' ? 'presence' : field.kind, value: '*' })})`;
@@ -270,7 +271,7 @@ export function compileQuery(q = '', now = Date.now()) {
   function conjunction(depth: number): string {
     const parts = [atom(depth)];
     while (peek() && !['OR', ')'].includes(peek()?.kind ?? '')) {
-      if (peek()?.kind === 'AND') at++;
+      if (peek()?.kind === 'AND') take();
       parts.push(atom(depth));
     }
     return parts.join(' AND ');
@@ -278,16 +279,20 @@ export function compileQuery(q = '', now = Date.now()) {
   function disjunction(depth: number): string {
     const parts = [conjunction(depth)];
     while (peek()?.kind === 'OR') {
-      at++;
+      take();
       parts.push(conjunction(depth));
     }
     return parts.length > 1 ? `(${parts.join(' OR ')})` : parts[0]!;
   }
-  const sql = tokens.length ? disjunction(0) : '1';
+  const sql = peek() ? disjunction(0) : '1';
   if (peek()) error('Unexpected token');
   return { sql, params };
 }
+export function compileQuery(q = '', now = Date.now()) {
+  return compile(q, now);
+}
 export function parseQuery(q = '') {
-  compileQuery(q);
-  return tokenize(q);
+  const tokens: Token[] = [];
+  compile(q, Date.now(), tokens);
+  return tokens;
 }

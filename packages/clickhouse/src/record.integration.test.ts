@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { EntityProfile } from '@logbird/contracts';
+import { type EntityProfile, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type ClickHouseClient, createClickHouseClient, createQueryClickHouseClient, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
-import { entityProfile, exportEvents, facets, listEntities, purgeProject, searchEvents } from './queries';
+import { entityProfile, exportEvents, facets, listEntities, purgeProject, read, searchEvents } from './queries';
+import { compileQuery } from './query';
 import { suggestValues } from './suggest';
 
 function expectSiteProfile(profile: EntityProfile | null) {
@@ -115,5 +116,106 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
       }
     },
     60_000,
+  );
+
+  it('keeps histories and names separate when two pairs share the directory key', async () => {
+    const collisionProject = `record-collision-${randomUUID()}`;
+    const sqlClient = createQueryClickHouseClient();
+    const fixtures = [
+      { eventId: 'archived-order', type: 'order:archived', id: 'A1', name: 'Archived order' },
+      { eventId: 'regular-order', type: 'order', id: 'archived:A1', name: 'Regular order' },
+      { eventId: 'long-record', type: `${'t'.repeat(63)}:`, id: 'i'.repeat(150), name: 'Long record name' },
+    ];
+    try {
+      await insertEvents(
+        ch,
+        fixtures.map(({ eventId, ...target }) => {
+          const event = normalizeEvent(
+            { id: eventId, action: `record.${eventId}`, actor: { id: 'record-actor' }, occurredAt: now.toISOString(), targets: [target] },
+            { projectId: collisionProject, receivedAt: now },
+          );
+          if (!event.ok) throw new Error('Invalid collision fixture');
+          return event.row;
+        }),
+      );
+
+      for (const { eventId, type, id, name } of fixtures) {
+        const q = formatRecordTerm(type, id);
+        const events = await searchEvents(ch, collisionProject, { ...range, limit: 10, order: 'asc', q });
+        expect(
+          events.data.map((e) => e.id),
+          q,
+        ).toEqual([eventId]);
+        const profile = await entityProfile(ch, collisionProject, 'target', `${type}:${id}`, { ...range, targetType: type });
+        expect(profile?.entity).toMatchObject({ type, name, events: 1 });
+        expect(profile?.series.buckets.reduce((n, b) => n + b.total, 0)).toBe(1);
+        expect(profile?.topActions.map((a) => a.id)).toEqual([`record.${eventId}`]);
+        if (sqlClient && type === 'order:archived') {
+          const sqlProfile = await entityProfile(sqlClient, collisionProject, 'target', `${type}:${id}`, {
+            ...range,
+            targetType: type,
+            lang: 'sql',
+            q: "action IN ('record.archived-order', 'record.regular-order')",
+          });
+          expect(sqlProfile?.entity).toMatchObject({ type, name, events: 1 });
+          expect(sqlProfile?.topActions.map((a) => a.id)).toEqual(['record.archived-order']);
+        }
+      }
+
+      const suggestions = await suggestValues(ch, collisionProject, { ...range, field: 'record', limit: 10 });
+      expect(suggestions.values.map(({ value }) => value).sort()).toEqual(fixtures.map(({ type, id }) => encodeRecordPair(type, id)).sort());
+      const directory = await listEntities(ch, collisionProject, { kind: 'target', limit: 10 });
+      expect(directory.data.find(({ id }) => id === 'order:archived:A1')?.events).toBe(2);
+      const actor = await entityProfile(ch, collisionProject, 'actor', 'record-actor', range);
+      expect(
+        actor?.related
+          .filter(({ kind }) => kind === 'target')
+          .map(({ name }) => name)
+          .sort(),
+      ).toEqual(fixtures.map(({ name }) => name).sort());
+    } finally {
+      try {
+        await purgeProject(ch, collisionProject);
+      } finally {
+        await sqlClient?.close();
+      }
+    }
+  }, 60_000);
+
+  it.runIf(process.env.CLICKHOUSE_RECORD_EXPLAIN === '1')(
+    'prunes multi-granule record searches with idx_targets',
+    async () => {
+      const scaleProject = `record-index-${randomUUID()}`;
+      const predicate = compileQuery('record:page:wanted');
+      try {
+        await ch.command({
+          query: `INSERT INTO events (project_id,event_id,timestamp,action,target_types,target_ids,target_names)
+          SELECT {p:String},toString(number),now64(3)+toIntervalMillisecond(number),'page.updated',['page'],
+                 [if(number=199999,'wanted','ordinary')],[''] FROM numbers(200000)`,
+          query_params: { p: scaleProject },
+        });
+        const params = { p: scaleProject, ...predicate.params };
+        const query = `SELECT count() AS count FROM events WHERE project_id={p:String} AND ${predicate.sql}`;
+        const [match] = await read<{ count: string | number }>(ch, query, params);
+        expect(Number(match?.count)).toBe(1);
+        const rows = await read<{ explain: string }>(
+          ch,
+          `EXPLAIN indexes = 1 ${query} SETTINGS use_query_condition_cache = 0, use_skip_indexes_on_data_read = 0`,
+          params,
+        );
+        const plan = rows.map(({ explain }) => explain).join('\n');
+        process.stdout.write(`${plan}\n`);
+        const granules = /Name: idx_targets[\s\S]*?Granules: (\d+)\/(\d+)/.exec(plan);
+        expect(granules, plan).not.toBeNull();
+        expect(Number(granules?.[1])).toBeLessThan(Number(granules?.[2]));
+      } finally {
+        await purgeProject(ch, scaleProject);
+      }
+      const [remaining] = await read<{ count: string | number }>(ch, 'SELECT count() AS count FROM events WHERE project_id={p:String}', {
+        p: scaleProject,
+      });
+      expect(Number(remaining?.count)).toBe(0);
+    },
+    120_000,
   );
 });

@@ -183,16 +183,18 @@ export const entityListQuery = (projectId: string, kind: EntityKind, q: string, 
     retry: shouldRetry,
   });
 
-export const entityProfileQuery = (projectId: string, kind: EntityKind, entityId: string, range: string) =>
-  queryOptions({
-    queryKey: [...keys.project(projectId), 'entity', kind, entityId, range] as const,
+export const entityProfileQuery = (projectId: string, kind: EntityKind, entityId: string, range: string, targetType?: string) => {
+  const entityKey = [...keys.project(projectId), 'entity', kind, entityId, targetType] as const;
+  return queryOptions({
+    queryKey: [...entityKey, range] as const,
     queryFn: ({ signal }) => {
       const r = resolveRange(range);
-      return api.entities.profile(projectId, kind, entityId, { from: r.from, to: r.to }, signal);
+      return api.entities.profile(projectId, kind, entityId, { from: r.from, to: r.to, targetType }, signal);
     },
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) => (entityKey.every((key, i) => query?.queryKey[i] === key) ? previous : undefined),
     retry: shouldRetry,
   });
+};
 
 export const fieldsQuery = (projectId: string, range: string) =>
   queryOptions({

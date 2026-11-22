@@ -10,12 +10,12 @@ import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/records/$entityId')({
   head: () => ({ meta: [{ title: 'Record · Logbird' }] }),
-  validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional(), live: z.boolean().optional() }),
+  validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional(), live: z.boolean().optional(), targetType: z.string().optional() }),
   staticData: { crumb: 'Records', range: true },
-  loaderDeps: ({ search }) => ({ range: search.range }),
+  loaderDeps: ({ search }) => ({ range: search.range, targetType: search.targetType }),
   loader: ({ context, params, deps }) => {
     const range = deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE;
-    context.queryClient.prefetchQuery(entityProfileQuery(params.projectId, 'target', params.entityId, range));
+    context.queryClient.prefetchQuery(entityProfileQuery(params.projectId, 'target', params.entityId, range, deps.targetType));
   },
   component: ProfilePage,
 });
@@ -45,6 +45,7 @@ function ProfilePage() {
       onTimelineChange={onChange}
       projectId={projectId}
       section="records"
+      targetType={search.targetType}
       timeline={{ q: search.q ?? '', range, columns: DEFAULT_COLUMNS, ev: search.ev, live: Boolean(search.live) }}
     />
   );

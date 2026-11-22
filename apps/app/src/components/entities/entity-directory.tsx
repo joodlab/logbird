@@ -245,14 +245,15 @@ function TypeChip({ label, active, onClick, count }: { label: string; active: bo
 }
 
 function EntityRow({ entity: e, projectId, section }: { entity: Entity; projectId: string; section: EntitySection }) {
-  const displayId = e.kind === 'target' ? splitTargetId(e.id).id : e.id;
+  const displayId = e.kind === 'target' ? splitTargetId(e.id, e.type).id : e.id;
   const showIcon = !(e.kind === 'actor' && (e.type === 'user' || e.type === 'anonymous'));
   return (
     <li>
       <Link
         className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/50 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px]"
         params={{ projectId, entityId: e.id }}
-        to={`/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId'}
+        search={e.kind === 'target' ? { targetType: e.type } : {}}
+        to={`/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId'}
       >
         <span className="flex min-w-0 items-center gap-2.5">
           <EntityAvatar

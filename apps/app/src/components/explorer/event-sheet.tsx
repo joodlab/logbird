@@ -1,4 +1,4 @@
-import type { AuditEvent, EventDetail } from '@logbird/contracts';
+import { type AuditEvent, type EventDetail, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
 import { OutcomeBadge, OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badges';
 import { CopyButton, CopyValue } from '@logbird/ui/components/copy-button';
 import { EntityAvatar, EntityChip } from '@logbird/ui/components/entity-chip';
@@ -453,7 +453,7 @@ function EventDetailBody({
           <Section title={`Targets · ${e.targets.length}`}>
             <ul className="flex flex-col divide-y rounded-lg border">
               {e.targets.map((t) => (
-                <li className="group/kv flex items-center gap-2 px-3 py-2" key={`${t.type}:${t.id}`}>
+                <li className="group/kv flex items-center gap-2 px-3 py-2" key={encodeRecordPair(t.type, t.id)}>
                   <EntityAvatar icon={typeIcon('target', t.type)} id={targetEntityId(t.type, t.id)} name={t.name || t.id} size="md" square />
                   <div className="flex min-w-0 flex-1 flex-col">
                     {projectId ? (
@@ -462,6 +462,7 @@ function EventDetailBody({
                         id={targetEntityId(t.type, t.id)}
                         kind="target"
                         projectId={projectId}
+                        type={t.type}
                       >
                         {t.name || t.id}
                       </EntityProfileLink>
@@ -473,12 +474,18 @@ function EventDetailBody({
                       <span className="truncate font-mono">{t.id}</span>
                     </span>
                   </div>
-                  <FilterButton onFilter={onFilter} term={formatTerm('record', targetEntityId(t.type, t.id))} />
+                  <FilterButton onFilter={onFilter} term={formatRecordTerm(t.type, t.id)} />
                   {projectId ? (
                     <Button
                       aria-label={`Follow ${t.name || t.id}`}
                       nativeButton={false}
-                      render={<Link params={{ projectId, entityId: targetEntityId(t.type, t.id) }} to="/p/$projectId/records/$entityId" />}
+                      render={
+                        <Link
+                          params={{ projectId, entityId: targetEntityId(t.type, t.id) }}
+                          search={{ targetType: t.type }}
+                          to="/p/$projectId/records/$entityId"
+                        />
+                      }
                       size="icon-xs"
                       variant="ghost"
                     >

@@ -1,14 +1,15 @@
-import type { EntityKind, SavedView } from '@logbird/contracts';
+import { decodeRecordPair, type EntityKind, encodeRecordPair, type SavedView } from '@logbird/contracts';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { meQuery } from '@/lib/api/queries';
-import { splitTargetId } from '@/lib/entities';
+import { splitTargetId, targetEntityId } from '@/lib/entities';
 import { canonicalField, fieldTerms } from '@/lib/query-language';
 
 export type ViewLabel = NonNullable<SavedView['state']['labels']>[number];
 export type ViewLabelField = ViewLabel['field'];
+type ViewLabelTerm = Pick<ViewLabel, 'field' | 'value'>;
 
 const FIELD_NAMES: Record<ViewLabelField, string> = {
   actor: 'Actor',
@@ -51,18 +52,39 @@ export function viewHref(
 }
 
 /** Plain field:value terms of `q` (query language only) whose value can be named: actor, tenant, executor, target. */
-export function nameableTerms(q: string, lang: 'query' | 'sql' = 'query'): { field: ViewLabelField; value: string }[] {
+export function nameableTerms(q: string, lang: 'query' | 'sql' = 'query'): ViewLabelTerm[] {
   if (lang !== 'query' || !q.trim()) return [];
   const seen = new Set<string>();
-  const out: { field: ViewLabelField; value: string }[] = [];
+  const out: ViewLabelTerm[] = [];
   for (const token of fieldTerms(q)) {
     if (token.negated || !token.value || (token.valueKind !== 'plain' && token.valueKind !== 'quoted')) continue;
     const field = RESOLVABLE[canonicalField(token.field ?? '')] ?? RESOLVABLE[token.field ?? ''];
-    if (!field || (field === 'record' && !token.value.includes(':')) || seen.has(`${field}:${token.value}`)) continue;
-    seen.add(`${field}:${token.value}`);
-    out.push({ field, value: token.value });
+    if (!field) continue;
+    const pair = field === 'record' ? decodeRecordPair(token.value) : undefined;
+    if (pair === null) continue;
+    const value = pair ? encodeRecordPair(pair.type, pair.id) : token.value;
+    const key = `${field}:${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ field, value });
   }
   return out.slice(0, MAX_RESOLVED_TERMS);
+}
+
+export async function resolveViewLabel(projectId: string, term: ViewLabelTerm, signal?: AbortSignal): Promise<ViewLabel | undefined> {
+  let name: string | undefined;
+  let id = term.value;
+  if (term.field === 'record') {
+    const pair = decodeRecordPair(term.value);
+    if (!pair) return undefined;
+    id = pair.id;
+    const profile = await api.entities.profile(projectId, 'target', targetEntityId(pair.type, pair.id), { targetType: pair.type }, signal);
+    name = profile.entity.name;
+  } else {
+    const { data } = await api.entities.list(projectId, { kind: term.field as EntityKind, q: id, limit: 10 }, signal);
+    name = data.find((entity) => (term.field === 'target' ? splitTargetId(entity.id, entity.type).id : entity.id) === id)?.name;
+  }
+  return name && name !== id ? { ...term, label: name.slice(0, 200) } : undefined;
 }
 
 /** "Tenant: Bayt Al Rimal" chips for the labels whose term is still in `q`. Labels equal to their raw id are dropped. */
@@ -83,18 +105,12 @@ export function useResolvedViewLabels(projectId: string, q: string, lang: 'query
   const results = useQueries({
     queries: terms.map((term) => ({
       queryKey: ['view-label', projectId, term.field, term.value] as const,
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        api.entities.list(projectId, { kind: term.field === 'record' ? 'target' : (term.field as EntityKind), q: term.value, limit: 10 }, signal),
+      queryFn: async ({ signal }: { signal: AbortSignal }) => (await resolveViewLabel(projectId, term, signal)) ?? null,
       staleTime: 5 * 60_000,
       retry: false,
     })),
   });
-  return terms.flatMap((term, i) => {
-    const match = results[i]?.data?.data.find((entity) =>
-      term.field === 'target' ? splitTargetId(entity.id).id === term.value : entity.id === term.value,
-    );
-    return match?.name && match.name !== term.value ? [{ ...term, label: match.name }] : [];
-  });
+  return results.flatMap(({ data }) => (data ? [data] : []));
 }
 
 /** Copy a view's link and say who can open it (OPS-18). */
