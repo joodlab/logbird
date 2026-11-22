@@ -61,9 +61,11 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
                 return;
             }
 
-            if (_waiters.Count > 0 && _waiters[_waiters.Count - 1].Target == _accepted)
+            if (_waiters.Count > 0 && (_waiters[_waiters.Count - 1].Target == _accepted || _waiters.Count >= EventQueue.MaxWaiters))
             {
+                // Past the bound, join the newest entry and raise its target (later is still correct).
                 entry = _waiters[_waiters.Count - 1];
+                entry.Target = Math.Max(entry.Target, _accepted);
                 entry.Callers++;
             }
             else
@@ -174,7 +176,7 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
 
     private sealed class Entry(long target)
     {
-        public long Target { get; } = target;
+        public long Target { get; set; } = target;
 
         public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

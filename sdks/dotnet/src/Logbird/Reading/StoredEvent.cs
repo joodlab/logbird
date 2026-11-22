@@ -81,12 +81,14 @@ public sealed class StoredEvent
 /// <param name="After">The new value.</param>
 public sealed record StoredChange(string Field, string Before, string After)
 {
-    /// <summary>Lists only the field name, never the values, so logging this object cannot leak them.</summary>
+    /// <summary>Lists no values (not even the field name), so logging this object cannot leak anything.</summary>
+#pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("Field = ").Append(Field);
-        return true;
+        _ = builder;
+        return false;
     }
+#pragma warning restore CA1822
 }
 
 /// <summary>One page of search results.</summary>

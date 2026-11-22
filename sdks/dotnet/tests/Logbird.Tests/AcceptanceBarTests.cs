@@ -210,7 +210,8 @@ public class AcceptanceBarTests
     public void Records_print_no_values()
     {
         var actor = AuditActor.User("user_42", "Fictional User", "fictional@example.invalid");
-        Assert.Equal("AuditActor { Type = user }", actor.ToString());
+        Assert.Equal("AuditActor { }", actor.ToString());
+        Assert.Equal("AuditExecutor { }", AuditExecutor.Worker("billing-worker", "job_1").ToString());
         Assert.DoesNotContain("acct", new AuditTenant("acct_7").ToString());
         Assert.DoesNotContain("inv_1", new AuditTarget("invoice", "inv_1") { Name = "INV-1" }.ToString());
         Assert.DoesNotContain("customer_9", new EventSearch { Query = "actor:customer_9" }.ToString());
