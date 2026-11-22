@@ -14,20 +14,46 @@ const event = `{
   "targets": [{ "type": "booking", "id": "bk_1042" }]
 }`;
 
-const authorize = `// server/logbird.ts: Nuxt runs this on your server for every history request.
+const config = `// nuxt.config.ts: register your authorize() module. Set NUXT_LOGBIRD_READ_KEY on the server only.
+import { fileURLToPath } from 'node:url';
+
+export default defineNuxtConfig({
+  modules: ['@logbird/nuxt'],
+  logbird: {
+    endpoint: process.env.LOGBIRD_ENDPOINT,
+    hooks: fileURLToPath(new URL('./server/logbird.ts', import.meta.url)),
+  },
+});`;
+
+const authorize = `// server/logbird.ts: Nuxt calls authorize() on your server for every history request, each next page included.
+import type { LogbirdHooks } from '@logbird/nuxt';
+import { trailQuery } from '@logbird/sdk/read';
+
 export default {
   authorize: async (event, query) => {
-    const session = await getSession(event); // your own authentication
-    if (!session) return false; // denied: nothing is forwarded to Logbird
-    // Only the query you return is forwarded: one customer account.
-    return { ...query, q: \`tenant:"\${session.tenantId}"\` };
+    const session = await getSession(event); // your own authentication and roles
+    if (!session?.canViewHistory) return false; // denied: nothing is forwarded to Logbird
+    // Build the query here, from the signed-in user's account; the browser's filter is ignored.
+    // trailQuery quotes the id for the query language.
+    return trailQuery({
+      tenant: session.tenantId,
+      cursor: typeof query.cursor === 'string' ? query.cursor : undefined,
+    });
   },
-};`;
+} satisfies LogbirdHooks;`;
 
-const component = `<script setup lang="ts">
-// Nuxt auto-imports useAuditTrail; it reads through the authorized route above.
-const trail = useAuditTrail({ target: { type: 'booking', id: props.bookingId } });
-</script>`;
+const component = `<!-- pages/account/history.vue: Nuxt auto-imports useAuditTrail; it reads through the route above. -->
+<script setup lang="ts">
+const { data, error, nextCursor, loadMore } = useAuditTrail({});
+</script>
+
+<template>
+  <p v-if="error">The history couldn't be loaded.</p>
+  <ol>
+    <li v-for="item in data" :key="item.id">{{ item.timestamp }}: {{ item.description || item.action }}</li>
+  </ol>
+  <button v-if="nextCursor" type="button" @click="loadMore">Load more</button>
+</template>`;
 
 export function customerAuditLogsContent(_site: SiteState): UseCase {
   return {
@@ -79,8 +105,13 @@ export function customerAuditLogsContent(_site: SiteState): UseCase {
         title: 'Authorize every read in one place.',
         steps: [
           {
-            title: 'Nuxt: the history route denies by default',
-            body: 'The `@logbird/nuxt` module adds a history route that refuses every request until your `authorize()` hook returns a query. Only that query is forwarded.',
+            title: 'Nuxt: register your `authorize()` module',
+            body: 'The `@logbird/nuxt` module adds a history route that refuses every request until your `authorize()` hook returns a query. Point `logbird.hooks` at the file that holds it.',
+            code: { title: 'nuxt.config.ts', code: config, language: 'ts' },
+          },
+          {
+            title: 'Build the query on the server',
+            body: "Check the session, then build the query from the signed-in user's account. Only the query you return is forwarded, so a filter the browser sends can't widen it.",
             code: { title: 'server/logbird.ts', code: authorize, language: 'ts' },
           },
           {
@@ -97,7 +128,7 @@ export function customerAuditLogsContent(_site: SiteState): UseCase {
           {
             title: 'Vue: `useAuditTrail`',
             body: 'It loads the events page by page, with loading, error, refresh and load-more states, and discards a stale response. The headless `AuditTimeline` passes the same state to your markup.',
-            code: { title: 'A Vue component in Nuxt', code: component, language: 'ts' },
+            code: { title: 'pages/account/history.vue', code: component, language: 'text' },
           },
         ],
         visual: {

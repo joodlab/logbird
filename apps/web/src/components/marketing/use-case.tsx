@@ -90,7 +90,7 @@ function UseCaseBlock({ section, sunken }: { section: UseCaseSection; sunken: bo
             id={section.visual.id}
             label={section.visual.label}
             sizes="(min-width: 1024px) 520px, calc(100vw - 2rem)"
-            zoomLabel={section.visual.zoom ? shared.openFullSize : undefined}
+            zoomLabel={section.visual.zoom ? `${shared.openFullSize}: ${section.visual.label}` : undefined}
           />
         </div>
       ) : (

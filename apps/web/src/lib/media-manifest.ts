@@ -94,7 +94,7 @@ export const screenshots: ScreenshotEntry[] = [
     light: `${C}/tenant-account-light.webp`,
     width: 588,
     height: 414,
-    alt: 'One customer account in the console: Dar Al Wafa Hotels, with 428 events in the last 24 hours and 2,634 in all, and 5 of them done by a support agent signed in as the customer, Leena Ashford.',
+    alt: 'One customer account in the console: Dar Al Wafa Hotels had 428 events in the last 24 hours and 2,634 in all. Support agent Leena Ashford performed 5 of the 428 while signed in as the customer.',
   },
   {
     id: 'actor',

@@ -38,7 +38,7 @@ describe('use-case pages', () => {
       expect(text).toContain('shasum -a 256 "$file"');
       expect(text).toContain('Get-FileHash -Algorithm SHA256 $file');
       // The event-detail crop is too small to read on a phone, so it opens full size.
-      expect(html).toMatch(/<a aria-label="Open the image full size"[^>]*href="\/media\/event-detail-/);
+      expect(html).toMatch(/<a aria-label="Open the image full size: Event detail"[^>]*href="\/media\/event-detail-/);
     }
   }, 60_000);
 
@@ -61,7 +61,7 @@ describe('use-case pages', () => {
       expect(html.match(/<h1[\s>]/g)?.length).toBe(1);
       const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id);
       expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([]);
-      expect(html).toMatch(/<a aria-label="Open the image full size"[^>]*href="\/media\/tenant-account-/);
+      expect(html).toMatch(/<a aria-label="Open the image full size: Customer account"[^>]*href="\/media\/tenant-account-/);
     }
   }, 60_000);
 });
