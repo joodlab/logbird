@@ -1,33 +1,12 @@
 /**
  * Prerendered pages are written after Nitro's `compressPublicAssets` step, so the Node preview would serve them
- * uncompressed. Write .br/.gz copies next to every prerendered text file. (Cloudflare compresses on its own.)
+ * uncompressed, and Nitro's own .br/.gz copies of a page predate the `email_off` wrap. compressTree (compress-tree.ts)
+ * wraps every page, then rewrites any missing or stale .br/.gz sibling from the final bytes. (Cloudflare compresses on
+ * its own.)
  */
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
+import { resolve } from 'node:path';
+import { compressTree } from './compress-tree';
 
 const root = resolve(process.argv[2] ?? '.output/public');
-const extensions = ['.html', '.xml', '.txt', '.webmanifest', '.svg'];
-
-async function* walk(dir: string): AsyncGenerator<string> {
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      yield* walk(path);
-    } else if (extensions.some((extension) => entry.name.endsWith(extension))) {
-      yield path;
-    }
-  }
-}
-
-let count = 0;
-for await (const file of walk(root)) {
-  const body = await readFile(file);
-  if (body.byteLength < 1024 || (await stat(`${file}.br`).catch(() => null))) {
-    continue;
-  }
-  await writeFile(`${file}.br`, brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }));
-  await writeFile(`${file}.gz`, gzipSync(body, { level: 9 }));
-  count += 1;
-}
-console.log(`compress-html: wrote .br/.gz for ${count} files in ${root}`);
+const { marked, written } = await compressTree(root);
+console.log(`compress-html: wrapped ${marked} pages, wrote ${written} .br/.gz files in ${root}`);

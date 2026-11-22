@@ -1,11 +1,15 @@
 import { CheckIcon, MinusIcon } from 'lucide-react';
+import { Rich } from './rich';
 
 export interface Guarantee {
   promise: string;
   limit: string;
 }
 
-/** "What we promise" next to "where the promise ends", one row per guarantee. Reads as a table on every width. */
+/**
+ * "What we promise" next to "where the promise ends", one row per guarantee. Reads as a table on every width. Both
+ * columns take the copy files' inline marks (`code`, bold, emphasis), rendered by Rich.
+ */
 export function Guarantees({ items }: { items: Guarantee[] }) {
   return (
     <div className="panel overflow-hidden">
@@ -20,14 +24,14 @@ export function Guarantees({ items }: { items: Guarantee[] }) {
               <CheckIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-outcome-success" />
               <span>
                 <span className="sr-only">Guarantee: </span>
-                {item.promise}
+                <Rich text={item.promise} />
               </span>
             </p>
             <p className="flex gap-3 px-5 pt-0 pb-5 text-muted-foreground md:border-s md:px-6 md:py-5">
               <MinusIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
               <span>
                 <span className="sr-only">Limit: </span>
-                {item.limit}
+                <Rich text={item.limit} />
               </span>
             </p>
           </li>
