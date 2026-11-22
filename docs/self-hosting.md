@@ -295,7 +295,8 @@ WHERE database = currentDatabase() AND table = 'events' AND command LIKE '%idx_r
 
 The migration is recorded as applied once both statements were submitted, so a later `ch:migrate` does not run it
 again. If the mutation was killed or failed, fix the cause shown in `latest_fail_reason` and reissue
-`ALTER TABLE events MATERIALIZE INDEX idx_received_at`; repeating it is safe.
+`ALTER TABLE events MATERIALIZE INDEX idx_received_at SETTINGS mutations_sync = 0`; repeating it is safe for event
+data, though it repeats the physical work.
 
 Known limit: during a large historical import (old event times arriving now), a slice that overlaps the import's
 arrival window still reads the granules the import touched, because each of them now spans that window. Draining such
