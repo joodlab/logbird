@@ -244,3 +244,74 @@ it.runIf(process.env.CLICKHOUSE_URL)(
   },
   60_000,
 );
+
+it.runIf(process.env.CLICKHOUSE_URL)(
+  'entity search ranks an exact id, then id prefix, name prefix, substring and fuzzy, before activity',
+  async () => {
+    const ch = createClickHouseClient();
+    const p = `test-entity-search-${randomUUID()}`;
+    const now = Date.now();
+    let n = 0;
+    const event = (
+      count: number,
+      e: { tenant?: { id: string; name?: string }; actor?: { id: string; name?: string }; targets?: { type: string; id: string; name?: string }[] },
+    ) =>
+      Array.from({ length: count }, () => {
+        n += 1;
+        const r = normalizeEvent(
+          { id: `e${n}`, action: 'x', occurredAt: new Date(now - n * 1000).toISOString(), actor: { id: 'u', type: 'user' }, ...e },
+          { projectId: p, receivedAt: new Date(now) },
+        );
+        if (!r.ok) throw new Error(r.reason);
+        return r.row;
+      });
+    try {
+      await insertEvents(ch, [
+        // The searched-for tenant is quiet and unnamed; busier near-matches must not push it out of a short list.
+        ...event(1, { tenant: { id: 'biz_27' } }),
+        ...event(2, { tenant: { id: 'biz_270', name: 'Rimal Crescent' } }),
+        ...event(9, { tenant: { id: 'biz_2', name: 'Rawda Suites' } }),
+        ...event(8, { tenant: { id: 'biz_7', name: 'Marsa Lantern Suites' } }),
+        ...event(7, { tenant: { id: 'biz_1', name: 'Dar Al Wafa' } }),
+        ...event(6, { tenant: { id: 'biz_3', name: 'Qamar Dunes' } }),
+        ...event(9, { actor: { id: 'crm-hourly-biz_7', name: 'Hourly scheduler - Marsa Lantern Suites' } }),
+        ...event(1, { actor: { id: 'usr_131', name: 'Sophie Patel' } }),
+        ...event(9, { actor: { id: 'usr_1', name: 'Noura Al-Harbi' } }),
+        ...event(8, { actor: { id: 'usr_13', name: 'Omar Kapoor' } }),
+        ...event(1, { targets: [{ type: 'article', id: 'article_27_2', name: 'Umrah Season Packages' }] }),
+        ...event(9, { targets: [{ type: 'website', id: 'web_27_2', name: 'darb-pearl-residences.example.com' }] }),
+        ...event(9, { targets: [{ type: 'article', id: 'article_1_2', name: 'Umrah Packages' }] }),
+      ]);
+      const ids = async (kind: 'actor' | 'tenant' | 'target', q: string, limit = 4) =>
+        entityListResponseSchema.parse(await listEntities(ch, p, { kind, q, limit })).data.map((e) => e.id);
+      // Exact id first, whatever the activity and the cap; an id prefix next.
+      expect((await ids('tenant', 'biz_27')).slice(0, 2)).toEqual(['biz_27', 'biz_270']);
+      expect(await ids('tenant', 'BIZ_27', 1)).toEqual(['biz_27']);
+      expect(await ids('actor', 'usr_131', 1)).toEqual(['usr_131']);
+      // Targets are stored as type:id; the bare id is an exact match too.
+      expect(await ids('target', 'article_27_2', 1)).toEqual(['article:article_27_2']);
+      // A name prefix beats a busier entity that only contains the words.
+      expect(await ids('tenant', 'Marsa', 1)).toEqual(['biz_7']);
+      expect(await ids('actor', 'marsa')).toContain('crm-hourly-biz_7');
+      // Without a search, the directory order is unchanged (most active first).
+      expect((await listEntities(ch, p, { kind: 'tenant', limit: 2 })).data.map((e) => e.id)).toEqual(['biz_2', 'biz_7']);
+      // A search pages by rank, then activity, without gaps or repeats; its cursor only fits a search.
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = entityListResponseSchema.parse(await listEntities(ch, p, { kind: 'tenant', q: 'biz_2', limit: 1, cursor }));
+        seen.push(...page.data.map((e) => e.id));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      // biz_2 is exact; biz_270 and biz_27 are id prefixes, so the busier one comes first.
+      expect(seen.slice(0, 3)).toEqual(['biz_2', 'biz_270', 'biz_27']);
+      expect(new Set(seen).size).toBe(seen.length);
+      const searched = await listEntities(ch, p, { kind: 'tenant', q: 'biz', limit: 1 });
+      await expect(listEntities(ch, p, { kind: 'tenant', limit: 1, cursor: searched.nextCursor ?? '' })).rejects.toThrow('Invalid cursor');
+    } finally {
+      await purgeProject(ch, p);
+      await ch.close();
+    }
+  },
+  60_000,
+);

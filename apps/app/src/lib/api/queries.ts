@@ -1,6 +1,7 @@
 import type { EntityKind, EntitySort, QueryLang } from '@logbird/contracts';
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { authClient } from '@/lib/auth-client';
+import { entityMatchRank } from '@/lib/entities';
 import { isBudgetLimit, isOverBudget } from '@/lib/query-budget';
 import { resolveRange } from '@/lib/range';
 import { api, langParam } from './client';
@@ -265,6 +266,28 @@ export const suggestQuery = (projectId: string, field: string, prefix: string) =
     queryFn: ({ signal }) => api.suggest(projectId, { field, prefix: prefix || undefined, limit: SUGGEST_LIMIT }, signal),
     staleTime: 60_000,
     retry: false,
+  });
+
+/**
+ * Entities of every kind whose id or name matches `text` (Jump to, the explorer's empty state), best match first: the
+ * server ranks each kind (an exact id always leads), and the kinds are merged by the same rank. A kind that fails to
+ * load is left out rather than failing the lookup.
+ */
+export const entitySearchQuery = (projectId: string, text: string, perKind = 4) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'entity-search', text, perKind] as const,
+    queryFn: async ({ signal }) => {
+      const kinds: EntityKind[] = ['actor', 'tenant', 'executor', 'target'];
+      const lists = await Promise.all(
+        kinds.map((kind) => api.entities.list(projectId, { kind, q: text, limit: perKind }, signal).catch(() => ({ data: [] }))),
+      );
+      const found = lists.flatMap((l) => l.data);
+      return found
+        .map((e, i) => ({ e, i, rank: entityMatchRank(e, text) }))
+        .sort((a, b) => a.rank - b.rank || a.i - b.i)
+        .map((x) => x.e);
+    },
+    staleTime: 30_000,
   });
 
 export const keysQuery = (projectId: string) =>

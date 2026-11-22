@@ -608,24 +608,40 @@ const ENTITY_ORDER: Record<EntitySort, { keys: string; types: [string, string] }
   lastSeen: { keys: '-toUnixTimestamp64Milli(lastSeen),-toInt64(events)', types: ['Int64', 'Int64'] },
   name: { keys: "lowerUTF8(if(name='',id,name)),''", types: ['String', 'String'] },
 };
+/**
+ * How well an entity matches a search, best first: 0 exact id, 1 id prefix, 2 name prefix, 3 substring of id or name,
+ * 4 fuzzy (ngram) only. Targets are stored as `type:id`, so their bare id counts as the id too (`article_27_2`).
+ */
+const ENTITY_MATCH_RANK = `multiIf(
+  lowerUTF8(id)=lowerUTF8({q:String}) OR lowerUTF8(substring(id,position(id,':')+1))=lowerUTF8({q:String}),0,
+  startsWith(lowerUTF8(id),lowerUTF8({q:String})) OR startsWith(lowerUTF8(substring(id,position(id,':')+1)),lowerUTF8({q:String})),1,
+  startsWith(lowerUTF8(name),lowerUTF8({q:String})),2,
+  positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0,3,
+  4)`;
 export async function listEntities(ch: ClickHouseClient, p: string, q: EntityListQuery) {
   const sort = q.sort ?? 'events',
     order = ENTITY_ORDER[sort];
+  // A search ranks by match quality first (an exact id always leads, whatever the limit), then by the chosen sort.
+  const search = Boolean(q.q);
   let after = '';
   const params: Params = { p, kind: q.kind, q: q.q ?? '', type: q.type ?? '', limit: q.limit + 1 };
   if (q.cursor) {
-    const [c1, c2, id] = entityCursor(q.cursor, sort);
-    Object.assign(params, { c1, c2, cid: id });
-    after = `WHERE (${order.keys},id) > ({c1:${order.types[0]}},{c2:${order.types[1]}},{cid:String})`;
+    const [c1, c2, id, rank] = entityCursor(q.cursor, sort, search);
+    Object.assign(params, { c1, c2, cid: id, cr: rank });
+    after = `WHERE (r,${order.keys},id) > ({cr:UInt8},{c1:${order.types[0]}},{c2:${order.types[1]}},{cid:String})`;
   }
-  const rows = await read<Entity & { k1: string | number; k2: string | number }>(
+  const rows = await read<Entity & { k1: string | number; k2: string | number; r: number }>(
     ch,
-    `SELECT *,tupleElement(k,1) k1,tupleElement(k,2) k2 FROM (SELECT *,tuple(${order.keys}) k FROM (SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} GROUP BY kind,id HAVING ({q:String}='' OR positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0.3) AND ({type:String}='' OR type={type:String}))) ${after} ORDER BY k,id LIMIT {limit:UInt32}`,
+    `SELECT *,tupleElement(k,1) k1,tupleElement(k,2) k2 FROM (SELECT *,tuple(${order.keys}) k,${search ? ENTITY_MATCH_RANK : '0'} r FROM (SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} GROUP BY kind,id HAVING ({q:String}='' OR positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0.3) AND ({type:String}='' OR type={type:String}))) ${after} ORDER BY r,k,id LIMIT {limit:UInt32}`,
     params,
     // Directory pages aggregate the whole kind; keep the guard roomy but bounded.
     isQueryClient(ch) ? 10 : 20,
   );
   const last = rows[q.limit - 1];
+  const cursor = (row: (typeof rows)[number]) => {
+    const keys = [sort, String(row.k1), String(row.k2), row.id];
+    return encode(search ? [...keys, String(row.r)] : keys);
+  };
   return {
     data: rows.slice(0, q.limit).map((r) => ({
       kind: r.kind,
@@ -636,15 +652,16 @@ export async function listEntities(ch: ClickHouseClient, p: string, q: EntityLis
       lastSeen: iso(r.lastSeen),
       events: Number(r.events),
     })),
-    nextCursor: rows.length > q.limit && last ? encode([sort, String(last.k1), String(last.k2), last.id]) : null,
+    nextCursor: rows.length > q.limit && last ? cursor(last) : null,
   };
 }
-function entityCursor(s: string, sort: EntitySort): [string, string, string] {
+/** A keyset cursor bound to its sort, and to whether the list was a search (a search cursor carries the match rank). */
+function entityCursor(s: string, sort: EntitySort, search: boolean): [string, string, string, string] {
   try {
     const a: unknown = JSON.parse(Buffer.from(s, 'base64url').toString());
-    if (Array.isArray(a) && a.length === 4 && a.every((v) => typeof v === 'string') && a[0] === sort) {
-      const [, k1, k2, id] = a as [string, string, string, string];
-      return [k1, k2, id];
+    if (Array.isArray(a) && a.length === (search ? 5 : 4) && a.every((v) => typeof v === 'string') && a[0] === sort) {
+      const [, k1, k2, id, rank = '0'] = a as string[];
+      if (/^[0-4]$/.test(rank)) return [k1 as string, k2 as string, id as string, rank];
     }
   } catch {
     /* Report malformed or cross-sort cursors with a stable public error below. */

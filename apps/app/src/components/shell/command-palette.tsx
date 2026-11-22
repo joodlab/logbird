@@ -1,4 +1,3 @@
-import type { EntityKind } from '@logbird/contracts';
 import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import {
   CommandDialog,
@@ -31,8 +30,8 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api/client';
-import { projectsQuery, viewsQuery } from '@/lib/api/queries';
-import { ENTITY_SECTIONS, sectionForKind } from '@/lib/entities';
+import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
+import { ENTITY_SECTIONS, entityMatchRank, entityQuery, sectionForKind } from '@/lib/entities';
 import { formatExactTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
 
@@ -46,18 +45,8 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const projects = useQuery({ ...projectsQuery(), enabled: open });
   const views = useQuery({ ...viewsQuery(projectId ?? ''), enabled: open && Boolean(projectId) });
 
-  const entities = useQuery({
-    queryKey: ['palette-entities', projectId, debounced],
-    enabled: open && Boolean(projectId) && debounced.length >= 2,
-    queryFn: async ({ signal }) => {
-      const kinds: EntityKind[] = ['actor', 'tenant', 'executor', 'target'];
-      const results = await Promise.all(
-        kinds.map((kind) => api.entities.list(projectId ?? '', { kind, q: debounced, limit: 4 }, signal).catch(() => ({ data: [] }))),
-      );
-      return results.flatMap((r) => r.data);
-    },
-    staleTime: 30_000,
-  });
+  // Best match first across kinds; an exact id always leads (the server ranks it first whatever the per-kind cap).
+  const entities = useQuery({ ...entitySearchQuery(projectId ?? '', debounced), enabled: open && Boolean(projectId) && debounced.length >= 2 });
   // Support agents only appear as `impersonator`, never in the actor directory: look them up by name or id.
   const agents = useQuery({
     queryKey: ['palette-support-agents', projectId, debounced],
@@ -73,9 +62,18 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const [highlighted, setHighlighted] = useState('');
   const firstAgent = agents.data?.[0];
   const firstAgentValue = firstAgent ? `support ${firstAgent.value} ${firstAgent.label}` : '';
+  const trimmed = search.trim();
+  // Entities whose id is exactly what was typed (`biz_27`, or a record's bare id): opened directly from Jump to.
+  const exact = (entities.data ?? []).filter((e) => entityMatchRank(e, trimmed) === 0).slice(0, 3);
+  const openValue = (e: { kind: string; id: string }) => `${trimmed} open ${e.kind} ${e.id}`;
+  const firstExact = exact[0];
+  const firstExactValue = firstExact ? openValue(firstExact) : '';
+  // Highlight an exact id once its lookup lands, else a matching support agent, so Enter opens what was meant rather
+  // than a free-text search that cannot find an id.
   useEffect(() => {
-    if (firstAgentValue) setHighlighted(firstAgentValue);
-  }, [firstAgentValue]);
+    if (firstExactValue || firstAgentValue) setHighlighted(firstExactValue || firstAgentValue);
+  }, [firstExactValue, firstAgentValue]);
+  const others = (entities.data ?? []).filter((e) => !exact.includes(e));
 
   const go = (fn: () => void) => {
     onOpenChange(false);
@@ -83,7 +81,6 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
     fn();
   };
 
-  const trimmed = search.trim();
   const looksLikeEvent = ULID_RE.test(trimmed) || /^evt_/.test(trimmed);
   const looksLikeOperation = /^op_/.test(trimmed);
 
@@ -145,18 +142,55 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                 Open operation <span className="font-mono text-xs">{trimmed}</span>
               </CommandItem>
             ) : null}
-            <CommandItem
-              onSelect={() => go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: trimmed } }))}
-              value={`search ${trimmed}`}
-            >
-              <SearchIcon />
-              Search events for <span className="font-mono text-xs">{trimmed}</span>
-            </CommandItem>
+            {exact.map((e) => {
+              const section = sectionForKind(e.kind);
+              const Icon = ENTITY_SECTIONS[section].icon;
+              return (
+                <CommandItem
+                  key={`open ${e.kind}:${e.id}`}
+                  onSelect={() =>
+                    go(() =>
+                      navigate({
+                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId',
+                        params: { projectId, entityId: e.id },
+                      }),
+                    )
+                  }
+                  value={openValue(e)}
+                >
+                  <Icon />
+                  Open {ENTITY_SECTIONS[section].singular.toLowerCase()} <span className="truncate font-mono text-xs">{e.id}</span>
+                  {e.name ? <span className="truncate text-muted-foreground">{e.name}</span> : null}
+                </CommandItem>
+              );
+            })}
+            {/* Free text searches names and descriptions, never ids: an exact id searches its own events instead. */}
+            {firstExact ? (
+              <CommandItem
+                onSelect={() =>
+                  go(() =>
+                    navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: entityQuery(firstExact.kind, firstExact.id) } }),
+                  )
+                }
+                value={`search ${trimmed}`}
+              >
+                <SearchIcon />
+                Search events for <span className="font-mono text-xs">{entityQuery(firstExact.kind, firstExact.id)}</span>
+              </CommandItem>
+            ) : (
+              <CommandItem
+                onSelect={() => go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: trimmed } }))}
+                value={`search ${trimmed}`}
+              >
+                <SearchIcon />
+                Search events for <span className="font-mono text-xs">{trimmed}</span>
+              </CommandItem>
+            )}
           </CommandGroup>
         ) : null}
-        {entities.data && entities.data.length > 0 ? (
+        {others.length > 0 ? (
           <CommandGroup heading="Entities">
-            {entities.data.map((e) => {
+            {others.map((e) => {
               const section = sectionForKind(e.kind);
               const Icon = ENTITY_SECTIONS[section].icon;
               return (

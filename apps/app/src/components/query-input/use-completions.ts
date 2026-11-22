@@ -1,7 +1,7 @@
 import type { QueryLang, SavedView, SuggestResponse } from '@logbird/contracts';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { awaiting, current, shownDimmed } from '@/lib/api/current';
 import { fieldsQuery, SUGGEST_LIMIT, suggestQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';
@@ -255,12 +255,20 @@ export function useCompletions({
     queries: ENTITY_FIELDS.map((field) => ({
       ...suggestQuery(projectId, field, debouncedWord),
       enabled: Boolean(debouncedWord) && word.toLowerCase().includes(debouncedWord.toLowerCase()),
-      // The previous word's matches, filtered locally by the current word, hold the rows while the next loads.
-      placeholderData: (previous: SuggestResponse | undefined) => (previous?.field === field ? previous : undefined),
     })),
   });
-  // The previous word's matches stay while the next word loads (or debounces): shown dimmed and busy, never as current.
-  const entityData = entityQueries.map((q) => shownDimmed(q));
+  // A `useQueries` placeholder gets no previous data (TanStack Query v5), so the last answered word's matches are kept
+  // here. Filtered locally by the current word, they hold the rows while the next word debounces or loads, shown dimmed
+  // and busy (entitiesStale below), never as current.
+  const answered = entityQueries.map((q) => q.data);
+  const hasAnswer = answered.some((d) => d !== undefined);
+  const lastAnswered = useRef<(SuggestResponse | undefined)[]>([]);
+  useEffect(() => {
+    if (hasAnswer) lastAnswered.current = answered;
+  });
+  // A failed lookup shows nothing rather than an older word's matches undimmed.
+  const failed = entityQueries.every((q) => q.isError);
+  const entityData = hasAnswer ? answered : word && !failed ? lastAnswered.current : [];
   const entitiesPending = Boolean(word) && (debouncedWord !== word || entityQueries.some((q) => q.isFetching));
   // biome-ignore lint/correctness/useExhaustiveDependencies: entityData is a fresh array each render; its items are stable query results
   const entities = useMemo(() => {

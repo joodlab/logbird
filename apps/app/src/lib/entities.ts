@@ -69,6 +69,30 @@ export function entityQuery(kind: EntityKind, id: string): string {
   return formatExactTerm(kind, id);
 }
 
+/**
+ * How well an entity matches what was typed, best first, the same order the server ranks a search by: 0 exact id,
+ * 1 id prefix, 2 name prefix, 3 id or name contains it, 4 a fuzzy match only. A record's bare id (`article_27_2` for
+ * `article:article_27_2`) counts as its id.
+ */
+export function entityMatchRank(entity: { id: string; name: string }, text: string): 0 | 1 | 2 | 3 | 4 {
+  const t = text.trim().toLowerCase();
+  const id = entity.id.toLowerCase();
+  const bare = id.slice(id.indexOf(':') + 1);
+  const name = entity.name.toLowerCase();
+  if (!t) return 4;
+  if (id === t || bare === t) return 0;
+  if (id.startsWith(t) || bare.startsWith(t)) return 1;
+  if (name.startsWith(t)) return 2;
+  if (`${id} ${name}`.includes(t)) return 3;
+  return 4;
+}
+
+/** Free text that could be an id: one word, no field, operator, quote, group or wildcard. */
+export function looksLikeId(text: string): boolean {
+  const t = text.trim();
+  return t.length >= 2 && /^[^\s:()"'*-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t);
+}
+
 export function targetEntityId(type: string, id: string): string {
   return `${type}:${id}`;
 }

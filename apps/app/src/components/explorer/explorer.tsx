@@ -1,4 +1,4 @@
-import type { AuditEvent, HistogramResponse, QueryLang, SearchResponse } from '@logbird/contracts';
+import type { AuditEvent, EntityKind, HistogramResponse, QueryLang, SearchResponse } from '@logbird/contracts';
 import { StableText } from '@logbird/ui/components/stable-text';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
@@ -16,7 +16,8 @@ import { QueryInput, type QueryInputHandle } from '@/components/query-input/quer
 import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
-import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
+import { entitySearchQuery, eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
+import { ENTITY_SECTIONS, entityMatchRank, entityQuery, looksLikeId, sectionForKind } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
@@ -71,6 +72,14 @@ export function explorerResultKey(projectId: string, range: string, effectiveQ: 
 
 function newestArrival(events: AuditEvent[]): string | undefined {
   return events.reduce<string | undefined>((max, e) => (!max || e.receivedAt > max ? e.receivedAt : max), undefined);
+}
+
+/** "tenant", "actor", "executor", "record": what the reader calls each kind. */
+function kindNoun(kind: EntityKind): string {
+  return ENTITY_SECTIONS[sectionForKind(kind)].singular.toLowerCase();
+}
+function articleFor(kind: EntityKind): string {
+  return /^[aeiou]/.test(kindNoun(kind)) ? 'an' : 'a';
 }
 
 function isTyping(target: EventTarget | null): boolean {
@@ -311,6 +320,26 @@ function ProjectExplorer({
     else toast.error('This filter has no SQL equivalent', { description: `Switch to Query mode to filter by ${term}.` });
   };
 
+  /* ---------------- empty results: say why, and offer only what would find something ---------------- */
+  const showsEmpty = Boolean(pages) && !problem && !events.isError && rows.length === 0;
+  // A bare word that is exactly an entity's id: free text searches names and descriptions, never ids.
+  const word = lang === 'query' && looksLikeId(q) ? q.trim() : '';
+  const idLookup = useQuery({ ...entitySearchQuery(projectId, word), enabled: showsEmpty && Boolean(word) });
+  const idMatch = word ? idLookup.data?.find((e) => entityMatchRank(e, word) === 0) : undefined;
+  const idSettled = !word || idLookup.isSuccess || idLookup.isError;
+  // Whether anything older matches: only then is the range the reason, and only then is widening offered.
+  const wider = useQuery({
+    ...histogramQuery(projectId, ALL_RANGE, effectiveQ, lang),
+    enabled: showsEmpty && !complete && idSettled && !idMatch,
+  });
+  const olderMatches = current(wider)?.buckets.reduce((n, b) => n + b.total, 0);
+  const widen =
+    olderMatches && olderMatches > 0 ? (
+      <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
+        Search all time
+      </Button>
+    ) : null;
+
   const empty = problem ? (
     <EmptyState description="Fix the query above to see results." icon={SearchXIcon} title="Query not run" />
   ) : events.isError ? (
@@ -318,31 +347,41 @@ function ProjectExplorer({
   ) : (
     <EmptyState
       description={
-        q ? (
+        idMatch ? (
+          <>
+            <span className="font-mono text-foreground">{word}</span> is {articleFor(idMatch.kind)} {kindNoun(idMatch.kind)} id. Free text searches
+            names and descriptions, not ids.
+          </>
+        ) : q ? (
           <>
             Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>.{' '}
-            {complete ? 'Remove a filter to see more.' : 'Try a wider range or remove a filter.'}
+            {olderMatches
+              ? `${formatNumber(olderMatches)} older ${olderMatches === 1 ? 'event matches' : 'events match'}.`
+              : 'Remove a filter or change the query.'}
           </>
-        ) : complete ? (
-          `No events in ${rangeInSentence(rangeName)}.`
+        ) : olderMatches ? (
+          `No events in ${rangeInSentence(rangeName)}. ${formatNumber(olderMatches)} older ${olderMatches === 1 ? 'event is' : 'events are'} stored.`
+        ) : complete || olderMatches === 0 ? (
+          `No events in ${rangeInSentence(rangeName)}. Send events with your ingest key to see them here.`
         ) : (
-          `No events in ${rangeInSentence(rangeName)}. Widen the range, or send events with your ingest key.`
+          `No events in ${rangeInSentence(rangeName)}.`
         )
       }
       icon={SearchXIcon}
       title={q ? 'No matching events' : 'No events in this range'}
     >
+      {idMatch ? (
+        <Button onClick={() => onChange({ q: entityQuery(idMatch.kind, idMatch.id) })} size="sm">
+          Search <span className="font-mono">{entityQuery(idMatch.kind, idMatch.id)}</span>
+        </Button>
+      ) : null}
       {q ? (
         <Button onClick={() => onChange({ q: '' })} size="sm" variant="outline">
           Clear query
         </Button>
       ) : null}
-      {range !== '30d' && !complete ? (
-        <Button onClick={() => onChange({ range: '30d' })} size="sm" variant="outline">
-          Search last 30 days
-        </Button>
-      ) : null}
+      {widen}
     </EmptyState>
   );
 
