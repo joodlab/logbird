@@ -113,7 +113,7 @@ async function lockedProject<T>(c: Context<AppEnv>, work: (tx: Prisma.Transactio
     if (!project) throw new ApiError(404, 'not_found', 'Project not found.');
     const endpointId = c.req.param('id');
     if (endpointId) {
-      // Automatic disable uses this row lock too. Re-read mutable endpoint state after acquiring it.
+      // Dispatch holds a shared lock on this row until it starts the request. Automatic disable also takes this exclusive lock.
       await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${endpointId} AND "projectId" = ${project.id} FOR UPDATE`;
     }
     return work(tx);
@@ -356,7 +356,7 @@ export const webhookRoutes = new Hono<AppEnv>()
         // Every earlier secret stops working by the end of this overlap: the current one and any still inside an earlier
         // rotation's window. An expiry already sooner is left alone, so a rotation never extends a secret's life, and a
         // zero overlap retires every earlier secret at once.
-        const now = new Date();
+        const [{ now }] = await tx.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
         const until = new Date(now.getTime() + overlapSeconds * 1000);
         // Secrets past their window can never sign again: drop them so rotations don't accumulate rows.
         await tx.webhookSecret.deleteMany({ where: { endpointId: endpoint.id, expiresAt: { lte: now } } });

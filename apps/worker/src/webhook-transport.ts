@@ -1,7 +1,6 @@
 import { request as requestHttp } from 'node:http';
 import { request as requestHttps } from 'node:https';
 import { resolveWebhookDestination, WebhookLookupBusyError } from '@logbird/database/webhooks';
-import { signWebhook } from '@logbird/sdk';
 import manifest from '../package.json' with { type: 'json' };
 
 const CONNECT_TIMEOUT_MS = 5000;
@@ -18,6 +17,8 @@ export type WebhookTransportOptions = NonNullable<Parameters<typeof resolveWebho
   totalTimeoutMs?: number;
 };
 type AttemptContext = { started: number; signal: AbortSignal; requestStarted: boolean; responseCode?: number };
+type StartedRequest = { response: Promise<AttemptResult> };
+type Dispatch = (startRequest: (timestamp: number, signature: string) => StartedRequest) => Promise<StartedRequest | AttemptResult | undefined>;
 
 export function legacyWebhookHeaderId(id: string) {
   // Reserve the prefix in both branches so a literal ID can never collide with an encoded ID.
@@ -29,8 +30,7 @@ export async function postWebhook(
   rawUrl: string,
   id: string,
   payload: string,
-  secrets: readonly string[],
-  getSigningTime: () => Promise<Date | undefined>,
+  dispatch: Dispatch,
   options: WebhookTransportOptions = {},
 ): Promise<AttemptResult | undefined> {
   const controller = new AbortController();
@@ -43,7 +43,7 @@ export async function postWebhook(
     }, options.totalTimeoutMs ?? TOTAL_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([deadline, sendWebhook(rawUrl, id, payload, secrets, getSigningTime, options, attempt)]);
+    return await Promise.race([deadline, sendWebhook(rawUrl, id, payload, dispatch, options, attempt)]);
   } finally {
     clearTimeout(timer);
   }
@@ -53,31 +53,32 @@ async function sendWebhook(
   rawUrl: string,
   id: string,
   payload: string,
-  secrets: readonly string[],
-  getSigningTime: () => Promise<Date | undefined>,
+  dispatch: Dispatch,
   options: WebhookTransportOptions,
   attempt: AttemptContext,
 ): Promise<AttemptResult | undefined> {
-  const { started, signal } = attempt;
   let destination: Awaited<ReturnType<typeof resolveWebhookDestination>>;
   try {
     destination = await resolveWebhookDestination(rawUrl, options);
   } catch (error) {
     return { error: error instanceof WebhookLookupBusyError ? 'lookup_failed' : 'destination_rejected' };
   }
-  if (signal.aborted) return { error: 'lookup_failed' };
-  const signingTime = await getSigningTime();
-  if (!signingTime) return;
-  if (signal.aborted || performance.now() - started >= CONNECT_TIMEOUT_MS) return { error: 'lookup_failed' };
-  const timestamp = Math.floor(+signingTime / 1000);
-  let signature: string;
-  try {
-    signature = await signWebhook({ id, timestamp, payload, secrets });
-  } catch {
-    return { error: 'signing_failed' };
-  }
+  if (attempt.signal.aborted) return { error: 'lookup_failed' };
+  const result = await dispatch((timestamp, signature) => ({ response: startWebhook(destination, id, payload, timestamp, signature, attempt) }));
+  return result && 'response' in result ? result.response : result;
+}
+
+function startWebhook(
+  destination: Awaited<ReturnType<typeof resolveWebhookDestination>>,
+  id: string,
+  payload: string,
+  timestamp: number,
+  signature: string,
+  attempt: AttemptContext,
+): Promise<AttemptResult> {
+  const { started, signal } = attempt;
   const connectTimeout = CONNECT_TIMEOUT_MS - (performance.now() - started);
-  if (signal.aborted || connectTimeout <= 0) return { error: 'lookup_failed' };
+  if (signal.aborted || connectTimeout <= 0) return Promise.resolve({ error: 'lookup_failed' });
   const { url, address, family } = destination;
   const https = url.protocol === 'https:';
   return new Promise((resolve) => {

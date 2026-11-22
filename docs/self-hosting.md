@@ -1116,6 +1116,7 @@ fresh retry window and retain their attempt history. Before sending, the worker
 applies the current scope and filter to the stored occurrence. A present event that
 no longer matches is recorded as `skipped` with `scope_mismatch`, without an HTTP
 request or a charge to the endpoint's failure counters.
+Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
 
 On very large projects delivery can stall until the arrival-time index is present.
 The cursor never skips events when a scan exceeds its read budget.

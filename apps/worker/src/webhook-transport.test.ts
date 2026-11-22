@@ -1,21 +1,24 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { generateWebhookSecret, verifyWebhook } from '@logbird/sdk';
+import { generateWebhookSecret, signWebhook, verifyWebhook } from '@logbird/sdk';
 import { expect, it } from 'vitest';
 import { postWebhook } from './webhook-transport';
 
 const secret = generateWebhookSecret();
-const getSigningTime = async () => new Date();
+const sign =
+  (id: string, payload: string, timestamp = Math.floor(Date.now() / 1000)): Parameters<typeof postWebhook>[3] =>
+  async (startRequest) =>
+    startRequest(timestamp, await signWebhook({ id, timestamp, payload, secrets: [secret] }));
 it.each(['127.0.0.1', '10.0.0.1', '169.254.169.254', '[fd00:ec2::254]'])('blocks %s before sending', async (address) => {
-  expect(await postWebhook(`http://${address}`, 'signed-id', '{}', [secret], getSigningTime, { allowHttp: true })).toEqual({
+  expect(await postWebhook(`http://${address}`, 'signed-id', '{}', sign('signed-id', '{}'), { allowHttp: true })).toEqual({
     error: 'destination_rejected',
   });
 });
 
 it('rejects mixed public and private DNS answers', async () => {
   expect(
-    await postWebhook('https://receiver.example.invalid', 'signed-id', '{}', [secret], getSigningTime, {
+    await postWebhook('https://receiver.example.invalid', 'signed-id', '{}', sign('signed-id', '{}'), {
       lookup: async () => [
         { address: '1.1.1.1', family: 4 },
         { address: '192.168.1.10', family: 4 },
@@ -49,8 +52,7 @@ it('pins the validated address, signs a real POST and never follows its redirect
       `http://receiver.example.invalid:${port}/event`,
       'signed-id',
       '{"ok":true}',
-      [secret],
-      async () => new Date(timestamp * 1000),
+      sign('signed-id', '{"ok":true}', timestamp),
       {
         allowHttp: true,
         lookup: async () => [{ address: '127.0.0.1', family: 4 }],
@@ -79,7 +81,7 @@ it('settles a stalled response at the total deadline and preserves its status co
     await once(receiver, 'listening');
     const { port } = receiver.address() as AddressInfo;
     expect(
-      await postWebhook(`http://127.0.0.1:${port}/event`, 'signed-id', '{}', [secret], getSigningTime, {
+      await postWebhook(`http://127.0.0.1:${port}/event`, 'signed-id', '{}', sign('signed-id', '{}'), {
         allowHttp: true,
         allowAddress: (address) => address === '127.0.0.1',
         totalTimeoutMs: 400,

@@ -541,6 +541,8 @@ with `scope_mismatch` and does not count toward endpoint failure. A missing even
 finishes with `event_unavailable`.
 Relative filter times use the start of the discovery scan as `now`. Send-time
 rechecks use the same clock for that delivery.
+Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
+If settings change while the worker prepares a request, it discards the prepared request without counting an attempt.
 
 Each POST body is the public event shape returned in `/v1/events/:id`'s
 `event`. It is built from stored event columns, which preserve exact attribute

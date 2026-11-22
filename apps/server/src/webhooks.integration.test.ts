@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { createServer, type IncomingHttpHeaders } from 'node:http';
+import { ClientRequest, createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fieldMaskKey, insertEvents, normalizeEvent } from '@logbird/clickhouse';
@@ -65,20 +65,33 @@ async function create(role = 'owner', input: unknown = { url: receiver }) {
   return createWebhookResponseSchema.parse(await response.json());
 }
 
-async function withLocalReceiver(endpointId: string, work: (received: { headers: IncomingHttpHeaders; payload: string }[]) => Promise<void>) {
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function withLocalReceiver(
+  endpointId: string,
+  work: (received: { headers: IncomingHttpHeaders; payload: string }[]) => Promise<void>,
+  { hostname = '127.0.0.1', beforeRespond }: { hostname?: string; beforeRespond?: () => Promise<void> } = {},
+) {
   const received: { headers: IncomingHttpHeaders; payload: string }[] = [];
   const receiver = createServer(async (req, res) => {
     req.setEncoding('utf8');
     let payload = '';
     for await (const chunk of req) payload += chunk;
     received.push({ headers: req.headers, payload });
+    await beforeRespond?.();
     res.writeHead(204).end();
   });
   try {
     receiver.listen(0, '127.0.0.1');
     await once(receiver, 'listening');
     const { port } = receiver.address() as AddressInfo;
-    await prisma.webhookEndpoint.update({ where: { id: endpointId }, data: { url: `http://127.0.0.1:${port}/test` } });
+    await prisma.webhookEndpoint.update({ where: { id: endpointId }, data: { url: `http://${hostname}:${port}/test` } });
     await work(received);
   } finally {
     receiver.closeAllConnections();
@@ -86,7 +99,7 @@ async function withLocalReceiver(endpointId: string, work: (received: { headers:
   }
 }
 
-const send = (project = projectId) =>
+const send = (project = projectId, overrides: Partial<Parameters<typeof deliverWebhooks>[1]> = {}) =>
   deliverWebhooks(
     clickhouse,
     {
@@ -95,7 +108,8 @@ const send = (project = projectId) =>
       concurrency: 1,
       perEndpoint: 1,
       failureLimit: 50,
-      transport: { allowHttp: true, allowAddress: (address) => address === '127.0.0.1' },
+      ...overrides,
+      transport: { allowHttp: true, allowAddress: (address) => address === '127.0.0.1', ...overrides.transport },
     },
     project,
   );
@@ -497,6 +511,32 @@ it('a zero-overlap rotation retires every earlier secret, including one still in
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id, expiresAt: null } })).toBe(1);
 });
 
+it('signs with only the new key after zero-overlap rotation when the API clock is ahead', async () => {
+  const { endpoint, secret: oldSecret } = await create();
+  const path = `${base()}/${endpoint.id}`;
+  await withLocalReceiver(endpoint.id, async (received) => {
+    const ahead = new Date(Date.now() + 120_000);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(ahead);
+    let rotated: Response;
+    try {
+      rotated = await request(`${path}/rotate-secret`, 'POST', { overlapSeconds: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(rotated.status).toBe(200);
+    const { secret } = await rotated.json();
+    expect((await request(`${path}/test`, 'POST')).status).toBe(202);
+    await send();
+    expect(received).toHaveLength(1);
+    const wire = received[0];
+    if (!wire) throw new Error('Missing receiver request');
+    expect((wire.headers['webhook-signature'] as string).split(' ')).toHaveLength(1);
+    await expect(verifyWebhook({ ...wire, secret })).resolves.toMatchObject({ action: 'logbird.webhook.test' });
+    await expect(verifyWebhook({ ...wire, secret: oldSecret })).rejects.toMatchObject({ reason: 'no_matching_signature' });
+  });
+});
+
 it('verifies with the oldest of ten active secrets and rejects the next overlapping rotation', async () => {
   const { endpoint, secret } = await create();
   const path = `${base()}/${endpoint.id}`;
@@ -802,6 +842,123 @@ it('rejects filters on masked columns and attribute paths using the combined old
   expect((await request(path, 'PATCH', { scope, filterQuery: 'action:qa.webhook' })).status).toBe(200);
   await reject(await request(path, 'PATCH', { filterQuery: 'attr.context.ip:*' }));
   expect(await (await request(path)).json()).toMatchObject({ scope, filterQuery: 'action:qa.webhook' });
+});
+
+it('discards a prepared body after PATCH adds an email mask and sends the rebuilt body once', async () => {
+  const tenantId = 'qa-race-tenant';
+  const email = 'qa-race@example.invalid';
+  const { endpoint, secret } = await create('owner', { url: receiver, scope: { tenantId } });
+  const path = `${base()}/${endpoint.id}`;
+  const receivedAt = new Date(+new Date(endpoint.createdAt) + 1);
+  const event = normalizeEvent(
+    { id: 'qa-mask-race', action: 'qa.webhook', tenant: { id: tenantId }, actor: { type: 'user', id: 'qa-actor', email } },
+    { projectId, receivedAt },
+  );
+  if (!event.ok) throw new Error(event.reason);
+  try {
+    await insertEvents(clickhouse, [event.row]);
+    await withLocalReceiver(
+      endpoint.id,
+      async (received) => {
+        const queued = await prisma.webhookDelivery.create({
+          data: { endpointId: endpoint.id, eventId: event.row.event_id, receivedAt, expiresAt: new Date(+receivedAt + 3_600_000) },
+        });
+        const lookup = async () => [{ address: '127.0.0.1', family: 4 }];
+        let patch: Response | undefined;
+        await send(projectId, {
+          transport: {
+            // DNS is resolved after the unmasked body is built and before dispatch takes its locks.
+            lookup: async () => {
+              patch = await request(path, 'PATCH', { scope: { tenantId, mask: ['actor_email'] } });
+              return lookup();
+            },
+          },
+        });
+        expect(patch?.status).toBe(200);
+        expect(received).toHaveLength(0);
+        expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: queued.id }, include: { attempts: true } })).toMatchObject({
+          status: 'pending',
+          attemptNumber: 0,
+          windowAttempts: 0,
+          leaseUntil: null,
+          attempts: [],
+        });
+        await send(projectId, { transport: { lookup } });
+        await send(projectId, { transport: { lookup } });
+        expect(received).toHaveLength(1);
+        const wire = received[0];
+        if (!wire) throw new Error('Missing receiver request');
+        expect(wire.payload).not.toContain(email);
+        const digest = createHmac('sha256', fieldMaskKey(env.BETTER_AUTH_SECRET)).update(`${projectId}\0${email}`).digest('hex').slice(0, 24);
+        await expect(verifyWebhook({ ...wire, secret })).resolves.toMatchObject({ actor: { email: `masked:${digest}` } });
+        expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: queued.id }, include: { attempts: true } })).toMatchObject({
+          status: 'succeeded',
+          attemptNumber: 1,
+          attempts: [{ status: 'succeeded', number: 1 }],
+        });
+      },
+      { hostname: 'qa-webhook.example.invalid' },
+    );
+  } finally {
+    await withProjectLock(projectId, () => purgeProjectEvents(projectId));
+  }
+});
+
+it('blocks PATCH on the dispatch row lock until the HTTP request starts', async () => {
+  const { endpoint } = await create('owner', { url: receiver, scope: { tenantId: 'qa-lock-tenant' } });
+  const path = `${base()}/${endpoint.id}`;
+  const reply = deferred<void>();
+  await withLocalReceiver(
+    endpoint.id,
+    async (received) => {
+      expect((await request(`${path}/test`, 'POST')).status).toBe(202);
+      const { id, eventId } = await prisma.webhookDelivery.findFirstOrThrow({ where: { endpointId: endpoint.id } });
+      const locked = deferred<number>();
+      const release = deferred<void>();
+      const end = vi.spyOn(ClientRequest.prototype, 'end');
+      const started = () => end.mock.contexts.some((ctx) => ctx instanceof ClientRequest && ctx.getHeader('webhook-id') === eventId);
+      const sending = send(projectId, {
+        beforeRequest: async (tx) => {
+          const [{ pid }] = await tx.$queryRaw<[{ pid: number }]>`SELECT pg_backend_pid() AS pid`;
+          locked.resolve(pid);
+          await release.promise;
+        },
+      });
+      let patch: Promise<{ response: Response; startedBeforeSave: boolean }> | undefined;
+      try {
+        const pid = await Promise.race([
+          locked.promise,
+          sending.then(() => {
+            throw new Error('Dispatch finished before acquiring the row lock');
+          }),
+        ]);
+        patch = Promise.resolve(request(path, 'PATCH', { scope: { tenantId: 'qa-lock-tenant', mask: ['actor_email'] } })).then((response) => ({
+          response,
+          startedBeforeSave: started(),
+        }));
+        await vi.waitFor(async () => {
+          const blockers = await prisma.$queryRaw<{ pid: number }[]>`SELECT pid FROM pg_stat_activity
+          WHERE ${pid} = ANY(pg_blocking_pids(pid)) AND query LIKE '%WebhookEndpoint%FOR UPDATE%'`;
+          expect(blockers).toHaveLength(1);
+        });
+        expect(started()).toBe(false);
+        release.resolve();
+        const saved = await patch;
+        expect(saved.response.status).toBe(200);
+        expect(saved.startedBeforeSave).toBe(true);
+        reply.resolve();
+        await sending;
+        expect(received).toHaveLength(1);
+        expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: 'succeeded', attemptNumber: 1 });
+      } finally {
+        release.resolve();
+        reply.resolve();
+        await Promise.allSettled([sending, patch]);
+        end.mockRestore();
+      }
+    },
+    { beforeRespond: () => reply.promise },
+  );
 });
 
 it('signs identical masked bytes on initial delivery and resend of a target-only event', async () => {
