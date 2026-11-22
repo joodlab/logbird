@@ -43,7 +43,7 @@ export type QueryErrorDetails = z.infer<typeof queryErrorDetailsSchema>;
 /* Field catalog (autocomplete + docs; query lang and SQL mode)        */
 /* ------------------------------------------------------------------ */
 
-export const QUERY_FIELD_TYPES = ['string', 'number', 'date', 'array', 'text'] as const;
+export const QUERY_FIELD_TYPES = ['string', 'number', 'date', 'array', 'text', 'record'] as const;
 export type QueryFieldType = (typeof QUERY_FIELD_TYPES)[number];
 
 export interface QueryFieldInfo {
@@ -51,8 +51,8 @@ export interface QueryFieldInfo {
   key: string;
   aliases?: readonly string[];
   type: QueryFieldType;
-  /** Underlying events column, which is also the identifier to use in SQL mode. */
-  column: string;
+  /** Underlying events column, when the field maps to a single column. */
+  column?: string;
   description: string;
   /** Where value autocomplete comes from (GET …/suggest). `none` = no suggestions. */
   suggest: 'entities' | 'rollup' | 'column' | 'none';
@@ -83,6 +83,7 @@ export const QUERY_FIELDS: readonly QueryFieldInfo[] = [
   { key: 'target', type: 'array', column: 'target_ids', description: 'What was changed (record id)', suggest: 'entities' },
   { key: 'target.type', type: 'array', column: 'target_types', description: 'Record type, e.g. booking', suggest: 'entities' },
   { key: 'target.name', type: 'array', column: 'target_names', description: 'Record display name', suggest: 'none' },
+  { key: 'record', type: 'record', description: 'Record type and id on the same target', suggest: 'entities' },
   { key: 'changes.field', type: 'array', column: 'changes_fields', description: 'Changed field names', suggest: 'none' },
   { key: 'operation', type: 'string', column: 'operation_id', description: 'Operation that grouped the work', suggest: 'none' },
   { key: 'parent', type: 'string', column: 'parent_event_id', description: 'Causing event id', suggest: 'none' },

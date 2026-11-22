@@ -31,7 +31,8 @@ describe('v2', () => {
     expect(compileQuery(q).sql).toBeTruthy();
   });
   it.each(QUERY_FIELDS.flatMap((f) => [f.key, ...(f.aliases ?? [])].map((k) => ({ k, f }))))('catalog $k', ({ k, f }) => {
-    expect(compileQuery(`${k}:*`).sql).toContain(f.type === 'number' || f.type === 'date' ? '1' : f.column);
+    const column = f.type === 'record' ? 'target_ids' : f.column;
+    expect(compileQuery(`${k}:*`).sql).toContain(f.type === 'number' || f.type === 'date' ? '1' : column);
   });
   it.each([
     ['attempt:>abc', 'type', 9, 12],

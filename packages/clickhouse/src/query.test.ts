@@ -82,6 +82,45 @@ describe('query language', () => {
   });
   it('keeps internal stars literal', () => expect(compileQuery('action:a*b').params.q0).toBe('a*b'));
 });
+
+describe('record selector', () => {
+  it.each([
+    ['record:site:12', 'site', '12'],
+    ['record:order:A:1', 'order', 'A:1'],
+    ['record:"order:A:1"', 'order', 'A:1'],
+    ['record:"page:home page"', 'page', 'home page'],
+    ['record:page:OR', 'page', 'OR'],
+    ['record:page:*', 'page', '*'],
+    [String.raw`record:"order:a\\b\"c"`, 'order', 'a\\b"c'],
+  ])('matches a paired target with %s', (q, type, id) => {
+    expect(compileQuery(q)).toEqual({
+      sql: '(arrayExists((t, i) -> t = {recordType0:String} AND i = {recordId0:String}, target_types, target_ids))',
+      params: { recordType0: type, recordId0: id },
+    });
+  });
+
+  it('negates the whole group and binds distinct pairs', () => {
+    const q = compileQuery('-record:(page:1 OR site:7)');
+    expect(q.sql).toMatch(/^NOT \(.*arrayExists.* OR .*arrayExists.*\)$/);
+    expect(q.params).toEqual({ recordType0: 'page', recordId0: '1', recordType1: 'site', recordId1: '7' });
+  });
+
+  it('supports presence and negated presence', () => {
+    expect(compileQuery('record:*')).toEqual({ sql: '(notEmpty(target_ids))', params: {} });
+    expect(compileQuery('NOT _exists_:record')).toEqual({ sql: 'NOT ((notEmpty(target_ids)))', params: {} });
+  });
+
+  it.each([
+    ['record:', 'syntax', 7, 7],
+    ['record:site', 'type', 7, 11],
+    ['😀 record:"site"', 'type', 10, 16],
+  ])('reports a helpful error span for %s', (q, reason, start, end) => {
+    expect(() => compileQuery(q)).toThrow(
+      expect.objectContaining({ details: { lang: 'query', reason, start, end, hint: expect.stringContaining('record:<type>:<id>') } }),
+    );
+  });
+});
+
 describe('normalization', () => {
   const ctx = { projectId: 'p', receivedAt: new Date('2026-11-04T00:00:00Z') };
   it('accepts empty action and malformed recommended fields', () => {

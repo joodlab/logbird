@@ -473,7 +473,7 @@ function EventDetailBody({
                       <span className="truncate font-mono">{t.id}</span>
                     </span>
                   </div>
-                  <FilterButton onFilter={onFilter} term={formatTerm('target', t.id)} />
+                  <FilterButton onFilter={onFilter} term={formatTerm('record', targetEntityId(t.type, t.id))} />
                   {projectId ? (
                     <Button
                       aria-label={`Follow ${t.name || t.id}`}

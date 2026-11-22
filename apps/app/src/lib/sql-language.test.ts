@@ -278,6 +278,17 @@ describe('translateQueryToSql', () => {
     expect(translateQueryToSql('(action:a OR action:b) NOT severity:info')).toBe("(action = 'a' OR action = 'b') AND NOT severity = 'info'");
   });
 
+  it('translates exact record pairs, presence and grouped negation', () => {
+    expect(translateQueryToSql('record:"order:A:1"')).toBe("(arrayExists((t, i) -> t = 'order' AND i = 'A:1', target_types, target_ids))");
+    expect(translateQueryToSql('-record:(site:12 OR "page:home ( OR ) page")')).toBe(
+      "NOT (arrayExists((t, i) -> t = 'site' AND i = '12', target_types, target_ids) OR arrayExists((t, i) -> t = 'page' AND i = 'home ( OR ) page', target_types, target_ids))",
+    );
+    expect(translateQueryToSql('NOT _exists_:record')).toBe('NOT notEmpty(target_ids)');
+    expect(translateQueryToSql('record:site')).toBeNull();
+    expect(translateQueryToSql('record:"site:12')).toBeNull();
+    expect(translateQueryToSql('record:(/site:12/)')).toBeNull();
+  });
+
   it('gives up on free text and the description field', () => {
     expect(translateQueryToSql('outcome:failure refund')).toBeNull();
     expect(translateQueryToSql('"free text"')).toBeNull();

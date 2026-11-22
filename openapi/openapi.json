@@ -6673,6 +6673,7 @@
                                         "tenant",
                                         "executor",
                                         "target",
+                                        "record",
                                         "impersonator"
                                       ],
                                       "type": "string"
@@ -6821,6 +6822,7 @@
                                 "tenant",
                                 "executor",
                                 "target",
+                                "record",
                                 "impersonator"
                               ],
                               "type": "string"
@@ -6938,6 +6940,7 @@
                                   "tenant",
                                   "executor",
                                   "target",
+                                  "record",
                                   "impersonator"
                                 ],
                                 "type": "string"

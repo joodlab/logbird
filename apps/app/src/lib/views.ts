@@ -15,10 +15,17 @@ const FIELD_NAMES: Record<ViewLabelField, string> = {
   tenant: 'Tenant',
   executor: 'Executor',
   target: 'Record',
+  record: 'Record',
   impersonator: 'Support',
 };
 
-const RESOLVABLE: Partial<Record<string, ViewLabelField>> = { actor: 'actor', tenant: 'tenant', executor: 'executor', target: 'target' };
+const RESOLVABLE: Partial<Record<string, ViewLabelField>> = {
+  actor: 'actor',
+  tenant: 'tenant',
+  executor: 'executor',
+  target: 'target',
+  record: 'record',
+};
 /** Bounded: one small entity lookup per term. */
 const MAX_RESOLVED_TERMS = 6;
 
@@ -51,7 +58,7 @@ export function nameableTerms(q: string, lang: 'query' | 'sql' = 'query'): { fie
   for (const token of fieldTerms(q)) {
     if (token.negated || !token.value || (token.valueKind !== 'plain' && token.valueKind !== 'quoted')) continue;
     const field = RESOLVABLE[canonicalField(token.field ?? '')] ?? RESOLVABLE[token.field ?? ''];
-    if (!field || seen.has(`${field}:${token.value}`)) continue;
+    if (!field || (field === 'record' && !token.value.includes(':')) || seen.has(`${field}:${token.value}`)) continue;
     seen.add(`${field}:${token.value}`);
     out.push({ field, value: token.value });
   }
@@ -77,7 +84,7 @@ export function useResolvedViewLabels(projectId: string, q: string, lang: 'query
     queries: terms.map((term) => ({
       queryKey: ['view-label', projectId, term.field, term.value] as const,
       queryFn: ({ signal }: { signal: AbortSignal }) =>
-        api.entities.list(projectId, { kind: term.field as EntityKind, q: term.value, limit: 10 }, signal),
+        api.entities.list(projectId, { kind: term.field === 'record' ? 'target' : (term.field as EntityKind), q: term.value, limit: 10 }, signal),
       staleTime: 5 * 60_000,
       retry: false,
     })),

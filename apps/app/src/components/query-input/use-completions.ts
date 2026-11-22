@@ -694,12 +694,12 @@ function queryValueItems(input: Input, context: Extract<QueryCompletion, { kind:
     items.push(snippet('phrase', '"…"', 'Exact value with spaces or symbols', '""', 1));
     if (type !== 'text') {
       items.push(snippet('group', '(a OR b)', 'Any of these values', '()', 1));
-      items.push(snippet('regex', '/regex/', 'RE2 regex on the whole value', '//', 1));
+      if (type !== 'record') items.push(snippet('regex', '/regex/', 'RE2 regex on the whole value', '//', 1));
     }
     if (type === 'attr') {
       items.push(snippet('gt', '>', 'Compare as a number or date', '>', 0, true), snippet('range', '[a TO b]', 'Numeric or date range', '[ TO ]', 5));
     }
-  } else if (p && !context.quoted && !p.endsWith('*') && type !== 'text' && !context.op) {
+  } else if (p && !context.quoted && !p.endsWith('*') && type !== 'text' && type !== 'record' && !context.op) {
     const term = `${quoteIfNeeded(p) === p ? p : ''}*`;
     if (term !== '*') items.push(snippet('prefix', term, `Starts with “${p}”`, term));
   }

@@ -293,7 +293,7 @@ export const savedViewSchema = z.object({
     labels: z
       .array(
         z.object({
-          field: z.enum(['actor', 'tenant', 'executor', 'target', 'impersonator']),
+          field: z.enum(['actor', 'tenant', 'executor', 'target', 'record', 'impersonator']),
           value: z.string().max(512),
           label: z.string().max(200),
         }),

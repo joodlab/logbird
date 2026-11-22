@@ -25,7 +25,7 @@ import { isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
-import { columns, compileQuery, QueryError } from './query';
+import { columns, compileQuery, QueryError, recordTargetPredicate } from './query';
 import { rollupSql } from './rollup-sql';
 import { freezeSqlClock, sqlSyntaxError, validateSql } from './sql-guard';
 
@@ -38,6 +38,7 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
   return { sql: frozen.sql, params: { ...frozen.params, [sqlExpression]: q.q ?? '' } };
 }
 
+type CompiledFilter = Awaited<ReturnType<typeof filter>>;
 type Params = Record<string, unknown>;
 export type ExportExecution = { signal: AbortSignal; cancelQuery: (queryId: string) => Promise<void> };
 export async function read<T>(
@@ -115,7 +116,7 @@ export function timeRange(q: RangeQuery, now = Date.now()) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: Awaited<ReturnType<typeof filter>>) {
+export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: CompiledFilter) {
   const c = compiled ?? (await filter(ch, q));
   return {
     sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql})`,
@@ -273,8 +274,13 @@ export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: st
     )
   ).map(toEvent);
 }
-export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<typeof histogramQuerySchema>): Promise<HistogramResponse> {
-  const w = await where(ch, p, q),
+export async function histogram(
+  ch: ClickHouseClient,
+  p: string,
+  q: z.infer<typeof histogramQuerySchema>,
+  compiled?: CompiledFilter,
+): Promise<HistogramResponse> {
+  const w = await where(ch, p, q, compiled),
     range = timeRange(q),
     interval = q.interval ?? pickHistogramInterval(Date.parse(range.to) - Date.parse(range.from));
   const step = interval * 1000;
@@ -300,8 +306,13 @@ export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<type
   }
   return { interval, buckets: [...buckets.values()] };
 }
-export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof facetQuerySchema>): Promise<FacetResponse> {
-  const w = await where(ch, p, q),
+export async function facets(
+  ch: ClickHouseClient,
+  p: string,
+  q: z.infer<typeof facetQuerySchema>,
+  compiled?: CompiledFilter,
+): Promise<FacetResponse> {
+  const w = await where(ch, p, q, compiled),
     col = Object.hasOwn(columns, q.field) ? columns[q.field] : undefined;
   let expr = col;
   if (!expr) {
@@ -343,8 +354,8 @@ async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
     )[0] ?? { events: 0, actors: 0, tenants: 0, failureRate: 0, avgConformance: 0 }
   );
 }
-async function top(ch: ClickHouseClient, p: string, q: RangeQuery, col: string, label: string, type = "''") {
-  const w = await where(ch, p, q);
+async function top(ch: ClickHouseClient, p: string, q: RangeQuery, col: string, label: string, type = "''", compiled?: CompiledFilter) {
+  const w = await where(ch, p, q, compiled);
   return read<{ id: string; label: string; type: string; count: number }>(
     ch,
     `SELECT ${col} id,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),id) label,argMax(${type},timestamp) type,count() count FROM events WHERE ${w.sql} AND ${col}!='' GROUP BY id ORDER BY count DESC,id LIMIT 10`,
@@ -453,14 +464,6 @@ function entityCursor(s: string, sort: EntitySort): [string, string, string] {
   }
   throw new Error('Invalid cursor');
 }
-function sqlLiteral(s: string) {
-  return `'${s.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
-}
-function entityFilter(kind: EntityKind, id: string) {
-  return kind === 'target'
-    ? `target.type:${JSON.stringify(id.slice(0, id.indexOf(':')))} target:${JSON.stringify(id.slice(id.indexOf(':') + 1))}`
-    : `${kind}:${JSON.stringify(id)}`;
-}
 export async function entityProfile(ch: ClickHouseClient, p: string, kind: EntityKind, id: string, q: RangeQuery): Promise<EntityProfile | null> {
   const raw = (
     await read<Entity>(
@@ -471,21 +474,24 @@ export async function entityProfile(ch: ClickHouseClient, p: string, kind: Entit
   )[0];
   const entity = raw ? { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) } : undefined;
   if (!entity) return null;
-  const entitySql =
+  const userFilter = await filter(ch, q);
+  // Compose trusted predicates after SQL-mode validation. Use separate bindings
+  // from the user filter, which may itself include record terms.
+  const entityFilter =
     kind === 'target'
-      ? `has(target_ids,${sqlLiteral(id.slice(id.indexOf(':') + 1))}) AND has(target_types,${sqlLiteral(id.slice(0, id.indexOf(':')))})`
-      : `${kind}_id = ${sqlLiteral(id)}`;
-  const scoped = { ...q, q: q.lang === 'sql' ? `(${q.q || '1'}) AND (${entitySql})` : `${q.q ? `(${q.q})` : ''} ${entityFilter(kind, id)}` };
+      ? recordTargetPredicate(entity.type, id.slice(entity.type.length + 1))
+      : { sql: `${kind}_id = {entityId:String}`, params: { entityId: id } };
+  const scoped = { sql: `(${userFilter.sql}) AND (${entityFilter.sql})`, params: { ...userFilter.params, ...entityFilter.params } };
+  const w = await where(ch, p, q, scoped);
   const [series, topActions, outcomes] = await Promise.all([
-    histogram(ch, p, scoped),
-    top(ch, p, scoped, 'action', 'action'),
-    facets(ch, p, { ...scoped, field: 'outcome', limit: 100 }),
+    histogram(ch, p, q, scoped),
+    top(ch, p, q, 'action', 'action', "''", scoped),
+    facets(ch, p, { ...q, field: 'outcome', limit: 100 }, scoped),
   ]);
   const related: EntityProfile['related'] = [];
   for (const k of ['actor', 'tenant', 'executor', 'target'] as const) {
     if (k === kind) continue;
-    const w = await where(ch, p, scoped),
-      target = k === 'target',
+    const target = k === 'target',
       idCol = target ? "concat(t.1,':',t.2)" : `${k}_id`,
       nameCol = target ? 't.3' : `${k}_name`,
       typeCol = target ? 't.1' : k === 'tenant' ? "''" : `${k}_type`;

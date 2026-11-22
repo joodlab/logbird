@@ -9,8 +9,20 @@ export class QueryError extends Error {
   }
 }
 export const columns: Record<string, string> = Object.fromEntries(
-  QUERY_FIELDS.flatMap((f) => [f.key, ...(f.aliases ?? [])].map((k) => [k, f.column])),
+  QUERY_FIELDS.flatMap(({ aliases, column, key }) => (column ? [key, ...(aliases ?? [])].map((field) => [field, column]) : [])),
 );
+
+/** Match both selectors on one target. The index keeps bindings distinct within a query. */
+export function recordTargetPredicate(type: string, id: string, index?: number) {
+  const typeParam = `recordType${index ?? ''}`;
+  const idParam = `recordId${index ?? ''}`;
+  return {
+    sql: `arrayExists((t, i) -> t = {${typeParam}:String} AND i = {${idParam}:String}, target_types, target_ids)`,
+    params: { [typeParam]: type, [idParam]: id },
+  };
+}
+
+const RECORD_HINT = 'Use record:<type>:<id>, for example record:booking:bk_1042';
 type Token = { kind: string; value: string; start: number; end: number };
 export type Term = { field: string; value: string; negate: boolean; start: number; end: number };
 function fail(reason: QueryErrorDetails['reason'], start: number, end: number, hint: string): never {
@@ -89,7 +101,8 @@ export function compileQuery(q = '', now = Date.now()) {
     params: Record<string, string | number> = {};
   let at = 0,
     terms = 0,
-    parameter = 0;
+    parameter = 0,
+    recordIndex = 0;
   const peek = () => tokens[at];
   const error = (hint: string, t = peek()) => fail('syntax', t?.start ?? q.length, t?.end ?? q.length, hint);
   const bind = (value: string | number, type = 'String') => {
@@ -97,26 +110,33 @@ export function compileQuery(q = '', now = Date.now()) {
     params[key] = value;
     return `{${key}:${type}}`;
   };
-  function value(joinColons = true): Token {
+  function value(joinColons = true, record = false): Token {
     const t = tokens[at++];
-    if (!t || !['value', 'regex'].includes(t.kind)) error('Expected value', t);
-    if (t && joinColons) {
-      while (tokens[at]?.start === t.end && tokens[at]?.kind === ':') {
-        const next = tokens[at++]!;
+    if (!t || (!['value', 'regex'].includes(t.kind) && !(record && (t.kind === ':' || (tokens[at]?.start === t.end && tokens[at]?.kind === ':')))))
+      return error(record ? RECORD_HINT : 'Expected value', t);
+    if (joinColons) {
+      let afterColon = t.kind === ':';
+      for (let next = peek(); next?.start === t.end; next = peek()) {
+        const part = next.kind === 'value' || (record && ['AND', 'OR', 'NOT', 'TO'].includes(next.kind));
+        if (next.kind !== ':' && !(afterColon && part)) break;
         t.value += next.value;
         t.end = next.end;
-        const tail = tokens[at];
-        if (tail && tail.start === t.end && tail.kind === 'value') {
-          t.value += tail.value;
-          t.end = tail.end;
-          at++;
-        }
+        afterColon = next.kind === ':';
+        at++;
       }
     }
-    return t!;
+    return t;
   }
   function predicate(field: string, token: Token, operator = '=', countTerm = true): string {
     if (countTerm && ++terms > 64) fail('too_complex', token.start, token.end, 'Query exceeds 64 terms');
+    if (field === 'record') {
+      if (token.kind === 'presence' || (token.kind === 'value' && token.value === '*' && q[token.start] !== '"')) return 'notEmpty(target_ids)';
+      const separator = token.value.indexOf(':');
+      if (token.kind === 'regex' || separator < 0) fail('type', token.start, token.end, RECORD_HINT);
+      const record = recordTargetPredicate(token.value.slice(0, separator), token.value.slice(separator + 1), recordIndex++);
+      Object.assign(params, record.params);
+      return record.sql;
+    }
     const info = QUERY_FIELDS.find((f) => f.key === field || f.aliases?.includes(field));
     const col = info?.column;
     const attr = field.replace(/^(attr|attributes)\./, '');
@@ -177,7 +197,9 @@ export function compileQuery(q = '', now = Date.now()) {
   }
   function fieldValue(field: string, depth: number): string {
     const t = peek();
-    if (!t) return error('Expected field value');
+    const record = field === 'record';
+    if (!t) return error(record ? RECORD_HINT : 'Expected field value');
+    if (record && ['>', '>=', '<', '<=', '[', '{'].includes(t.kind)) fail('type', t.start, t.end, RECORD_HINT);
     if (['>', '>=', '<', '<='].includes(t.kind)) {
       at++;
       return predicate(field, value(), t.kind);
@@ -199,10 +221,10 @@ export function compileQuery(q = '', now = Date.now()) {
     if (t.kind === '(') {
       if (depth >= 16) fail('too_complex', t.start, t.end, 'Query exceeds 16 nesting levels');
       at++;
-      const members = [value()];
+      const members = [value(true, record)];
       while (peek()?.kind === 'OR') {
         at++;
-        members.push(value());
+        members.push(value(true, record));
       }
       if (peek()?.kind !== ')') error('Expected closing value group parenthesis');
       at++;
@@ -214,7 +236,7 @@ export function compileQuery(q = '', now = Date.now()) {
       }
       return members.map((m) => `(${predicate(field, m)})`).join(' OR ');
     }
-    return predicate(field, value());
+    return predicate(field, value(true, record));
   }
   function atom(depth: number): string {
     const t = peek();
@@ -236,7 +258,7 @@ export function compileQuery(q = '', now = Date.now()) {
       at++;
       if (v.value === '_exists_') {
         const field = value(false);
-        return `(${predicate(field.value, { ...field, value: '*' })})`;
+        return `(${predicate(field.value, { ...field, kind: field.value === 'record' ? 'presence' : field.kind, value: '*' })})`;
       }
       return `(${fieldValue(v.value, depth)})`;
     }

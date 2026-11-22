@@ -21,7 +21,7 @@ interface Target {
 
 function targetFor(field: string): Target | null {
   const core = /^(attr|attributes)\./.test(field) ? undefined : coreField(field);
-  if (core) return core.type === 'text' ? null : { ref: core.column, type: core.type };
+  if (core) return core.type === 'text' || core.type === 'record' || !core.column ? null : { ref: core.column, type: core.type };
   return { ref: `attributes[${sqlString(attributeKey(field))}]`, type: 'attr' };
 }
 
@@ -49,7 +49,38 @@ function equals(t: Target, value: string): string | null {
   return `${t.ref} = ${literal(value, t)}`;
 }
 
+function recordValueToSql(raw: string): string | null {
+  const quoted = raw.startsWith('"');
+  if (quoted ? !/^"(?:[^"\\]|\\[\s\S])*"$/.test(raw) : /[\s()"<>[\]{}]|^\/|&&|\|\|/.test(raw)) return null;
+  const value = quoted ? raw.slice(1, -1).replace(/\\([\s\S])/g, '$1') : raw;
+  if (!quoted && value === '*') return 'notEmpty(target_ids)';
+  const separator = value.indexOf(':');
+  if (separator < 0) return null;
+  return `arrayExists((t, i) -> t = ${sqlString(value.slice(0, separator))} AND i = ${sqlString(value.slice(separator + 1))}, target_types, target_ids)`;
+}
+
+function recordTermToSql(token: QueryToken): string | null {
+  const value = token.value ?? '';
+  if (token.valueKind === 'plain' || token.valueKind === 'quoted')
+    return recordValueToSql(token.raw.slice((token.valueStart ?? token.start) - token.start));
+  if (token.valueKind !== 'group' || !value.endsWith(')')) return null;
+
+  const inner = value.slice(1, -1).trim();
+  const member = /("(?:[^"\\]|\\[\s\S])*"|[^\s()"<>[\]{}]+)(?:\s+OR\s+|$)/gy;
+  const parts: string[] = [];
+  let end = 0;
+  for (const match of inner.matchAll(member)) {
+    const sql = recordValueToSql(match[1] ?? '');
+    if (!sql) return null;
+    parts.push(sql);
+    end = match.index + match[0].length;
+  }
+  return parts.length && end === inner.length ? `(${parts.join(' OR ')})` : null;
+}
+
 function termToSql(token: QueryToken): string | null {
+  if (token.field === 'record') return recordTermToSql(token);
+  if (token.field === '_exists_' && token.value === 'record') return 'notEmpty(target_ids)';
   const t = targetFor(token.field ?? '');
   if (!t) return null;
   const value = token.value ?? '';
@@ -150,5 +181,5 @@ export function translateQueryToSql(q: string): string | null {
     pendingNot = false;
     needsAnd = true;
   }
-  return out.join(' ').replace(/\( /g, '(').replace(/ \)/g, ')');
+  return out.map((part, i) => (i === 0 || part === ')' || out[i - 1]?.endsWith('(') ? part : ` ${part}`)).join('');
 }

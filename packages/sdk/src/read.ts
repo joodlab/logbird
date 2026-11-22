@@ -49,11 +49,11 @@ export interface TrailQuery {
   cursor?: string;
 }
 export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
-  const quote = (value: string) => JSON.stringify(value);
+  const quote = (value: string) => `"${value.replace(/["\\]/g, '\\$&')}"`;
+  const target = input.target;
   const terms = [
     input.q ? `(${input.q})` : '',
-    input.target ? `target:${quote(input.target.id)}` : '',
-    input.target?.type ? `target.type:${quote(input.target.type)}` : '',
+    target?.type ? `record:${quote(`${target.type}:${target.id}`)}` : target ? `target:${quote(target.id)}` : '',
     input.actor ? `actor:${quote(input.actor)}` : '',
     input.tenant ? `tenant:${quote(input.tenant)}` : '',
   ].filter(Boolean);

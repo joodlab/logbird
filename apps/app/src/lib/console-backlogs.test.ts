@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { mustConfirmSecretClose } from '@/components/one-time-secret';
 import { entityViewName } from '@/components/views/save-entity-view-button';
 import { ApiRequestError } from './api/errors';
+import { entityQuery } from './entities';
 import { actorAttributeHint, outcomeWasSent, parentActor } from './events';
 import { sortProjectsByActivity } from './projects';
 import { queryProblem, queryProblemText } from './query-error';
@@ -151,5 +152,18 @@ describe('OPS-17/18 saved views', () => {
   it('builds a shareable link that reopens the view', () => {
     const href = viewHref('proj_1', { id: 'view_1', state: { q: 'tenant:biz_5', range: '7d' } }, 'https://console.example.test');
     expect(href).toBe('https://console.example.test/p/proj_1/events?q=tenant%3Abiz_5&range=7d&view=view_1');
+  });
+
+  it('uses the complete pair for record history links and labels', () => {
+    const q = entityQuery('target', 'order:A:1');
+    expect(q).toBe('record:"order:A:1"');
+    expect(nameableTerms(q)).toEqual([{ field: 'record', value: 'order:A:1' }]);
+    const labels = [
+      { field: 'record' as const, value: 'order:A:1', label: 'Order One' },
+      { field: 'record' as const, value: 'page:A:1', label: 'Page One' },
+      { field: 'target' as const, value: 'A:1', label: 'Legacy label' },
+    ];
+    expect(labelChips(q, labels).map((c) => c.text)).toEqual(['Record: Order One']);
+    expect(labelChips('target:"A:1" target.type:order', labels).map((c) => c.text)).toEqual(['Record: Legacy label']);
   });
 });

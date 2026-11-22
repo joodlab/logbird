@@ -9,7 +9,7 @@ import { errorMessage } from '@/lib/api/errors';
 import { keys, viewsQuery } from '@/lib/api/queries';
 import { splitTargetId } from '@/lib/entities';
 import { rangeLabel } from '@/lib/range';
-import { useCopyViewLink, type ViewLabelField, viewSearch } from '@/lib/views';
+import { useCopyViewLink, viewSearch } from '@/lib/views';
 
 /** "Bayt Al Rimal — last 7 days". */
 export function entityViewName(name: string, range: string): string {
@@ -47,7 +47,8 @@ export function SaveEntityViewButton({
   const existing = views.data?.find((v) => v.name === viewName && (v.state.q ?? '') === query && (v.state.range ?? '24h') === range);
   const open = (view: { id: string; state: Parameters<typeof viewSearch>[0]['state'] }) =>
     navigate({ to: '/p/$projectId/events', params: { projectId }, search: viewSearch(view) });
-  const value = kind === 'target' ? splitTargetId(entityId).id : entityId;
+  const field = kind === 'target' && entityId.includes(':') ? 'record' : kind;
+  const displayId = kind === 'target' ? splitTargetId(entityId).id : entityId;
   const save = useMutation({
     mutationFn: () =>
       api.views.create(projectId, {
@@ -57,7 +58,7 @@ export function SaveEntityViewButton({
           q: query,
           lang: 'query',
           range,
-          ...(name && name !== value ? { labels: [{ field: kind as ViewLabelField, value, label: name.slice(0, 200) }] } : {}),
+          ...(name && name !== displayId ? { labels: [{ field, value: entityId, label: name.slice(0, 200) }] } : {}),
         },
       }),
     onSuccess: async (view) => {

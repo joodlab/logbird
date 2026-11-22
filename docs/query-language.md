@@ -7,6 +7,7 @@ Logbird searches one authorized project within a half-open UTC time range. The d
 | Construct | Example | Meaning |
 | --- | --- | --- |
 | Exact | action:hotel.policy.updated | Exact, case-sensitive value |
+| Record | record:booking:bk_1042 | Exact type and id on the same target |
 | Prefix | action:hotel.* | Trailing wildcard; internal stars are literal |
 | Negation | -env:staging or NOT env:staging | Exclude matches |
 | Presence | impersonator:* -tenant:* or _exists_:impersonator | Non-empty / missing (numeric/date columns always present) |
@@ -22,6 +23,10 @@ Logbird searches one authorized project within a half-open UTC time range. The d
 | Attribute | metadata.channel:whatsapp | Unknown keys are attribute lookups; attr. and attributes. prefixes are aliases |
 
 Arrays (target, target.type, target.name, changes.field) match any element. Attribute comparisons convert strings with toFloat64OrNull, or parseDateTime64BestEffortOrNull for date bounds; invalid conversions do not match. String fields do not support ordered comparisons. Quote values containing whitespace or grammar punctuation; quoted strings accept backslash escapes.
+
+Use `record:<type>:<id>` to filter a record's history. The first colon in the value separates the type from the id, so use types without colons. For example, `record:"order:A:1"` matches the order with id `A:1`, and `record:"page:home page"` matches the page with id `home page`. Record pairs match exactly and support negation and value groups, such as `-record:(page:1 OR site:7)`. `record:*` and `_exists_:record` match events with any target. Use `attr.record` to search a custom attribute named `record`.
+
+`target:12 target.type:site` checks the arrays independently, so it also matches an event with targets `page:12` and `site:7`. Existing saved views using those terms keep this behavior. Use `record:site:12` for the paired match.
 
 Examples retained from v0:
 
@@ -70,6 +75,7 @@ resolved dates are parameters. `NOT _exists_:field` means missing.
 | target |  | array | target_ids | entities |
 | target.type |  | array | target_types | entities |
 | target.name |  | array | target_names | none |
+| record |  | record pair | target_types + target_ids | entities |
 | changes.field |  | array | changes_fields | none |
 | operation |  | string | operation_id | none |
 | parent |  | string | parent_event_id | none |
