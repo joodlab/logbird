@@ -155,12 +155,16 @@ Audit logging never takes your application down with it:
   the server never stores an event twice.
 - **The queue is bounded** (`MaxQueueSize`, 10,000 events by default). If Logbird stays unreachable long enough to fill
   it, the oldest events are dropped and each drop is reported.
-- **Every event Logbird gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`, `Rejected`, `Shutdown`,
-  …): rejections by the server on the `logbird.events.rejected` counter, everything else on `logbird.events.dropped`.
-  `OnDrop` is told about each one on a background thread; if your callback falls far behind (more than `MaxQueueSize`
-  notifications), further notifications are skipped and counted on `logbird.notifications.lost`, so keep it fast.
-- **Some of those events are unconfirmed rather than lost**: when a request times out or shutdown ends while a batch
-  is in flight, the server may already have stored it. Treat `HttpError` and `Shutdown` drops as "not confirmed".
+- **Every event the running client gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`,
+  `Rejected`, `Shutdown`, …): rejections by the server on the `logbird.events.rejected` counter, everything else on
+  `logbird.events.dropped`. A client being disposed leaves the meter, so a collection after shutdown may miss its last
+  drops; `OnDrop` and the log still report them. Events lost in a crash are not reported at all (see the outbox below).
+- **`OnDrop` is told about each one** on a background thread; if your callback falls far behind (more than
+  `MaxQueueSize` notifications), further notifications are skipped and counted on `logbird.notifications.lost`, so keep
+  it fast.
+- **Some of those events are unconfirmed rather than lost**: when a request times out, a response's acknowledgement is
+  lost on the way back, or shutdown ends while a batch is in flight, the server may already have stored the event.
+  Treat `HttpError`, `Unacknowledged` and `Shutdown` drops as "not confirmed".
 - **On shutdown** the host sends what is queued, within `ShutdownTimeout` (10 seconds) and the host's own shutdown
   budget.
 
@@ -178,6 +182,12 @@ The queue lives in memory, so a crash loses what is queued. For events that must
 own database in the same transaction as the change (an outbox), with their id, their `OccurredAt` and their content,
 and send them from there exactly as stored on every attempt. A resend is then always an exact retry; an event rebuilt
 with a new timestamp would conflict with the copy the server already has.
+
+`Track` only queues an event, and a successful `FlushAsync` means each event was stored *or* given up on, so neither
+proves an event was stored. Keep each outbox row until you have confirmed its event, for example by reading it back by
+id with `LogbirdReadClient.GetAsync`, and resend it, exactly as stored, until then. Resending a stored event is always
+safe. Decide yourself what happens to a row that is never confirmed (for example alert and keep it); Logbird cannot
+make that choice for you.
 
 ## 6. Check that it worked
 

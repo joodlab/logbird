@@ -25,7 +25,8 @@ dotnet run
 
 `dotnet run` uses the `Development` launch profile in `Properties/launchSettings.json`, which is what makes ASP.NET Core
 load user secrets. If you start the app another way (for example `dotnet bin/.../Logbird.Example.AspNetCore.dll`), set
-`ASPNETCORE_ENVIRONMENT=Development` or pass the key as the `Logbird__IngestKey` environment variable.
+`ASPNETCORE_ENVIRONMENT=Development`, or pass the settings as environment variables: `Logbird__IngestKey`, and
+`Logbird__Endpoint` if your Logbird is not at the default address.
 
 The API listens on `http://127.0.0.1:4740`. In another terminal (`cookies.txt` is git-ignored):
 
