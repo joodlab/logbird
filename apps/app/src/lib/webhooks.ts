@@ -1,5 +1,13 @@
-import { MAX_WEBHOOK_ENDPOINTS, type WebhookEndpoint } from '@logbird/contracts';
+import {
+  listWebhookDeliveriesResponseSchema,
+  MAX_WEBHOOK_ENDPOINTS,
+  type WebhookEndpoint,
+  webhookAttemptSchema,
+  webhookDeliverySchema,
+} from '@logbird/contracts';
+import { z } from 'zod';
 import { ApiRequestError } from '@/lib/api/errors';
+import { MASK_LABEL, type ScopeMask } from '@/lib/api-keys';
 
 export { MAX_WEBHOOK_ENDPOINTS };
 
@@ -27,7 +35,9 @@ export function scopeSummary(scope: WebhookEndpoint['scope']): string {
   const parts: string[] = [];
   if (scope.tenantId) parts.push(`tenant ${scope.tenantId}`);
   if (scope.target) parts.push(`record ${scope.target.type}:${scope.target.id}`);
-  return parts.length ? `Only ${parts.join(' and ')}` : 'The whole project';
+  const where = parts.length ? `Only ${parts.join(' and ')}` : 'The whole project';
+  const hidden = (scope.mask ?? []).map((m) => MASK_LABEL[m as ScopeMask] ?? m);
+  return hidden.length ? `${where}, hiding ${hidden.join(', ')}` : where;
 }
 
 /** The URL as people recognise it: host and path. The full URL (it can carry a token) shows only in the editor. */
@@ -74,6 +84,14 @@ export function webhookErrorCopy(error: unknown): string {
       return 'This endpoint already has ten secrets signing deliveries. Rotate with no overlap, or wait for an overlap to end.';
     case 'invalid_query':
       return `The filter is not valid: ${error.message}`;
+    case 'webhook_disabled':
+      return 'This endpoint is off. Turn it on first.';
+    case 'webhook_invalid_scope':
+      return 'This endpoint is held until its scope is corrected. Edit the scope first.';
+    case 'webhook_filter_review_required':
+      return 'This endpoint is held until its filter is confirmed. Confirm or edit the filter first.';
+    case 'webhook_delivery_pending':
+      return 'This delivery is already waiting to be sent.';
     default:
       return error.message;
   }
@@ -81,7 +99,16 @@ export function webhookErrorCopy(error: unknown): string {
 
 /* ---------------- the endpoint form ---------------- */
 
-export type Form = { url: string; description: string; filter: string; tenantId: string; targetType: string; targetId: string; enabled: boolean };
+export type Form = {
+  url: string;
+  description: string;
+  filter: string;
+  tenantId: string;
+  targetType: string;
+  targetId: string;
+  masks: ScopeMask[];
+  enabled: boolean;
+};
 export const formFrom = (e: WebhookEndpoint | null): Form => ({
   url: e?.url ?? '',
   description: e?.description ?? '',
@@ -89,6 +116,7 @@ export const formFrom = (e: WebhookEndpoint | null): Form => ({
   tenantId: e?.scope?.tenantId ?? '',
   targetType: e?.scope?.target?.type ?? '',
   targetId: e?.scope?.target?.id ?? '',
+  masks: (e?.scope?.mask ?? []) as ScopeMask[],
   enabled: e?.enabled ?? true,
 });
 export type FormErrors = Partial<Record<keyof Form | 'form', string>>;
@@ -115,6 +143,7 @@ export function validateWebhookForm(f: Form): FormErrors {
   // The missing half is the field that needs attention.
   if (type && !id) e.targetId ??= 'Add the record’s id: a record needs both its type and its id.';
   if (id && !type) e.targetType ??= 'Add the record’s type: a record needs both its type and its id.';
+  if (f.masks.length && !f.tenantId.trim() && !(type && id)) e.masks = 'Hidden fields apply to a tenant or a record: name one above.';
   return e;
 }
 
@@ -133,7 +162,9 @@ export function fieldErrorsFromValidation(error: unknown): FormErrors {
             ? leaf === 'type'
               ? 'targetType'
               : 'targetId'
-            : 'tenantId'
+            : sub === 'mask'
+              ? 'masks'
+              : 'tenantId'
         : map[String(top)];
     if (field && !out[field]) out[field] = issue.message || 'This value is not accepted.';
   }
@@ -145,5 +176,118 @@ export const scopeOf = (f: Form) => {
   const type = f.targetType.trim();
   const id = f.targetId.trim();
   if (!tenantId && !type && !id) return null;
-  return { ...(tenantId ? { tenantId } : {}), ...(type && id ? { target: { type, id } } : {}) };
+  return {
+    ...(tenantId ? { tenantId } : {}),
+    ...(type && id ? { target: { type, id } } : {}),
+    ...(f.masks.length ? { mask: [...f.masks].sort() } : {}),
+  };
 };
+
+/* ---------------- held and warning states ---------------- */
+
+/** Where the operator procedure lives (self-hosting docs, on GitHub). */
+export const CURSOR_REVIEW_DOCS = 'https://github.com/joodlab/logbird/blob/master/docs/self-hosting.md#reconcile-a-webhook-discovery-cursor';
+
+export type EndpointState = {
+  key: 'filter' | 'scope' | 'cursor' | 'secrets';
+  /** A hold pauses delivery; a warning does not. */
+  kind: 'hold' | 'warning';
+  badge: string;
+  title: string;
+  /** What happened, whether anything is lost, and what to do. */
+  what: string;
+  lost: string;
+  todo: string;
+};
+
+/** Every state the API reports for an endpoint, holds first. A held endpoint delivers nothing and loses nothing. */
+export function endpointStates(e: WebhookEndpoint): EndpointState[] {
+  const states: EndpointState[] = [];
+  const kept = 'It keeps its place: every event that arrives meanwhile is sent once it resumes.';
+  if (e.filterWarning) {
+    states.push({
+      key: 'filter',
+      kind: 'hold',
+      badge: 'Held: confirm filter',
+      title: 'Paused until someone confirms its filter',
+      what: 'The query language changed in this version, and this endpoint’s filter was written for the old one. Rather than guess what it means now, Logbird paused the endpoint.',
+      lost: kept,
+      todo: 'Check that the filter below still selects the events you want, then confirm it, or edit it.',
+    });
+  }
+  if (e.scopeWarning) {
+    states.push({
+      key: 'scope',
+      kind: 'hold',
+      badge: 'Held: fix scope',
+      title: 'Paused until its scope is corrected',
+      what: 'The stored scope names a tenant, record or hidden field this version does not accept.',
+      lost: kept,
+      todo: 'Edit the scope: name a tenant or record exactly as stored, or clear the scope.',
+    });
+  }
+  if (e.cursorWarning) {
+    states.push({
+      key: 'cursor',
+      kind: 'hold',
+      badge: 'Needs an operator',
+      title: 'Paused until an operator checks its position',
+      what: 'Logbird found that this endpoint’s place in the event stream does not add up, so it stopped looking for new events instead of skipping or repeating any.',
+      lost: kept,
+      todo: 'This needs the person who runs your Logbird server: the procedure is in the self-hosting guide. There is nothing to do here.',
+    });
+  }
+  if (e.secretOverlapWarning) {
+    states.push({
+      key: 'secrets',
+      kind: 'warning',
+      badge: 'Too many secrets',
+      title: 'Only the ten newest secrets sign deliveries',
+      what: 'More than ten secrets are still inside their overlap, from rotations before this version. Deliveries continue, signed with the ten newest.',
+      lost: 'Nothing is paused or lost. A receiver that only knows an older secret will fail to verify.',
+      todo: 'Rotate with no overlap to retire the old secrets, or wait for an overlap to end.',
+    });
+  }
+  return states;
+}
+
+/* ---------------- delivery log ---------------- */
+
+const ATTEMPT_ERRORS: Record<string, string> = {
+  destination_rejected: 'Your endpoint answered with an error status.',
+  timeout: 'Your endpoint did not answer in time.',
+  network_error: 'Logbird could not connect to your endpoint.',
+  event_unavailable: 'The event is no longer stored (retention), so there was nothing to send.',
+  invalid_event_id: 'The event id could not be used to sign a delivery.',
+  lookup_failed: 'The endpoint’s address could not be resolved, or resolved to a private address.',
+  signing_failed: 'Logbird could not sign the delivery with this endpoint’s secret.',
+  scope_mismatch: 'The event no longer matches the endpoint’s filter or scope, so it was skipped. This does not count as a failure.',
+};
+
+/** Why an attempt failed, in words. A code this console does not know yet still shows, as a generic error with its code. */
+export function attemptErrorCopy(code: string | null): string | null {
+  if (!code) return null;
+  return ATTEMPT_ERRORS[code] ?? `The attempt failed (${code}).`;
+}
+
+export const DELIVERY_STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending',
+  succeeded: 'Delivered',
+  failed: 'Failed',
+  skipped: 'Skipped',
+};
+export const ATTEMPT_STATUS_LABEL: Record<string, string> = {
+  sending: 'Sending',
+  succeeded: 'Delivered',
+  failed: 'Failed',
+  interrupted: 'Interrupted',
+  skipped: 'Skipped',
+};
+
+/**
+ * The delivery log, tolerant of attempt error codes this console does not know yet (the contract may add values):
+ * an unknown code still renders, as a generic error with its code, instead of failing the whole page.
+ */
+export const lenientDeliveriesSchema = listWebhookDeliveriesResponseSchema.extend({
+  data: z.array(webhookDeliverySchema.extend({ attempts: z.array(webhookAttemptSchema.extend({ error: z.string().nullable() })) })),
+});

@@ -1,8 +1,9 @@
-import type { WebhookEndpoint } from '@logbird/contracts';
+import { SCOPE_MASKS, type WebhookEndpoint } from '@logbird/contracts';
 import { TypePill } from '@logbird/ui/components/badges';
 import { CopyButton } from '@logbird/ui/components/copy-button';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
+import { Checkbox } from '@logbird/ui/components/ui/checkbox';
 import { useConfirm } from '@logbird/ui/components/ui/confirm';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@logbird/ui/components/ui/dialog';
 import { Label } from '@logbird/ui/components/ui/label';
@@ -19,9 +20,12 @@ import { CloseWithoutCopying, useSecretCloseGuard } from '@/components/one-time-
 import { SettingsSection } from '@/components/settings-section';
 import { TextField } from '@/components/text-field';
 import { Timestamp } from '@/components/timestamp';
+import { DeliveryLog } from '@/components/webhooks/delivery-log';
+import { EndpointStates } from '@/components/webhooks/endpoint-states';
 import { api } from '@/lib/api/client';
 import { ApiRequestError } from '@/lib/api/errors';
 import { keys as queryKeys, webhooksQuery } from '@/lib/api/queries';
+import { MASK_HINT, MASK_LABEL } from '@/lib/api-keys';
 import { creatorLabel } from '@/lib/events';
 import { useOrganization } from '@/lib/organization';
 import { useCan } from '@/lib/permissions';
@@ -29,6 +33,7 @@ import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import {
   disabledCopy,
   displayUrl,
+  endpointStates,
   type Form,
   type FormErrors,
   fieldErrorsFromValidation,
@@ -181,9 +186,28 @@ function EndpointCard({
     },
     onError: (error) => toast.error('Could not delete the endpoint', { description: webhookErrorCopy(error) }),
   });
+  // Confirming the stored filter as it is: a PATCH that includes filterQuery, unchanged, lifts the hold.
+  const confirmFilter = useMutation({
+    mutationFn: () => api.webhooks.update(projectId, endpoint.id, { filterQuery: endpoint.filterQuery }),
+    ...webhookRetry,
+    onSuccess: () => {
+      toast.success('Filter confirmed', { description: 'Delivery resumes where it paused, including events that arrived meanwhile.' });
+      refresh();
+    },
+    onError: (error) => toast.error('Could not confirm the filter', { description: webhookErrorCopy(error) }),
+  });
+  const test = useMutation({
+    mutationFn: () => api.webhooks.test(projectId, endpoint.id),
+    ...webhookRetry,
+    onSuccess: () => toast.success('Test ping queued', { description: 'It is sent within seconds and shows up in the delivery log.' }),
+    onError: (error) => toast.error('Could not send a test ping', { description: webhookErrorCopy(error) }),
+  });
+  const [logOpen, setLogOpen] = useState(false);
   const off = !endpoint.enabled;
   const reason = disabledCopy(endpoint.disabledReason);
-  const busy = (toggle.isPending && toggle.failureCount > 0) || (remove.isPending && remove.failureCount > 0);
+  const states = endpointStates(endpoint);
+  const held = states.find((s) => s.kind === 'hold');
+  const busy = [toggle, remove, confirmFilter, test].some((m) => m.isPending && m.failureCount > 0);
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-lg border p-4" data-testid="webhook-endpoint">
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -194,7 +218,7 @@ function EndpointCard({
           </p>
           {endpoint.description ? <p className="text-muted-foreground text-sm">{endpoint.description}</p> : null}
         </div>
-        <TypePill tone={off ? 'warning' : 'brand'}>{off ? 'Off' : 'On'}</TypePill>
+        <TypePill tone={off || held ? 'warning' : 'brand'}>{off ? 'Off' : held ? held.badge : 'On'}</TypePill>
       </div>
       {off ? (
         <div className="flex items-start gap-2 rounded-md border border-outcome-denied/30 bg-outcome-denied/[0.06] p-3 text-sm" role="status">
@@ -213,6 +237,13 @@ function EndpointCard({
           </span>
         </div>
       ) : null}
+      <EndpointStates
+        confirming={confirmFilter.isPending}
+        endpoint={endpoint}
+        onConfirmFilter={() => confirmFilter.mutate()}
+        onEdit={onEdit}
+        onRotate={onRotate}
+      />
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
         <dt className="text-muted-foreground">Sends</dt>
         <dd className="min-w-0">
@@ -232,6 +263,19 @@ function EndpointCard({
         </Button>
         <Button onClick={onRotate} size="sm" variant="outline">
           Rotate secret
+        </Button>
+        <Button onClick={() => setLogOpen(true)} size="sm" variant="outline">
+          Delivery log
+        </Button>
+        <Button
+          disabled={test.isPending || off || Boolean(held)}
+          onClick={() => test.mutate()}
+          size="sm"
+          title={off ? 'Turn the endpoint on first.' : held ? 'Resolve the hold first.' : undefined}
+          variant="outline"
+        >
+          {test.isPending ? <Loader2Icon className="animate-spin" /> : null}
+          Send test ping
         </Button>
         <Button disabled={toggle.isPending} onClick={() => toggle.mutate(off)} size="sm" variant="outline">
           {toggle.isPending ? <Loader2Icon className="animate-spin" /> : null}
@@ -259,6 +303,7 @@ function EndpointCard({
           </span>
         ) : null}
       </div>
+      <DeliveryLog endpoint={endpoint} onOpenChange={setLogOpen} open={logOpen} projectId={projectId} />
     </li>
   );
 }
@@ -347,7 +392,7 @@ function EndpointDialog({
         // A body the contract rejects names its field: put the message there.
         const onField = fieldErrorsFromValidation(error);
         setErrors(Object.keys(onField).length ? onField : { form: webhookErrorCopy(error) });
-        if (onField.tenantId || onField.targetType || onField.targetId) setNarrowOpen(true);
+        if (onField.tenantId || onField.targetType || onField.targetId || onField.masks) setNarrowOpen(true);
       }
     },
   });
@@ -355,13 +400,13 @@ function EndpointDialog({
     const next = validateWebhookForm(form);
     setErrors(next);
     if (Object.keys(next).length) {
-      if (next.tenantId || next.targetType || next.targetId) setNarrowOpen(true);
+      if (next.tenantId || next.targetType || next.targetId || next.masks) setNarrowOpen(true);
       return;
     }
     save.mutate({ f: form, target: endpoint, at: session.current });
   };
   const retrying = save.isPending && save.failureCount > 0 && isWebhookBusy(save.failureReason);
-  const scopeInvalid = Boolean(errors.tenantId || errors.targetType || errors.targetId);
+  const scopeInvalid = Boolean(errors.tenantId || errors.targetType || errors.targetId || errors.masks);
   const narrowShown = narrowOpen || scopeInvalid;
   return (
     <Dialog onOpenChange={(next) => (next ? undefined : onClose())} open={open}>
@@ -427,7 +472,7 @@ function EndpointDialog({
                 className={narrowShown ? 'mt-0.5 size-4 shrink-0 text-muted-foreground' : '-rotate-90 mt-0.5 size-4 shrink-0 text-muted-foreground'}
               />
               <span>
-                Only part of the project <span className="font-normal text-muted-foreground">· one tenant or one record</span>
+                Only part of the project <span className="font-normal text-muted-foreground">· one tenant or record, hidden fields</span>
               </span>
             </button>
             <div className="flex min-w-0 flex-col gap-3" hidden={!narrowShown} id={`${ids}-narrow`}>
@@ -465,6 +510,30 @@ function EndpointDialog({
                   value={form.targetId}
                 />
               </div>
+              <fieldset
+                aria-describedby={`${ids}-masks-hint`}
+                aria-invalid={Boolean(errors.masks) || undefined}
+                className="flex min-w-0 flex-col gap-2"
+              >
+                <legend className="font-medium text-sm">
+                  Hide fields <span className="font-normal text-muted-foreground">· optional</span>
+                </legend>
+                {SCOPE_MASKS.map((mask) => (
+                  // biome-ignore lint/a11y/noLabelWithoutControl: the Base UI checkbox inside is the control.
+                  <label className="flex items-start gap-2 text-sm" key={mask}>
+                    <Checkbox
+                      checked={form.masks.includes(mask)}
+                      onCheckedChange={(checked) => set({ masks: checked ? [...form.masks, mask] : form.masks.filter((m) => m !== mask) })}
+                    />
+                    <span>
+                      {MASK_LABEL[mask]} <span className="text-muted-foreground text-xs">· {MASK_HINT[mask]}</span>
+                    </span>
+                  </label>
+                ))}
+                <p className={errors.masks ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'} id={`${ids}-masks-hint`}>
+                  {errors.masks ?? 'Hidden fields are emptied in every delivery, retries and test pings included, and the filter cannot use them.'}
+                </p>
+              </fieldset>
             </div>
           </div>
           {endpoint ? (
