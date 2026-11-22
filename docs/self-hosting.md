@@ -272,6 +272,20 @@ below for older Trailmark installations.
 See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
 for signal handling; its live acceptance is pending in #77.
 
+### Upgrading to the arrival-time index (010)
+
+Migration 010 adds a minmax skip index on `events.received_at` and materializes it. Arrival-time reads (webhook
+discovery, alert windows, the live view) then skip granules whose arrival range misses the requested slice instead of
+reading the project's whole `received_at` history. It is additive: no rows are rewritten and nothing else changes.
+`MATERIALIZE INDEX` runs as a background mutation. The migration returns at once, reads stay correct while it runs
+(parts without the index are read as before), and new parts get the index on insert. Measured locally on a shared
+2 GiB ClickHouse: 23.8 million rows (4.05 GiB) materialized in about 35 seconds, roughly 2.5 minutes per 100 million
+rows. That is an extrapolation from one machine, not a bound; busy or slower storage takes longer. Confirm completion
+with `SELECT is_done FROM system.mutations WHERE table = 'events' AND command LIKE '%idx_received_at%'`.
+Known limit: during a large historical import (old event times arriving now), a slice that overlaps the import's
+arrival window still reads the granules the import touched, because each of them now spans that window. Slices after
+the import are fast again.
+
 ### Upgrading to immutable ids
 
 Back up Postgres and ClickHouse, preserve the private environment file and stop
