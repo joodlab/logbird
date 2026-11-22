@@ -1,4 +1,4 @@
-import { exportEvents, insertEvents, searchEvents } from '@logbird/clickhouse';
+import { exportEvents, insertEvents, read, searchEvents } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { clickhouse } from './clickhouse';
@@ -117,4 +117,19 @@ it('keeps a shallow event exact beside a deeply nested wrapper property, so a st
   const retry = await rawPost(event);
   expect(await retry.json()).toMatchObject({ accepted: 1, ids: ['wrapped'], rejected: [] });
   expect(await f.count()).toBe(1);
+});
+
+it('never creates a shared record for numeric target ids too long to index', async () => {
+  const long = (last: string) => `${'1'.repeat(256)}${last}`;
+  const at = new Date(Date.now() - 20_000).toISOString();
+  const res = await rawPost(
+    `[{"id":"long-1","action":"qa.long","occurredAt":"${at}","targets":[{"type":"order","id":${long('1')}}]},{"id":"long-2","action":"qa.long","occurredAt":"${at}","targets":[{"type":"order","id":${long('2')}}]}]`,
+  );
+  expect(await res.json()).toMatchObject({ accepted: 2, rejected: [] });
+  const records = await read<{ entity_id: string }>(
+    clickhouse,
+    "SELECT entity_id FROM entities WHERE project_id={p:String} AND kind='target' GROUP BY entity_id",
+    { p: f.project },
+  );
+  expect(records).toEqual([]);
 });

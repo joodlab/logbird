@@ -6,7 +6,6 @@
  * move on). A receiver misconfiguration (a secret that isn't a valid `whsec_…`, a bad clock or tolerance) throws a
  * `TypeError` or `RangeError`, which should reach your error monitoring instead of turning every delivery into a 400.
  */
-import { parseJsonExact } from './exact-json';
 
 /** Why a request failed verification. Misconfiguration is not a verification failure (see above). */
 export type WebhookVerificationReason =
@@ -153,7 +152,7 @@ export async function verifyWebhook<T = unknown>(options: VerifyWebhookOptions):
   }
   if (!matched) throw new WebhookVerificationError('no_matching_signature');
   try {
-    return parseJsonExact(payload) as T;
+    return JSON.parse(payload) as T;
   } catch {
     throw new WebhookVerificationError('invalid_payload');
   }

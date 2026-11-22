@@ -241,8 +241,7 @@ when pending captures may still exist rather than calling client.shutdown direct
 
 Large numbers: a JavaScript `number` cannot hold integers above 2^53 − 1, and the SDK copies events through JSON.
 Send 64-bit ids and long decimals as strings. Numeric entity ids within the safe range (`actor: { id: 42 }`) are fine
-and are indexed as `"42"`. `verifyWebhook()` keeps exact digits in parsed webhook payloads on runtimes with JSON.parse source access (Node 21+,
-current browsers), except in payloads nested thousands of levels deep. See
+and are indexed as `"42"`. See
 [numbers and ids](../../docs/integrating-a-backend.md#numbers-and-ids).
 
 

@@ -143,8 +143,17 @@ it('never truncates a long numeric id: plain if it fits, else unique scientific,
   expect(ids('1e255')).toMatchObject({ actor_id: `1${'0'.repeat(255)}`, target_ids: [`1${'0'.repeat(255)}`] });
   expect(ids('1e256')).toMatchObject({ actor_id: '1e256', target_ids: ['1e256'] });
   expect(ids('2e256').target_ids).toEqual(['2e256']);
-  // Two 257-significant-digit ids that share their first 256 digits must not merge: neither is indexed.
+  // Two 257-significant-digit ids that share their first 256 digits must not merge: neither is indexed, and such a
+  // target leaves the record columns entirely (no shared `order:` record).
   expect([ids(`${'1'.repeat(256)}1`).actor_id, ids(`${'1'.repeat(256)}2`).actor_id]).toEqual(['', '']);
+  expect(ids(`${'1'.repeat(256)}1`)).toMatchObject({ target_types: [], target_ids: [], target_names: [] });
+  const mixed = normalize(
+    wire(`{"action":"x","targets":[{"type":"page","id":7},{"type":"order","id":${'1'.repeat(257)}},{"type":"site","id":"s"}]}`),
+  ).row;
+  expect([mixed.target_types, mixed.target_ids]).toEqual([
+    ['page', 'site'],
+    ['7', 's'],
+  ]);
 });
 
 it('stores long numbers as doubles with a warning only for events nested deeper than the exactness bound', () => {
@@ -155,4 +164,16 @@ it('stores long numbers as doubles with a warning only for events nested deeper 
   const shallow = normalize(wire('{"action":"x","metadata":{"n":12345678901234567891,"deep":[[[1]]]}}'));
   expect(shallow.warning).toBeNull();
   expect(shallow.row.attributes['metadata.n']).toBe('12345678901234567891');
+});
+
+it('keeps the deep-rounding warning when re-normalizing, and survives cyclic caller objects', () => {
+  expect(normalize(wire('{"action":"x"}')).warning).toBeNull();
+  expect(
+    normalizeEvent({ action: 'x' }, { ...ctx, numbersRounded: true }).ok && normalizeEvent({ action: 'x' }, { ...ctx, numbersRounded: true }),
+  ).toMatchObject({
+    warning: expect.stringContaining('Nested deeper than 1000 levels'),
+  });
+  const cyclic: Record<string, unknown> = { action: 'x' };
+  cyclic.self = cyclic;
+  expect(normalizeEvent(cyclic, ctx)).toMatchObject({ ok: false, reason: 'event must be JSON serializable' });
 });

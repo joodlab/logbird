@@ -99,10 +99,10 @@ it('refuses plain decimals that would be huge, and non-numbers', () => {
 });
 
 it('skips arithmetic for exponents over 15 significant digits, in linear time', () => {
-  const huge = `1e-${'9'.repeat(1_000_000)}`; // more than 1000 exponent digits: kept as sent
+  const huge = `1e-${'9'.repeat(1_000_000)}`; // a million-digit exponent: exact string arithmetic, linear
   const padded = `1e-${'0'.repeat(1_000_000)}5`;
   const start = Date.now();
-  expect(canonicalDecimal(huge)).toBeNull();
+  expect(canonicalDecimal(huge)?.startsWith(`1e-${'9'.repeat(10)}`)).toBe(true);
   expect(isRawJson((parseJsonExact(`[${huge}]`) as unknown[])[0])).toBe(true);
   // Exponent padding is not significant: this is 0.00001, a plain number.
   expect(canonicalDecimal(padded)).toBe('1e-5');
@@ -147,4 +147,14 @@ it('rejects a raw JSON value that is not a number in the entity id contract', as
   const rawJSON = (JSON as JSON & { rawJSON: (t: string) => unknown }).rawJSON;
   expect(eventInputSchema.safeParse({ action: 'x', actor: { id: rawJSON('false') } }).success).toBe(false);
   expect(eventInputSchema.safeParse({ action: 'x', actor: { id: rawJSON('9007199254740993') } }).success).toBe(true);
+});
+
+it('shifts exponents of any length exactly, with carries and borrows', () => {
+  expect(canonicalDecimal('12.5e9999999999999999')).toBe('125e9999999999999998');
+  expect(canonicalDecimal('0.5e10000000000000000')).toBe('5e9999999999999999');
+  expect(canonicalDecimal('500e9999999999999999')).toBe('5e10000000000000001');
+  expect(canonicalDecimal('0.1e-10000000000000000')).toBe('1e-10000000000000001');
+  const big = `1${'0'.repeat(1200)}`;
+  expect(canonicalDecimal(`1e${big}`)).toBe(canonicalDecimal(`1E+${big}`));
+  expect(canonicalDecimal(`10e${big}`)).toBe(`1e${big.slice(0, -1)}1`);
 });

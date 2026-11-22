@@ -39,7 +39,11 @@ function numericId(v: unknown, cap: number): string | null {
 }
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
-export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {
+export const DEEP_NUMBERS_WARNING = `Nested deeper than ${EXACT_NUMBER_MAX_DEPTH} levels: long numbers were stored as doubles.`;
+export function normalizeEvent(
+  input: unknown,
+  ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean; numbersRounded?: boolean },
+) {
   // Only identifiers index numbers (integer primary keys); other text columns keep string-only semantics.
   const text = (v: unknown, cap = 512) => textOf(v, cap, false);
   const idText = (v: unknown, cap = 256) => textOf(v, cap, !ctx.legacyColumns);
@@ -53,7 +57,8 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     return { ok: false as const, reason: 'invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL' };
   // Exactness is bounded by depth: deeper than this, long numbers are stored as doubles (as JSON.parse gives) and the
   // caller is warned; stringifying raw values that deep would overflow the stack.
-  const roundedDeep = roundDeepRawNumbers(input);
+  // `numbersRounded`: a re-normalization of an input this function already rounded keeps the warning.
+  const roundedDeep = roundDeepRawNumbers(input) || ctx.numbersRounded === true;
   let payload: string;
   try {
     payload = JSON.stringify(input);
@@ -103,6 +108,9 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   for (const [key, fields] of Object.entries(known))
     for (const [k, v] of Object.entries(object(e[key]))) if (!fields.includes(k)) flatten(v, `${key}.${k}`, 2);
   const targets = Array.isArray(e.targets) ? e.targets.slice(0, 64).map(object) : [];
+  // A numeric target id too long to index is left out of the record columns (the payload keeps it): an empty id would
+  // make every such target one shared `type:` record.
+  const recordTargets = ctx.legacyColumns ? targets : targets.filter((t) => !(isNumber(t.id) && idText(t.id) === ''));
   targets.forEach((t, i) => {
     for (const [k, v] of Object.entries(t)) if (!['type', 'id', 'name'].includes(k)) flatten(v, `targets.${i}.${k}`, 3);
   });
@@ -120,7 +128,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
-      roundedDeep ? `Nested deeper than ${EXACT_NUMBER_MAX_DEPTH} levels: long numbers were stored as doubles.` : null,
+      roundedDeep ? DEEP_NUMBERS_WARNING : null,
       isNumber(e.id) ? 'Numeric id is not a stable event id; send a string id for safe retries.' : null,
     ]
       .filter(Boolean)
@@ -154,9 +162,9 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     tenant_id: idText(tenant.id),
     tenant_name: text(tenant.name),
     source: text(e.source, 128),
-    target_types: targets.map((t) => text(t.type, 64)),
-    target_ids: targets.map((t) => idText(t.id)),
-    target_names: targets.map((t) => text(t.name)),
+    target_types: recordTargets.map((t) => text(t.type, 64)),
+    target_ids: recordTargets.map((t) => idText(t.id)),
+    target_names: recordTargets.map((t) => text(t.name)),
     changes_fields: changes.map((c) => text(c.field, 256)),
     changes_before: changes.map((c) => wellFormed(value(c.before))),
     changes_after: changes.map((c) => wellFormed(value(c.after))),

@@ -14,13 +14,40 @@ type ExactJson = JSON & { rawJSON?: (text: string) => RawJson; isRawJSON?: (valu
 const json = JSON as ExactJson;
 const NUMBER = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
 
-/** Exponents up to this many significant digits use safe-integer arithmetic. */
+/** Exponents up to this many significant digits use safe-integer arithmetic; longer ones exact string arithmetic. */
 const SAFE_EXPONENT_DIGITS = 15;
-/** Longer exponents (up to this) use bounded BigInt arithmetic; beyond it a number keeps its sent spelling. */
-const MAX_EXPONENT_DIGITS = 1000;
+/**
+ * `exponent + shift` for an exponent of any length and a small shift (|shift| < 1e15, from a fraction length).
+ * Linear in the exponent's length: only the last 16 digits change, plus a carry or borrow run.
+ */
+function shiftExponent(exponent: string, shift: number): string {
+  const negative = exponent.startsWith('-');
+  const digits = exponent.replace(/^[+-]/, '').replace(/^0+/, '') || '0';
+  if (digits.length <= SAFE_EXPONENT_DIGITS) return String((negative ? -1 : 1) * Number(digits) + shift);
+  // |exponent| ≥ 1e15 > |shift|, so the sign cannot change: add `delta` to the magnitude.
+  const delta = BigInt(negative ? -shift : shift);
+  const head = digits.slice(0, -16);
+  const tail = BigInt(digits.slice(-16)) + delta;
+  const limit = 10n ** 16n;
+  let prefix = head;
+  let low = tail;
+  if (low >= limit) {
+    low -= limit;
+    const nines = /9*$/.exec(prefix)?.[0].length ?? 0;
+    const before = prefix.slice(0, prefix.length - nines);
+    prefix = `${before ? `${before.slice(0, -1)}${Number(before.at(-1)) + 1}` : '1'}${'0'.repeat(nines)}`;
+  } else if (low < 0n) {
+    low += limit;
+    const zeros = /0*$/.exec(prefix)?.[0].length ?? 0;
+    const before = prefix.slice(0, prefix.length - zeros);
+    prefix = `${before.slice(0, -1)}${Number(before.at(-1)) - 1}${'9'.repeat(zeros)}`;
+  }
+  const magnitude = `${prefix}${low.toString().padStart(16, '0')}`.replace(/^0+/, '') || '0';
+  return `${negative ? '-' : ''}${magnitude}`;
+}
 /**
  * One spelling per decimal value: `-123e-5` for `-0.00123`, `0` for any zero. Null when `text` is not a JSON/JS
- * number spelling (e.g. Infinity) or its exponent has more than 15 digits (such a number overflows or underflows a
+ * number spelling (e.g. Infinity). Exponents of any length are exact (string arithmetic); a number whose exponent overflows or underflows a
  * double and keeps its sent spelling). Linear in the input: digit scans and safe-integer arithmetic only.
  */
 export function canonicalDecimal(text: string): string | null {
@@ -32,13 +59,9 @@ export function canonicalDecimal(text: string): string | null {
   while (start < all.length && all.charCodeAt(start) === 48) start++;
   // Zero is zero whatever its exponent; padded exponents (`1e0000000000000000`) are measured without their zeros.
   if (start === all.length) return '0';
-  const expDigits = (m[4] ?? '').replace(/^[+-]/, '').replace(/^0+/, '').length;
-  if (expDigits > MAX_EXPONENT_DIGITS) return null;
   let end = all.length;
   while (all.charCodeAt(end - 1) === 48) end--;
-  const shift = all.length - end - fraction.length;
-  const exponent = expDigits > SAFE_EXPONENT_DIGITS ? (BigInt(m[4] ?? 0) + BigInt(shift)).toString() : String(Number(m[4] ?? 0) + shift);
-  return `${m[1]}${all.slice(start, end)}e${exponent}`;
+  return `${m[1]}${all.slice(start, end)}e${shiftExponent(m[4] ?? '0', all.length - end - fraction.length)}`;
 }
 
 /** True when the double `value` denotes exactly the decimal written as `source` (`19.90` → 19.9 and `1e3` → 1000 do). */
@@ -218,25 +241,33 @@ export const EXACT_NUMBER_MAX_DEPTH = 1000;
 export function roundDeepRawNumbers(value: unknown, maxDepth = EXACT_NUMBER_MAX_DEPTH): boolean {
   let deep = false;
   let raw = false;
+  // Visited set: caller-owned graphs may contain cycles (they then fail serialization as before).
+  const seen = new WeakSet<object>();
   const stack: [unknown, number][] = [[value, 1]];
   while (stack.length && !(deep && raw)) {
     const [node, depth] = stack.pop() as [unknown, number];
     if (isRawJson(node)) raw = true;
-    else if (node !== null && typeof node === 'object') {
+    else if (node !== null && typeof node === 'object' && !seen.has(node)) {
+      seen.add(node);
       if (depth > maxDepth) deep = true;
       for (const child of Object.values(node)) stack.push([child, depth + 1]);
     }
   }
   if (!(deep && raw)) return false;
+  const visited = new WeakSet<object>();
   const nodes: unknown[] = [value];
   while (nodes.length) {
     const node = nodes.pop();
-    if (node === null || typeof node !== 'object' || isRawJson(node)) continue;
+    if (node === null || typeof node !== 'object' || isRawJson(node) || visited.has(node)) continue;
+    visited.add(node);
     const record = node as Record<string, unknown>;
+    const frozen = Object.isFrozen(record);
     for (const key of Object.keys(record)) {
       const child = record[key];
-      if (isRawJson(child)) record[key] = Number(child.rawJSON);
-      else nodes.push(child);
+      // Raw values only come from parseJsonExact trees, which are never frozen; leave a frozen caller object as is.
+      if (isRawJson(child)) {
+        if (!frozen) record[key] = Number(child.rawJSON);
+      } else nodes.push(child);
     }
   }
   return true;
