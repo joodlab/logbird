@@ -7908,6 +7908,11 @@
                               "null"
                             ]
                           },
+                          "cursorWarning": {
+                            "const": "webhook_cursor_review_required",
+                            "description": "Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.",
+                            "type": "string"
+                          },
                           "description": {
                             "type": [
                               "string",
@@ -7947,6 +7952,11 @@
                           "filterQuery": {
                             "type": "string"
                           },
+                          "filterWarning": {
+                            "const": "webhook_filter_review_required",
+                            "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
                           },
@@ -7956,19 +7966,30 @@
                           "scope": {
                             "anyOf": [
                               {
-                                "additionalProperties": false,
                                 "properties": {
+                                  "mask": {
+                                    "example": [
+                                      "ip",
+                                      "user_agent"
+                                    ],
+                                    "items": {
+                                      "enum": [
+                                        "ip",
+                                        "user_agent",
+                                        "actor_email"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "maxItems": 3,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
                                   "target": {
-                                    "additionalProperties": false,
                                     "properties": {
                                       "id": {
-                                        "maxLength": 256,
-                                        "minLength": 1,
                                         "type": "string"
                                       },
                                       "type": {
-                                        "maxLength": 256,
-                                        "minLength": 1,
                                         "type": "string"
                                       }
                                     },
@@ -7979,8 +8000,6 @@
                                     "type": "object"
                                   },
                                   "tenantId": {
-                                    "maxLength": 256,
-                                    "minLength": 1,
                                     "type": "string"
                                   }
                                 },
@@ -7990,6 +8009,16 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "scopeWarning": {
+                            "const": "webhook_invalid_scope",
+                            "description": "Delivery is blocked. Replace the scope with valid stored IDs and masks.",
+                            "type": "string"
+                          },
+                          "secretOverlapWarning": {
+                            "const": "webhook_secret_overlap_limit",
+                            "description": "Only the newest ten active secrets sign deliveries. Wait for an overlap to expire or rotate with overlapSeconds set to 0.",
+                            "type": "string"
                           },
                           "updatedAt": {
                             "format": "date-time",
@@ -8111,16 +8140,37 @@
                       {
                         "additionalProperties": false,
                         "properties": {
+                          "mask": {
+                            "example": [
+                              "ip",
+                              "user_agent"
+                            ],
+                            "items": {
+                              "enum": [
+                                "ip",
+                                "user_agent",
+                                "actor_email"
+                              ],
+                              "type": "string"
+                            },
+                            "maxItems": 3,
+                            "minItems": 1,
+                            "type": "array"
+                          },
                           "target": {
                             "additionalProperties": false,
+                            "example": {
+                              "id": "site_42",
+                              "type": "website"
+                            },
                             "properties": {
                               "id": {
-                                "maxLength": 256,
+                                "maxLength": 250,
                                 "minLength": 1,
                                 "type": "string"
                               },
                               "type": {
-                                "maxLength": 256,
+                                "maxLength": 60,
                                 "minLength": 1,
                                 "type": "string"
                               }
@@ -8132,7 +8182,8 @@
                             "type": "object"
                           },
                           "tenantId": {
-                            "maxLength": 256,
+                            "example": "biz_5",
+                            "maxLength": 250,
                             "minLength": 1,
                             "type": "string"
                           }
@@ -8178,6 +8229,11 @@
                             "null"
                           ]
                         },
+                        "cursorWarning": {
+                          "const": "webhook_cursor_review_required",
+                          "description": "Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.",
+                          "type": "string"
+                        },
                         "description": {
                           "type": [
                             "string",
@@ -8217,6 +8273,11 @@
                         "filterQuery": {
                           "type": "string"
                         },
+                        "filterWarning": {
+                          "const": "webhook_filter_review_required",
+                          "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                          "type": "string"
+                        },
                         "id": {
                           "type": "string"
                         },
@@ -8226,19 +8287,30 @@
                         "scope": {
                           "anyOf": [
                             {
-                              "additionalProperties": false,
                               "properties": {
+                                "mask": {
+                                  "example": [
+                                    "ip",
+                                    "user_agent"
+                                  ],
+                                  "items": {
+                                    "enum": [
+                                      "ip",
+                                      "user_agent",
+                                      "actor_email"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "maxItems": 3,
+                                  "minItems": 1,
+                                  "type": "array"
+                                },
                                 "target": {
-                                  "additionalProperties": false,
                                   "properties": {
                                     "id": {
-                                      "maxLength": 256,
-                                      "minLength": 1,
                                       "type": "string"
                                     },
                                     "type": {
-                                      "maxLength": 256,
-                                      "minLength": 1,
                                       "type": "string"
                                     }
                                   },
@@ -8249,8 +8321,6 @@
                                   "type": "object"
                                 },
                                 "tenantId": {
-                                  "maxLength": 256,
-                                  "minLength": 1,
                                   "type": "string"
                                 }
                               },
@@ -8260,6 +8330,16 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "scopeWarning": {
+                          "const": "webhook_invalid_scope",
+                          "description": "Delivery is blocked. Replace the scope with valid stored IDs and masks.",
+                          "type": "string"
+                        },
+                        "secretOverlapWarning": {
+                          "const": "webhook_secret_overlap_limit",
+                          "description": "Only the newest ten active secrets sign deliveries. Wait for an overlap to expire or rotate with overlapSeconds set to 0.",
+                          "type": "string"
                         },
                         "updatedAt": {
                           "format": "date-time",
@@ -8299,6 +8379,105 @@
               }
             },
             "description": "Create webhook endpoint (secret shown once)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid endpoint configuration or filter. Filters cannot reference masked fields."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "const": "webhook_lookup_busy",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "const": "webhook_mutation_busy",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Destination lookup capacity or the webhook is busy. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -8367,6 +8546,46 @@
         "responses": {
           "204": {
             "description": "Deleted"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_mutation_busy",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Another operation is using the webhook or project. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -8447,6 +8666,11 @@
                         "null"
                       ]
                     },
+                    "cursorWarning": {
+                      "const": "webhook_cursor_review_required",
+                      "description": "Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.",
+                      "type": "string"
+                    },
                     "description": {
                       "type": [
                         "string",
@@ -8486,6 +8710,11 @@
                     "filterQuery": {
                       "type": "string"
                     },
+                    "filterWarning": {
+                      "const": "webhook_filter_review_required",
+                      "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                      "type": "string"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -8495,19 +8724,30 @@
                     "scope": {
                       "anyOf": [
                         {
-                          "additionalProperties": false,
                           "properties": {
+                            "mask": {
+                              "example": [
+                                "ip",
+                                "user_agent"
+                              ],
+                              "items": {
+                                "enum": [
+                                  "ip",
+                                  "user_agent",
+                                  "actor_email"
+                                ],
+                                "type": "string"
+                              },
+                              "maxItems": 3,
+                              "minItems": 1,
+                              "type": "array"
+                            },
                             "target": {
-                              "additionalProperties": false,
                               "properties": {
                                 "id": {
-                                  "maxLength": 256,
-                                  "minLength": 1,
                                   "type": "string"
                                 },
                                 "type": {
-                                  "maxLength": 256,
-                                  "minLength": 1,
                                   "type": "string"
                                 }
                               },
@@ -8518,8 +8758,6 @@
                               "type": "object"
                             },
                             "tenantId": {
-                              "maxLength": 256,
-                              "minLength": 1,
                               "type": "string"
                             }
                           },
@@ -8529,6 +8767,16 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "scopeWarning": {
+                      "const": "webhook_invalid_scope",
+                      "description": "Delivery is blocked. Replace the scope with valid stored IDs and masks.",
+                      "type": "string"
+                    },
+                    "secretOverlapWarning": {
+                      "const": "webhook_secret_overlap_limit",
+                      "description": "Only the newest ten active secrets sign deliveries. Wait for an overlap to expire or rotate with overlapSeconds set to 0.",
+                      "type": "string"
                     },
                     "updatedAt": {
                       "format": "date-time",
@@ -8650,16 +8898,37 @@
                       {
                         "additionalProperties": false,
                         "properties": {
+                          "mask": {
+                            "example": [
+                              "ip",
+                              "user_agent"
+                            ],
+                            "items": {
+                              "enum": [
+                                "ip",
+                                "user_agent",
+                                "actor_email"
+                              ],
+                              "type": "string"
+                            },
+                            "maxItems": 3,
+                            "minItems": 1,
+                            "type": "array"
+                          },
                           "target": {
                             "additionalProperties": false,
+                            "example": {
+                              "id": "site_42",
+                              "type": "website"
+                            },
                             "properties": {
                               "id": {
-                                "maxLength": 256,
+                                "maxLength": 250,
                                 "minLength": 1,
                                 "type": "string"
                               },
                               "type": {
-                                "maxLength": 256,
+                                "maxLength": 60,
                                 "minLength": 1,
                                 "type": "string"
                               }
@@ -8671,7 +8940,8 @@
                             "type": "object"
                           },
                           "tenantId": {
-                            "maxLength": 256,
+                            "example": "biz_5",
+                            "maxLength": 250,
                             "minLength": 1,
                             "type": "string"
                           }
@@ -8712,6 +8982,11 @@
                         "null"
                       ]
                     },
+                    "cursorWarning": {
+                      "const": "webhook_cursor_review_required",
+                      "description": "Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.",
+                      "type": "string"
+                    },
                     "description": {
                       "type": [
                         "string",
@@ -8751,6 +9026,11 @@
                     "filterQuery": {
                       "type": "string"
                     },
+                    "filterWarning": {
+                      "const": "webhook_filter_review_required",
+                      "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                      "type": "string"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -8760,19 +9040,30 @@
                     "scope": {
                       "anyOf": [
                         {
-                          "additionalProperties": false,
                           "properties": {
+                            "mask": {
+                              "example": [
+                                "ip",
+                                "user_agent"
+                              ],
+                              "items": {
+                                "enum": [
+                                  "ip",
+                                  "user_agent",
+                                  "actor_email"
+                                ],
+                                "type": "string"
+                              },
+                              "maxItems": 3,
+                              "minItems": 1,
+                              "type": "array"
+                            },
                             "target": {
-                              "additionalProperties": false,
                               "properties": {
                                 "id": {
-                                  "maxLength": 256,
-                                  "minLength": 1,
                                   "type": "string"
                                 },
                                 "type": {
-                                  "maxLength": 256,
-                                  "minLength": 1,
                                   "type": "string"
                                 }
                               },
@@ -8783,8 +9074,6 @@
                               "type": "object"
                             },
                             "tenantId": {
-                              "maxLength": 256,
-                              "minLength": 1,
                               "type": "string"
                             }
                           },
@@ -8794,6 +9083,16 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "scopeWarning": {
+                      "const": "webhook_invalid_scope",
+                      "description": "Delivery is blocked. Replace the scope with valid stored IDs and masks.",
+                      "type": "string"
+                    },
+                    "secretOverlapWarning": {
+                      "const": "webhook_secret_overlap_limit",
+                      "description": "Only the newest ten active secrets sign deliveries. Wait for an overlap to expire or rotate with overlapSeconds set to 0.",
+                      "type": "string"
                     },
                     "updatedAt": {
                       "format": "date-time",
@@ -8823,6 +9122,105 @@
               }
             },
             "description": "Update webhook endpoint"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid endpoint configuration or filter. Filters cannot reference masked fields."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "const": "webhook_lookup_busy",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "const": "webhook_mutation_busy",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Destination lookup capacity or the webhook is busy. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -8862,6 +9260,414 @@
           }
         ],
         "summary": "Update webhook endpoint",
+        "tags": [
+          "console"
+        ]
+      }
+    },
+    "/api/projects/{projectId}/webhooks/{id}/deliveries": {
+      "get": {
+        "operationId": "console_list_webhook_deliveries_and_attempts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "pending",
+                "succeeded",
+                "failed",
+                "skipped"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "properties": {
+                          "attemptCount": {
+                            "description": "Total attempts, including attempts outside the retention window.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "attempts": {
+                            "description": "The five most recent retained attempts, in attempt number order.",
+                            "items": {
+                              "properties": {
+                                "error": {
+                                  "anyOf": [
+                                    {
+                                      "enum": [
+                                        "destination_rejected",
+                                        "timeout",
+                                        "network_error",
+                                        "event_unavailable",
+                                        "invalid_event_id",
+                                        "lookup_failed",
+                                        "signing_failed",
+                                        "scope_mismatch"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "latencyMs": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "number": {
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "type": "integer"
+                                },
+                                "responseBody": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "responseCode": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "startedAt": {
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "sending",
+                                    "succeeded",
+                                    "failed",
+                                    "interrupted",
+                                    "skipped"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "number",
+                                "status",
+                                "startedAt",
+                                "latencyMs",
+                                "responseCode",
+                                "responseBody",
+                                "error"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "createdAt": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                            "type": "string"
+                          },
+                          "eventId": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "event",
+                              "test"
+                            ],
+                            "type": "string"
+                          },
+                          "nextAttemptAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "enum": [
+                              "pending",
+                              "succeeded",
+                              "failed",
+                              "skipped"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "eventId",
+                          "kind",
+                          "status",
+                          "createdAt",
+                          "nextAttemptAt",
+                          "attemptCount",
+                          "attempts"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "List webhook deliveries and attempts"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request failed"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "List webhook deliveries and attempts",
+        "tags": [
+          "console"
+        ]
+      }
+    },
+    "/api/projects/{projectId}/webhooks/{id}/deliveries/{deliveryId}/resend": {
+      "post": {
+        "operationId": "console_requeue_a_webhook_delivery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "deliveryId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "event",
+                        "test"
+                      ],
+                      "type": "string"
+                    },
+                    "status": {
+                      "const": "pending",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "eventId",
+                    "kind",
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Requeue a webhook delivery"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_mutation_busy",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Another operation is using the webhook or project. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request failed"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Requeue a webhook delivery",
         "tags": [
           "console"
         ]
@@ -8926,6 +9732,77 @@
             },
             "description": "Rotate webhook secret (shown once; default 24-hour overlap, maximum 7 days)"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_secret_overlap_limit",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rotation would exceed the limit of 10 active secrets. Wait for an expiry or rotate with zero overlap."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_mutation_busy",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Another operation is using the webhook or project. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "default": {
             "content": {
               "application/json": {
@@ -8964,6 +9841,146 @@
           }
         ],
         "summary": "Rotate webhook secret (shown once; default 24-hour overlap, maximum 7 days)",
+        "tags": [
+          "console"
+        ]
+      }
+    },
+    "/api/projects/{projectId}/webhooks/{id}/test": {
+      "post": {
+        "operationId": "console_queue_a_webhook_test_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "eventId": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "event",
+                        "test"
+                      ],
+                      "type": "string"
+                    },
+                    "status": {
+                      "const": "pending",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "eventId",
+                    "kind",
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Queue a webhook test event"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_mutation_busy",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Another operation is using the webhook or project. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request failed"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Queue a webhook test event",
         "tags": [
           "console"
         ]

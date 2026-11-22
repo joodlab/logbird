@@ -21,7 +21,8 @@ path: /self-hosting
   own servers. It's the same codebase Logbird Cloud will run.
   <!-- source: LICENSE; docs/SPEC.md intro ("one codebase, self-host or cloud") -->
 - **cta:** Quickstart ↓ `#quickstart` (public repo only) · Join the Cloud waitlist → `/contact`
-- **small print:** Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.
+- **small print:** Source on GitHub — coming soon. Once `WEB_GITHUB_PUBLIC=true`: "Compose pulls the published
+  `<latest release>` images for amd64 and arm64 from GHCR." (No release yet: "Nothing has been released yet.")
   <!-- when WEB_GITHUB_PUBLIC=true: drop "Source on GitHub — coming soon." -->
 - **visual:** a diagram of the Compose stack (console, api, worker, postgres, clickhouse, redis). The 2026-11-05
   self-hosting captures show the old name and a real key prefix, so they aren't used.
@@ -30,30 +31,30 @@ path: /self-hosting
 
 - **id:** `quickstart`
 - **eyebrow:** Quickstart
-- **heading:** From clone to your first event. <!-- no time claim: source builds vary by machine -->
-- **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. The first build takes longer, depending on
-  your CPU and network. <!-- source: docs/self-hosting.md §Five-minute quickstart -->
-- **code sample (rendered only once `WEB_GITHUB_PUBLIC=true`; until then the section reads "The quickstart is published
-  when the repository opens." with the self-host CTA — see `README.md` § Self-host CTA rule):**
+- **heading:** From clone to your first event.
+- **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls the four published Logbird role images; nothing
+  is compiled on your server. <!-- source: docs/self-hosting.md §Five-minute quickstart -->
+- **code sample (rendered only when `WEB_GITHUB_PUBLIC=true` and the release list has a release; while the repository
+  is private the section reads "The quickstart is published when the repository opens." with the self-host CTA — see
+  `README.md` § Self-host CTA rule; in a public build with no release it reads "Nothing has been released yet." and links
+  to the guide's "Build from source"):**
 
   ```sh
-  git clone <WEB_GITHUB_URL>.git
+  git clone --branch v<latest release> <repository URL>.git logbird
   cd logbird
   sh scripts/selfhost-init.sh   # creates .env and generates secrets
-  # Set SMTP in .env, or set AUTH_LOG_SIGN_IN_CODES=true for a first test.
-  # Build the four roles one at a time (less peak memory), then start without rebuilding.
-  docker compose build migrate
-  docker compose build server
-  docker compose build worker
-  docker compose build app
+  # Set SMTP in .env, or AUTH_LOG_SIGN_IN_CODES=true for a first local test.
+  # Internet-facing? Also set AUTH_SIGNUP=restricted and AUTH_SIGNUP_DOMAINS.
+  docker compose pull
   docker compose up -d --no-build
   ```
-  <!-- source: docs/self-hosting.md (after #51): sequential builds, pull_policy: build, up --no-build -->
+  <!-- source: apps/web/src/lib/selfhost.ts; docs/self-hosting.md §Five-minute quickstart -->
 
 - **steps after the code:**
-  1. Open `http://localhost:4600` and sign in with the code sent to your email.
+  1. Open `http://localhost:4600` and sign in with the code sent to your email, or printed in the server log if you set
+     `AUTH_LOG_SIGN_IN_CODES=true`.
   2. Create a workspace and a project. Copy the ingest key; it's shown once.
-  3. Send an event:
+  3. Set `LOGBIRD_INGEST_KEY` to the key you just copied, and send an event:
 
      ```sh
      curl http://localhost:4600/v1/events \
@@ -78,9 +79,8 @@ path: /self-hosting
   - A Linux host, or any machine that runs Linux containers, with Docker Engine and Compose 2.24.4 or newer.
   - An SMTP provider for sign-in codes and invitations, for example Amazon SES, Postmark or Brevo.
   - A domain and ports 80 and 443 if you want automatic HTTPS.
-  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That's an initial allocation, not measured capacity. Building
-    from source needs more headroom: build the roles one at a time, and leave disk for images and build cache as well
-    as your data, ClickHouse merges and backups.
+  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That's an initial allocation, not measured capacity. Leave disk
+    for images as well as your data, ClickHouse merges and backups; building from source needs more headroom still.
   - **Access:** sign-up is open: anyone who can reach the console can create an account and a workspace. Keep it private
     while you evaluate, or restrict who can reach it.
   <!-- source: docs/self-hosting.md §SMTP and first login, §Caddy TLS, §Sizing, §Five-minute quickstart (after #51) -->
@@ -97,7 +97,8 @@ path: /self-hosting
      the API and worker start.
      <!-- source: docs/self-hosting.md; docs/deployment.md -->
   2. **Coolify.** Point Coolify's Docker Compose build pack at `docker-compose.coolify.yml`. Coolify generates the
-     secrets and routes your domain to the console. Builds run from source.
+     secrets, pulls the published images (before the first release, it builds them once you add
+     `docker-compose.build.yml`; see the Coolify guide) and routes your domain to the console.
      <!-- source: docs/coolify.md -->
   3. **Bring your own databases.** Use your own Postgres, ClickHouse and Redis (or Dragonfly) with
      `docker-compose.external.yml`. Use ClickHouse 26.9. Logbird creates its own restricted query user
@@ -145,17 +146,27 @@ path: /self-hosting
 
 - **id:** `upgrades`
 - **eyebrow:** Upgrades and backups
-- **heading:** Upgrade with a pinned revision, after a backup.
+- **heading:** Upgrade to a pinned release, after a backup.
 - **steps:**
-  1. Stop writes: block ingress and stop the console, server and worker (the worker finishes its current job first).
+  1. Stop writes: run every command in these steps with the installation's own Compose project, env file, `-f` files
+     and profile (after a restore cutover, the restored project's). Block ingress and stop the console, server and worker. The worker gets five minutes to finish its
+     current job: wait for the stop to complete, and check its logs if it had to be killed.
   2. Back up, with writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
-     SHA-256 checksum file. Keep the original `.env`; record the Git revision and image IDs.
-  3. Switch to a tested revision.
-  4. Build the four roles one at a time, then `docker compose up -d --no-build`. Migrations run first; if one fails,
-     the new version doesn't start.
+     SHA-256 checksum file. Keep the original env file; record the Git revision (`git rev-parse HEAD`) and the images
+     (`docker compose images`).
+  3. Pin the new version: check out the release tag `vX.Y.Z`, then set `LOGBIRD_VERSION=X.Y.Z`, without the `v`, in
+     the env file the installation runs with (`.env`, or the one you cut over to after a restore): its value overrides
+     the Compose default, and a `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in your shell overrides the env
+     file (unset it). Run `docker compose config --images` and check the full names: all four must be
+     `<registry>/logbird-<role>:X.Y.Z`, with the registry you expect (the project's GHCR namespace by default). Built from source
+     (`docker-compose.build.yml`)? Keep that override and build the four roles from the new revision instead; the image
+     check doesn't apply.
+  4. `docker compose pull` (skip it for a source build), then `docker compose up -d --no-build`. Migrations run first; if one fails, the new
+     version doesn't start.
   5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before reopening ingress.
 - **bullets:**
-  - `docker compose down` keeps your data. `docker compose down -v` deletes it, permanently.
+  - `docker compose down` keeps your data. `docker compose down -v` permanently deletes the Compose-managed volumes,
+    which hold the bundled Postgres, ClickHouse and Redis data.
   - Restore into empty, separate storage first, and check counts before you switch over.
   <!-- source: docs/self-hosting.md §Upgrades and backups -->
 - **cta:** Full self-hosting guide → `docs/self-hosting.md` (repo doc; link target pending)
@@ -167,10 +178,8 @@ path: /self-hosting
 - **eyebrow:** Not there yet
 - **heading:** What self-hosting doesn't include today.
 - **bullets:**
-  - **Published images.** You build from source; publishing to a registry is still being decided (#88). Smaller runtime
-    images are in progress (#67, #68).
   - **High availability.** The Compose setup is a single VM. It has no failover.
-  - **Published capacity numbers.** We haven't published load-test results yet. Size from your own measurements.
+  - **Production sizing guarantee.** There's no published sizing guarantee yet. Size from your own measurements.
   - **SSO.** Sign-in is by emailed code only. SSO is on the roadmap.
   <!-- source: docs/self-hosting.md; docs/deployment.md ("This single VM is a first test, not HA"); docs/roadmap.md P2-5 -->
 - **visual:** none

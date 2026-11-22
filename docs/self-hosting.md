@@ -248,6 +248,12 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 
 ## Upgrades and backups
 
+Run every `docker compose` command below with the active installation's invocation: its project (`-p`), env file
+(`--env-file`), Compose files (`-f`, including any override) and TLS profile. After a restore cutover that is the
+restored project's invocation (see the wrapper in Cut over below). A source-build installation keeps
+`docker-compose.build.yml` in that invocation: in step 5 it builds the four roles from the new revision one at a time
+instead of pulling, and the image-tag check doesn't apply.
+
 1. Block browser/SDK ingress and run `docker compose stop app server worker`.
    The worker has a five-minute grace period to finish its current job; wait for
    stop to complete and inspect logs if it needed a forced kill.
@@ -255,10 +261,19 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 3. Record `git rev-parse HEAD` and `docker compose images` with the backup receipt.
 4. Fetch/select the tested revision: `git fetch origin`, then
    `git switch --detach <tested-sha>`. Preserve local changes first.
-5. Re-run `sh scripts/selfhost-init.sh` (it preserves existing values and warns if
-   `.env` still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird` namespace; remove that
-   line so the default `ghcr.io/joodlab` applies). Set LOGBIRD_VERSION to the tested
-   release, run `docker compose pull`, then `docker compose up -d --no-build`.
+5. Re-run `sh scripts/selfhost-init.sh <active env file>` (default `.env`; after a
+   restore cutover, the env file the installation now runs with). It preserves existing
+   values and warns if the file still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird`
+   namespace; remove that line so the default `ghcr.io/joodlab` applies. It keeps the
+   existing `LOGBIRD_VERSION`, and that value overrides the new revision's Compose
+   default, so set it to the tested release without the `v` (tag `v0.2.0` means
+   `LOGBIRD_VERSION=0.2.0`). A `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in
+   your shell overrides the env file: unset it, or set it to the same values. Run
+   `docker compose config --images` with the installation's project, env-file and `-f`
+   flags and check the full names: all four must be
+   `<registry>/logbird-<role>:<version>`, with `ghcr.io/joodlab` as the default
+   registry, before you run
+   `docker compose pull` and `docker compose up -d --no-build`.
    One-shot migrate gates new API/worker startup; failure blocks startup.
 6. Verify readiness, SMTP login, retained events/settings/keys and retention
    receipts before reopening ingress. After a failed receipt the next successful
@@ -480,6 +495,10 @@ stopped; never force a restore into populated storage. Preserved env credentials
 configure the bundled administrator; migrate later reprovisions the restricted
 query account without rotation. Custom access settings need a separate backup.
 See the [ClickHouse backup reference](https://clickhouse.com/docs/concepts/features/backup-restore/overview).
+
+Before re-enabling webhook discovery after a restore, review enabled endpoints
+against the restored delivery history and the original rollout time. See
+[Reconcile a webhook discovery cursor](#reconcile-a-webhook-discovery-cursor).
 
 ### Normalize restored ClickHouse parts
 
@@ -1030,9 +1049,8 @@ every ClickHouse upgrade before accepting ingest traffic; it also checks the asy
 
 ## Webhook endpoint settings
 
-The endpoint management API can store and rotate secrets; this change does not
-send webhooks yet. Each project may have up to 10 endpoints. Owners and admins
-manage them; workspace members can read endpoint configuration without secrets.
+Each project may have up to 10 signed webhook endpoints. Owners and admins
+manage endpoints and read delivery history.
 Create and rotate return a `whsec_` secret once, with `Cache-Control: no-store`.
 Save it in the receiver's secret store. Never put it in a webhook URL.
 
@@ -1056,11 +1074,185 @@ self-hosted receivers, but still requires public unicast addresses. Loopback,
 private, link-local, CGNAT, multicast, unspecified, reserved, documentation and
 metadata addresses are rejected, including mapped/translated forms. Every DNS
 answer must pass validation. Credentials and fragments are forbidden. Save-time
-validation does not protect a sender against DNS rebinding; the future sender
-must resolve and pin an allowed address again when connecting.
+validation uses a cancellable DNS resolver. The sender resolves again and pins
+an allowed address on every attempt.
+
+Over HTTP the whole request travels unencrypted: the signed body and the full endpoint URL, including any token in
+its path or query string. A signature proves who sent a message; it doesn't hide it. Use HTTP only for receivers on a
+network you trust, and never put a credential in an HTTP endpoint URL.
 
 PATCH `scope` replaces the whole scope; `null` clears it. `filterQuery` uses the
-Logbird query language (empty matches everything). Secret rotation accepts an
+Logbird query language (empty matches everything). A scope can name a tenant, a
+target, or both. Like scoped read access, it uses [stored IDs](security.md#scopes-name-stored-ids),
+including the maintainer decision about whitespace on ingest. The scope input
+allows at most 250 UTF-16 code units per ID and 60 for a target type, with no
+surrounding whitespace, NUL, U+FFFD or lone surrogates. The API shows
+`scopeWarning: webhook_invalid_scope` on legacy endpoints with invalid stored
+scopes. The worker skips discovery without advancing their cursors and blocks
+delivery. Replace the scope through PATCH to resume processing.
+
+`scope.mask` accepts `ip`, `user_agent` and `actor_email`. The signed event uses
+the same [field masks as scoped reads](scoped-read-access.md#masks), with empty
+IP and user agent, a stable project-keyed actor email hash, and the corresponding
+attribute paths removed. The webhook body is the event projection. It excludes
+the original document. Create and PATCH reject filters on masked fields with
+HTTP 422 `invalid_query`. Retries and resends apply the endpoint's current scope
+and masks. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
+even when `WEBHOOK_SECRET_KEY` is configured separately. Upgrade all workers
+before enabling masks, and disable masked endpoints before rolling workers back
+to code that predates masks.
+
+Secret rotation accepts an
 `overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH
-remain unchanged. Delivery, filters at delivery time, retries and the UI arrive
-in later webhook PRs.
+remain unchanged.
+
+Run the additive Postgres migrations before upgrading the API and worker.
+Compose runs it through the existing migrate service. If the worker uses a
+separate runtime environment, provide the same `WEBHOOK_SECRET_KEY` as the
+server, or the same `BETTER_AUTH_SECRET` if using a derived key. The worker
+logs `webhook.delivery_key_missing` and reports itself unready when neither is supplied. For disable
+notifications, give the worker the existing `SMTP_*`, `MAIL_FROM` and
+`APP_URL` settings. Keep both roles' `WEBHOOKS_ALLOW_HTTP` settings aligned.
+
+On upgrade, endpoints with existing non-empty filters pause at their saved cursor until an owner or admin reviews the query under the current syntax.
+Confirm the filter by saving it with `filterQuery` in PATCH, even if its text stays the same; the worker uses the existing SMTP settings to send one review notice per held endpoint to workspace owners and admins.
+
+| Worker environment variable | Default | Effect |
+| --- | --- | --- |
+| `WEBHOOKS_WORKER_CONCURRENCY` | `16` | Concurrent attempts across replicas sharing the same BullMQ prefix (1–32). |
+| `WEBHOOKS_ENDPOINT_CONCURRENCY` | `4` | Concurrent attempts against one endpoint (1–16). |
+| `WEBHOOKS_FAILURE_LIMIT` | `50` | Consecutive failed deliveries before auto-disable (1–1000). |
+
+Set these optional variables in the worker's runtime environment, such as a
+Compose override or a Kubernetes deployment overlay. Attempt logs expire
+after 30 days. Delivery records expire 30 days after they finish. New endpoints start at their creation millisecond. A receiver should
+deduplicate by `webhook-id` and verify its signature against the raw request body.
+The header stays stable on retry and resend. When retention frees an event ID and it is used again,
+the new occurrence has a different `webhook-id` and the same JSON `id`. Pending disable emails survive
+delivery-log pruning and retry when SMTP is available again for eligible recipients.
+
+If the endpoint API reports `scopeWarning: webhook_invalid_scope`, queued deliveries
+stay pending without new attempts or retry deadlines. Correct or clear the scope
+through the endpoint's PATCH API to resume. Previously attempted pending rows get a
+fresh retry window and retain their attempt history. Before sending, the worker
+applies the current scope and filter to the stored occurrence. A present event that
+no longer matches is recorded as `skipped` with `scope_mismatch`, without an HTTP
+request or a charge to the endpoint's failure counters.
+Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
+Each delivery claim has a two-minute lease. Before a POST starts, the worker reserves 56.5 seconds of that lease to store the outcome. Each settlement can wait up to 12.25 seconds for a PostgreSQL connection, and the worker retries the same result within the lease when settlement fails.
+
+On very large projects delivery can stall until the arrival-time index is present.
+The cursor never skips events when a scan exceeds its read budget.
+A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
+Discovery reads up to 10,000 event positions per query to move through imports with fewer queries. It commits deliveries
+in batches of up to 100 and resumes after the last committed position if a scan is interrupted.
+
+If an endpoint carries more than ten active secrets from an earlier version,
+the API reports `secretOverlapWarning: webhook_secret_overlap_limit` and the
+worker signs with the ten newest active secrets. Wait for an overlap to expire,
+or rotate with `overlapSeconds` set to `0` and update the receiver with the new secret. Waiting only clears the
+warning: a receiver that knows only a secret outside those ten cannot verify any delivery until it is given one of
+the ten (or the new secret from a zero-overlap rotation).
+
+### Reconcile a webhook discovery cursor
+
+The rollout repair uses the original PostgreSQL fast-default metadata. A table
+rewrite or logical restore can remove that metadata while leaving an original
+cursor shifted by the former database session time zone. Discovery compares
+the stored cursor to database time, the later of endpoint creation and the UTC
+rollout, and the last recorded scan. A verified original rollout stored on the
+endpoint takes precedence over the live ledger's time. The scan bound allows a
+minute for prior workers to acquire their watermark. A cursor outside those
+bounds is held in place.
+The worker logs `webhook.cursor_review_required` and the endpoint API returns
+`cursorWarning: webhook_cursor_review_required`. The hold persists until an
+operator clears it. The check detects impossible positions and cannot establish
+that scans completed through an otherwise plausible position.
+
+1. Stop webhook workers while reconciling the affected endpoint. Take a database
+   backup and record the endpoint ID, project ID, `createdAt`, `cursorReceivedAt`,
+   `cursorEventId`, `lastScannedAt` and `cursorVerifiedFloor`. If the endpoint
+   already has a verified floor, use it as the original rollout. Otherwise, use the rollout's `started_at`
+   from `_prisma_migrations` for `20261122140000_webhook_deliveries`, converted to
+   UTC. If the ledger was rebuilt, read the completed, non-rolled-back migration's
+   `started_at` from a pre-rebuild backup of the original database, or use a verified
+   record of that original migration run. Confirm the backup or record belongs to
+   this installation. Record the source in the reconciliation log.
+2. Compare the backed-up cursor and retained `WebhookDelivery` occurrences against
+   stored event receive times and receiver records, using `webhook-id` where available. Test
+   pings (`receivedAt IS NULL`), a scan timestamp, and the newest successful
+   delivery alone cannot prove coverage. Choose the earliest uncertain receive
+   millisecond, no earlier than the later of endpoint creation and rollout.
+   Rewind or keep the held cursor. If the held cursor is below that starting
+   bound, move it to the bound exactly. If you cannot prove coverage, use the
+   starting bound. Preserve the delivery history so rediscovery can deduplicate
+   retained occurrences. Receivers may see duplicates where earlier delivery
+   records have expired.
+3. In one transaction, lock and re-read the exact endpoint by project and ID.
+   Set `cursorReceivedAt` to the chosen UTC millisecond, set `cursorEventId` to
+   `NULL` to include all events at that millisecond, and clear
+   `cursorReviewRequired`. Set `lastScannedAt` to the greater of its stored value
+   and the checkpoint, using the checkpoint if no scan time was recorded.
+   Update `updatedAt` in UTC and verify exactly one row changed before committing.
+   Leave delivery and attempt records intact. For a rebuilt
+   ledger, record the verified original rollout on the endpoint in the same
+   transaction using the procedure below.
+4. Restart workers. Verify the warning clears, the cursor resumes moving and
+   expected deliveries appear in the log. Keep workers stopped if the restored
+   data cannot establish a trustworthy starting bound.
+
+#### Record the original rollout after a ledger rebuild
+
+In `psql`, set `endpoint_id`, `project_id`, `original_rollout`, `checkpoint`,
+`evidence_ref` and `audit_namespace` with `\set`. Use ISO 8601 timestamps with `Z`
+for `original_rollout` and `checkpoint`. Use a backup or incident record reference
+without credentials or payload data for `evidence_ref`. Use the worker's
+`BULLMQ_PREFIX` (default `{logbird}`) for `audit_namespace`.
+
+Run this transaction while webhook workers are stopped. It stores the verified
+floor and queues a workspace audit event with the operator's database login and
+the evidence reference. Once a floor is recorded, every subsequent reconciliation
+must supply that same UTC millisecond. The checkpoint must be at or before the held cursor,
+except that a cursor below the starting bound can move to that bound. Commit
+after confirming the statement returned one audit ID.
+Roll back if it returned zero rows and check the endpoint, hold and timestamps.
+
+```sql
+BEGIN;
+
+WITH bounds AS (
+  SELECT (:'original_rollout'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS floor,
+         (:'checkpoint'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS checkpoint,
+         (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now_utc
+), reconciled AS (
+  UPDATE "WebhookEndpoint" e
+  SET "cursorVerifiedFloor" = b.floor, "cursorReceivedAt" = b.checkpoint,
+      "cursorEventId" = NULL, "lastScannedAt" = greatest(e."lastScannedAt", b.checkpoint),
+      "cursorReviewRequired" = false, "updatedAt" = b.now_utc
+  FROM bounds b, "Project" p
+  WHERE e.id = :'endpoint_id' AND e."projectId" = :'project_id'
+    AND p.id = e."projectId" AND e."cursorReviewRequired"
+    AND (e."cursorVerifiedFloor" IS NULL OR e."cursorVerifiedFloor" = b.floor)
+    AND b.checkpoint BETWEEN greatest(e."createdAt", b.floor) AND b.now_utc
+    AND (b.checkpoint <= e."cursorReceivedAt"
+         OR b.checkpoint = greatest(e."createdAt", coalesce(e."cursorVerifiedFloor", b.floor)))
+    AND length(trim(:'evidence_ref')) > 0 AND length(trim(:'audit_namespace')) > 0
+  RETURNING e.id, p."organizationId", e."projectId", b.floor, b.checkpoint, b.now_utc
+), audit AS (
+  SELECT *, gen_random_uuid()::text AS audit_id FROM reconciled
+)
+INSERT INTO "AuditOutbox" (id, namespace, stream, payload, "createdAt", "nextAttemptAt", "confirmedAt")
+SELECT audit_id, :'audit_namespace', 'ws:' || "organizationId", jsonb_build_object(
+  'id', audit_id, 'action', 'webhook.cursor_reconciled', 'occurredAt', clock_timestamp(),
+  'actor', jsonb_build_object('type', 'database-operator', 'id', session_user),
+  'targets', jsonb_build_array(jsonb_build_object('type', 'webhook', 'id', id),
+                             jsonb_build_object('type', 'project', 'id', "projectId")),
+  'metadata', jsonb_build_object('originalRollout', floor AT TIME ZONE 'UTC',
+                                'checkpoint', checkpoint AT TIME ZONE 'UTC', 'evidenceRef', :'evidence_ref'::text)
+), now_utc, now_utc, now_utc
+FROM audit
+RETURNING id;
+```
+
+Run `COMMIT;` or `ROLLBACK;` as described above, then follow the restart and
+verification step. Keep the recorded floor for future scans and reconciliations.

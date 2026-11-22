@@ -1,4 +1,4 @@
-import { prisma } from '@logbird/database';
+import { workspaceAdminRoles as admins, hasWorkspaceRole, prisma } from '@logbird/database';
 import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { ApiError } from '../errors';
@@ -6,7 +6,8 @@ import type { AppEnv } from '../types';
 import { requireSession } from './require-session';
 
 const all = ['owner', 'admin', 'member'] as const;
-const admins = ['owner', 'admin'] as const;
+
+export { hasAdminRole } from '@logbird/database';
 // All console mutations must be listed here, including self-only session endpoints.
 export const mutationPermissions = [
   { method: 'POST', path: /^\/api\/session\/sign-out$/, roles: all, self: true },
@@ -19,6 +20,8 @@ export const mutationPermissions = [
   { method: 'PATCH', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+$/, roles: admins },
   { method: 'DELETE', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+\/rotate-secret$/, roles: admins },
+  { method: 'POST', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+\/test$/, roles: admins },
+  { method: 'POST', path: /^\/api\/projects\/[^/]+\/webhooks\/[^/]+\/deliveries\/[^/]+\/resend$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/keys$/, roles: admins },
   { method: 'DELETE', path: /^\/api\/projects\/[^/]+\/keys\/[^/]+$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/keys\/[^/]+\/roll$/, roles: admins },
@@ -31,12 +34,11 @@ export const mutationPermissions = [
   { method: 'DELETE', path: /^\/api\/workspace\/invite-links\/[^/]+$/, roles: admins },
 ] as const;
 
-export const hasAdminRole = (role: string) => role.split(',').some((r) => admins.some((allowed) => allowed === r.trim()));
 const forbidden = () => new ApiError(403, 'forbidden', 'Workspace owner or admin access required.');
 
 export async function requireRole(c: Context<AppEnv>, roles: readonly string[] = admins, organizationId = c.get('activeOrganizationId')) {
   const member = organizationId ? await prisma.member.findFirst({ where: { organizationId, userId: c.get('user').id } }) : null;
-  if (!member?.role.split(',').some((r) => roles.includes(r.trim()))) throw forbidden();
+  if (!member || !hasWorkspaceRole(member.role, roles)) throw forbidden();
   return member;
 }
 

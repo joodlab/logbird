@@ -41,7 +41,7 @@ path: /
 - **eyebrow:** For developers
 - **heading:** One call per action. No schema to migrate.
 - **body:** Only an `action` string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which
-  customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns. Custom
+  customer account, to which records, what changed. Logbird lifts the fields it knows into their own columns. Custom
   top-level fields and anything under `metadata` are searchable as attributes within the indexing limits, and the full
   parsed event is available as JSON. Recommended fields are optional: an event is never
   rejected for missing them.
@@ -51,7 +51,8 @@ path: /
   - Middleware for Hono, TanStack Start and Nuxt; a Vue read composable. <!-- source: docs/integrations.md (Vue is useAuditTrail/AuditTimeline, a reader, not middleware) -->
   - `jobAudit` for queue workers: the job keeps the original actor and joins the request's operation.
     <!-- source: packages/sdk/README.md §Requests and workers -->
-  - A conformance score on every event, so you can see which recommended fields you're missing.
+  - A conformance score on every event: the share of nine recommended checks it passes. The setup page shows which
+    fields your events miss.
 - **code sample:** (tabs "Route" and "Worker")
 
   ```ts
@@ -93,13 +94,13 @@ path: /
 - **eyebrow:** For support, operations and compliance
 - **heading:** Answer "what happened in this account?" in one search.
 - **body:** The console is built for the people who get the question: support, operators, and whoever answers the
-  auditor. Search every event, open a customer account or a single record, and see each change with its before and
-  after values.
+  auditor. Search every event, open a customer account or a single record, and see the before and after values you
+  send for the first 256 changes of each event.
 - **bullets:**
   - **Search** with `actor:usr_42 action:booking.* outcome:failure`, or write a guarded SQL `WHERE` expression.
   - **Entity pages** for every actor, tenant, executor and record, each with its own timeline.
-  - **Operation trees** show one request, the jobs it spawned and every record they changed.
-  - **Impersonation** is a first-class field: when support acts for a customer, both names are on the event.
+  - **Operation trees** show the events that share an operation id, from the request to the jobs it spawned.
+  - **Impersonation** is a first-class field: when support acts for a customer, the event records who acted for whom.
   - **Retention** per project, from 7 days to 10 years. Expired events are permanently deleted.
     <!-- source: packages/contracts/src/api.ts RETENTION_OPTIONS (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days) -->
 - **cta:** Take the product tour → `/product`
@@ -162,8 +163,8 @@ path: /
 - **eyebrow:** Open source
 - **heading:** MIT-licensed. Runs with Docker Compose.
 - **body:** The whole product is in one repository: the API, the console, the retention worker, the SDK and the
-  integrations. Self-hosting builds it from source on your server, so your events stay on your infrastructure.
-  No images are published yet.
+  integrations. Self-hosting runs the published, versioned images on your server, so your events stay on your
+  infrastructure.
   <!-- source: LICENSE; docs/self-hosting.md -->
 - **bullets:**
   - Bundled Docker Compose, a Coolify build, or your own Postgres, ClickHouse and Redis.
@@ -171,7 +172,7 @@ path: /
   - Source on GitHub — coming soon. The repository opens publicly soon.
 - **cta:** Self-host it → `/self-hosting` (public repo only; see the CTA rule) · What's in the repository → `/open-source`
 - **while the repository is private:** replace the quickstart code block with "Available when the repository opens.
-  On one VM: clone, generate secrets, configure SMTP, build the four roles, then `docker compose up -d --no-build`. We'll
+  On one VM: clone, generate secrets, configure SMTP, pull the images, then `docker compose up -d --no-build`. We'll
   publish the commands here the day the source is public." and a "Tell me when it opens" button → `/contact?interest=self-host`.
 - **visual:** a new, reviewed capture (required before publication) (terminal: `docker compose ps` with the
   stack running). Check the terminal for paths or hostnames before use.

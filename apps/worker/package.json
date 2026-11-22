@@ -13,6 +13,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "pnpm with-env vitest run",
     "dev": "pnpm with-env tsx watch --clear-screen=false src/index.ts",
     "with-env": "dotenv -e ../../.env --",
     "build": "tsdown",
@@ -23,6 +24,9 @@
     "@t3-oss/env-core": "^0.13.11",
     "zod": "^4.5.4",
     "@logbird/database": "workspace:*",
+    "@logbird/contracts": "workspace:*",
+    "@logbird/email": "workspace:*",
+    "@logbird/sdk": "workspace:*",
     "@clickhouse/client": "1.23.1",
     "bullmq": "^6.2.0",
     "ioredis": "^6.0.0",

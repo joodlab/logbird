@@ -11,9 +11,9 @@ path: /changelog
 - **id:** `intro`
 - **eyebrow:** Changelog
 - **heading (H1):** What changed, and when.
-- **body:** Two lists live here. **Releases** follow the repository's `CHANGELOG.md`: what changed in each version,
-  and anything you must do to upgrade. The **build log** is a short post for each day of work, showing what we shipped
-  with a real capture from the product.
+- **body:** Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the
+  repository's `CHANGELOG.md`; once the repository is public, each links to its full notes and upgrade steps. The
+  **build log** holds short updates on what we shipped, with a capture from the product when there is one.
   <!-- source: CHANGELOG.md (all sections "Unreleased") -->
 - **visual:** none
 
@@ -25,8 +25,8 @@ path: /changelog
   bullets of its `CHANGELOG.md` section and, once the repository is public, a link to its full release notes. The
   build reads the list from the GitHub API and falls back to `apps/web/src/lib/releases.snapshot.ts`; run
   `pnpm --filter @logbird/web releases:sync` after each release.
-- **empty state (until the first release):** Nothing has been released yet. The first release, 0.1.0, is in progress
-  and will list everything since the start of the project. (Said once, here; there's no separate status line.)
+- **empty state (only when the release list is empty):** Nothing has been released yet. The first release will list
+  everything since the start of the project. (Said once, here; there's no separate status line.)
 - **visual:** none
 
 ## build-log

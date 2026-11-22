@@ -172,8 +172,13 @@ that copy's `deploy/k3s` directory:
 
    | Secret | Keys / purpose |
    | --- | --- |
-   | `logbird-runtime` | API: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`, `BETTER_AUTH_SECRET`, `CLICKHOUSE_QUERY_PASSWORD` (64 lowercase hex); `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` as required by the selected provider |
-   | `logbird-worker` | Retention/health/queue only: `DATABASE_URL` (a direct, session-mode connection: receipt-index compaction needs one session for its lock, settings, pid and REINDEX, so not a transaction-mode pooler), `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`. The manifest names these five `secretKeyRef` entries explicitly; no API auth secret, restricted-query password or SMTP credentials are mounted |
+   | `logbird-runtime` | API runtime: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`, `BETTER_AUTH_SECRET`, `CLICKHOUSE_QUERY_PASSWORD` (64 lowercase hex). The worker reads the same `BETTER_AUTH_SECRET`, optional `WEBHOOK_SECRET_KEY`, and provider settings `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` through explicit references. |
+   | `logbird-worker` | Worker storage and queues: `DATABASE_URL` (a direct session-mode connection for receipt-index compaction), `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`. |
+
+   Keep `APP_URL`, `WEBHOOKS_ALLOW_HTTP`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, and `MAIL_FROM`
+   in `logbird-config` so both roles use the same settings. A missing webhook signing key makes the worker
+   unready and reports `webhook.delivery_key_missing` in its startup log and readiness probe output.
+   If `WEBHOOK_SECRET_KEY` is configured, use the existing value for both roles.
    | `logbird-migration` | One-shot schema/access tooling: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, preserved `CLICKHOUSE_QUERY_PASSWORD`; no auth or mail credentials |
 
    Back up the three object names, key inventories and encrypted recovery references
@@ -345,8 +350,8 @@ archived; prune only release-owned completed Jobs under a separate retention pol
 
 The API uses `/livez` for startup/liveness and `/readyz` for routing. App readiness proxies
 `/readyz`; TCP liveness avoids restarting it just because storage is unavailable. The worker's
-`node dist/health.mjs` checks dependency connectivity in a separate process; it does **not**
-prove that the existing consumer is polling. It has no dependency-triggered liveness restart.
+`node dist/health.mjs` checks dependency connectivity and webhook signing configuration in a separate process.
+Check a completed job to confirm the live consumer is polling. Probe failures affect readiness only.
 The extra Node readiness process shares the worker's 1 GiB memory limit: measure
 combined peak RSS/cgroup usage with concurrent retention and a probe, and leave
 headroom or change the probe design before qualifying that image (OPS-02).

@@ -2,6 +2,9 @@
  * The console's API proxy handler against a capturing upstream: `fetch` is stubbed, so no port is opened and the
  * exact method and headers the API listener would receive are recorded.
  */
+import { once } from 'node:events';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { H3 } from 'nitro/h3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import handler from './proxy';
@@ -284,5 +287,54 @@ describe('optional marketing upstream', () => {
     expect(response.headers.get('location')).toBe('/contact?status=ok');
     expect(response.headers.get('content-security-policy')).toBe(policy);
     expect(response.headers.getSetCookie()).toEqual([]);
+  });
+});
+
+describe('identity headers reach ingest exactly as the client sent them', () => {
+  const ingest = (headers: Record<string, string>) =>
+    app.fetch(
+      new Request('http://console.logbird.test/v1/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: '{}',
+      }),
+    );
+
+  it('forwards User-Agent and X-Logbird-SDK unchanged', async () => {
+    await ingest({ 'user-agent': 'billing-service/2.3 (.NET 10)', 'x-logbird-sdk': 'logbird-dotnet/0.1.0' });
+    expect(captured[0]?.headers.get('user-agent')).toBe('billing-service/2.3 (.NET 10)');
+    expect(captured[0]?.headers.get('x-logbird-sdk')).toBe('logbird-dotnet/0.1.0');
+  });
+
+  it('sends an empty User-Agent when the client sent none, never one of its own', async () => {
+    await ingest({});
+    expect(captured[0]?.headers.get('user-agent')).toBe('');
+    expect(captured[0]?.headers.get('x-logbird-sdk')).toBeNull();
+  });
+
+  it('keeps an outer proxy chain in X-Forwarded-For', async () => {
+    await ingest({ 'x-forwarded-for': '198.51.100.7' });
+    expect(captured[0]?.headers.get('x-forwarded-for')).toMatch(/^198\.51\.100\.7(, .+)?$/);
+  });
+
+  it('over a real socket, a client without a User-Agent is not labelled with the proxy runtime', async () => {
+    vi.unstubAllGlobals();
+    const seen: IncomingHttpHeaders[] = [];
+    const server = createServer((req, res) => {
+      seen.push(req.headers);
+      req.resume();
+      res.writeHead(202, { 'content-type': 'application/json' }).end('{}');
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      vi.stubEnv('LOGBIRD_SERVER_URL', `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+      expect((await ingest({})).status).toBe(202);
+      expect((await ingest({ 'user-agent': 'curl/8.9.1' })).status).toBe(202);
+    } finally {
+      server.close();
+    }
+    expect(seen[0]?.['user-agent'] ?? '').toBe('');
+    expect(seen[1]?.['user-agent']).toBe('curl/8.9.1');
   });
 });

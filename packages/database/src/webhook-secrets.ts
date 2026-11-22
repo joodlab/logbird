@@ -1,4 +1,7 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
+import type { Prisma } from './generated/client';
+
+export const activeWebhookSecrets = (now: Date): Prisma.WebhookSecretWhereInput => ({ OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] });
 
 export function webhookSecretKey(authSecret: string, explicitKey?: string): Buffer {
   if (explicitKey !== undefined) {
