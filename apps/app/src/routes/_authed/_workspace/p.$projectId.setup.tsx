@@ -254,8 +254,7 @@ function RecentEvents({ projectId, setup }: { projectId: string; setup: ProjectS
       <p className="text-muted-foreground text-sm">
         {onlyConsoleTest(setup) ? 'The console test doesn’t count here: these show events your backend sends. ' : null}
         Track events where data changes — API handlers, workers, schedulers, webhooks — not only from the UI. If events stopped, check that the ingest
-        key was not revoked and that your process calls <span className="font-mono text-foreground">shutdown()</span> or{' '}
-        <span className="font-mono text-foreground">flush()</span> before exiting.
+        key was not revoked and, if a client library queues your events, that your process flushes them on shutdown.
       </p>
       <Button
         className="self-start"

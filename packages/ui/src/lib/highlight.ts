@@ -1,9 +1,9 @@
 /**
  * A tiny, dependency-free highlighter for the handful of languages the console shows
- * (JSON payloads, shell/curl, TypeScript SDK snippets). Tokens map to theme-aware
+ * (JSON payloads, shell/curl, TypeScript and C# snippets). Tokens map to theme-aware
  * `--syntax-*` colors so code reads well in light and dark.
  */
-export type CodeLanguage = 'json' | 'bash' | 'ts' | 'text';
+export type CodeLanguage = 'json' | 'bash' | 'ts' | 'csharp' | 'text';
 export type TokenType = 'key' | 'string' | 'number' | 'keyword' | 'comment' | 'punct' | 'plain';
 export interface CodeToken {
   type: TokenType;
@@ -29,6 +29,27 @@ const TS_KEYWORDS = new Set([
   'else',
   'type',
   'interface',
+]);
+
+const CSHARP_KEYWORDS = new Set([
+  'using',
+  'var',
+  'new',
+  'await',
+  'async',
+  'return',
+  'if',
+  'else',
+  'true',
+  'false',
+  'null',
+  'class',
+  'public',
+  'static',
+  'string',
+  'int',
+  'namespace',
+  'throw',
 ]);
 
 const RULES: Record<Exclude<CodeLanguage, 'text'>, [RegExp, TokenType | ((m: string) => TokenType)][]> = {
@@ -61,6 +82,16 @@ const RULES: Record<Exclude<CodeLanguage, 'text'>, [RegExp, TokenType | ((m: str
     [/^\d+(?:\.\d+)?/, 'number'],
     [/^[A-Za-z_$][\w$]*(?=\s*:)/, 'key'],
     [/^[A-Za-z_$][\w$]*/, (m) => (TS_KEYWORDS.has(m) ? 'keyword' : 'plain')],
+    [/^[{}()[\];,.:=<>+\-*/!?&|]/, 'punct'],
+    [/^\s+/, 'plain'],
+    [/^./, 'plain'],
+  ],
+  csharp: [
+    [/^\/\/[^\n]*/, 'comment'],
+    [/^\/\*[\s\S]*?\*\//, 'comment'],
+    [/^@?"(?:[^"\\]|\\.)*"/, 'string'],
+    [/^\d+(?:\.\d+)?/, 'number'],
+    [/^[A-Za-z_][\w]*/, (m) => (CSHARP_KEYWORDS.has(m) ? 'keyword' : 'plain')],
     [/^[{}()[\];,.:=<>+\-*/!?&|]/, 'punct'],
     [/^\s+/, 'plain'],
     [/^./, 'plain'],
