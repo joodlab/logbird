@@ -48,6 +48,14 @@ it('explains without a button when the pair has no single unambiguous record: fo
     expect(loosePairNotice(q, 'query'), q).toEqual({ exact: null });
 });
 
+it('explains without a button when the exact form would exceed the 4,096-byte query limit', () => {
+  // Each colon in a type is escaped twice in the record: pair, so a saved query well under the limit can grow past it.
+  const q = `target:12 target.type:"${':'.repeat(1362)}"`;
+  expect(new TextEncoder().encode(q).length).toBeLessThan(4096);
+  expect(new TextEncoder().encode(formatRecordTerm(':'.repeat(1362), '12')).length).toBeGreaterThan(4096);
+  expect(loosePairNotice(q, 'query')).toEqual({ exact: null });
+});
+
 it('says nothing when there is no loose pair', () => {
   for (const q of [
     '',
