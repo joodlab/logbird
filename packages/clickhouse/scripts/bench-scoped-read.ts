@@ -9,7 +9,16 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ReadScope } from '@logbird/contracts';
-import { type ClickHouseClient, createClickHouseClient, createQueryClickHouseClient, exportEvents, facets, getEvent, purgeProject, searchEvents } from '../src/index';
+import {
+  type ClickHouseClient,
+  createClickHouseClient,
+  createQueryClickHouseClient,
+  exportEvents,
+  facets,
+  getEvent,
+  purgeProject,
+  searchEvents,
+} from '../src/index';
 
 const total = Number(process.argv[2] ?? 1_000_000);
 const runs = Number(process.argv[3] ?? 30);
@@ -100,7 +109,9 @@ try {
       ['24h', day],
       ['7d', week],
     ] as const) {
-      results.push(await measure(`search ${range} ${label}`, () => searchEvents(reader(scope), p, { ...r, limit: 50, order: 'desc' }, undefined, scope)));
+      results.push(
+        await measure(`search ${range} ${label}`, () => searchEvents(reader(scope), p, { ...r, limit: 50, order: 'desc' }, undefined, scope)),
+      );
     }
     results.push(await measure(`facets 7d action ${label}`, () => facets(reader(scope), p, { ...week, field: 'action', limit: 10 }, scope)));
     results.push(
