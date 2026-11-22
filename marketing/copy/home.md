@@ -72,7 +72,7 @@ Every claim on the page, with its source. Update the source and the module toget
 | Claim (module key) | Source |
 | --- | --- |
 | Search your events in the console, within the indexing limits (`hero.lead`) | `docs/SPEC.md` §3 (attribute indexing limits) and §5.1 |
-| One event per action over HTTP or the TypeScript SDK; only `action` is required (`hero.lead`, `hero.sample`, `developers.lead`, `guarantees.items[2]`) | `docs/SPEC.md` §1.1, §3; `packages/sdk/README.md`; `README.md` Quickstart |
+| One event per action over HTTP or the TypeScript SDK; only `action` is required, and a missing recommended field never causes a rejection (a supplied one can still be rejected, for example an `id` over 256 trimmed UTF-16 units) (`hero.lead`, `hero.sample`, `developers.lead`, `guarantees.items[2]`) | `docs/SPEC.md` §1.1, §3; `packages/sdk/README.md`; `README.md` Quickstart |
 | Export it complete (`hero.lead`, `evidence.rows[2]`) | `docs/exports.md` § Which format? (`jsonl-evidence`: the normalized event plus the stored original payload) |
 | MIT-licensed; run it on your own servers (`hero.lead`, `hosting.selfHost`) | `LICENSE`; `docs/self-hosting.md` |
 | Logbird Cloud: early access or waitlist, by state; the same codebase; "we run" the servers, upgrades and backups only once it is open, "we will run" before (`hero.lead`, `hosting.cloud`) | `content/shared.ts` (Cloud CTA rule, `README.md`); `marketing/copy/cloud.md` hero |
@@ -82,7 +82,7 @@ Every claim on the page, with its source. Update the source and the module toget
 | `useAuditTrail` loads pages (`loadMore`); headless `AuditTimeline` (`customers.now.points[2]`) | `docs/integrations.md` § Design |
 | A read key reads the whole project, so your backend authorizes (`customers.now.limit`) | `docs/integrations.md` § Design ("A project read key is project-wide; a query filter is not authorization.") |
 | After the proof: viewer tokens of 15 minutes by default, one hour at most; the scope applied outside every query on search, detail, counts and export; scoped keys with optional target and action prefixes; one tenant per scope, stored ids, ClickHouse enforcement only with the restricted query user (`customers.scoped`) | `docs/scoped-read-access.md`; `CHANGELOG.md` 0.2.0 (release branch) § Scoped read access |
-| Actor, `impersonator`, tenant, records, before and after for up to 256 changes (`evidence.rows[0]`, `operators.screenshot`) | `docs/concepts.md` § Actors; `packages/contracts/src/events.ts` (`changes` at most 256) |
+| Actor, `impersonator`, tenant, records, before and after for up to 256 changes (`evidence.rows[0]`, `operators.screenshot`) | `docs/concepts.md` § Actors; `packages/clickhouse/src/normalize.ts` (`e.changes.slice(0, 256)`: the first 256 are kept, with their before and after values) |
 | Logbird records what your code sends (`evidence.rows[0].limit`) | `docs/SPEC.md` §1 item 2 ("Capture is the client's job") |
 | Retention from 7 days to 10 years; hourly deletion (`evidence.rows[1]`, `guarantees.items[3]`) | `packages/contracts/src/api.ts` `RETENTION_OPTIONS`; `docs/SPEC.md` §1.4, §4 |
 | An owner or admin can shorten retention; the purge starts immediately and is final (`evidence.rows[1].limit`) | `docs/SPEC.md` §1 item 4 and §7.1 (PATCH `retentionDays`: owner, admin); `/security` § Retention |
@@ -92,7 +92,7 @@ Every claim on the page, with its source. Update the source and the module toget
 | Search syntax and guarded SQL, entity pages, operation trees (`operators.features`) | `docs/SPEC.md` §5.1; `docs/concepts.md` |
 | SDK, middleware, `jobAudit`, the conformance score (`developers.items`, `developers.code`) | `packages/sdk/README.md`; `docs/integrations.md`; `docs/SPEC.md` §3 (`conformance`); `packages/clickhouse/src/normalize.ts` |
 | Any language that can POST JSON works; a .NET package is in the repository, not on NuGet (`developers.otherStacks`) | `docs/SPEC.md` §5 (`POST /v1/events`); `sdks/dotnet/README.md`; `CHANGELOG.md` on the `chore/release-0.2.0` branch, 0.2.0 § .NET; NuGet has no `Logbird` or `Logbird.AspNetCore` package (checked 2026-11-22) |
-| The guarantees table (`guarantees`) | `docs/SPEC.md` §2, §3; `docs/concepts.md`; `packages/sdk/README.md`; `docs/integrations.md` § Outage backpressure |
+| The guarantees table (`guarantees`) | `docs/SPEC.md` §2 (including `Logbird-Retry: subset`: only the unsettled events are resent when a `503` lists them), §3; `docs/concepts.md`; `packages/sdk/README.md`; `docs/integrations.md` § Outage backpressure (per-event validation; the bounded SDK queue and its drop policy) |
 
 ## Owner notes
 
