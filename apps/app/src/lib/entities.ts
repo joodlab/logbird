@@ -70,10 +70,12 @@ export function entityQuery(kind: EntityKind, id: string, targetType?: string): 
  * 1 id prefix, 2 name prefix, 3 id or name contains it, 4 a fuzzy match only. A record's bare id (`article_27_2` for
  * `article:article_27_2`) counts as its id.
  */
-export function entityMatchRank(entity: { id: string; name: string }, text: string): 0 | 1 | 2 | 3 | 4 {
+export function entityMatchRank(entity: { kind?: EntityKind; id: string; name: string; type?: string }, text: string): 0 | 1 | 2 | 3 | 4 {
   const t = text.trim().toLowerCase();
   const id = entity.id.toLowerCase();
-  const bare = id.slice(id.indexOf(':') + 1);
+  // Only a record loses a prefix, and only its own known type (which may contain colons): `a:biz_27` is not `biz_27`.
+  const type = entity.kind === 'target' ? (entity.type ?? '').toLowerCase() : '';
+  const bare = type && id.startsWith(`${type}:`) ? id.slice(type.length + 1) : id;
   const name = entity.name.toLowerCase();
   if (!t) return 4;
   if (id === t || bare === t) return 0;
@@ -83,10 +85,15 @@ export function entityMatchRank(entity: { id: string; name: string }, text: stri
   return 4;
 }
 
-/** Free text that could be an id: one word, no field, operator, quote, group or wildcard. */
-export function looksLikeId(text: string): boolean {
+/**
+ * The id that free text could be, or '' when it cannot be one: a single bare word (no field, operator, group or
+ * wildcard), or one quoted term (`"acme:27"`, which the query language reads as the literal text).
+ */
+export function idFromFreeText(text: string): string {
   const t = text.trim();
-  return t.length >= 2 && /^[^\s:()"'*-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t);
+  const quoted = /^"([^"\\\s]+)"$/.exec(t);
+  if (quoted) return quoted[1] ?? '';
+  return /^[^\s:()"'*-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
 }
 
 export function targetEntityId(type: string, id: string): string {

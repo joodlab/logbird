@@ -260,15 +260,15 @@ export function useCompletions({
   // A `useQueries` placeholder gets no previous data (TanStack Query v5), so the last answered word's matches are kept
   // here. Filtered locally by the current word, they hold the rows while the next word debounces or loads, shown dimmed
   // and busy (entitiesStale below), never as current.
-  const answered = entityQueries.map((q) => q.data);
-  const hasAnswer = answered.some((d) => d !== undefined);
+  // Per field: the field's own answer for this word, else its last answer (any earlier word), else nothing. One field
+  // answering first never clears the others' kept rows; a field whose lookup failed shows nothing from before.
   const lastAnswered = useRef<(SuggestResponse | undefined)[]>([]);
+  const entityData = entityQueries.map((q, i) => q.data ?? (word && !q.isError ? lastAnswered.current[i] : undefined));
   useEffect(() => {
-    if (hasAnswer) lastAnswered.current = answered;
+    entityQueries.forEach((q, i) => {
+      if (q.data) lastAnswered.current[i] = q.data;
+    });
   });
-  // A failed lookup shows nothing rather than an older word's matches undimmed.
-  const failed = entityQueries.every((q) => q.isError);
-  const entityData = hasAnswer ? answered : word && !failed ? lastAnswered.current : [];
   const entitiesPending = Boolean(word) && (debouncedWord !== word || entityQueries.some((q) => q.isFetching));
   // biome-ignore lint/correctness/useExhaustiveDependencies: entityData is a fresh array each render; its items are stable query results
   const entities = useMemo(() => {

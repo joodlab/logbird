@@ -281,6 +281,10 @@ it.runIf(process.env.CLICKHOUSE_URL)(
         ...event(1, { targets: [{ type: 'article', id: 'article_27_2', name: 'Umrah Season Packages' }] }),
         ...event(9, { targets: [{ type: 'website', id: 'web_27_2', name: 'darb-pearl-residences.example.com' }] }),
         ...event(9, { targets: [{ type: 'article', id: 'article_1_2', name: 'Umrah Packages' }] }),
+        // Colons: tenants whose ids merely end in `biz_27` are not it; a record type may itself contain a colon.
+        ...['a', 'b', 'c', 'd'].flatMap((x) => event(5, { tenant: { id: `${x}:biz_27` } })),
+        ...event(1, { targets: [{ type: 'catalog:item', id: 'item_99_1', name: 'Catalog item' }] }),
+        ...event(9, { targets: [{ type: 'post', id: 'item_99_10', name: 'Busier post' }] }),
       ]);
       const ids = async (kind: 'actor' | 'tenant' | 'target', q: string, limit = 4) =>
         entityListResponseSchema.parse(await listEntities(ch, p, { kind, q, limit })).data.map((e) => e.id);
@@ -288,6 +292,9 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       expect((await ids('tenant', 'biz_27')).slice(0, 2)).toEqual(['biz_27', 'biz_270']);
       expect(await ids('tenant', 'BIZ_27', 1)).toEqual(['biz_27']);
       expect(await ids('actor', 'usr_131', 1)).toEqual(['usr_131']);
+      // Only a record loses its own type prefix: four busier `x:biz_27` tenants never push out the exact `biz_27`.
+      expect(await ids('tenant', 'biz_27', 1)).toEqual(['biz_27']);
+      expect(await ids('target', 'item_99_1', 1)).toEqual(['catalog:item:item_99_1']);
       // Targets are stored as type:id; the bare id is an exact match too.
       expect(await ids('target', 'article_27_2', 1)).toEqual(['article:article_27_2']);
       // A name prefix beats a busier entity that only contains the words.

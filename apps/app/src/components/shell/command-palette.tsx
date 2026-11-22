@@ -11,7 +11,7 @@ import {
 } from '@logbird/ui/components/ui/command';
 import { useTheme } from '@logbird/ui/theme';
 import { useDebouncedValue } from '@tanstack/react-pacer';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ActivityIcon,
@@ -45,8 +45,11 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const projects = useQuery({ ...projectsQuery(), enabled: open });
   const views = useQuery({ ...viewsQuery(projectId ?? ''), enabled: open && Boolean(projectId) });
 
+  const queryClient = useQueryClient();
   // Best match first across kinds; an exact id always leads (the server ranks it first whatever the per-kind cap).
-  const entities = useQuery({ ...entitySearchQuery(projectId ?? '', debounced), enabled: open && Boolean(projectId) && debounced.length >= 2 });
+  // One character is enough: ingest accepts an id like `7`.
+  const lookup = useQuery({ ...entitySearchQuery(projectId ?? '', debounced), enabled: open && Boolean(projectId) && debounced.length >= 1 });
+  const found = lookup.data?.entities;
   // Support agents only appear as `impersonator`, never in the actor directory: look them up by name or id.
   const agents = useQuery({
     queryKey: ['palette-support-agents', projectId, debounced],
@@ -64,7 +67,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const firstAgentValue = firstAgent ? `support ${firstAgent.value} ${firstAgent.label}` : '';
   const trimmed = search.trim();
   // Entities whose id is exactly what was typed (`biz_27`, or a record's bare id): opened directly from Jump to.
-  const exact = (entities.data ?? []).filter((e) => entityMatchRank(e, trimmed) === 0).slice(0, 3);
+  const exact = (found ?? []).filter((e) => entityMatchRank(e, trimmed) === 0).slice(0, 3);
   const openValue = (e: { kind: string; id: string }) => `${trimmed} open ${e.kind} ${e.id}`;
   const firstExact = exact[0];
   const firstExactValue = firstExact ? openValue(firstExact) : '';
@@ -73,7 +76,20 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   useEffect(() => {
     if (firstExactValue || firstAgentValue) setHighlighted(firstExactValue || firstAgentValue);
   }, [firstExactValue, firstAgentValue]);
-  const others = (entities.data ?? []).filter((e) => !exact.includes(e));
+  const others = (found ?? []).filter((e) => !exact.includes(e));
+  // "Search events for": an id searches its own events, never free text (which matches names, not ids). Enter can land
+  // before the lookup for this exact text (debounce, a slow kind): then finish the lookup first and decide.
+  const searchEvents = async () => {
+    if (!projectId || !trimmed) return;
+    const pid = projectId;
+    let q = trimmed;
+    if (!/\s/.test(trimmed)) {
+      const answer = await queryClient.fetchQuery(entitySearchQuery(pid, trimmed)).catch(() => undefined);
+      const id = answer?.entities.find((e) => entityMatchRank(e, trimmed) === 0);
+      if (id) q = entityQuery(id.kind, id.id, id.type);
+    }
+    go(() => navigate({ to: '/p/$projectId/events', params: { projectId: pid }, search: { q } }));
+  };
 
   const go = (fn: () => void) => {
     onOpenChange(false);
@@ -166,27 +182,13 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             })}
             {/* Free text searches names and descriptions, never ids: an exact id searches its own events instead. */}
             {firstExact ? (
-              <CommandItem
-                onSelect={() =>
-                  go(() =>
-                    navigate({
-                      to: '/p/$projectId/events',
-                      params: { projectId },
-                      search: { q: entityQuery(firstExact.kind, firstExact.id, firstExact.type) },
-                    }),
-                  )
-                }
-                value={`search ${trimmed}`}
-              >
+              <CommandItem onSelect={searchEvents} value={`search ${trimmed}`}>
                 <SearchIcon />
                 <span className="shrink-0 whitespace-nowrap">Search events for</span>
                 <span className="min-w-0 truncate font-mono text-xs">{entityQuery(firstExact.kind, firstExact.id, firstExact.type)}</span>
               </CommandItem>
             ) : (
-              <CommandItem
-                onSelect={() => go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: trimmed } }))}
-                value={`search ${trimmed}`}
-              >
+              <CommandItem onSelect={searchEvents} value={`search ${trimmed}`}>
                 <SearchIcon />
                 <span className="shrink-0 whitespace-nowrap">Search events for</span>
                 <span className="min-w-0 truncate font-mono text-xs">{trimmed}</span>

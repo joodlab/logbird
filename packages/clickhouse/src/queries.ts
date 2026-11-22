@@ -613,11 +613,14 @@ const ENTITY_ORDER: Record<EntitySort, { keys: string; types: [string, string] }
 };
 /**
  * How well an entity matches a search, best first: 0 exact id, 1 id prefix, 2 name prefix, 3 substring of id or name,
- * 4 fuzzy (ngram) only. Targets are stored as `type:id`, so their bare id counts as the id too (`article_27_2`).
+ * 4 fuzzy (ngram) only. A record is stored as `type:id`; its bare id (the part after its own, known type, which may
+ * itself contain colons) counts as the id too (`article_27_2`). Other kinds keep their ids whole: `a:biz_27` is not
+ * `biz_27`.
  */
+const ENTITY_BARE_ID = "lowerUTF8(if(kind='target' AND type!='' AND startsWith(id,concat(type,':')),substring(id,length(type)+2),id))";
 const ENTITY_MATCH_RANK = `multiIf(
-  lowerUTF8(id)=lowerUTF8({q:String}) OR lowerUTF8(substring(id,position(id,':')+1))=lowerUTF8({q:String}),0,
-  startsWith(lowerUTF8(id),lowerUTF8({q:String})) OR startsWith(lowerUTF8(substring(id,position(id,':')+1)),lowerUTF8({q:String})),1,
+  lowerUTF8(id)=lowerUTF8({q:String}) OR ${ENTITY_BARE_ID}=lowerUTF8({q:String}),0,
+  startsWith(lowerUTF8(id),lowerUTF8({q:String})) OR startsWith(${ENTITY_BARE_ID},lowerUTF8({q:String})),1,
   startsWith(lowerUTF8(name),lowerUTF8({q:String})),2,
   positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0,3,
   4)`;

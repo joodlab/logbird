@@ -17,7 +17,7 @@ import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { entitySearchQuery, eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
-import { ENTITY_SECTIONS, entityMatchRank, entityQuery, looksLikeId, sectionForKind } from '@/lib/entities';
+import { ENTITY_SECTIONS, entityMatchRank, entityQuery, idFromFreeText, sectionForKind } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
 import { andQuery, scopedQuery } from '@/lib/query-language';
@@ -328,9 +328,9 @@ function ProjectExplorer({
   /* ---------------- empty results: say why, and offer only what would find something ---------------- */
   const showsEmpty = Boolean(pages) && !problem && !events.isError && rows.length === 0;
   // A bare word that is exactly an entity's id: free text searches names and descriptions, never ids.
-  const word = lang === 'query' && looksLikeId(q) ? q.trim() : '';
+  const word = lang === 'query' ? idFromFreeText(q) : '';
   const idLookup = useQuery({ ...entitySearchQuery(projectId, word), enabled: showsEmpty && Boolean(word) });
-  const idMatch = word ? idLookup.data?.find((e) => entityMatchRank(e, word) === 0) : undefined;
+  const idMatch = word ? idLookup.data?.entities.find((e) => entityMatchRank(e, word) === 0) : undefined;
   const idSettled = !word || idLookup.isSuccess || idLookup.isError;
   // Whether anything older matches: only then is the range the reason, and only then is widening offered.
   const wider = useQuery({
@@ -362,11 +362,11 @@ function ProjectExplorer({
             Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>.{' '}
             {olderMatches
-              ? `${formatNumber(olderMatches)} older ${olderMatches === 1 ? 'event matches' : 'events match'}.`
+              ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
               : 'Remove a filter or change the query.'}
           </>
         ) : olderMatches ? (
-          `No events in ${rangeInSentence(rangeName)}. ${formatNumber(olderMatches)} older ${olderMatches === 1 ? 'event is' : 'events are'} stored.`
+          `No events in ${rangeInSentence(rangeName)}. ${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event is' : 'events are'} stored outside it.`
         ) : complete || olderMatches === 0 ? (
           `No events in ${rangeInSentence(rangeName)}. Send events with your ingest key to see them here.`
         ) : (
