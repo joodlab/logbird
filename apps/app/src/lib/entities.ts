@@ -1,5 +1,6 @@
 import type { EntityKind } from '@logbird/contracts';
 import { Bot, Building2, Cog, type LucideIcon, Package, User } from 'lucide-react';
+import { formatExactTerm } from '@/lib/query-language';
 
 /**
  * URL segment ↔ entity kind. The `/workers` URL is kept for compatibility, but the UI calls every executor
@@ -55,18 +56,17 @@ export function sectionForKind(kind: EntityKind): EntitySection {
   }
 }
 
-/** Query that selects every event involving the entity. Target ids are "<type>:<id>". */
+/**
+ * Query that selects every event involving the entity, matching its id exactly (an id like `team*` is never a prefix
+ * search). Target ids are "<type>:<id>".
+ */
 export function entityQuery(kind: EntityKind, id: string): string {
   if (kind === 'target') {
     const sep = id.indexOf(':');
-    if (sep > 0) return `target:${quote(id.slice(sep + 1))} target.type:${quote(id.slice(0, sep))}`;
-    return `target:${quote(id)}`;
+    if (sep > 0) return `${formatExactTerm('target', id.slice(sep + 1))} ${formatExactTerm('target.type', id.slice(0, sep))}`;
+    return formatExactTerm('target', id);
   }
-  return `${kind}:${quote(id)}`;
-}
-
-function quote(v: string): string {
-  return /[\s()"]/.test(v) ? `"${v.replaceAll('"', '\\"')}"` : v;
+  return formatExactTerm(kind, id);
 }
 
 export function targetEntityId(type: string, id: string): string {

@@ -11,7 +11,7 @@ import { useRange } from '@/lib/use-range';
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/records/$entityId')({
   head: () => ({ meta: [{ title: 'Record · Logbird' }] }),
   validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional(), live: z.boolean().optional() }),
-  staticData: { crumb: 'Records', range: true },
+  staticData: { crumb: 'Records', range: true, keepChosenRange: true },
   loaderDeps: ({ search }) => ({ range: search.range }),
   loader: ({ context, params, deps }) => {
     const range = deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE;
@@ -34,7 +34,8 @@ function ProfilePage() {
           ...('q' in patch ? { q: patch.q || undefined } : {}),
           ...('ev' in patch ? { ev: patch.ev } : {}),
           ...('live' in patch ? { live: patch.live || undefined } : {}),
-          ...('range' in patch ? { range: patch.range === DEFAULT_RANGE ? undefined : patch.range } : {}),
+          // Histogram zoom and range changes are the reader's choice: keep them, even when equal to the default.
+          ...('range' in patch ? { range: patch.range } : {}),
         }),
       }),
     [navigate],
