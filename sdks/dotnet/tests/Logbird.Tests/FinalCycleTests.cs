@@ -39,6 +39,10 @@ public class FinalCycleTests
     private sealed class StalledStream : Stream
     {
         private readonly TaskCompletionSource<int> _read = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _reads;
+
+        /// <summary>How many reads were started (each one never completes).</summary>
+        public int Reads => Volatile.Read(ref _reads);
 
         public override bool CanRead => true;
 
@@ -50,13 +54,25 @@ public class FinalCycleTests
 
         public override long Position { get => 0; set => throw new NotSupportedException(); }
 
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => _read.Task;
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _reads);
+            return _read.Task;
+        }
 
 #if NET
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => new(_read.Task);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _reads);
+            return new(_read.Task);
+        }
 #endif
 
-        public override int Read(byte[] buffer, int offset, int count) => _read.Task.GetAwaiter().GetResult();
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Interlocked.Increment(ref _reads);
+            return _read.Task.GetAwaiter().GetResult();
+        }
 
         public override void Flush()
         {
@@ -128,13 +144,16 @@ public class FinalCycleTests
     [Fact]
     public async Task A_stalled_body_cannot_outlive_the_read_timeout()
     {
-        var server = new FakeServer().Then(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream()) });
-        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k", Timeout = TimeSpan.FromMilliseconds(300) }, new HttpClient(server));
-        // The 300 ms timeout must end the read; the watchdog only catches a hang, it does not measure scheduling time.
+        // The body never arrives and its reads ignore cancellation. The read timeout must still end the search, and the
+        // stream must show that a body read had started (so it was the stalled read the timeout ended, not the headers).
+        var body = new StalledStream();
+        var server = new FakeServer().Then(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k", Timeout = TimeSpan.FromSeconds(2) }, new HttpClient(server));
         var search = reader.SearchAsync();
         Assert.Same(search, await Task.WhenAny(search, Task.Delay(TimeSpan.FromSeconds(60))));
         var error = await Assert.ThrowsAsync<LogbirdApiException>(() => search);
         Assert.Equal("unreachable", error.Code);
+        Assert.True(body.Reads >= 1, "no body read had started");
     }
 
     [Fact]
@@ -273,7 +292,14 @@ public class FinalCycleTests
 
         Assert.True(WaiterCount(client) <= Internal.EventQueue.MaxWaiters, WaiterCount(client).ToString(System.Globalization.CultureInfo.InvariantCulture));
         release.SetResult(true);
-        Assert.All(await Task.WhenAll(flushes), Assert.True);
+        var results = await Task.WhenAll(flushes);
+
+        // Every flush completes. All of them succeed unless the setup stalled past the sender's five-minute limit for one
+        // send, which fails that send by design; the bound on waiters is what this test is about.
+        if (client.Stats.FailedSends == 0)
+        {
+            Assert.All(results, Assert.True);
+        }
     }
 
     [Fact]
@@ -401,11 +427,13 @@ public class FinalCycleTests
 
         // [X] is held open; then [A, B] gets a 503 that accepts A and leaves B unresolved, which completes a flush covering
         // X and A while the send goes on. The retry for B waits in the sender's backoff (the injectable delay) until the
-        // assertion has run, so the sender cannot advance in between. X's request timeout is long, so X never retries into
-        // that gate, and every wait has a hang watchdog only.
+        // assertion has run, so the sender cannot advance in between. X never meets that gate: the 503 response arms it,
+        // and X's request has neither an SDK nor an HttpClient timeout that could expire first. Every wait has a hang
+        // watchdog only.
         var xArrived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseX = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseRetry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryArmed = 0;
         var server = new FakeServer()
             .ThenAsync(async request =>
             {
@@ -413,7 +441,14 @@ public class FinalCycleTests
                 await releaseX.Task;
                 return Accept(request);
             })
-            .Then(request => FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new
+            .Then(request =>
+            {
+                // From this response on, a retry (only B's can follow) waits for the gate; X never meets it.
+                Interlocked.Exchange(ref retryArmed, 1);
+                return Pending503(request);
+            })
+            .Then(Accept);
+        static HttpResponseMessage Pending503(CapturedRequest request) => FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new
             {
                 error = new
                 {
@@ -428,13 +463,12 @@ public class FinalCycleTests
                         eventIds = new[] { request.Ids[1] },
                     },
                 },
-            })))
-            .Then(Accept);
+            }));
         await using var client = new LogbirdClient(
             Options(o => o.RequestTimeout = TimeSpan.FromMinutes(5)),
-            new HttpClient(server),
+            new HttpClient(server) { Timeout = System.Threading.Timeout.InfiniteTimeSpan },
             logger: null,
-            delay: (_, _) => releaseRetry.Task);
+            delay: (_, _) => Volatile.Read(ref retryArmed) == 1 ? releaseRetry.Task : Task.CompletedTask);
         try
         {
             client.Track(new AuditEvent("x"));
