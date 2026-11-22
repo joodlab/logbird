@@ -175,11 +175,11 @@ public class IngestRoundTripTests(ITestOutputHelper output)
     [LiveFact]
     public async Task Record_trails_match_a_target_type_and_id_together_for_any_text()
     {
-        // record:<type>:<id> exists from 0.2.0 (#182). LOGBIRD_IT_RECORD=1 runs this against a server built from master.
+        // record:<type>:<id> exists from 0.2.0 (#182), and the read client refuses to send a record trail to an older server.
         var version = await LiveServer.ServerVersionAsync();
-        if (version < new Version(0, 2, 0) && Environment.GetEnvironmentVariable("LOGBIRD_IT_RECORD") != "1")
+        if (version < new Version(0, 2, 0))
         {
-            output.WriteLine($"server {version}: record trails need 0.2.0; set LOGBIRD_IT_RECORD=1 against a server from master");
+            output.WriteLine($"server {version}: record trails need 0.2.0; skipped");
             return;
         }
 
