@@ -34,7 +34,8 @@ function ProfilePage() {
           ...('q' in patch ? { q: patch.q || undefined } : {}),
           ...('ev' in patch ? { ev: patch.ev } : {}),
           ...('live' in patch ? { live: patch.live || undefined } : {}),
-          ...('range' in patch ? { range: patch.range === DEFAULT_RANGE ? undefined : patch.range } : {}),
+          // Histogram zoom and range changes are the reader's choice: keep them, even when equal to the default.
+          ...('range' in patch ? { range: patch.range } : {}),
         }),
       }),
     [navigate],

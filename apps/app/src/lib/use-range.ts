@@ -21,11 +21,16 @@ export function useRange(): {
     (next: string) => {
       navigate({
         to: '.',
-        search: ((prev: Record<string, unknown>) => ({ ...prev, range: next === fallback ? undefined : next })) as never,
+        // A chosen range stays in the URL even when it equals the page default: entity pages tell "the reader picked
+        // 24 hours" apart from "no choice, show the full history".
+        search: ((prev: Record<string, unknown>) => ({ ...prev, range: next })) as never,
       });
     },
-    [navigate, fallback],
+    [navigate],
   );
-  const clearRange = useCallback(() => setRange(fallback), [setRange, fallback]);
+  const clearRange = useCallback(
+    () => navigate({ to: '.', search: ((prev: Record<string, unknown>) => ({ ...prev, range: undefined })) as never }),
+    [navigate],
+  );
   return { range, setRange, explicit, clearRange };
 }

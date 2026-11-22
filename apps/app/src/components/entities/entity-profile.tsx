@@ -9,7 +9,7 @@ import { Button } from '@logbird/ui/components/ui/button';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeftIcon, Rows3Icon, SearchXIcon, VenetianMaskIcon } from 'lucide-react';
+import { ArrowLeftIcon, BookmarkIcon, Rows3Icon, SearchXIcon, VenetianMaskIcon } from 'lucide-react';
 import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { SupportSplitPanel, useSupportCounts, WhoSegmentedControl } from '@/components/entities/support-split';
@@ -56,7 +56,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   const onWho = (next: WhoFilter) => onTimelineChange({ q: withWhoFilter(timeline.q, next, lang), ev: undefined });
   // The history shows everything this entity did unless the reader picked a range; the charts follow the picker.
   const { explicit: rangeChosen, clearRange } = useRange();
-  const timelineRange = rangeChosen ? timeline.range : p ? historyRange(p.entity.firstSeen) : undefined;
+  // Only this entity's own profile may define its history (a placeholder can still hold the previous entity's).
+  const own = p && !(profile.isPlaceholderData && p.entity.id !== entityId) ? p : undefined;
+  const timelineRange = rangeChosen ? timeline.range : own ? historyRange(own.entity.firstSeen, Date.now(), own.entity.lastSeen) : undefined;
 
   if (profile.isError && !p) {
     const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
@@ -134,25 +136,39 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <SaveEntityViewButton
-              entityId={entityId}
-              kind={kind}
-              name={p?.entity.name || displayId}
-              projectId={projectId}
-              query={baseQuery}
-              range={timelineRange ?? timeline.range}
-            />
-            <Button
-              nativeButton={false}
-              render={
-                <Link params={{ projectId }} search={(prev) => ({ range: timelineRange ?? prev.range, q: baseQuery })} to="/p/$projectId/events" />
-              }
-              size="sm"
-              variant="outline"
-            >
-              <Rows3Icon />
-              Open in explorer
-            </Button>
+            {timelineRange ? (
+              <>
+                <SaveEntityViewButton
+                  entityId={entityId}
+                  kind={kind}
+                  name={p?.entity.name || displayId}
+                  projectId={projectId}
+                  query={baseQuery}
+                  range={timelineRange}
+                />
+                <Button
+                  nativeButton={false}
+                  render={<Link params={{ projectId }} search={{ range: timelineRange, q: baseQuery }} to="/p/$projectId/events" />}
+                  size="sm"
+                  variant="outline"
+                >
+                  <Rows3Icon />
+                  Open in explorer
+                </Button>
+              </>
+            ) : (
+              // Until the history's range is known, neither action could say what it saves or opens.
+              <>
+                <Button disabled size="sm" variant="outline">
+                  <BookmarkIcon />
+                  Save as view
+                </Button>
+                <Button disabled size="sm" variant="outline">
+                  <Rows3Icon />
+                  Open in explorer
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
@@ -179,33 +195,37 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                 History
               </h2>
               <div className="min-h-4 text-muted-foreground text-xs">
-                {!p ? (
-                  <Skeleton className="h-4 w-56" />
-                ) : rangeChosen ? (
+                {rangeChosen ? (
                   <>
                     {rangeLabel(timeline.range)}, from the time range above ·{' '}
                     <button className="font-medium text-foreground underline-offset-2 hover:underline" onClick={clearRange} type="button">
-                      Show all {formatNumber(p.entity.events)} events
+                      Clear time range
                     </button>
                   </>
+                ) : !own ? (
+                  <Skeleton className="h-4 w-56" />
                 ) : (
                   <>
-                    All {formatNumber(p.entity.events)} event{p.entity.events === 1 ? '' : 's'} since{' '}
-                    <Timestamp format="date" iso={p.entity.firstSeen} />, newest first
+                    All {formatNumber(own.entity.events)} event{own.entity.events === 1 ? '' : 's'} since{' '}
+                    <Timestamp format="date" iso={own.entity.firstSeen} />, newest first
                   </>
                 )}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              {(support?.support ?? 0) > 0 || who !== 'all' ? <WhoSegmentedControl kind={kind} onWho={onWho} who={who} /> : null}
+              {/* The history spans more than the charts' range: offer the support filter whatever the charts counted. */}
+              <WhoSegmentedControl kind={kind} onWho={onWho} who={who} />
               <button
-                className="text-muted-foreground text-xs hover:text-foreground"
+                className="text-muted-foreground text-xs hover:text-foreground disabled:opacity-50"
+                disabled={!timelineRange}
                 onClick={() =>
-                  navigate({
-                    to: '/p/$projectId/events',
-                    params: { projectId },
-                    search: { range: timelineRange ?? timeline.range, q: andQuery(baseQuery, timeline.q) },
-                  })
+                  timelineRange
+                    ? navigate({
+                        to: '/p/$projectId/events',
+                        params: { projectId },
+                        search: { range: timelineRange, q: andQuery(baseQuery, timeline.q) },
+                      })
+                    : undefined
                 }
                 type="button"
               >
@@ -221,6 +241,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                 embedded
                 onChange={onTimelineChange}
                 projectId={projectId}
+                rangeComplete={!rangeChosen}
                 rangeLabel={rangeChosen ? undefined : 'All history'}
                 state={{ ...timeline, range: timelineRange }}
               />

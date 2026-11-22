@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { historyRange, rangePhrase } from './range';
+import { historyRange, rangePhrase, resolveRange } from './range';
 
 describe('rangePhrase', () => {
   it('reads presets as a phrase with "the"', () => {
@@ -25,5 +25,15 @@ describe('historyRange', () => {
 
   it('falls back to 90 days for an unreadable first-seen time', () => {
     expect(historyRange('not a date', now)).toBe('90d');
+  });
+});
+
+describe('historyRange with a future-dated last event', () => {
+  it('ends just after that event instead of now', () => {
+    const now = Date.parse('2026-11-22T12:00:00.000Z');
+    const last = '2026-11-22T13:00:00.000Z';
+    const r = resolveRange(historyRange('2026-11-20T12:00:00.000Z', now, last), now);
+    expect(r.toMs).toBe(Date.parse(last) + 1);
+    expect(r.fromMs).toBe(now - 3 * 86_400_000);
   });
 });

@@ -103,8 +103,12 @@ export function previousWindow(range: string): { from: string; to: string } {
  * A relative range that covers everything since `firstSeenIso` (whole days, plus one so the first event is inside),
  * for an entity's full history. Relative, so live tail and "now" keep working; the string only changes once a day.
  */
-export function historyRange(firstSeenIso: string, now = Date.now()): string {
+export function historyRange(firstSeenIso: string, now = Date.now(), lastSeenIso?: string): string {
   const first = Date.parse(firstSeenIso);
   if (Number.isNaN(first)) return '90d';
-  return `${Math.max(1, Math.ceil((now - first) / UNIT_MS.d) + 1)}d`;
+  const days = Math.max(1, Math.ceil((now - first) / UNIT_MS.d) + 1);
+  // Ingest admits events stamped up to a day ahead; a relative range ends now and would hide them.
+  const last = lastSeenIso ? Date.parse(lastSeenIso) : Number.NaN;
+  if (!Number.isNaN(last) && last >= now) return absoluteRange(now - days * UNIT_MS.d, last + 1);
+  return `${days}d`;
 }

@@ -49,6 +49,8 @@ interface ExplorerProps {
   allowSql?: boolean;
   /** How to name the range in counts and empty states, when the range string is not what the reader chose ("All history"). */
   rangeLabel?: string;
+  /** The range already covers everything there is (an entity's full history): never suggest widening it. */
+  rangeComplete?: boolean;
   className?: string;
 }
 
@@ -86,6 +88,7 @@ export function Explorer({
   embedded = false,
   allowSql = !embedded && !baseQuery,
   rangeLabel: rangeLabelOverride,
+  rangeComplete = false,
   className,
 }: ExplorerProps) {
   const { q, range, columns, ev, live } = state;
@@ -270,8 +273,11 @@ export function Explorer({
         q ? (
           <>
             Nothing in <span className="font-medium text-foreground">{rangeName.toLowerCase()}</span> matches{' '}
-            <span className="font-mono text-foreground">{q}</span>. Try a wider range or remove a filter.
+            <span className="font-mono text-foreground">{q}</span>.{' '}
+            {rangeComplete ? 'Remove a filter to see more.' : 'Try a wider range or remove a filter.'}
           </>
+        ) : rangeComplete ? (
+          `No events in ${rangeName.toLowerCase()}.`
         ) : (
           `No events in ${rangeName.toLowerCase()}. Widen the range, or send events with your ingest key.`
         )
@@ -284,7 +290,7 @@ export function Explorer({
           Clear query
         </Button>
       ) : null}
-      {range !== '30d' ? (
+      {range !== '30d' && !rangeComplete ? (
         <Button onClick={() => onChange({ range: '30d' })} size="sm" variant="outline">
           Search last 30 days
         </Button>
