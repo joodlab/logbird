@@ -91,6 +91,7 @@ export function EventSheet({
             detail={detail.data}
             detailError={detail.isError ? detail.error : null}
             detailLoading={fetchDetail && detail.isPending}
+            detailFetching={detail.isFetching}
             detailUpdatedAt={detail.dataUpdatedAt}
             event={e}
             onFilter={onFilter}
@@ -234,7 +235,12 @@ interface Children {
  * "View all"), so fewer rows than the count is normal. Only more rows than the count means one cached side is stale:
  * then the older side is refreshed, once per side for that disagreement, after which the larger number stands.
  */
-function useChildren(detail: EventDetail | undefined, detailUpdatedAt: number, e: AuditEvent, projectId: string | undefined): Children {
+function useChildren(
+  detail: EventDetail | undefined,
+  detailSync: { updatedAt: number; fetching: boolean },
+  e: AuditEvent,
+  projectId: string | undefined,
+): Children {
   const operationId = e.context.operationId;
   const lookup = Boolean(projectId && detail && operationId) && (detail?.operationSize ?? Number.POSITIVE_INFINITY) <= CHILD_LOOKUP_MAX_OPERATION;
   const op = useQuery({ ...operationQuery(projectId ?? '', operationId ?? ''), enabled: lookup });
@@ -245,15 +251,17 @@ function useChildren(detail: EventDetail | undefined, detailUpdatedAt: number, e
   const children = lookup && op.isSuccess ? directChildren(op.data, e.id) : [];
   const mismatch = `${e.id}:${counted}:${children.length}`;
   const exceeds = lookup && op.isSuccess && children.length > counted;
+  // While either read of a known disagreement is in flight, neither side may be trusted yet.
+  const settling = exceeds && (op.isFetching || detailSync.fetching);
   let refresh: 'detail' | 'operation' | null = null;
-  if (exceeds && !op.isFetching) {
-    const older = op.dataUpdatedAt >= detailUpdatedAt ? 'detail' : 'operation';
+  if (exceeds && !settling) {
+    const older = op.dataUpdatedAt >= detailSync.updatedAt ? 'detail' : 'operation';
     const other = older === 'detail' ? 'operation' : 'detail';
     if (!tried.current.has(`${mismatch}:${older}`)) refresh = older;
     else if (!tried.current.has(`${mismatch}:${other}`)) refresh = other;
   }
   // Attempts belong to one disagreement: once settled reads agree again (or another event opens), start afresh.
-  const consistent = lookup && op.isSuccess && !op.isFetching && !exceeds;
+  const consistent = lookup && op.isSuccess && !op.isFetching && !detailSync.fetching && !exceeds;
   useEffect(() => {
     if (consistent) tried.current.clear();
   }, [consistent]);
@@ -267,11 +275,11 @@ function useChildren(detail: EventDetail | undefined, detailUpdatedAt: number, e
     const queryKey = refresh === 'detail' ? eventQuery(projectId, e.id).queryKey : operationQuery(projectId, operationId ?? '').queryKey;
     queryClient.invalidateQueries({ queryKey });
   }, [refresh, mismatch, queryClient, projectId, e.id, operationId]);
-  const accepted = lookup && op.isSuccess && !refresh;
+  const accepted = lookup && op.isSuccess && !refresh && !settling;
   return {
     total: accepted ? Math.max(counted, children.length) : counted,
     shown: accepted ? children.slice(0, CHILD_PREVIEW) : [],
-    loading: lookup && (op.isPending || Boolean(refresh)),
+    loading: lookup && (op.isPending || Boolean(refresh) || settling),
   };
 }
 
@@ -311,33 +319,21 @@ function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Child
       )}
       {needsLink ? (
         <li className="flex items-center gap-2 pt-1 text-xs" style={{ paddingInlineStart: indent }}>
-          {oldest.isSuccess ? (
-            <Link
-              className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
-              params={{ projectId }}
-              // Every child, whatever its operation or timestamp: an exact parent search over every timestamp ingest
-              // admits and every row the project still stores. A self-parented event is left out of its own search.
-              search={{
-                range: admittedRange(Date.now(), oldest.data),
-                q: andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : ''),
-              }}
-              to="/p/$projectId/events"
-            >
-              {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
-              <ArrowRightIcon className="size-3" />
-            </Link>
-          ) : oldest.isError ? (
-            <span className="text-muted-foreground">
-              Could not read how far back this project's events go.{' '}
-              <button className="font-medium text-foreground underline-offset-2 hover:underline" onClick={() => oldest.refetch()} type="button">
-                Try again
-              </button>
-            </span>
-          ) : (
-            <span aria-live="polite" className="text-muted-foreground">
-              Preparing the link to all {total}…
-            </span>
-          )}
+          <Link
+            className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
+            params={{ projectId }}
+            // Every child, whatever its operation or timestamp: an exact parent search over every timestamp ingest
+            // admits, reaching further back when the project still stores older rows. A self-parented event is left
+            // out of its own search. The oldest-row lookup only widens the window; the link never waits on it.
+            search={{
+              range: admittedRange(Date.now(), oldest.data),
+              q: andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : ''),
+            }}
+            to="/p/$projectId/events"
+          >
+            {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
+            <ArrowRightIcon className="size-3" />
+          </Link>
         </li>
       ) : null}
     </>
@@ -487,6 +483,7 @@ function EventDetailBody({
   detail,
   detailLoading,
   detailUpdatedAt,
+  detailFetching,
   detailError,
   projectId,
   onPrev,
@@ -497,8 +494,9 @@ function EventDetailBody({
   event: AuditEvent;
   detail: EventDetail | undefined;
   detailLoading: boolean;
-  /** When the detail was fetched: the child list is reconciled against it. */
+  /** When the detail was fetched, and whether it is refetching: the child list is reconciled against it. */
   detailUpdatedAt: number;
+  detailFetching: boolean;
   detailError: unknown;
   projectId?: string;
   onPrev?: () => void;
@@ -518,7 +516,7 @@ function EventDetailBody({
         }`;
   const attributes = Object.entries(e.attributes).sort(([a], [b]) => a.localeCompare(b));
   const ctx = e.context;
-  const caused = useChildren(detail, detailUpdatedAt, e, projectId);
+  const caused = useChildren(detail, { updatedAt: detailUpdatedAt, fetching: detailFetching }, e, projectId);
   const depth = detail?.parents.length ?? 0;
 
   return (
