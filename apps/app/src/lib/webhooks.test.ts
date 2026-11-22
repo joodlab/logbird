@@ -203,3 +203,22 @@ describe('scope repairs', () => {
     expect(storedScope({ scope: null } as never)).toBeNull();
   });
 });
+
+describe('attempt explanations keep every fact', () => {
+  it('says both the answer and the error when both happened', () => {
+    expect(attemptWhy({ status: 'failed', error: 'timeout', responseCode: 410 })).toBe(
+      'Your endpoint answered 410. Your endpoint did not answer in time.',
+    );
+  });
+  it('promises a retry only while the delivery is waiting for one', () => {
+    expect(attemptWhy({ status: 'interrupted', error: null, responseCode: null }, false)).toBe('The attempt was interrupted before it finished.');
+    expect(attemptWhy({ status: 'interrupted', error: null, responseCode: null }, true)).toBe(
+      'The attempt was interrupted before it finished; it is tried again.',
+    );
+  });
+  it('tells a cursor review apart from a filter or scope hold', () => {
+    const [cursor] = endpointStates({ cursorWarning: 'webhook_cursor_review_required' } as never);
+    expect(cursor?.lost).toMatch(/queued, resends and test pings still go out/);
+    expect(cursor?.lost).not.toMatch(/Nothing is sent/);
+  });
+});

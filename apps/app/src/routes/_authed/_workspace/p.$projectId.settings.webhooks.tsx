@@ -63,6 +63,11 @@ function WebhooksSettings() {
   const [editing, setEditing] = useState<WebhookEndpoint | 'new' | null>(null);
   // The server's explanation of a filter it rejected, carried into the editor so it stays beside the filter.
   const [editFilterError, setEditFilterError] = useState<string | null>(null);
+  // A new endpoint never inherits another endpoint's filter explanation.
+  const addEndpoint = () => {
+    setEditFilterError(null);
+    setEditing('new');
+  };
   const [rotating, setRotating] = useState<WebhookEndpoint | null>(null);
   // Every issued secret waits its turn: one finishing while another is on screen never replaces it.
   const [issued, setIssued] = useState<(Issued & { n: number })[]>([]);
@@ -92,7 +97,7 @@ function WebhooksSettings() {
           list.data ? (
             <Button
               disabled={full}
-              onClick={() => setEditing('new')}
+              onClick={addEndpoint}
               size="sm"
               title={full ? `A project can have at most ${MAX_WEBHOOK_ENDPOINTS} endpoints.` : undefined}
             >
@@ -117,7 +122,7 @@ function WebhooksSettings() {
             size="sm"
             title="No endpoints yet"
           >
-            <Button onClick={() => setEditing('new')} size="sm">
+            <Button onClick={addEndpoint} size="sm">
               <PlusIcon />
               Add endpoint
             </Button>
@@ -142,7 +147,10 @@ function WebhooksSettings() {
       <EndpointDialog
         endpoint={editing === 'new' ? null : editing}
         filterError={editFilterError}
-        onClose={() => setEditing(null)}
+        onClose={() => {
+          setEditing(null);
+          setEditFilterError(null);
+        }}
         onSecret={enqueue}
         open={editing !== null}
         projectId={projectId}
@@ -286,7 +294,7 @@ function EndpointCard({
         </dd>
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => onEdit()} size="sm" variant="outline">
+        <Button onClick={() => onEdit(filterError ?? undefined)} size="sm" variant="outline">
           Edit
         </Button>
         <Button onClick={onRotate} size="sm" variant="outline">
@@ -564,7 +572,8 @@ function EndpointDialog({
                   </label>
                 ))}
                 <p className={errors.masks ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'} id={`${ids}-masks-hint`}>
-                  {errors.masks ?? 'Each delivery, retry and test ping leaves the chosen fields out as described, and the filter cannot use them.'}
+                  {errors.masks ??
+                    'Each delivery, retry and test ping hides the chosen fields as described above (emptied, or a stable hash for actor email), and the filter cannot use them.'}
                 </p>
               </fieldset>
             </div>

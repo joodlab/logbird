@@ -129,7 +129,7 @@ function DeliveryRow({ projectId, endpointId, delivery }: { projectId: string; e
     onError: (error) => toast.error('Could not send it again', { description: webhookErrorCopy(error) }),
   });
   const last = delivery.attempts.at(-1);
-  const why = last ? attemptWhy(last) : null;
+  const why = last ? attemptWhy(last, delivery.status === 'pending') : null;
   return (
     <li className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">

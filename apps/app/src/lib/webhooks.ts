@@ -235,7 +235,7 @@ export function endpointStates(e: WebhookEndpoint): EndpointState[] {
       badge: 'Needs an operator',
       title: 'Paused until an operator checks its position',
       what: 'Logbird found that this endpoint’s place in the event stream does not add up, so it stopped looking for new events instead of skipping or repeating any.',
-      lost: kept,
+      lost: 'Only the search for new events is paused, and nothing is skipped: it keeps its place. Deliveries already queued, resends and test pings still go out. When it resumes, it checks the events that arrived meanwhile against its filter and scope, and sends the matches that are still stored.',
       todo: 'This needs the person who runs your Logbird server: the procedure is in the self-hosting guide. There is nothing to do here.',
     });
   }
@@ -276,13 +276,22 @@ export function attemptErrorCopy(code: string | null): string | null {
  * Why an attempt did not deliver, from its error and its response code together: an answer outside 2xx is the
  * receiver's own (even with no error code), a destination rejection without an answer means nothing was sent.
  */
-export function attemptWhy(attempt: { status: string; error: string | null; responseCode: number | null }): string | null {
+export function attemptWhy(
+  attempt: { status: string; error: string | null; responseCode: number | null },
+  /** Whether the delivery is still waiting for another try (only then is a retry promised). */
+  retrying = false,
+): string | null {
   if (attempt.status === 'succeeded' || attempt.status === 'sending') return null;
-  if (attempt.responseCode !== null && (attempt.responseCode < 200 || attempt.responseCode >= 300)) {
-    return `Your endpoint answered ${attempt.responseCode}${attempt.responseCode >= 500 ? ' (a server error on its side)' : ''}.`;
+  const answered = attempt.responseCode !== null && (attempt.responseCode < 200 || attempt.responseCode >= 300);
+  // Both facts when both happened (a receiver can send its status, then stall).
+  const error = attempt.error && attempt.error !== 'destination_rejected' ? attemptErrorCopy(attempt.error) : null;
+  if (answered) {
+    const said = `Your endpoint answered ${attempt.responseCode}${(attempt.responseCode ?? 0) >= 500 ? ' (a server error on its side)' : ''}.`;
+    return error ? `${said} ${error}` : said;
   }
   if (attempt.error) return attemptErrorCopy(attempt.error);
-  return attempt.status === 'interrupted' ? 'The attempt was interrupted before it finished; it is retried.' : null;
+  if (attempt.status === 'interrupted') return `The attempt was interrupted before it finished${retrying ? '; it is tried again' : ''}.`;
+  return null;
 }
 
 /** The scope exactly as stored (not trimmed), to tell whether an edit changes it. */
