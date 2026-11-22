@@ -237,7 +237,7 @@ using var reader = new LogbirdReadClient(new LogbirdReadOptions
 });
 
 var page = await reader.SearchAsync(new EventSearch { Query = "action:invoice.* actor:user_42", Limit = 50 });
-await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: invoice.Id)))
+await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: invoice.Id, targetType: "invoice")))
 {
     Console.WriteLine($"{e.Timestamp:u} {e.Actor?.Name} {e.Action}");
 }
@@ -250,9 +250,15 @@ against a misbehaving server, the client stops with `LogbirdApiException` (`pagi
 its last 1,000 pages, and you can bound every iteration with `LogbirdReadOptions.MaxPages` (code `page_limit` when more
 pages remain).
 
-`ForTrail` throws `ArgumentException` when it has no selector or query, for an empty selector (pass `null` to leave one
-out) and for a value ending in `*` (the query language would read it as a prefix wildcard), so a bug cannot silently
-widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
+`ForTrail` builds the same query as the TypeScript SDK's `trailQuery`. With `targetType`, it matches a target of exactly
+that type and id together (the `record:` query field); with only `targetId`, any target with that id. Every value is
+quoted, and quotes, backslashes, `*` and line breaks are matched literally, so a value can never widen the search. A
+trail with `targetType`, or with a selector that ends in `*` or contains a carriage return, needs Logbird 0.2.0 or later
+(older servers read those differently): the read client checks the server's version once (from its public OpenAPI
+document, shared by all searches) and throws `LogbirdApiException` instead of sending the trail: `server_too_old`, or
+`server_version_unknown` when the document has no readable version, or `unreachable` when it cannot be fetched. A failed
+check is retried by the next search. `ForTrail` throws `ArgumentException` when it has no selector or query, or for an empty selector (pass `null`
+to leave one out), so a bug cannot silently widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
 may see the tenant or record first, on every request including next-page requests.
 
 ## Verify webhooks

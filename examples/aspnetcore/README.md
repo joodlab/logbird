@@ -65,7 +65,7 @@ curl -s -H "Authorization: Bearer <read key>" "http://127.0.0.1:4601/v1/events?l
   once, after the change succeeds.
 - `Invoices.cs`: the worker turns the carrier from the job payload back into an `IAuditLog` with
   `IAuditLogFactory.ForJob`.
-- In your project, reference the package instead of the source once it is published: `dotnet add package
-  Logbird.AspNetCore` (or `<PackageReference Include="Logbird.AspNetCore" Version="0.2.0" />`).
+- In your project, reference the package instead of the source once it is published on nuget.org:
+  `dotnet add package Logbird.AspNetCore` adds the version nuget.org lists.
 
 The full guide is [docs/sdk-dotnet.md](../../docs/sdk-dotnet.md).

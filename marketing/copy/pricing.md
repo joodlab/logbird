@@ -24,7 +24,8 @@ Before this page, `/pricing` was a 404.
 - **Not in this repository** until the owner approves Logbird Cloud's pricing: anything about it beyond "not set yet". The repository is public, so committing it would disclose it even on an unpublished page.
 - **No plan comparison:** the feature list is what is available today.
 - **Roadmap rows** only for items `docs/roadmap.md` lists, under `roadmap-claims.test.ts`.
-- **Scoped read access** appears only behind `SCOPED_READ_LIVE`, after the maintainer confirms its production proof.
+- **Scoped read access** appears only behind `SCOPED_READ_LIVE`, on since 2026-11-23 when the maintainer confirmed its
+  production proof (31/31, #138).
 - **Structured data:** no Cloud offer until prices are approved. The home page's free self-hosted offer stays.
 
 ## How approved pricing arrives (one change, data only)
