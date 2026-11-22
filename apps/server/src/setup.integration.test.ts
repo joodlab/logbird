@@ -115,8 +115,10 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
     expect(state.ingest.firstEvent?.action).toBe('sample.record.updated');
     expect(state.ingest.firstEvent?.source).toBe(s.CONSOLE_TEST_EVENT_SOURCE);
     expect(state.steps.find((step) => step.id === 'first_event')?.status).toBe('done');
-    for (const id of ['recent_events', 'envelope', 'operation_id'] as const)
-      expect(state.steps.find((step) => step.id === id)?.status).not.toBe('done');
+    for (const id of ['envelope', 'operation_id'] as const) expect(state.steps.find((step) => step.id === id)?.status).not.toBe('done');
+    // Nothing from the integration yet: "keep events flowing" is still to do, not "needs attention".
+    expect(state.steps.find((step) => step.id === 'recent_events')?.status).toBe('todo');
+    expect(state.ingest.lastEventAt).toBeNull();
     expect(state.ingest.eventsLast24h).toBe(0);
     expect(state.envelope.sampledEvents).toBe(0);
     expect(state.operations.eventsWithOperationId).toBe(0);

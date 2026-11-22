@@ -111,6 +111,8 @@ Omitted values use receive time.
 }
 ```
 
+Sources beginning with `logbird-` are reserved for events Logbird itself generates: `logbird-sample` (sample data) and `logbird-test` (the console's "Send a test event"). An integration that sends one is stored and searchable like any other event, but its events do not count toward setup progress (`isLogbirdGeneratedSource` in `packages/contracts`).
+
 Semantics worth documenting to users:
 - **id is immutable within a project**, regardless of `occurredAt`. Exact retries
   appear in `ids` as accepted, without another raw insert or rollup increment.

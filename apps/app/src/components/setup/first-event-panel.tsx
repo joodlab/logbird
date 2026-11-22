@@ -25,6 +25,7 @@ import { useCan } from '@/lib/permissions';
 import { curlSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 import { useSessionKey } from './api-key-step';
 import { useInvalidateSetup, useSampleData, useTestEvent } from './use-setup';
+import { isLogbirdGeneratedSource } from '@logbird/contracts';
 
 /** How often the first-event step polls setup while nothing has arrived. */
 export const FIRST_EVENT_POLL_MS = 2500;
@@ -72,7 +73,13 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
       sawEmpty.current = false;
       setCelebrate(true);
       invalidate();
-      toast.success('First event received', { description: 'Your integration works. Everything else builds on this.' });
+      // A console test proves the pipeline, not the integration: say so instead of "your integration works".
+      const fromConsole = isLogbirdGeneratedSource(data.ingest.firstEvent?.source);
+      toast.success(fromConsole ? 'Console test received' : 'First event received', {
+        description: fromConsole
+          ? 'Logbird is receiving events. Send one from your backend to check your integration.'
+          : 'Your integration works. Everything else builds on this.',
+      });
     }
   }, [data, invalidate]);
 

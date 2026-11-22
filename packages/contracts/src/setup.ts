@@ -12,10 +12,10 @@ import { eventSchema } from './events';
  */
 export const SETUP_STEPS = [
   'ingest_key', // a non-revoked ingest key exists
-  'first_event', // at least one non-sample event was ever received
-  'recent_events', // ≥ 1 non-sample event received in the last 24h
-  'envelope', // avg conformance of recent non-sample events ≥ SETUP_CONFORMANCE_TARGET
-  'operation_id', // ≥ 1 recent non-sample event carries context.operationId
+  'first_event', // at least one non-sample event was ever received (a console test event counts)
+  'recent_events', // ≥ 1 integration event (not sample data, not a console test) received in the last 24h
+  'envelope', // avg conformance of recent integration events ≥ SETUP_CONFORMANCE_TARGET
+  'operation_id', // ≥ 1 recent integration event carries context.operationId
   'retention', // retention window reviewed (acknowledged or changed) by a member
   'read_key', // a non-revoked read key exists (for products reading the audit trail)
   'teammate', // the workspace has another member or a pending invitation
@@ -27,7 +27,7 @@ export const SETUP_REQUIRED_STEPS: readonly SetupStepId[] = ['ingest_key', 'firs
 
 /** Average conformance (0..100) at which the envelope step counts as done. */
 export const SETUP_CONFORMANCE_TARGET = 70;
-/** Window used for the envelope / operationId checks: the most recent N non-sample events within 7 days. */
+/** Window used for the envelope / operationId checks: the most recent N integration events (no sample data, no console tests) within 7 days. */
 export const SETUP_ENVELOPE_SAMPLE = 10_000;
 
 /**
@@ -65,6 +65,15 @@ export const ENVELOPE_MISSING_QUERIES: Record<EnvelopeField, string | null> = {
   occurredAt: null,
 };
 
+/**
+ * Sources beginning with `logbird-` are reserved for events Logbird itself generates (sample data, console test
+ * events). An integration that sends one is stored and searchable like any other event, but its events do not count
+ * toward setup progress. Use `isLogbirdGeneratedSource` (or `LOGBIRD_SOURCE_PREFIX` in SQL) everywhere setup decides.
+ */
+export const LOGBIRD_SOURCE_PREFIX = 'logbird-';
+export function isLogbirdGeneratedSource(source: string | null | undefined): boolean {
+  return Boolean(source?.startsWith(LOGBIRD_SOURCE_PREFIX));
+}
 /** Events loaded by "Load sample data" carry this `source`; they never count toward setup steps. */
 export const SAMPLE_DATA_SOURCE = 'logbird-sample';
 export const SAMPLE_DATA_SOURCES = [SAMPLE_DATA_SOURCE];
@@ -95,11 +104,11 @@ export const projectSetupSchema = z.object({
   steps: z.array(setupStepSchema),
   ingest: z.object({
     activeIngestKeys: z.number().int(),
-    firstEventAt: z.string().nullable(), // non-sample events only (by receivedAt)
-    /** The earliest non-sample event, so the first-event step can show what arrived. */
+    firstEventAt: z.string().nullable(), // non-sample events only, console tests included (by receivedAt)
+    /** The earliest non-sample event (possibly a console test), so the first-event step can show what arrived. */
     firstEvent: eventSchema.nullable(),
-    lastEventAt: z.string().nullable(), // non-sample
-    eventsLast24h: z.number().int(), // non-sample
+    lastEventAt: z.string().nullable(), // integration events only: no sample data, no console tests
+    eventsLast24h: z.number().int(), // integration events only: no sample data, no console tests
     sampleEvents: z.number().int(), // rows with source = SAMPLE_DATA_SOURCE
   }),
   envelope: z.object({
