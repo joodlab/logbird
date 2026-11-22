@@ -163,7 +163,7 @@ function WorkspaceStep() {
             <span className="font-medium text-foreground">1.</span> Create a project for the product that will send events.
           </li>
           <li>
-            <span className="font-medium text-foreground">2.</span> Copy its ingest key and send one event with the SDK or curl.
+            <span className="font-medium text-foreground">2.</span> Copy its ingest key and send one event: curl, an SDK or any HTTP client.
           </li>
           <li>
             <span className="font-medium text-foreground">3.</span> Search, follow and explain every change from the console.
