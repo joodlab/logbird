@@ -158,8 +158,9 @@ Audit logging never takes your application down with it:
 - **Every event the running client gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`,
   `Rejected`, `Shutdown`, …): rejections by the server on the `logbird.events.rejected` counter, everything else on
   `logbird.events.dropped`. A client being disposed leaves the meter, so a collection after shutdown may miss its last
-  drops; `OnDrop` and the log report them too, unless those notifications are skipped because your callback fell far
-  behind (next point). Events lost in a crash are not reported at all (see the outbox below).
+  drops. `OnDrop` and the log are told about them on the background thread, but disposal waits at most five seconds
+  for pending callbacks, so a slow callback (or a process that exits right after shutdown) can miss them. Events lost
+  in a crash are not reported at all (see the outbox below).
 - **`OnDrop` is told about each one** on a background thread; if your callback falls far behind (more than
   `MaxQueueSize` notifications), further notifications are skipped and counted on `logbird.notifications.lost`, so keep
   it fast.
