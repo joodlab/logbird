@@ -111,6 +111,8 @@ Omitted values use receive time.
 }
 ```
 
+Sources beginning with `logbird-` are reserved for events Logbird itself generates: `logbird-sample` (sample data) and `logbird-test` (the console's "Send a test event"). An integration that sends one is stored and searchable like any other event, but it does not count toward the integration setup steps (events flowing, envelope, operation ids; `isLogbirdGeneratedSource` in `packages/contracts`). `logbird-sample` is also left out of the first-event step, and replacing or removing sample data deletes every row tagged `logbird-sample`, including rows a client sent with that tag.
+
 Semantics worth documenting to users:
 - **id is immutable within a project**, regardless of `occurredAt`. Exact retries
   appear in `ids` as accepted, without another raw insert or rollup increment.
@@ -650,7 +652,7 @@ User journeys (each must work end-to-end against the real server):
    `onboarding.next`, so leaving and coming back resumes at the missing step; the wizard's progress reflects real
    state. The first-event step reuses the Setup page's component: ingest key shown once (copy), curl / SDK / fetch
    snippets pre-filled, a **live waiting indicator** that polls setup every 2.5 s and flips to the received event,
-   "Send a test event", "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
+   "Send a test event" (stored with `source: logbird-test`; completes only the first-event step), "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
    the name from `GET /api/onboarding/workspace-name` (selected, so typing replaces it). The full-screen wizard is only
    for a workspace's first project: later projects are created from a dialog inside the app shell (Projects page and
    switcher → New project) that lands on the new project's Setup page.

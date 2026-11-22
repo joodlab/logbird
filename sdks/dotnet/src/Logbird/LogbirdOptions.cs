@@ -88,41 +88,42 @@ public sealed class LogbirdOptions
     /// </summary>
     public Action<DroppedEvent>? OnDrop { get; set; }
 
+    // Messages name the setting and the rule, never the value.
     internal void Validate()
     {
         if (BatchSize is < 1 or > 1000)
         {
-            throw new ArgumentOutOfRangeException(nameof(BatchSize), BatchSize, "BatchSize must be between 1 and 1000.");
+            throw new ArgumentOutOfRangeException(nameof(BatchSize), "BatchSize must be between 1 and 1000.");
         }
 
         if (MaxQueueSize < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(MaxQueueSize), MaxQueueSize, "MaxQueueSize must be at least 1.");
+            throw new ArgumentOutOfRangeException(nameof(MaxQueueSize), "MaxQueueSize must be at least 1.");
         }
 
         if (MaxRetries < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(MaxRetries), MaxRetries, "MaxRetries must not be negative.");
+            throw new ArgumentOutOfRangeException(nameof(MaxRetries), "MaxRetries must not be negative.");
         }
 
         if (FlushInterval < TimeSpan.FromMilliseconds(1) || FlushInterval > TimeSpan.FromHours(1))
         {
-            throw new ArgumentOutOfRangeException(nameof(FlushInterval), FlushInterval, "FlushInterval must be between 1 ms and 1 hour.");
+            throw new ArgumentOutOfRangeException(nameof(FlushInterval), "FlushInterval must be between 1 ms and 1 hour.");
         }
 
         if (ShutdownTimeout < TimeSpan.Zero || ShutdownTimeout > TimeSpan.FromHours(1))
         {
-            throw new ArgumentOutOfRangeException(nameof(ShutdownTimeout), ShutdownTimeout, "ShutdownTimeout must be between 0 and 1 hour.");
+            throw new ArgumentOutOfRangeException(nameof(ShutdownTimeout), "ShutdownTimeout must be between 0 and 1 hour.");
         }
 
         if (RequestTimeout < TimeSpan.FromMilliseconds(1) || RequestTimeout > TimeSpan.FromMinutes(5))
         {
-            throw new ArgumentOutOfRangeException(nameof(RequestTimeout), RequestTimeout, "RequestTimeout must be between 1 ms and 5 minutes.");
+            throw new ArgumentOutOfRangeException(nameof(RequestTimeout), "RequestTimeout must be between 1 ms and 5 minutes.");
         }
 
         if (QueueFullBehavior is not (QueueFullBehavior.DropOldest or QueueFullBehavior.DropNewest))
         {
-            throw new ArgumentOutOfRangeException(nameof(QueueFullBehavior), QueueFullBehavior, "Unknown QueueFullBehavior.");
+            throw new ArgumentOutOfRangeException(nameof(QueueFullBehavior), "Unknown QueueFullBehavior.");
         }
 
         if (Redaction is null)
