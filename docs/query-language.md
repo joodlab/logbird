@@ -32,6 +32,8 @@ Record pairs support negation and value groups, such as `-record:(page:1 OR site
 
 The record directory and unscoped record suggestions still group targets by the stored `type:id` key. Pairs that share a key appear together in the directory. A record link from an event carries its original type, and each record profile and timeline uses the exact pair it opened.
 
+For records counted from the rollup, an event that lists the same target twice contributes twice to the directory and the profile's **Events · all time** tile. The timeline and its date-range totals count that event once.
+
 `target:12 target.type:site` checks the arrays independently, so it also matches an event with targets `page:12` and `site:7`. Existing saved views using those terms keep this behavior. Use `record:site:12` for the paired match.
 
 Examples retained from v0:

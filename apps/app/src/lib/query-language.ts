@@ -8,7 +8,7 @@
 import { scanBareRecordValue } from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 
-export type TokenKind = 'field' | 'text' | 'phrase' | 'operator' | 'paren' | 'space';
+export type TokenKind = 'field' | 'text' | 'phrase' | 'regex' | 'operator' | 'paren' | 'space';
 /** Shape of a field term's value (v2). */
 export type ValueKind = 'plain' | 'quoted' | 'regex' | 'range' | 'compare' | 'group';
 
@@ -30,7 +30,7 @@ export interface QueryToken {
   op?: string;
 }
 
-const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*):/;
+const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
 const OPERATORS = new Set(['OR', 'AND', 'NOT']);
 
 function unquote(value: string): string {
@@ -62,8 +62,8 @@ function scanGroup(input: string, i: number): number {
   let j = i;
   while (j < input.length) {
     const ch = input[j];
-    if (ch === '"') {
-      j = scanDelimited(input, j, '"');
+    if (ch === '"' || (ch === '/' && /[\s(]/.test(input[j - 1] ?? ''))) {
+      j = scanDelimited(input, j, ch);
       continue;
     }
     if (ch === '(') depth += 1;
@@ -83,6 +83,12 @@ function scanPlain(input: string, i: number): number {
   return j;
 }
 
+function skipWhitespace(input: string, start: number): number {
+  let i = start;
+  while (i < input.length && /\s/.test(input[i] ?? '')) i += 1;
+  return i;
+}
+
 /** Lex the value after `key:` starting at `i`. */
 function scanValue(input: string, i: number, record: boolean): { end: number; kind: ValueKind; op?: string } {
   const ch = input[i];
@@ -94,7 +100,7 @@ function scanValue(input: string, i: number, record: boolean): { end: number; ki
   }
   if (ch === '(') return { end: scanGroup(input, i), kind: 'group' };
   const op = /^(>=|<=|>|<)/.exec(input.slice(i))?.[0];
-  if (op) return { end: scanPlain(input, i + op.length), kind: 'compare', op };
+  if (op) return { end: scanPlain(input, skipWhitespace(input, i + op.length)), kind: 'compare', op };
   return { end: record ? scanBareRecordValue(input, i) : scanPlain(input, i), kind: 'plain' };
 }
 
@@ -119,10 +125,10 @@ export function tokenize(input: string): QueryToken[] {
     }
     const key = KEY_RE.exec(rest);
     if (key) {
-      const valueStart = i + key[0].length;
+      const valueStart = skipWhitespace(input, i + key[0].length);
       const v = scanValue(input, valueStart, key[2] === 'record');
       const raw = input.slice(i, v.end);
-      const valueRaw = input.slice(valueStart + (v.op?.length ?? 0), v.end);
+      const valueRaw = input.slice(skipWhitespace(input, valueStart + (v.op?.length ?? 0)), v.end);
       tokens.push({
         kind: 'field',
         raw,
@@ -139,11 +145,12 @@ export function tokenize(input: string): QueryToken[] {
       i = v.end;
       continue;
     }
-    const neg = ch === '-' && rest[1] === '"' ? 1 : 0;
-    if (rest[neg] === '"') {
-      const end = scanDelimited(input, i + neg, '"');
+    const neg = ch === '-' && (rest[1] === '"' || rest[1] === '/') ? 1 : 0;
+    const delimiter = rest[neg];
+    if (delimiter === '"' || delimiter === '/') {
+      const end = scanDelimited(input, i + neg, delimiter);
       const raw = input.slice(i, end);
-      tokens.push({ kind: 'phrase', raw, start: i, end, negated: neg === 1, value: unquote(raw.slice(neg)) });
+      tokens.push({ kind: delimiter === '"' ? 'phrase' : 'regex', raw, start: i, end, negated: neg === 1, value: unquote(raw.slice(neg)) });
       i = end;
       continue;
     }
@@ -240,11 +247,17 @@ function dropTokens(tokens: QueryToken[], test: (t: QueryToken) => boolean): Que
 }
 
 function join(tokens: QueryToken[]): string {
-  return tidy(tokens)
-    .map((t) => t.raw)
-    .join('')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  let result = '';
+  let space = false;
+  for (const token of tidy(tokens)) {
+    if (token.kind === 'space') {
+      space = result !== '';
+    } else {
+      result += (space ? ' ' : '') + token.raw;
+      space = false;
+    }
+  }
+  return result;
 }
 
 /** True when `q` has an `OR` outside every group. Adjacent terms bind tighter than `OR` (`a b OR c` = `(a b) OR c`). */
@@ -460,20 +473,31 @@ export function highlightQuery(input: string): Segment[] {
       case 'phrase':
         out.push({ start: t.start, end: t.end, cls: t.negated ? 'negation' : 'string' });
         break;
+      case 'regex':
+        out.push({ start: t.start, end: t.end, cls: t.negated ? 'negation' : 'regex' });
+        break;
       case 'text':
         if (t.negated) out.push({ start: t.start, end: t.end, cls: 'negation' });
         else pushValueWord(out, input, t.start, t.end);
         break;
       case 'field': {
         const keyStart = t.start + (t.negated ? 1 : 0);
-        const colon = keyStart + (t.field?.length ?? 0);
+        const keyEnd = keyStart + (t.field?.length ?? 0);
+        const colon = input.indexOf(':', keyEnd);
         const valueStart = t.valueStart ?? colon + 1;
         if (t.negated) out.push({ start: t.start, end: keyStart, cls: 'negation' });
-        out.push({ start: keyStart, end: colon, cls: t.negated ? 'negation' : 'key' }, { start: colon, end: valueStart, cls: 'punct' });
+        out.push(
+          { start: keyStart, end: keyEnd, cls: t.negated ? 'negation' : 'key' },
+          { start: keyEnd, end: colon, cls: 'plain' },
+          { start: colon, end: colon + 1, cls: 'punct' },
+          { start: colon + 1, end: valueStart, cls: 'plain' },
+        );
         if (t.valueKind === 'compare') {
           const opEnd = valueStart + (t.op?.length ?? 0);
           out.push({ start: valueStart, end: opEnd, cls: 'operator' });
-          pushValueWord(out, input, opEnd, t.end);
+          const operandStart = skipWhitespace(input, opEnd);
+          out.push({ start: opEnd, end: operandStart, cls: 'plain' });
+          pushValueWord(out, input, operandStart, t.end);
         } else if (t.valueKind === 'regex') {
           const closed = t.end - valueStart > 1 && input[t.end - 1] === '/' && input[t.end - 2] !== '\\';
           out.push({ start: valueStart, end: valueStart + 1, cls: 'punct' });
@@ -547,7 +571,8 @@ export type QueryCompletion =
   | { kind: 'phrase' }
   | { kind: 'none' };
 
-const isTerm = (t?: QueryToken) => Boolean(t && (t.kind === 'field' || t.kind === 'text' || t.kind === 'phrase' || t.raw === ')'));
+const isTerm = (t?: QueryToken) =>
+  Boolean(t && (t.kind === 'field' || t.kind === 'text' || t.kind === 'phrase' || t.kind === 'regex' || t.raw === ')'));
 
 /** What the caret is completing. Pure; drives the suggestion list and the syntax hint row. */
 export function queryCompletionAt(q: string, caret: number): QueryCompletion {
@@ -562,7 +587,7 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
     return { kind: 'key', prefix: q.slice(from, caret), from, to, afterTerm: !negating && isTerm(prev) };
   };
   if (!t || t.kind === 'paren' || (t.kind === 'operator' && caret === t.start)) return key(caret, caret);
-  if (t.kind === 'phrase') return caret === t.start ? key(caret, caret) : { kind: 'phrase' };
+  if (t.kind === 'phrase' || t.kind === 'regex') return caret === t.start ? key(caret, caret) : { kind: 'phrase' };
   if (t.kind === 'operator' || t.kind === 'text') {
     if (caret === t.start && t.kind === 'text') return key(caret, caret);
     const from = t.start + (t.negated || t.raw === '-' ? 1 : 0);
@@ -573,8 +598,9 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
   const keyStart = t.start + (t.negated ? 1 : 0);
   const valueStart = t.valueStart ?? t.end;
   if (caret < keyStart) return { kind: 'none' };
-  if (caret < valueStart) return key(keyStart, valueStart);
   const field = t.field ?? '';
+  const colon = q.indexOf(':', keyStart + field.length);
+  if (caret <= colon) return key(keyStart, colon + 1);
   if (field === '_exists_') return { kind: 'exists', prefix: q.slice(valueStart, caret), from: keyStart, to: t.end };
   const value = (prefix: string, from: number, to: number, extra: Partial<Extract<QueryCompletion, { kind: 'value' }>> = {}): QueryCompletion => ({
     kind: 'value',
@@ -588,20 +614,21 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
   });
   switch (t.valueKind) {
     case 'regex':
-      return caret === valueStart ? value('', valueStart, t.end) : { kind: 'regex', field };
+      return caret <= valueStart ? value('', valueStart, t.end) : { kind: 'regex', field };
     case 'range':
-      return caret === valueStart ? value('', valueStart, t.end) : { kind: 'range', field };
+      return caret <= valueStart ? value('', valueStart, t.end) : { kind: 'range', field };
     case 'compare': {
-      const from = valueStart + (t.op?.length ?? 0);
-      if (caret < from) return value('', valueStart, t.end);
+      const opEnd = valueStart + (t.op?.length ?? 0);
+      const from = skipWhitespace(q, opEnd);
+      if (caret < opEnd) return value('', valueStart, t.end);
       return value(q.slice(from, caret), from, t.end, { op: t.op });
     }
     case 'quoted': {
-      if (caret === valueStart) return value('', valueStart, t.end, { quoted: true });
+      if (caret <= valueStart) return value('', valueStart, t.end, { quoted: true });
       return value(unquote(q.slice(valueStart, caret)), valueStart, t.end, { quoted: true });
     }
     case 'group': {
-      if (caret === valueStart) return value('', valueStart, t.end);
+      if (caret <= valueStart) return value('', valueStart, t.end);
       // Find the member word around the caret inside `( … )`.
       let s = caret;
       while (s > valueStart + 1 && !/[\s()]/.test(q[s - 1] ?? '')) s -= 1;

@@ -294,6 +294,9 @@ describe('translateQueryToSql', () => {
   });
 
   it.each([
+    ['record: page:7', 'page', '7'],
+    ['record \t:  page:7', 'page', '7'],
+    ['record: "!page:7"', '!page', '7'],
     ['record:page:/home/', 'page', '/home/'],
     [String.raw`record:page:/a\d+.*/`, 'page', String.raw`/a\d+.*/`],
     ['record:page:home*', 'page', 'home*'],
@@ -307,6 +310,31 @@ describe('translateQueryToSql', () => {
     expect(compiled.params).toEqual({ recordType0: type, recordId0: id });
     const sql = compiled.sql.replace(/\{(recordType0|recordId0):String\}/g, (_, key) => sqlString(String(compiled.params[key])));
     expect(translateQueryToSql(q)).toBe(sql);
+  });
+
+  it.each([
+    ['action :  "page  updated"', { q0: 'page  updated' }, "action = 'page  updated'"],
+    ['attempt: >= 2', { q0: 2 }, 'job_attempt >= 2'],
+    ['actor: user:7', { q0: 'user:7' }, "actor_id = 'user:7'"],
+  ])('translates spaced values according to the compiler for %s', (q, params, sql) => {
+    expect(compileQuery(q).params).toEqual(params);
+    expect(translateQueryToSql(q)).toBe(sql);
+  });
+
+  it.each([
+    'record:!page:7',
+    'record: !page:7',
+    'record: (page:8 OR !page:7)',
+    'env: !tenant:7',
+    'env:(prod OR !tenant:7)',
+    'env:AND',
+    'attempt: >= -2',
+    'action:a&&env:prod',
+    'NOT',
+    'record:page:7 OR',
+  ])('rejects invalid query syntax consistently for %s', (q) => {
+    expect(() => compileQuery(q)).toThrow();
+    expect(translateQueryToSql(q)).toBeNull();
   });
 
   it('gives up on free text and the description field', () => {

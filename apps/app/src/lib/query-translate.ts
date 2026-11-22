@@ -5,7 +5,7 @@
  * Only constructs with an unambiguous SQL equivalent are translated; anything else (free text, phrases,
  * the `description` text field) returns null so the caller can ask instead of guessing.
  */
-import { decodeRecordPair, scanBareRecordValue } from '@logbird/contracts';
+import { decodeRecordPair, QUERY_DIALECT_PREFIX, scanBareRecordValue } from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 import { type QueryToken, tokenize } from './query-language';
 import { sqlString } from './sql-language';
@@ -13,6 +13,8 @@ import { sqlString } from './sql-language';
 const NUMBER = /^-?\d+(\.\d+)?$/;
 const DATE = /^\d{4}-\d{2}-\d{2}(T.+)?$/;
 const SQL_OPS: Record<string, string> = { '>': '>', '>=': '>=', '<': '<', '<=': '<=' };
+const QUOTED_VALUE = /^"(?:[^"\\]|\\[\s\S])*"$/;
+const BARE_VALUE = /^[^\s()"<>[\]{}]+$/;
 
 interface Target {
   /** SQL reference: column or `attributes['k']`. */
@@ -41,7 +43,7 @@ function ordered(t: Target, sample: string): string {
 function equals(t: Target, value: string): string | null {
   if (value === '*')
     return t.type === 'array' ? `notEmpty(${t.ref})` : t.type === 'number' || t.type === 'date' ? `isNotNull(${t.ref})` : `${t.ref} != ''`;
-  if (value.endsWith('*') && !value.slice(0, -1).includes('*')) {
+  if (value.endsWith('*')) {
     const prefix = sqlString(value.slice(0, -1));
     return t.type === 'array' ? `arrayExists(x -> startsWith(x, ${prefix}), ${t.ref})` : `startsWith(${t.ref}, ${prefix})`;
   }
@@ -52,7 +54,8 @@ function equals(t: Target, value: string): string | null {
 
 function recordValueToSql(raw: string): string | null {
   const quoted = raw.startsWith('"');
-  if (quoted ? !/^"(?:[^"\\]|\\[\s\S])*"$/.test(raw) : raw.startsWith('/') || scanBareRecordValue(raw, 0) !== raw.length) return null;
+  if (quoted ? !QUOTED_VALUE.test(raw) : raw.startsWith('/') || QUERY_DIALECT_PREFIX.test(raw) || scanBareRecordValue(raw, 0) !== raw.length)
+    return null;
   const value = quoted ? raw.slice(1, -1).replace(/\\([\s\S])/g, '$1') : raw;
   if (!quoted && value === '*') return 'notEmpty(target_ids)';
   const pair = decodeRecordPair(value);
@@ -61,41 +64,47 @@ function recordValueToSql(raw: string): string | null {
   return `(has(target_ids, ${id}) AND arrayExists((t, i) -> t = ${sqlString(pair.type)} AND i = ${id}, target_types, target_ids))`;
 }
 
-function recordTermToSql(token: QueryToken): string | null {
-  const value = token.value ?? '';
-  if (token.valueKind === 'plain' || token.valueKind === 'quoted')
-    return recordValueToSql(token.raw.slice((token.valueStart ?? token.start) - token.start));
-  if (token.valueKind !== 'group' || !value.endsWith(')')) return null;
-
+function groupMembers(value: string): string[] | null {
+  if (!value.endsWith(')')) return null;
   const inner = value.slice(1, -1).trim();
   const member = /("(?:[^"\\]|\\[\s\S])*"|[^\s()"<>[\]{}]+)(?:\s+OR\s+|$)/gy;
   const parts: string[] = [];
   let end = 0;
   for (const match of inner.matchAll(member)) {
-    const sql = recordValueToSql(match[1] ?? '');
-    if (!sql) return null;
-    parts.push(sql);
+    parts.push(match[1] ?? '');
     end = match.index + match[0].length;
   }
-  return parts.length && end === inner.length ? `(${parts.join(' OR ')})` : null;
+  return parts.length && end === inner.length ? parts : null;
+}
+
+function recordTermToSql(token: QueryToken, raw: string): string | null {
+  if (token.valueKind === 'plain' || token.valueKind === 'quoted') return recordValueToSql(raw);
+  if (token.valueKind !== 'group') return null;
+  const parts = groupMembers(raw)?.map(recordValueToSql);
+  return parts?.every(Boolean) ? `(${parts.join(' OR ')})` : null;
+}
+
+function isBareValue(raw: string): boolean {
+  return BARE_VALUE.test(raw) && !/^(?:AND|OR|NOT|TO)(?=:|$)|&&|\|\|/.test(raw) && !QUERY_DIALECT_PREFIX.test(raw);
 }
 
 function termToSql(token: QueryToken): string | null {
-  if (token.field === 'record') return recordTermToSql(token);
+  const start = (token.valueStart ?? token.start) - token.start;
+  const raw = token.raw.slice(start);
+  if (token.field === 'record') return recordTermToSql(token, raw);
   if (token.field === '_exists_' && token.value === 'record') return 'notEmpty(target_ids)';
   const t = targetFor(token.field ?? '');
   if (!t) return null;
   const value = token.value ?? '';
   switch (token.valueKind) {
     case 'plain':
-    case 'quoted':
-      if (token.valueKind === 'quoted') {
-        if (t.type === 'array') return `has(${t.ref}, ${sqlString(value)})`;
-        return `${t.ref} = ${literal(value, t)}`;
-      }
+      if (!isBareValue(raw) || (raw.startsWith('-') && /\s/.test(token.raw[start - 1] ?? ''))) return null;
       return equals(t, value);
+    case 'quoted':
+      return QUOTED_VALUE.test(raw) ? equals(t, value) : null;
     case 'compare': {
-      if (t.type === 'string' || t.type === 'array' || !value) return null;
+      const operand = raw.slice(token.op?.length ?? 0);
+      if (t.type === 'string' || t.type === 'array' || (!NUMBER.test(value) && !DATE.test(value)) || /^\s+-/.test(operand)) return null;
       return `${ordered(t, value)} ${SQL_OPS[token.op ?? '>']} ${literal(value, t, t.type === 'attr')}`;
     }
     case 'range': {
@@ -110,18 +119,15 @@ function termToSql(token: QueryToken): string | null {
       return parts.length ? parts.join(' AND ') : null;
     }
     case 'regex': {
-      const body = value.slice(1, value.endsWith('/') && value.length > 1 ? -1 : undefined).replaceAll('\\/', '/');
+      if (!/^\/(?:[^/\\]|\\[\s\S])*\/$/.test(value)) return null;
+      const body = value.slice(1, -1).replaceAll('\\/', '/');
       const re = sqlString(`^(?:${body})$`);
       return t.type === 'array' ? `arrayExists(x -> match(x, ${re}), ${t.ref})` : `match(${t.ref}, ${re})`;
     }
     case 'group': {
-      const inner = value.replace(/^\(|\)$/g, '');
-      const members = inner
-        .split(/\s+OR\s+/)
-        .map((m) => m.trim())
-        .filter(Boolean);
-      if (members.length === 0 || members.some((m) => /[\s()]/.test(m.replace(/^"(.*)"$/, '')) && !/^".*"$/.test(m))) return null;
-      const values = members.map((m) => (m.startsWith('"') ? m.slice(1, -1).replace(/\\(.)/g, '$1') : m));
+      const members = groupMembers(value);
+      if (!members || members.some((m) => !QUOTED_VALUE.test(m) && (/^[-/]/.test(m) || !isBareValue(m)))) return null;
+      const values = members.map((m) => (m.startsWith('"') ? m.slice(1, -1).replace(/\\([\s\S])/g, '$1') : m));
       if (values.some((v) => v.includes('*'))) {
         const each = values.map((v) => equals(t, v));
         return each.every(Boolean) ? `(${each.join(' OR ')})` : null;
@@ -139,9 +145,11 @@ function termToSql(token: QueryToken): string | null {
  * without a faithful equivalent. Empty input translates to ''.
  */
 export function translateQueryToSql(q: string): string | null {
+  if (!q.trim()) return '';
   const out: string[] = [];
   let needsAnd = false;
   let pendingNot = false;
+  let depth = 0;
   for (const tok of tokenize(q)) {
     if (tok.kind === 'space') continue;
     if (tok.kind === 'operator') {
@@ -151,16 +159,20 @@ export function translateQueryToSql(q: string): string | null {
         pendingNot = !pendingNot;
         continue;
       }
+      if (!needsAnd) return null;
       out.push(tok.raw);
       needsAnd = false;
       continue;
     }
     if (tok.kind === 'paren') {
       if (tok.raw === ')') {
+        if (!needsAnd || depth === 0) return null;
+        depth -= 1;
         out.push(')');
         needsAnd = true;
         continue;
       }
+      depth += 1;
       if (needsAnd) out.push('AND');
       out.push(`${pendingNot !== tok.negated ? 'NOT ' : ''}(`);
       pendingNot = false;
@@ -183,5 +195,6 @@ export function translateQueryToSql(q: string): string | null {
     pendingNot = false;
     needsAnd = true;
   }
+  if (!needsAnd || depth !== 0) return null;
   return out.map((part, i) => (i === 0 || part === ')' || out[i - 1]?.endsWith('(') ? part : ` ${part}`)).join('');
 }

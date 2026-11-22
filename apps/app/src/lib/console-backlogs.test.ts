@@ -176,26 +176,19 @@ describe('OPS-17/18 saved views', () => {
     expect(labelChips(regularQuery, [archivedLabel])).toEqual([]);
   });
 
-  it('resolves a long record label via the exact profile', async () => {
+  it('resolves a long record label from the metadata endpoint alone', async () => {
     const type = 't'.repeat(64);
     const id = 'i'.repeat(150);
     const entityId = `${type}:${id}`;
-    const now = '2026-11-22T00:00:00.000Z';
-    const fetch = vi.fn().mockResolvedValue(
-      Response.json({
-        entity: { kind: 'target', id: entityId, type, name: 'Long record', firstSeen: now, lastSeen: now, events: 1 },
-        series: { interval: 60, buckets: [] },
-        topActions: [],
-        outcomes: {},
-        related: [],
-      }),
-    );
+    const fetch = vi.fn().mockResolvedValue(Response.json({ kind: 'target', id: entityId, type, name: 'Long record' }));
     vi.stubGlobal('fetch', fetch);
     try {
       const [term] = nameableTerms(formatRecordTerm(type, id));
       if (!term) throw new Error('Missing long record term');
       expect(await resolveViewLabel('demo', term)).toEqual({ field: 'record', value: encodeRecordPair(type, id), label: 'Long record' });
-      expect(fetch.mock.calls.map(([url]) => url)).toEqual([`/api/projects/demo/entities/target/${encodeURIComponent(entityId)}?targetType=${type}`]);
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+        `/api/projects/demo/entities/target/${encodeURIComponent(entityId)}/metadata?targetType=${type}`,
+      ]);
     } finally {
       vi.unstubAllGlobals();
     }

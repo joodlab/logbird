@@ -76,6 +76,11 @@ const found = <T>(value: T | null) => {
   if (value === null) throw new ApiError(404, 'not_found', 'Record not found.');
   return value;
 };
+function entityKind(value: string) {
+  const kind = s.entityKindSchema.safeParse(value);
+  if (!kind.success) throw new ApiError(422, 'validation_error', 'Invalid entity kind.');
+  return kind.data;
+}
 const projectRead = createMiddleware<AppEnv>(async (c, next) => {
   if (c.req.method !== 'GET' || /\/projects\/[^/]+\/export$/.test(c.req.path)) return next();
   const projectId = c.get('project').id;
@@ -188,16 +193,32 @@ export const dataRoutes = new Hono<AppEnv>()
     doc('Entity profile', s.entityProfileSchema),
     query(s.entityProfileQuerySchema),
     async (c) => {
-      const kind = s.entityKindSchema.safeParse(c.req.param('kind'));
-      if (!kind.success) throw new ApiError(422, 'validation_error', 'Invalid entity kind.');
+      const kind = entityKind(c.req.param('kind'));
       return c.json(
         s.entityProfileSchema.parse(
-          found(
-            await ch.entityProfile(queryClient(c.req.valid('query')), c.get('project').id, kind.data, c.req.param('entityId'), c.req.valid('query')),
-          ),
+          found(await ch.entityProfile(queryClient(c.req.valid('query')), c.get('project').id, kind, c.req.param('entityId'), c.req.valid('query'))),
         ),
       );
     },
+  )
+  .get(
+    '/projects/:projectId/entities/:kind/:entityId/metadata',
+    doc('Entity display metadata', s.entityMetadataSchema),
+    query(s.entityMetadataQuerySchema),
+    async (c) =>
+      c.json(
+        s.entityMetadataSchema.parse(
+          found(
+            await ch.entityMetadata(
+              clickhouse,
+              c.get('project').id,
+              entityKind(c.req.param('kind')),
+              c.req.param('entityId'),
+              c.req.valid('query').targetType,
+            ),
+          ),
+        ),
+      ),
   )
   .get('/projects/:projectId/suggest', doc('Suggest field values', s.suggestResponseSchema), query(s.suggestQuerySchema), async (c) =>
     c.json(s.suggestResponseSchema.parse(await ch.suggestValues(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),

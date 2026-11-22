@@ -236,13 +236,12 @@ export function QueryInput({
     if (!text) {
       submit('', next);
     } else if (next === 'sql') {
-      const sql = translateQueryToSql(applyFixes(text, autoFixes(completions.fixes)));
+      const sql = translateQueryToSql(applyFixes(draft, autoFixes(completions.fixes)));
       if (sql) {
         submit(sql, 'sql');
         toast.success('Translated to SQL', { description: sql, action: restore });
       } else {
-        submit('', 'sql');
-        toast('Query cleared for SQL mode', { description: 'Free text and phrases have no exact SQL equivalent.', action: restore });
+        toast.error('Could not switch to SQL', { description: 'This filter has no exact SQL translation. Your query is still active.' });
       }
     } else {
       submit('', 'query');

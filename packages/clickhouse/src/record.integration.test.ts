@@ -3,7 +3,7 @@ import { type EntityProfile, encodeRecordPair, formatRecordTerm } from '@logbird
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type ClickHouseClient, createClickHouseClient, createQueryClickHouseClient, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
-import { entityProfile, exportEvents, facets, listEntities, purgeProject, read, searchEvents } from './queries';
+import { entityMetadata, entityProfile, exportEvents, facets, listEntities, purgeProject, read, searchEvents } from './queries';
 import { compileQuery } from './query';
 import { suggestValues } from './suggest';
 
@@ -72,6 +72,8 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
     }
 
     expectSiteProfile(await entityProfile(ch, projectId, 'target', 'site:12', { ...range, q: 'record:site:7 OR record:site:12' }));
+    expect(await entityMetadata(ch, projectId, 'target', 'site:12', 'site')).toMatchObject({ id: 'site:12', type: 'site' });
+    expect(await entityMetadata(ch, projectId, 'target', 'site:missing', 'site')).toBeNull();
 
     const records = ['page:12', 'site:12', 'site:7'];
     expect((await listEntities(ch, projectId, { kind: 'target', limit: 10 })).data.map((r) => r.id).sort()).toEqual(records);
@@ -148,6 +150,12 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
         ).toEqual([eventId]);
         const profile = await entityProfile(ch, collisionProject, 'target', `${type}:${id}`, { ...range, targetType: type });
         expect(profile?.entity).toMatchObject({ type, name, events: 1 });
+        expect(await entityMetadata(ch, collisionProject, 'target', `${type}:${id}`, type)).toEqual({
+          kind: 'target',
+          type,
+          id: `${type}:${id}`,
+          name,
+        });
         expect(profile?.series.buckets.reduce((n, b) => n + b.total, 0)).toBe(1);
         expect(profile?.topActions.map((a) => a.id)).toEqual([`record.${eventId}`]);
         if (sqlClient && type === 'order:archived') {
@@ -182,6 +190,22 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
     }
   }, 60_000);
 
+  it('counts duplicate record targets twice in the rollup tile and once in the timeline', async () => {
+    const target = { type: 'page', id: 'duplicate-target' };
+    const event = normalizeEvent(
+      { id: 'repeat', action: 'page.updated', occurredAt: now.toISOString(), targets: [target, target] },
+      { projectId, receivedAt: now },
+    );
+    if (!event.ok) throw new Error('Invalid duplicate-target fixture');
+    await insertEvents(ch, [event.row]);
+
+    const profile = await entityProfile(ch, projectId, 'target', 'page:duplicate-target', range);
+    expect(profile?.entity.events).toBe(2);
+    expect(profile?.outcomes).toEqual({ success: 1 });
+    const timeline = await searchEvents(ch, projectId, { ...range, q: 'record:page:duplicate-target', limit: 10, order: 'asc' });
+    expect(timeline.data.map(({ id }) => id)).toEqual(['repeat']);
+  }, 60_000);
+
   it.runIf(process.env.CLICKHOUSE_RECORD_EXPLAIN === '1')(
     'prunes multi-granule record searches with idx_targets',
     async () => {
@@ -190,8 +214,8 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
       try {
         await ch.command({
           query: `INSERT INTO events (project_id,event_id,timestamp,action,target_types,target_ids,target_names)
-          SELECT {p:String},toString(number),now64(3)+toIntervalMillisecond(number),'page.updated',['page'],
-                 [if(number=199999,'wanted','ordinary')],[''] FROM numbers(200000)`,
+          SELECT {p:String},toString(number),now64(3)+toIntervalMillisecond(number),'page.updated',['page','page','other'],
+                 [if(number=199999,'wanted','ordinary'),'section:common','common'],['','Common section',''] FROM numbers(200000)`,
           query_params: { p: scaleProject },
         });
         const params = { p: scaleProject, ...predicate.params };
@@ -208,6 +232,16 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
         const granules = /Name: idx_targets[\s\S]*?Granules: (\d+)\/(\d+)/.exec(plan);
         expect(granules, plan).not.toBeNull();
         expect(Number(granules?.[1])).toBeLessThan(Number(granules?.[2]));
+
+        let started = performance.now();
+        expect(await entityMetadata(ch, scaleProject, 'target', 'page:section:common', 'page')).toMatchObject({ name: 'Common section' });
+        const hitMs = performance.now() - started;
+        // The wanted target ID appears in every row, on another type. The miss exercises the paired predicate after pruning.
+        started = performance.now();
+        expect(await entityMetadata(ch, scaleProject, 'target', 'page:section:common', 'page:section')).toBeNull();
+        process.stdout.write(
+          `Metadata lookup across 200000 events: hit ${hitMs.toFixed(1)} ms, paired miss ${(performance.now() - started).toFixed(1)} ms\n`,
+        );
       } finally {
         await purgeProject(ch, scaleProject);
       }

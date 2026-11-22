@@ -370,6 +370,11 @@ UTC multiples of their size, so ≥ 1h buckets start on whole hours (24h → 15m
 recent first; `name` is A→Z (unnamed entities by id). `nextCursor` is an opaque keyset cursor
 bound to its sort.
 
+`GET /api/projects/:projectId/entities/:kind/:entityId/metadata` returns `kind`, `id`, `type` and `name` for an
+exact entity under the same session and project access rules as the profile. For targets, pass the composite
+entity ID and the original `targetType` to disambiguate pairs that share a key. An unknown entity returns 404.
+The console uses this lookup to name saved-view labels without running profile summaries.
+
 Session-authenticated `GET /api/projects/:projectId/setup` reports the computed integration checklist;
 `GET /api/workspace/setup` summarizes active-workspace projects and resumable onboarding.
 Postgres facts are fresh; ClickHouse facts may be cached for 30 seconds after a real first event.

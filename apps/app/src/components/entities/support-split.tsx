@@ -26,9 +26,12 @@ export interface SupportCounts {
  * with `impersonator:*` so the empty bucket (events nobody impersonated) never lands in the overflow total.
  */
 export function useSupportCounts(projectId: string, kind: EntityKind, entityId: string, baseQuery: string, range: string): SupportCounts | undefined {
-  const agents = useQuery(facetQuery(projectId, 'impersonator', range, withPresence(baseQuery, 'impersonator'), 20));
+  const agents = useQuery({
+    ...facetQuery(projectId, 'impersonator', range, withPresence(baseQuery, 'impersonator'), 20),
+    enabled: Boolean(baseQuery),
+  });
   const asAgent = useQuery({ ...facetQuery(projectId, 'impersonator', range, supportAgentQuery(entityId), 1), enabled: kind === 'actor' });
-  if (!agents.data || agents.isPlaceholderData) return undefined;
+  if (!baseQuery || !agents.data || agents.isPlaceholderData) return undefined;
   const present = agents.data.values.filter((v) => v.value !== '');
   return {
     support: present.reduce((n, v) => n + v.count, 0) + agents.data.otherCount,

@@ -198,10 +198,14 @@ export const entityListQuerySchema = z.object({
 });
 export const entityListResponseSchema = z.object({ data: z.array(entitySchema), nextCursor: z.string().nullable() });
 
-export const entityProfileQuerySchema = rangeQuerySchema.extend({
+export const entityMetadataQuerySchema = z.object({
   /** For targets, selects the original type when more than one pair can share the composite entity id. */
   targetType: z.string().max(64).optional(),
 });
+export const entityMetadataSchema = entitySchema.pick({ kind: true, id: true, type: true, name: true });
+export type EntityMetadata = z.infer<typeof entityMetadataSchema>;
+
+export const entityProfileQuerySchema = rangeQuerySchema.extend(entityMetadataQuerySchema.shape);
 export type EntityProfileQuery = z.infer<typeof entityProfileQuerySchema>;
 
 export const entityProfileSchema = z.object({

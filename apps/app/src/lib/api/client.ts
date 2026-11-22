@@ -9,6 +9,7 @@ import {
   type EntitySort,
   type ExportQuery,
   entityListResponseSchema,
+  entityMetadataSchema,
   entityProfileSchema,
   eventDetailSchema,
   eventSchema,
@@ -234,6 +235,8 @@ export const api = {
     ) => request(entityListResponseSchema, 'GET', pathFor(routes.entities.list.path, { projectId }), { query: { ...query }, signal }),
     profile: (projectId: string, kind: EntityKind, entityId: string, query: EntityProfileQuery, signal?: AbortSignal) =>
       request(entityProfileSchema, 'GET', pathFor(routes.entities.profile.path, { projectId, kind, entityId }), { query: { ...query }, signal }),
+    metadata: (projectId: string, kind: EntityKind, entityId: string, targetType?: string, signal?: AbortSignal) =>
+      request(entityMetadataSchema, 'GET', pathFor(routes.entities.metadata.path, { projectId, kind, entityId }), { query: { targetType }, signal }),
   },
 
   fields: (projectId: string, query: RangeParams, signal?: AbortSignal) =>

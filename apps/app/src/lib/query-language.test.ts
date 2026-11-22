@@ -1,3 +1,4 @@
+import { formatRecordTerm } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   andQuery,
@@ -28,6 +29,7 @@ describe('tokenize', () => {
       'occurredAt:[2026-11-01 TO 2026-11-03T12:00:00Z] NOT a AND b -(x OR y) trace:abc:def',
       'action:(booking.* OR "a b"', // unclosed group
       'actor.name:"Ra', // unclosed quote
+      'record \t:  page:7 attempt: >= 2 /a  b/',
     ]) {
       expect(
         tokenize(q)
@@ -51,6 +53,11 @@ describe('tokenize', () => {
 
   it('separates comparison operators from their value', () => {
     expect(tokenize('attempt:>=2')[0]).toMatchObject({ valueKind: 'compare', op: '>=', value: '2', valueStart: 8 });
+  });
+
+  it('reads through spacing around the colon without losing source offsets', () => {
+    expect(tokenize('record :  page:7')[0]).toMatchObject({ field: 'record', value: 'page:7', valueStart: 10, end: 16 });
+    expect(queryCompletionAt('record: ', 8)).toMatchObject({ kind: 'value', field: 'record', prefix: '', from: 8, to: 8 });
   });
 
   it('treats -( as a negated group', () => {
@@ -97,6 +104,14 @@ describe('tokenize', () => {
     // Lower-case boolean words stay text (the server only knows upper-case operators).
     expect(tokenize('a and b').filter((t) => t.kind === 'operator')).toEqual([]);
   });
+});
+
+it('keeps literal whitespace, quotes and escapes when Explorer applies a facet or scopes its counts', () => {
+  const record = formatRecordTerm('page:section\\v2', 'A  B "C"\\root');
+  const filters = String.raw`action:/updated  \(now\)/ /two  words/`;
+  const q = `${record}  outcome:failure \t ${filters}`;
+  expect(removeTerm(q, 'outcome')).toBe(`${record} ${filters}`);
+  expect(toggleTerm(q, 'outcome', 'success', 'include')).toBe(`${record} ${filters} outcome:success`);
 });
 
 describe('highlightQuery', () => {

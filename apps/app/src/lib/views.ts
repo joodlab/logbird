@@ -78,8 +78,8 @@ export async function resolveViewLabel(projectId: string, term: ViewLabelTerm, s
     const pair = decodeRecordPair(term.value);
     if (!pair) return undefined;
     id = pair.id;
-    const profile = await api.entities.profile(projectId, 'target', targetEntityId(pair.type, pair.id), { targetType: pair.type }, signal);
-    name = profile.entity.name;
+    const metadata = await api.entities.metadata(projectId, 'target', targetEntityId(pair.type, pair.id), pair.type, signal);
+    name = metadata.name;
   } else {
     const { data } = await api.entities.list(projectId, { kind: term.field as EntityKind, q: id, limit: 10 }, signal);
     name = data.find((entity) => (term.field === 'target' ? splitTargetId(entity.id, entity.type).id : entity.id) === id)?.name;

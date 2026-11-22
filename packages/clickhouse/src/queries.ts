@@ -3,6 +3,7 @@ import type {
   AuditEvent,
   Entity,
   EntityKind,
+  EntityMetadata,
   EntityProfile,
   EntityProfileQuery,
   EntitySort,
@@ -465,6 +466,43 @@ function entityCursor(s: string, sort: EntitySort): [string, string, string] {
   }
   throw new Error('Invalid cursor');
 }
+
+const ENTITY_NAMES = 'kind,entity_id id,anyLast(type) type,anyLast(name) name';
+const ENTITY_BY_ID = 'FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id';
+
+function ambiguousTarget(kind: EntityKind, id: string) {
+  return kind === 'target' && id.indexOf(':') !== id.lastIndexOf(':');
+}
+
+/** Read the display metadata only. The composite rollup key cannot distinguish pairs containing colons. */
+export async function entityMetadata(
+  ch: ClickHouseClient,
+  p: string,
+  kind: EntityKind,
+  id: string,
+  targetType?: string,
+): Promise<EntityMetadata | null> {
+  const ambiguous = ambiguousTarget(kind, id);
+  const rollup =
+    ambiguous && targetType !== undefined
+      ? undefined
+      : (await read<EntityMetadata>(ch, `SELECT ${ENTITY_NAMES} ${ENTITY_BY_ID}`, { p, kind, id }))[0];
+  if (kind !== 'target') return rollup ?? null;
+  const type = targetType ?? rollup?.type;
+  if (type === undefined || !id.startsWith(`${type}:`)) return null;
+  if (!ambiguous) return rollup ?? null;
+
+  const pair = recordTargetPredicate(type, id.slice(type.length + 1));
+  const [event] = await read<EntityMetadata>(
+    ch,
+    `SELECT 'target' kind, {id:String} id, {recordType:String} type,
+       arrayFirst((n, t, i) -> t = {recordType:String} AND i = {recordId:String}, target_names, target_types, target_ids) name
+     FROM events WHERE project_id={p:String} AND (${pair.sql}) ORDER BY timestamp DESC,event_id DESC LIMIT 1`,
+    { p, id, ...pair.params },
+  );
+  return event ?? null;
+}
+
 export async function entityProfile(
   ch: ClickHouseClient,
   p: string,
@@ -472,16 +510,16 @@ export async function entityProfile(
   id: string,
   q: EntityProfileQuery,
 ): Promise<EntityProfile | null> {
-  const ambiguous = kind === 'target' && id.indexOf(':') !== id.lastIndexOf(':');
+  const ambiguous = ambiguousTarget(kind, id);
   const rollup =
     ambiguous && q.targetType !== undefined
       ? undefined
       : (
-          await read<Entity>(
-            ch,
-            'SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id',
-            { p, kind, id },
-          )
+          await read<Entity>(ch, `SELECT ${ENTITY_NAMES},min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events ${ENTITY_BY_ID}`, {
+            p,
+            kind,
+            id,
+          })
         )[0];
   if (!ambiguous && !rollup) return null;
   const targetType = kind === 'target' ? (q.targetType ?? rollup?.type) : undefined;

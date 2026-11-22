@@ -1,4 +1,4 @@
-import { decodeRecordPair, QUERY_FIELDS, type QueryErrorDetails, scanBareRecordValue } from '@logbird/contracts';
+import { decodeRecordPair, QUERY_DIALECT_PREFIX, QUERY_FIELDS, type QueryErrorDetails, scanBareRecordValue } from '@logbird/contracts';
 export class QueryError extends Error {
   constructor(
     message: string,
@@ -35,7 +35,7 @@ function queryLexer(q: string) {
     while (i < q.length && /\s/.test(q[i]!)) i++;
     if (i === q.length) return undefined;
     // Only inspect outside quoted/regex tokens, so literal punctuation stays literal.
-    const dialect = /^(?:([\w.]+)\s+(!=|=)\s*("(?:[^"\\]|\\.)*"|[^\s()]+)|(!)(?=[\w.]+:)|(&&|\|\|))/.exec(q.slice(i));
+    const dialect = QUERY_DIALECT_PREFIX.exec(q.slice(i));
     if (dialect) {
       const text = dialect[1]
         ? `${dialect[2] === '!=' ? '-' : ''}${dialect[1]}:${dialect[3]}`
