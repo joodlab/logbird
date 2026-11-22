@@ -1,6 +1,8 @@
 /**
- * The marketing copy files (marketing/copy/*.md) state the words of each page. copy-sync.test.ts checks every claim
- * they make against the page as rendered, so a correction made on one side only fails a test instead of shipping.
+ * Parser for the interim copy drift check (copy-sync.test.ts). INTERIM, to be deleted when the typed content modules land (#250): it catches common drift between the copy files and the pages, and does not make each claim single-source.
+ *
+ * The marketing copy files (marketing/copy/*.md) describe the words of each page; the check compares the claims parsed
+ * here with the pages as rendered, so many corrections made on one side only fail a test instead of shipping.
  *
  * Parsing follows marketing/copy/README.md: one `##` block per section, fields written as `- **name:** text`, continued
  * on indented lines, lists as indented `-` or `1.` items, tables as Markdown rows. Every field name is classified

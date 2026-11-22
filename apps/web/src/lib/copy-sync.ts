@@ -6,8 +6,10 @@ import { elementChildren, elements, inlineRuns, type PageElement, parsePage, tex
 import { firstRelease, latestRelease, supportedLine } from './releases';
 
 /**
- * One source per claim (copy-sync.test.ts): every claim a copy file states for a page must be on that page, as the
- * public build renders it, bound to an element: a heading to a heading, a text to one element's whole text (or a run
+ * Interim drift check (copy-sync.test.ts). INTERIM, to be deleted when the typed content modules land (#250): it catches common drift between the copy files and the pages, and does not make each claim single-source.
+ *
+ * Claims a copy file states for a page are looked for on that page, as the public build renders it, bound to an
+ * element: a heading to a heading, a text to one element's whole text (or a run
  * of up to three adjacent sibling elements, for a title and its body), a list to sibling elements in the same order
  * and number, a table to a table row by row and cell by cell, a call to action to a link with the same label and
  * target. The map of files to routes is marketing/copy/README.md; every copy file is either mapped or listed in

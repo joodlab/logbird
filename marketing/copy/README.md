@@ -49,11 +49,15 @@ Then one `##` block per section, in page order:
 - `cta`: label → target.
 - `visual`: an exact path under `marketing/media/`, or "code sample", or "diagram: …".
 
-### One source per claim (checked)
+### Interim drift check
+
+**Interim.** The planned fix is typed content modules (#250): the pages render them, so each claim has one source. This
+check catches common drift between these files and the pages until then, and is deleted when the modules land. It
+doesn't make each claim single-source; its known gaps are listed in the pull request that added it (#249).
 
 `apps/web/src/lib/copy-sync.test.ts` renders every page in the map above as the public build does, once with Logbird
-Cloud closed and once open (`WEB_APP_URL` set). It checks every claim the copy file states for that page against
-elements, not loose text. Change a claim in the copy and on the page in the same pull request.
+Cloud closed and once open (`WEB_APP_URL` set). It looks for the claims the copy file states for that page, bound to
+elements rather than loose text. Change a claim in the copy and on the page in the same pull request.
 
 - **Headings.** A `heading` must be a heading on the page. In the other direction, every `h1`/`h2` section heading in
   the page's `<main>` must be a heading in the copy. The shared closing band is the exception: its words are checked on

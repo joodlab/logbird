@@ -3,6 +3,7 @@ import { quietHrefWarnings, renderPages } from '../test/render-pages';
 import { type CopyClaim, copyClaims } from './copy-claims';
 import { CLOUD_OPEN, copy, copyFiles, NOT_CHECKED, type Page, PLACEHOLDERS, PUBLIC, problems, readPage, routeMap } from './copy-sync';
 
+/** Interim drift check: see the header of copy-sync.ts. Delete this file when the typed content modules land. */
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
