@@ -204,6 +204,8 @@ export type EndpointState = {
 /** Every state the API reports for an endpoint, holds first. A held endpoint delivers nothing and loses nothing. */
 export function endpointStates(e: WebhookEndpoint): EndpointState[] {
   const states: EndpointState[] = [];
+  // A filter or scope hold stops sending altogether; a cursor review alone stops only the search for new events.
+  const blocked = Boolean(e.filterWarning || e.scopeWarning);
   const kept =
     'Nothing is sent while it is held, and nothing is skipped: it keeps its place. When it resumes, it checks the events that arrived meanwhile against its filter and scope, and sends the ones that match and are still stored.';
   if (e.filterWarning) {
@@ -235,7 +237,9 @@ export function endpointStates(e: WebhookEndpoint): EndpointState[] {
       badge: 'Needs an operator',
       title: 'Paused until an operator checks its position',
       what: 'Logbird found that this endpoint’s place in the event stream does not add up, so it stopped looking for new events instead of skipping or repeating any.',
-      lost: 'Only the search for new events is paused, and nothing is skipped: it keeps its place. Deliveries already queued, resends and test pings still go out. When it resumes, it checks the events that arrived meanwhile against its filter and scope, and sends the matches that are still stored.',
+      lost: blocked
+        ? 'Nothing is sent while the hold above lasts, and nothing is skipped: it keeps its place. Once that hold is resolved, deliveries already queued, resends and test pings go out again, while the search for new events stays paused until this review is done.'
+        : 'Only the search for new events is paused, and nothing is skipped: it keeps its place. Deliveries already queued, resends and test pings still go out. When it resumes, it checks the events that arrived meanwhile against its filter and scope, and sends the matches that are still stored.',
       todo: 'This needs the person who runs your Logbird server: the procedure is in the self-hosting guide. There is nothing to do here.',
     });
   }

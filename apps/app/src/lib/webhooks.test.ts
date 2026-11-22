@@ -222,3 +222,14 @@ describe('attempt explanations keep every fact', () => {
     expect(cursor?.lost).not.toMatch(/Nothing is sent/);
   });
 });
+
+describe('combined holds', () => {
+  it('never tells the reader that test pings go out while a filter or scope hold stops them', () => {
+    for (const extra of [{ filterWarning: 'webhook_filter_review_required' }, { scopeWarning: 'webhook_invalid_scope' }]) {
+      const states = endpointStates({ cursorWarning: 'webhook_cursor_review_required', ...extra } as never);
+      const cursor = states.find((s) => s.key === 'cursor');
+      expect(cursor?.lost).toMatch(/Nothing is sent while the hold above lasts/);
+      expect(cursor?.lost).not.toMatch(/still go out/);
+    }
+  });
+});

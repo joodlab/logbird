@@ -204,12 +204,15 @@ function EndpointCard({
     onError: (error) => toast.error('Could not delete the endpoint', { description: webhookErrorCopy(error) }),
   });
   // Confirming the stored filter as it is: a PATCH that includes filterQuery, unchanged, lifts the hold.
-  const [filterError, setFilterError] = useState<string | null>(null);
+  // The server's rejection of a filter belongs to that filter text, and only while the filter hold lasts: once the
+  // filter is changed or confirmed, it is gone.
+  const [rejected, setRejected] = useState<{ query: string; message: string } | null>(null);
+  const filterError = rejected && endpoint.filterWarning && rejected.query === endpoint.filterQuery ? rejected.message : null;
   const confirmFilter = useMutation({
     mutationFn: () => api.webhooks.update(projectId, endpoint.id, { filterQuery: endpoint.filterQuery }),
     ...webhookRetry,
     onSuccess: (updated) => {
-      setFilterError(null);
+      setRejected(null);
       refresh();
       // Say what the returned endpoint says: another hold (a scope, an operator review) can still keep it paused.
       const still = endpointStates(updated).filter((s) => s.kind === 'hold');
@@ -222,7 +225,11 @@ function EndpointCard({
     },
     onError: (error) => {
       const problem = queryProblem(error, 'query');
-      if (problem) setFilterError(`${reasonTitle(problem.details, problem.code)}: ${queryProblemText(problem, endpoint.filterQuery)}`);
+      if (problem)
+        setRejected({
+          query: endpoint.filterQuery,
+          message: `${reasonTitle(problem.details, problem.code)}: ${queryProblemText(problem, endpoint.filterQuery)}`,
+        });
       else toast.error('Could not confirm the filter', { description: webhookErrorCopy(error) });
     },
   });
