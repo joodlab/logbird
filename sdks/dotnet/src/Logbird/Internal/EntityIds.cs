@@ -69,17 +69,20 @@ internal static class EntityIds
             return null;
         }
 
+        // Positions are counted as sent: a null target is not serialized, so it takes no position.
         var index = 0;
         foreach (var target in e.Targets)
         {
-            if (target is not null)
+            if (target is null)
             {
-                var reason = Check($"targets[{index}].type", target.Type, MaxTargetTypeLength, whitespaceFields)
-                    ?? Check($"targets[{index}].id", target.Id, MaxIdLength, whitespaceFields);
-                if (reason is not null)
-                {
-                    return reason;
-                }
+                continue;
+            }
+
+            var reason = Check($"targets[{index}].type", target.Type, MaxTargetTypeLength, whitespaceFields)
+                ?? Check($"targets[{index}].id", target.Id, MaxIdLength, whitespaceFields);
+            if (reason is not null)
+            {
+                return reason;
             }
 
             index++;

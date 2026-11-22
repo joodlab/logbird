@@ -104,8 +104,9 @@ first 64 targets of an event. Before sending, the client checks every identifier
 
 Identifiers are strings in this SDK. For a numeric id, pass an integer's invariant text, for example
 `userId.ToString(CultureInfo.InvariantCulture)` for a `long` gives `"42"`. Avoid formatting a `decimal` (`42.0m` keeps its
-scale and becomes `"42.0"`). Logbird 0.2.x indexes an integer id sent as a JSON number (by another SDK) such as `42` as
-its plain decimal text, so the string `"42"` from this SDK and the number `42` match, while `"42.0"` does not. For a `Guid`, pick one format
+scale and becomes `"42.0"`). Logbird 0.2.x indexes a JSON-number id such as `42` (sent by another SDK) as `42`, so the
+string `"42"` from this SDK and the number `42` match, while `"42.0"` does not. A very large number can be indexed in
+another spelling (for example `1e33`), so keep such ids as strings everywhere. For a `Guid`, pick one format
 (`guid.ToString()` gives lowercase `d0c4…`) and keep it, because a different format is a different identity.
 
 The server can also attach warnings to stored events (for example an `occurredAt` outside the accepted window, stored

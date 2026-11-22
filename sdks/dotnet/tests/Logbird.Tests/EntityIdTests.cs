@@ -9,7 +9,10 @@ using System.Threading.Tasks;
 
 namespace Logbird.Tests;
 
-/// <summary>Entity identifiers are sent exactly as given, and the SDK refuses those Logbird would not index as given.</summary>
+/// <summary>
+/// Entity identifiers are sent exactly as given. The SDK refuses an identifier that is too long or holds a lone surrogate,
+/// and more than 256 targets; it sends surrounding whitespace as given and warns about it.
+/// </summary>
 public class EntityIdTests
 {
     private static readonly Uri Endpoint = new("https://audit.example.invalid/");
@@ -139,6 +142,28 @@ public class EntityIdTests
         var warning = Assert.Single(h.Errors.OfType<LogbirdEventWarning>());
         Assert.Equal(
             "surrounding whitespace in targets[64].id: sent exactly as given; Logbird up to 0.2.x indexes only the first 64 targets, so this one is kept in the stored payload only",
+            warning.Reason);
+    }
+
+    [Fact]
+    public async Task Target_positions_in_messages_count_targets_as_sent()
+    {
+        // A null target is not serialized, so the padded target below is sent (and indexed) at position 63.
+        await using var h = new Harness();
+        var e = new AuditEvent("many");
+        e.Targets.Add(null!);
+        for (var i = 0; i < 63; i++)
+        {
+            e.Target("record", "r" + i);
+        }
+
+        e.Target("record", " r63");
+        h.Client.Track(e);
+        Assert.True(await h.Client.FlushAsync());
+        Assert.Equal(64, h.Server.Requests.Single().Events.Single().GetProperty("targets").GetArrayLength());
+        var warning = Assert.Single(h.Errors.OfType<LogbirdEventWarning>());
+        Assert.Equal(
+            "surrounding whitespace in targets[63].id: sent exactly as given; Logbird up to 0.2.x indexes it trimmed, so a search for the value with its whitespace does not find it",
             warning.Reason);
     }
 
