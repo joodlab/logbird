@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 const { resend, failedPing, deliveries, pendingIds } = vi.hoisted(() => ({
   // What the pending list holds (the resend watcher reads it); everything else answers with the one failed ping.
   pendingIds: { current: [] as string[] },
-  deliveries: vi.fn(async (_p: string, _e: string, query: { status?: string }) => ({ data: [], nextCursor: null }) as unknown),
+  deliveries: vi.fn(async (_p: string, _e: string, _query: { status?: string }) => ({ data: [], nextCursor: null }) as unknown),
   resend: vi.fn(async (_projectId: string, _endpointId: string, _deliveryId: string) => ({})),
   // A finished test ping: the only kind of row that offers "Send again" without a router link.
   failedPing: {
