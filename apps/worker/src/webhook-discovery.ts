@@ -4,6 +4,7 @@ import {
   type EventRow,
   OCCURRED_AT_FUTURE_DAYS,
   OCCURRED_AT_PAST_DAYS,
+  QueryError,
   read,
   toEvent,
 } from '@logbird/clickhouse';
@@ -19,9 +20,13 @@ const DISCOVERY_SLICE_MS = 5 * 60_000;
 const COMPLETE_READ = `SETTINGS read_overflow_mode = 'throw', read_overflow_mode_leaf = 'throw', result_overflow_mode = 'throw',
   timeout_overflow_mode = 'throw', timeout_overflow_mode_leaf = 'throw', group_by_overflow_mode = 'throw', sort_overflow_mode = 'throw'`;
 type EndpointFilter = Pick<WebhookEndpoint, 'projectId' | 'filterQuery'>;
+type Predicate = ReturnType<typeof scopePredicate>;
+// RE2 rejected a stored pattern. The same filter fails every scan, unlike timeouts, limits or network errors.
+const PERMANENT_FILTER_ERRORS = new Set(['427', 'CANNOT_COMPILE_REGEXP']);
 
+/** The clock only checks that relative times stay in range: `now` in a webhook filter is each event's arrival time. */
 function scopePredicate(endpoint: EndpointFilter, scope: WebhookScope | null, clock: number) {
-  const filter = compileMaskedQuery(endpoint.filterQuery, scope?.mask, clock);
+  const filter = compileMaskedQuery(endpoint.filterQuery, scope?.mask, clock, { relativeTo: 'received_at' });
   const tenant = scope?.tenantId ? 'AND tenant_id = {tenant:String}' : '';
   const target = scope?.target
     ? 'AND arrayExists((type, id) -> type = {targetType:String} AND id = {targetId:String}, target_types, target_ids)'
@@ -43,9 +48,9 @@ export async function webhookEvent(
   scope: WebhookScope | null,
   eventId: string,
   receivedAt: Date,
-  filterClock: Date,
+  abortSignal?: AbortSignal,
 ) {
-  const match = scopePredicate(endpoint, scope, +filterClock);
+  const match = scopePredicate(endpoint, scope, +receivedAt);
   const identity = `project_id = {project:String} AND event_id = {id:String} AND received_at = {from:DateTime64(3,'UTC')}`;
   const params = { ...match.params, id: eventId, from: receivedAt.toISOString() };
   const [row] = await read<EventRow>(
@@ -53,12 +58,24 @@ export async function webhookEvent(
     `SELECT * FROM events WHERE ${match.sql} AND event_id = {id:String} AND received_at = {from:DateTime64(3,'UTC')}
       ORDER BY timestamp LIMIT 1 ${COMPLETE_READ}`,
     params,
+    undefined,
+    undefined,
+    undefined,
+    abortSignal,
   );
   // The public projection keeps stored attribute text exact, including integers beyond JavaScript's safe range.
   if (row) return toEvent(row);
   if (!scope && !endpoint.filterQuery) return null;
   // Distinguish a present occurrence that is out of scope without loading its payload.
-  const [present] = await read<{ present: number }>(ch, `SELECT 1 AS present FROM events WHERE ${identity} LIMIT 1 ${COMPLETE_READ}`, params);
+  const [present] = await read<{ present: number }>(
+    ch,
+    `SELECT 1 AS present FROM events WHERE ${identity} LIMIT 1 ${COMPLETE_READ}`,
+    params,
+    undefined,
+    undefined,
+    undefined,
+    abortSignal,
+  );
   return present ? 'scope_mismatch' : null;
 }
 
@@ -74,8 +91,7 @@ async function captureScanBounds(projectId: string) {
 }
 
 // Keep the arrival-time predicate on the stored column so ClickHouse can use an arrival-time index when present.
-function readWebhookCandidates(ch: ClickHouseClient, endpoint: WebhookEndpoint, scope: WebhookScope | null, sliceEnd: Date, now: Date) {
-  const match = scopePredicate(endpoint, scope, +now);
+function readWebhookCandidates(ch: ClickHouseClient, endpoint: WebhookEndpoint, match: Predicate, sliceEnd: Date) {
   return read<{ event_id: string; received_ms: string | number }>(
     ch,
     `SELECT event_id, toUnixTimestamp64Milli(received_at) AS received_ms FROM events
@@ -144,6 +160,29 @@ export async function discoverWebhookDeliveries(
   }
   const scope = storedWebhookScope(endpoint);
   if (scope === undefined) return;
+  const holdInvalidFilter = async (error: unknown) => {
+    // A stored filter that can never run would otherwise fail every scan silently while the endpoint looks enabled.
+    const held = await prisma.webhookEndpoint.updateMany({
+      where: snapshot,
+      data: { filterReviewRequired: true, filterReviewReason: 'invalid_filter', filterReviewNoticeClaimedAt: null, updatedAt: endpoint.updatedAt },
+    });
+    if (held.count)
+      console.warn(
+        JSON.stringify({
+          event: 'webhook.filter_invalid',
+          endpointId: endpoint.id,
+          reason: error instanceof QueryError ? error.details.reason : 'regex',
+        }),
+      );
+  };
+  let match: Predicate;
+  try {
+    match = scopePredicate(endpoint, scope, +cursorClock.now);
+  } catch (error) {
+    // Compilation is deterministic: a stored filter that fails it fails the same way on every scan.
+    if (error instanceof QueryError) return holdInvalidFilter(error);
+    throw error;
+  }
   const bounds = await captureScanBounds(endpoint.projectId);
   if (!bounds) return;
   const lastScannedAt = new Date(Math.max(+bounds.now, +cursorClock.now, +(endpoint.lastScannedAt ?? cursorClock.now)));
@@ -153,7 +192,13 @@ export async function discoverWebhookDeliveries(
   if (early && +bounds.watermark + 1 < start) return;
   // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
   const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +bounds.watermark + 1));
-  const rows = await readWebhookCandidates(ch, endpoint, scope, sliceEnd, bounds.now);
+  let rows: Awaited<ReturnType<typeof readWebhookCandidates>>;
+  try {
+    rows = await readWebhookCandidates(ch, endpoint, match, sliceEnd);
+  } catch (error) {
+    if (endpoint.filterQuery && permanentFilterError(error)) return holdInvalidFilter(error);
+    throw error;
+  }
   const expiresAt = new Date(+bounds.now + WEBHOOK_LOG_RETENTION_MS);
   const commit = async (cursorReceivedAt: Date, cursorEventId: string | null, deliveries?: Prisma.WebhookDeliveryCreateManyInput[]) => {
     const position = { cursorReceivedAt, cursorEventId, lastScannedAt };
@@ -176,7 +221,6 @@ export async function discoverWebhookDeliveries(
         eventId,
         receivedAt,
         webhookId: `lb1_${Buffer.from(occurrence, 'utf8').toString('base64url')}`,
-        // Re-evaluate relative-time filters at this same database instant on every send.
         createdAt: bounds.now,
         expiresAt,
       };
@@ -187,6 +231,12 @@ export async function discoverWebhookDeliveries(
   }
   // Only a fully consumed short page proves the remainder of the slice is empty.
   if (rows.length < DISCOVERY_PAGE_SIZE) await commit(sliceEnd, null);
+}
+
+function permanentFilterError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const { code, type } = error as { code?: unknown; type?: unknown };
+  return PERMANENT_FILTER_ERRORS.has(String(code)) || PERMANENT_FILTER_ERRORS.has(String(type));
 }
 
 export async function scanWebhooks(ch: ClickHouseClient) {

@@ -373,6 +373,8 @@ model WebhookEndpoint {
   filterQuery String @default("")
   filterReviewRequired Boolean @default(false)
   filterReviewNoticeClaimedAt DateTime?
+  // Null: confirm a filter stored before webhook delivery. invalid_filter: the stored filter cannot run.
+  filterReviewReason String?
   scopeTenantId String?
   scopeTargetType String?
   scopeTargetId String?

@@ -7953,8 +7953,11 @@
                             "type": "string"
                           },
                           "filterWarning": {
-                            "const": "webhook_filter_review_required",
-                            "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                            "description": "Discovery and delivery are paused. webhook_filter_review_required: confirm a filter stored before webhook delivery. webhook_filter_invalid: the stored filter cannot run, for example a regex that RE2 rejects. Include a valid filterQuery in an endpoint PATCH to resume from the saved cursor.",
+                            "enum": [
+                              "webhook_filter_review_required",
+                              "webhook_filter_invalid"
+                            ],
                             "type": "string"
                           },
                           "id": {
@@ -8132,6 +8135,7 @@
                     "type": "boolean"
                   },
                   "filterQuery": {
+                    "description": "Logbird query language; empty matches every event. Regexes use RE2 syntax. In relative times such as occurredAt:>now-1h, now is each event's arrival time (receivedAt), so a filter selects the same events whenever discovery runs.",
                     "maxLength": 4096,
                     "type": "string"
                   },
@@ -8274,8 +8278,11 @@
                           "type": "string"
                         },
                         "filterWarning": {
-                          "const": "webhook_filter_review_required",
-                          "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                          "description": "Discovery and delivery are paused. webhook_filter_review_required: confirm a filter stored before webhook delivery. webhook_filter_invalid: the stored filter cannot run, for example a regex that RE2 rejects. Include a valid filterQuery in an endpoint PATCH to resume from the saved cursor.",
+                          "enum": [
+                            "webhook_filter_review_required",
+                            "webhook_filter_invalid"
+                          ],
                           "type": "string"
                         },
                         "id": {
@@ -8409,7 +8416,7 @@
                 }
               }
             },
-            "description": "Invalid endpoint configuration or filter. Filters cannot reference masked fields."
+            "description": "Invalid endpoint configuration or filter (invalid_query). Filters cannot reference masked fields, and regexes must be valid RE2."
           },
           "503": {
             "content": {
@@ -8711,8 +8718,11 @@
                       "type": "string"
                     },
                     "filterWarning": {
-                      "const": "webhook_filter_review_required",
-                      "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                      "description": "Discovery and delivery are paused. webhook_filter_review_required: confirm a filter stored before webhook delivery. webhook_filter_invalid: the stored filter cannot run, for example a regex that RE2 rejects. Include a valid filterQuery in an endpoint PATCH to resume from the saved cursor.",
+                      "enum": [
+                        "webhook_filter_review_required",
+                        "webhook_filter_invalid"
+                      ],
                       "type": "string"
                     },
                     "id": {
@@ -8890,6 +8900,7 @@
                     "type": "boolean"
                   },
                   "filterQuery": {
+                    "description": "Logbird query language; empty matches every event. Regexes use RE2 syntax. In relative times such as occurredAt:>now-1h, now is each event's arrival time (receivedAt), so a filter selects the same events whenever discovery runs.",
                     "maxLength": 4096,
                     "type": "string"
                   },
@@ -9027,8 +9038,11 @@
                       "type": "string"
                     },
                     "filterWarning": {
-                      "const": "webhook_filter_review_required",
-                      "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                      "description": "Discovery and delivery are paused. webhook_filter_review_required: confirm a filter stored before webhook delivery. webhook_filter_invalid: the stored filter cannot run, for example a regex that RE2 rejects. Include a valid filterQuery in an endpoint PATCH to resume from the saved cursor.",
+                      "enum": [
+                        "webhook_filter_review_required",
+                        "webhook_filter_invalid"
+                      ],
                       "type": "string"
                     },
                     "id": {
@@ -9152,7 +9166,7 @@
                 }
               }
             },
-            "description": "Invalid endpoint configuration or filter. Filters cannot reference masked fields."
+            "description": "Invalid endpoint configuration or filter (invalid_query). Filters cannot reference masked fields, and regexes must be valid RE2."
           },
           "503": {
             "content": {

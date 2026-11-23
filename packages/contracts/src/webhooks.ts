@@ -42,7 +42,14 @@ export function storedWebhookScope(endpoint: Parameters<typeof webhookScopeFromC
 const webhookFields = {
   url: z.string().min(1).max(2048),
   description: z.string().max(1000).nullable().optional(),
-  filterQuery: z.string().max(4096).optional(),
+  filterQuery: z
+    .string()
+    .max(4096)
+    .optional()
+    .describe(
+      'Logbird query language; empty matches every event. Regexes use RE2 syntax. In relative times such as ' +
+        "occurredAt:>now-1h, now is each event's arrival time (receivedAt), so a filter selects the same events whenever discovery runs.",
+    ),
   scope: webhookScopeSchema.nullable().optional(),
   enabled: z.boolean().optional(),
 };
@@ -63,9 +70,13 @@ export const webhookEndpointSchema = z.object({
     .describe('Only the newest ten active secrets sign deliveries. Wait for an overlap to expire or rotate with overlapSeconds set to 0.'),
   scopeWarning: z.literal('webhook_invalid_scope').optional().describe('Delivery is blocked. Replace the scope with valid stored IDs and masks.'),
   filterWarning: z
-    .literal('webhook_filter_review_required')
+    .enum(['webhook_filter_review_required', 'webhook_filter_invalid'])
     .optional()
-    .describe('Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.'),
+    .describe(
+      'Discovery and delivery are paused. webhook_filter_review_required: confirm a filter stored before webhook delivery. ' +
+        'webhook_filter_invalid: the stored filter cannot run, for example a regex that RE2 rejects. ' +
+        'Include a valid filterQuery in an endpoint PATCH to resume from the saved cursor.',
+    ),
   cursorWarning: z
     .literal('webhook_cursor_review_required')
     .optional()

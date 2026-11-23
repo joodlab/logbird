@@ -9,7 +9,7 @@ import { encryptWebhookSecret, webhookCursorClock } from '@logbird/database/webh
 import { generateWebhookSecret } from '@logbird/sdk';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from './webhook-delivery';
-import { discoverWebhookDeliveries, scanWebhooks } from './webhook-discovery';
+import { discoverWebhookDeliveries, scanWebhooks, webhookEvent } from './webhook-discovery';
 
 const ch = createClickHouseClient();
 const runId = randomUUID();
@@ -335,4 +335,121 @@ it.each([
   } finally {
     await limited.close();
   }
+});
+
+it('selects the same relative-time matches on an immediate, a delayed and a resumed scan', async () => {
+  const { now } = await webhookCursorClock(prisma);
+  // In a webhook filter, now is each event's arrival time: the same events match however late discovery runs.
+  const endpoint = async (name: string, from: Date) => {
+    const action = `qa.webhook.relative.${name}`;
+    const hook = await prisma.webhookEndpoint.create({
+      data: {
+        projectId,
+        url: 'https://fixture.example.invalid',
+        createdAt: from,
+        cursorReceivedAt: from,
+        filterQuery: `action:${action} occurredAt:[now-5m TO now]`,
+      },
+    });
+    const row = (id: string, occurredOffsetMs: number) => {
+      const normalized = normalizeEvent(
+        { action, id, occurredAt: new Date(+from + occurredOffsetMs).toISOString() },
+        { projectId, receivedAt: from },
+      );
+      if (!normalized.ok) throw new Error(normalized.reason);
+      return normalized.row;
+    };
+    return { hook, row };
+  };
+  // Occurred one minute and zero before arrival match; ten minutes before and one minute after do not.
+  const shape = [
+    ['inside-1m', -60_000],
+    ['inside-0', 0],
+    ['outside-10m', -600_000],
+    ['outside-future', 60_000],
+  ] as const;
+  const suffixes = async (endpointId: string, name: string) => (await queuedIds(endpointId)).map((id) => id.slice(name.length + 1));
+
+  // Immediate: the events arrived just behind the watermark and discovery runs right away.
+  const immediateFrom = new Date(+now - 20_000);
+  const immediate = await endpoint('immediate', immediateFrom);
+  // Delayed: the worker was down for twenty minutes after the events arrived.
+  const delayedFrom = new Date(+now - 20 * 60_000);
+  const delayed = await endpoint('delayed', delayedFrom);
+  await insertEvents(ch, [
+    ...shape.map(([id, offset]) => immediate.row(`immediate-${id}`, offset)),
+    ...shape.map(([id, offset]) => delayed.row(`delayed-${id}`, offset)),
+  ]);
+  await discoverWebhookDeliveries(ch, immediate.hook, scanClock(immediateFrom));
+  await discoverWebhookDeliveries(ch, delayed.hook, scanClock(delayedFrom));
+  const expected = ['inside-0', 'inside-1m'];
+  expect(await suffixes(immediate.hook.id, 'immediate')).toEqual(expected);
+  expect(await suffixes(delayed.hook.id, 'delayed')).toEqual(expected);
+  // The send-time recheck uses the same per-event meaning, so a late send still finds each queued event.
+  for (const delivery of await prisma.webhookDelivery.findMany({ where: { endpointId: delayed.hook.id } })) {
+    if (!delivery.receivedAt) throw new Error('Missing event delivery fixture');
+    expect(await webhookEvent(ch, delayed.hook, null, delivery.eventId, delivery.receivedAt)).toMatchObject({ id: delivery.eventId });
+  }
+
+  // Resumed: a partial page committed, the worker stopped, and a later scan resumed after the committed position.
+  const resumed = await endpoint('resumed', delayedFrom);
+  const inside = Array.from({ length: 101 }, (_, index) => `resumed-in-${String(index).padStart(3, '0')}`);
+  await insertEvents(ch, [
+    ...inside.map((id) => resumed.row(id, -60_000)),
+    ...['resumed-out-000', 'resumed-out-050', 'resumed-out-200'].map((id) => resumed.row(id, -600_000)),
+  ]);
+  const transaction = prisma.$transaction.bind(prisma);
+  const interrupted = vi.spyOn(prisma, '$transaction').mockImplementation(async (...args) => {
+    const result = await Reflect.apply(transaction, prisma, args);
+    if (args[1] === undefined) throw new Error('QA worker stopped after a partial page');
+    return result;
+  });
+  try {
+    await expect(discoverWebhookDeliveries(ch, resumed.hook, scanClock(delayedFrom))).rejects.toThrow('QA worker stopped after a partial page');
+  } finally {
+    interrupted.mockRestore();
+  }
+  expect(await refetch(resumed.hook.id)).toMatchObject({ cursorReceivedAt: delayedFrom, cursorEventId: inside[99] });
+  expect(await queuedIds(resumed.hook.id)).toEqual(inside.slice(0, 100));
+  await discoverWebhookDeliveries(ch, await refetch(resumed.hook.id), scanClock(delayedFrom));
+  expect(await queuedIds(resumed.hook.id)).toEqual(inside);
+});
+
+it('holds an endpoint whose stored regex RE2 cannot compile after one scan, but not on a network failure', async () => {
+  const from = new Date(Date.now() - 60_000);
+  const { hook, row } = await fixture(from, 're2-size');
+  await insertEvents(ch, [row('re2-size-event', from)]);
+  // JavaScript and the save-time RE2 check accept this pattern; ClickHouse's RE2 refuses it as too large (code 427).
+  // It stands for any stored filter that can never run, including filters saved before the check existed.
+  const endpoint = await prisma.webhookEndpoint.update({ where: { id: hook.id }, data: { filterQuery: String.raw`action:/\pL{1000}/` } });
+  const unreachable = createClient({ url: 'http://127.0.0.1:9', request_timeout: 2000 });
+  try {
+    await expect(discoverWebhookDeliveries(unreachable, endpoint, scanClock(from))).rejects.toThrow();
+  } finally {
+    await unreachable.close();
+  }
+  expect(await refetch(hook.id)).toMatchObject({ filterReviewRequired: false, filterReviewReason: null, cursorReceivedAt: from });
+  const warn = vi.spyOn(console, 'warn');
+  try {
+    await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
+    expect(warn.mock.calls.map(([message]) => String(message))).toContainEqual(expect.stringContaining('webhook.filter_invalid'));
+  } finally {
+    warn.mockRestore();
+  }
+  expect(await refetch(hook.id)).toMatchObject({
+    filterReviewRequired: true,
+    filterReviewReason: 'invalid_filter',
+    filterReviewNoticeClaimedAt: null,
+    cursorReceivedAt: from,
+    cursorEventId: null,
+    lastScannedAt: null,
+  });
+  expect(await queuedIds(hook.id)).toEqual([]);
+  // A corrected filter (what PATCH stores) resumes from the saved cursor.
+  const corrected = await prisma.webhookEndpoint.update({
+    where: { id: hook.id },
+    data: { filterQuery: String.raw`action:/qa\.webhook\.re2-size/`, filterReviewRequired: false, filterReviewReason: null },
+  });
+  await discoverWebhookDeliveries(ch, corrected, scanClock(from));
+  expect(await queuedIds(hook.id)).toEqual(['re2-size-event']);
 });
