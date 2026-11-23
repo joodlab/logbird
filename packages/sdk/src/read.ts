@@ -98,32 +98,52 @@ const fail = (where: string, message: string): never => {
 };
 const isObject = (value: unknown): value is object => value !== null && typeof value === 'object';
 /**
- * A container the boundary reads fields from: a plain object or an ordinary class instance (Vue reactive ones too).
- * An array, Date, Map or other built-in is refused: it has none of the named fields, so reading it would silently drop
- * every bound or selector (a date picker's `[start, end]` would become the server's default window).
+ * A container the boundary reads fields from: a plain object, a null-prototype object or an ordinary class instance
+ * (Vue reactive ones too, and ones with their own `Symbol.toStringTag`). Anything built on a built-in prototype is
+ * refused: an array, Date, Map, URLSearchParams, Headers or FormData has none of the named fields as properties, so
+ * reading it would silently drop every bound, selector or `q` (a date picker's `[start, end]` would become the server's
+ * default window, and `new URLSearchParams('q=…')` a project-wide read).
  */
-const isRecord = (value: unknown): value is object => isObject(value) && !Array.isArray(value) && !ArrayBuffer.isView(value) && !isBuiltIn(value);
-/** Tags of the built-in containers; a class's own custom `Symbol.toStringTag` is not one of them and stays allowed. */
-const BUILT_IN_TAGS = new Set(['Array', 'Date', 'Map', 'Set', 'WeakMap', 'WeakSet', 'RegExp', 'Promise', 'Error', 'ArrayBuffer']);
-/** Internal-slot checks that throw for anything but the real built-in, whatever its tag says. */
-const BRANDS: ((value: object) => unknown)[] = [
-  (value) => Date.prototype.getTime.call(value),
-  (value) => Reflect.apply(Object.getOwnPropertyDescriptor(Map.prototype, 'size')?.get as () => number, value, []),
-  (value) => Reflect.apply(Object.getOwnPropertyDescriptor(Set.prototype, 'size')?.get as () => number, value, []),
-  (value) => WeakMap.prototype.has.call(value as WeakMap<object, unknown>, {}),
-  (value) => WeakSet.prototype.has.call(value as WeakSet<object>, {}),
+const isRecord = (value: unknown): value is object =>
+  isObject(value) && !Array.isArray(value) && !ArrayBuffer.isView(value) && !hasBuiltInPrototype(value);
+const PLATFORM_CONTAINERS = [
+  'Map',
+  'Set',
+  'WeakMap',
+  'WeakSet',
+  'Date',
+  'RegExp',
+  'Promise',
+  'Error',
+  'URL',
+  'URLSearchParams',
+  'Headers',
+  'FormData',
+  'Request',
+  'Response',
+  'Blob',
+  'EventTarget',
+  'ReadableStream',
 ];
-/** A built-in container: by its tag (which also sees through a Vue reactive Proxy) or by its internal slots. */
-function isBuiltIn(value: object): boolean {
-  if (BUILT_IN_TAGS.has(Object.prototype.toString.call(value).slice(8, -1))) return true;
-  return BRANDS.some((brand) => {
-    try {
-      brand(value);
-      return true;
-    } catch {
-      return false;
-    }
-  });
+/**
+ * Walks the prototype chain up to (not including) its root `Object.prototype`, of whichever realm. A built-in prototype
+ * owns a native `constructor`; a class's prototype owns its class, and a plain object used as a prototype owns none.
+ * This also sees through a Vue reactive Proxy (whose prototype is its target's) and works across realms.
+ */
+function hasBuiltInPrototype(value: object): boolean {
+  // Runtimes implement some web containers in JavaScript (Node's URLSearchParams, Headers, FormData), so their
+  // constructors do not print as native: they are named here and matched by prototype (a Proxy's too).
+  for (const name of PLATFORM_CONTAINERS) {
+    const type = (globalThis as Record<string, unknown>)[name];
+    if (typeof type === 'function' && value instanceof type) return true;
+  }
+  let prototype = Object.getPrototypeOf(value);
+  while (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
+    const owned = Object.getOwnPropertyDescriptor(prototype, 'constructor')?.value;
+    if (typeof owned === 'function' && /\{\s*\[native code\]\s*\}\s*$/.test(Function.prototype.toString.call(owned))) return true;
+    prototype = Object.getPrototypeOf(prototype);
+  }
+  return false;
 }
 /** Blank means only whitespace, as JavaScript's `trim()` sees it (the .NET builder uses the same rule). */
 const isBlank = (value: string) => value.trim().length === 0;

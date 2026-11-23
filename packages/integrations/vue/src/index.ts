@@ -11,8 +11,9 @@ import {
 import { defineComponent, type MaybeRefOrGetter, onScopeDispose, type PropType, shallowRef, toValue, watch } from 'vue';
 export type AuditFetcher = (query: Partial<SearchQuery>, signal?: AbortSignal) => Promise<SearchResponse>;
 /**
- * A string or number naming who is signed in (a user or session id). When it changes, the shown rows, the cursor and
- * any read in flight are dropped and the trail reloads from page one.
+ * A string or number that changes whenever the fetcher's scope would: the signed-in user **and** the active tenant or
+ * workspace, for example `JSON.stringify([user.id, workspace.id])`. When it changes, the shown rows, the cursor and any
+ * read in flight are dropped and the trail reloads from page one.
  */
 export type AuditSession = string | number;
 export interface AuditTrailOptions extends TrailQuery {
@@ -132,10 +133,24 @@ function createTrail(source: () => RawRequest) {
       if (current === generation) loading.value = false;
     }
   }
-  const refresh = () => run(snapshot(), false);
+  /**
+   * An explicit read. Reading the caller's options can itself change them (and queue a newer trail through the
+   * watcher): a snapshot that a change overtook while it was being read stands down, and the newer queued run proceeds.
+   */
+  const explicitState = (): State | undefined => {
+    const revision = selection;
+    const state = snapshot();
+    return revision === selection ? state : undefined;
+  };
+  const refresh = () => {
+    if (disposed) return Promise.resolve();
+    const state = explicitState();
+    return state ? run(state, false) : Promise.resolve();
+  };
   const loadMore = () => {
     if (disposed) return Promise.resolve();
-    const state = snapshot();
+    const state = explicitState();
+    if (!state) return Promise.resolve();
     // Nothing more to load for the trail on screen. A changed trail, session or fetcher (or an invalid one) always runs,
     // restarting at page one or showing the error.
     if (owns(state) && (!nextCursor.value || loading.value)) return Promise.resolve();
@@ -159,9 +174,11 @@ function createTrail(source: () => RawRequest) {
       // invalidate() aborts the read in flight, and an abort listener may have changed the options again: the newer
       // callback has already queued its own state, so this older one must not overwrite it.
       if (mine !== selection || disposed) return;
-      loading.value = !('error' in state);
       pending = state;
-      if (scheduled) return;
+      // Setting loading can run a synchronous consumer that changes the options again: its callback queues its own
+      // state, so this one stands down.
+      loading.value = !('error' in state);
+      if (mine !== selection || disposed || scheduled) return;
       scheduled = true;
       queueMicrotask(() => {
         scheduled = false;

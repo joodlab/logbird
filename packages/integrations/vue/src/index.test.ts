@@ -548,3 +548,27 @@ it('lets the newest selection win when an abort listener changes the trail durin
   expect(trail.data.value.map((e) => e.id)).toEqual(['tenant:"c"-1']);
   wrapper.unmount();
 });
+
+// Round 6: reading the options for an explicit refresh can itself change them; the newer trail must win.
+it('lets a change made while refresh reads the options win over the snapshot refresh read', async () => {
+  const tenant = ref('b');
+  let flip = false;
+  const fetcher = vi.fn((query: Record<string, unknown>) => Promise.resolve(page([`${String(query.q)}-1`])));
+  const { trail, wrapper } = mountTrail(() =>
+    useAuditTrail(() => {
+      const value = tenant.value;
+      if (flip) {
+        flip = false;
+        tenant.value = 'c';
+      }
+      return { fetcher, tenant: value };
+    }),
+  );
+  await flushPromises();
+  flip = true;
+  await trail.refresh();
+  await flushPromises();
+  expect(fetcher.mock.calls.map((call) => call[0].q)).toEqual(['tenant:"b"', 'tenant:"c"']);
+  expect(trail.data.value.map((e) => e.id)).toEqual(['tenant:"c"-1']);
+  wrapper.unmount();
+});

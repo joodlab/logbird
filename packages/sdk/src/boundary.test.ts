@@ -105,6 +105,20 @@ describe('the trail boundary accepts the shapes a careful developer passes', () 
         })(),
       'tenant:"acme"',
     ],
+    // Round 6: only built-in prototypes are refused; a class tagged like a built-in is still an ordinary instance.
+    [
+      'a class tagged Map',
+      () => ({
+        tenant: 'acme',
+        range: new (class {
+          readonly [Symbol.toStringTag] = 'Map';
+          from = ISO;
+        })(),
+      }),
+      'tenant:"acme"',
+      { from: ISO },
+    ],
+    ['a null-prototype object', () => Object.assign(Object.create(null), { tenant: 'acme' }), 'tenant:"acme"'],
     [
       'a millisecond ISO string bound',
       () => ({ tenant: 'acme', range: { from: '2026-11-01T00:00:00.123Z' } }),
@@ -172,16 +186,18 @@ describe('the trail boundary refuses a value that is not the primitive its field
     ['an array as the options', [{ tenant: 'acme' }]],
     ['fractional epoch milliseconds', { tenant: 'acme', range: { from: Date.parse(ISO) + 0.5 } }],
     ['a sub-millisecond ISO string bound', { tenant: 'acme', range: { from: '2026-11-01T00:00:00.0005Z' } }],
+    // Round 6: built-in prototypes are refused whatever their tag says.
     [
-      'a class claiming to be a Map by its tag',
+      'a class extending Map',
       {
         tenant: 'acme',
-        range: new (class {
-          readonly [Symbol.toStringTag] = 'Map';
-          from = ISO;
+        range: (() => {
+          class Bounds extends Map<string, string> {}
+          return new Bounds([['from', ISO]]);
         })(),
       },
     ],
+    ['URLSearchParams as the options', new URLSearchParams('tenant=acme')],
     ['a target that is a string', { target: 'inv_1' }],
     ['no options object', 'tenant:acme'],
   ];
@@ -279,6 +295,17 @@ describe('the search query boundary (readAuditTrail, the Vue engine, the Nuxt ro
     ['fractional epoch milliseconds', { q: 'a', from: Date.parse(ISO) + 0.5 }],
     ['a sub-millisecond ISO string bound', { q: 'a', from: '2026-11-01T00:00:00.0005+00:00' }],
     ['a Set as the query', new Set(['q'])],
+    // Round 6: URL parameter containers have no `q` property, so reading them would drop the filter.
+    ['URLSearchParams as the query', new URLSearchParams('q=tenant:"acme"')],
+    ['Headers as the query', new Headers({ q: 'tenant:"acme"' })],
+    [
+      'FormData as the query',
+      (() => {
+        const form = new FormData();
+        form.set('q', 'tenant:"acme"');
+        return form;
+      })(),
+    ],
   ])('refuses %s before any request', async (_, query) => {
     await expect(sent(query)).rejects.toBeInstanceOf(TrailQueryError);
   });
