@@ -7,7 +7,9 @@ It requires, reading each package's manifest as XML:
   file name, both with the same version (and the expected version, when given);
 - dependency groups for exactly the target frameworks Logbird.AspNetCore ships (its lib/<tfm>/ folders, matched by exact
   name), each with exactly one Logbird dependency, at exactly that version ([x.y.z]) and with exclude="Build,Analyzers";
-- in both packages, an <icon> naming a file the package carries, which is a 128x128 PNG.
+- in both packages, exactly one <icon> in the nuspec namespace, naming by its exact relative path (case included) a file
+  the package carries, whose bytes are those of the repository's logbird-icon.png; that file itself must be a complete,
+  valid 128x128 PNG (every chunk's CRC, IHDR first, IEND last, and image data that inflates to exactly 128 rows).
 
 NuGet package ids are case-insensitive, so ids are compared case-insensitively everywhere.
 
@@ -17,6 +19,7 @@ Logbird.AspNetCore calls Logbird's internal members, so a version range could bi
 import struct
 import sys
 import xml.etree.ElementTree as ElementTree
+import zlib
 import zipfile
 from pathlib import Path
 
@@ -41,22 +44,63 @@ def manifest(package):
     metadata = children(root, "metadata")
     if len(metadata) != 1:
         raise SystemExit(f"{package.name}: expected one <metadata> element")
-    return metadata[0], frameworks
+    return root, metadata[0], frameworks
 
 
-def check_icon(package, metadata):
-    """The <icon> names a file inside the package, and that file is a 128x128 PNG (nuget.org's recommended size)."""
-    icon = text(metadata, "icon", package).replace("\\", "/").lstrip("/")
-    with zipfile.ZipFile(package) as archive:
-        names = {name.lower(): name for name in archive.namelist()}
-        if icon.lower() not in names:
-            raise SystemExit(f"{package.name}: <icon> names {icon}, which the package does not carry")
-        data = archive.read(names[icon.lower()])
-    if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
-        raise SystemExit(f"{package.name}: the icon {icon} is not a PNG")
-    width, height = struct.unpack(">II", data[16:24])
+ICON = Path(__file__).resolve().parent / "logbird-icon.png"
+CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+
+
+def check_png(data, label):
+    """A complete, valid 128x128 PNG: signature, every chunk's CRC, IHDR first, IEND last, inflating to 128 full rows."""
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit(f"{label}: not a PNG")
+    chunks, offset = [], 8
+    while offset < len(data):
+        if offset + 12 > len(data):
+            raise SystemExit(f"{label}: a PNG chunk is cut short")
+        length, kind = struct.unpack(">I4s", data[offset:offset + 8])
+        end = offset + 12 + length
+        if end > len(data):
+            raise SystemExit(f"{label}: a PNG chunk is cut short")
+        body = data[offset + 8:offset + 8 + length]
+        if struct.unpack(">I", data[end - 4:end])[0] != zlib.crc32(kind + body) & 0xFFFFFFFF:
+            raise SystemExit(f"{label}: the {kind.decode('latin-1')} chunk fails its CRC")
+        chunks.append((kind, body))
+        offset = end
+    if not chunks or chunks[0][0] != b"IHDR" or len(chunks[0][1]) != 13 or chunks[-1][0] != b"IEND":
+        raise SystemExit(f"{label}: not a complete PNG (IHDR first and IEND last)")
+    width, height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", chunks[0][1])
     if (width, height) != (128, 128):
-        raise SystemExit(f"{package.name}: the icon {icon} is {width}x{height}, not 128x128")
+        raise SystemExit(f"{label}: {width}x{height}, not 128x128")
+    if color not in CHANNELS or interlace != 0:
+        raise SystemExit(f"{label}: unsupported PNG colour type {color} or interlaced")
+    try:
+        pixels = zlib.decompress(b"".join(body for kind, body in chunks if kind == b"IDAT"))
+    except zlib.error as error:
+        raise SystemExit(f"{label}: the image data does not inflate ({error})") from error
+    row = 1 + (width * CHANNELS[color] * depth + 7) // 8
+    if len(pixels) != row * height:
+        raise SystemExit(f"{label}: the image data holds {len(pixels)} bytes, not {height} rows of {row}")
+
+
+def check_icon(package, root, metadata):
+    """Exactly one <icon> in the nuspec namespace names, exactly, a file whose bytes are the repository icon's."""
+    namespace = root.tag[: root.tag.index("}") + 1] if root.tag.startswith("{") else ""
+    icons = [child for child in metadata if child.tag == f"{namespace}icon"]
+    foreign = [child for child in metadata if local(child.tag) == "icon" and child.tag != f"{namespace}icon"]
+    if len(icons) != 1 or foreign:
+        raise SystemExit(f"{package.name}: expected exactly one <icon> in the nuspec namespace, found {len(icons)} (and {len(foreign)} elsewhere)")
+    # NuGet resolves the icon by its exact relative path; only the directory separator may differ (NU5046 for case).
+    icon = (icons[0].text or "").strip().replace("\\", "/")
+    if not icon or icon.startswith("/"):
+        raise SystemExit(f"{package.name}: <icon> must name a relative path, not {icon!r}")
+    with zipfile.ZipFile(package) as archive:
+        if icon not in archive.namelist():
+            raise SystemExit(f"{package.name}: <icon> names {icon}, which the package does not carry under that exact name")
+        data = archive.read(icon)
+    if data != ICON.read_bytes():
+        raise SystemExit(f"{package.name}: the icon {icon} is not the repository's {ICON.name}")
     return icon
 
 
@@ -73,22 +117,23 @@ def main():
     expected = sys.argv[2] if len(sys.argv) > 2 else None
     packages = {}
     for package in sorted(folder.glob("*.nupkg")):
-        metadata, frameworks = manifest(package)
+        root, metadata, frameworks = manifest(package)
         package_id = text(metadata, "id", package)
         version = text(metadata, "version", package)
         if package.name != f"{package_id}.{version}.nupkg":
             raise SystemExit(f"{package.name}: the file name does not match its manifest ({package_id} {version})")
-        packages.setdefault(package_id.lower(), []).append((package, metadata, frameworks, version))
+        packages.setdefault(package_id.lower(), []).append((package, metadata, frameworks, version, root))
 
     for package_id in ("Logbird", "Logbird.AspNetCore"):
         found = packages.get(package_id.lower(), [])
         if len(found) != 1:
             raise SystemExit(f"expected exactly one {package_id} package (any casing) in {folder}, found {len(found)}: {[p.name for p, *_ in found]}")
 
-    icons = [check_icon(package, metadata) for package, metadata, _, _ in (packages["logbird"][0], packages["logbird.aspnetcore"][0])]
+    check_png(ICON.read_bytes(), f"the repository icon {ICON.name}")
+    icons = [check_icon(package, root, metadata) for package, metadata, _, _, root in (packages["logbird"][0], packages["logbird.aspnetcore"][0])]
 
-    _, _, _, logbird_version = packages["logbird"][0]
-    aspnet, metadata, frameworks, aspnet_version = packages["logbird.aspnetcore"][0]
+    _, _, _, logbird_version, _ = packages["logbird"][0]
+    aspnet, metadata, frameworks, aspnet_version, _ = packages["logbird.aspnetcore"][0]
     if aspnet_version != logbird_version:
         raise SystemExit(f"Logbird is {logbird_version} but Logbird.AspNetCore is {aspnet_version}")
     if expected is not None and logbird_version != expected:
