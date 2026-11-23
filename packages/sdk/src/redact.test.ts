@@ -68,6 +68,24 @@ it('returns the event as JSON sends it', () => {
   expect(result).toStrictEqual({ id: 'e', action: 'a', occurredAt: '2026-11-24T00:00:00.000Z', metadata: {} });
 });
 
+it('replaces a matched value without reading it, so a value JSON cannot hold never stops the event', () => {
+  const event = { id: 'e', action: 'probe', metadata: { token: 1n, nested: { apiKey: Symbol('x') } } } as unknown as EventInput;
+  const result = redact()(event);
+  // A value JSON leaves out (a symbol) is left out, matched or not, as the JSON the .NET SDK redacts would not hold it.
+  expect(JSON.stringify(result)).toBe('{"id":"e","action":"probe","metadata":{"token":"[redacted]","nested":{}}}');
+});
+
+it('keeps key order and writes exactly what JSON.stringify would for what it keeps', () => {
+  const event = {
+    action: 'a',
+    id: 'e',
+    metadata: { b: 1, a: undefined, c: () => 1, d: [undefined, () => 1, 2], when: new Date('2026-11-24T00:00:00.000Z'), z: 'last' },
+  } as unknown as EventInput;
+  const result = redact({ keys: /^never$/ })(event);
+  expect(JSON.stringify(result)).toBe(JSON.stringify(event));
+  expect(Object.keys((result as unknown as { metadata: object }).metadata)).toEqual(['b', 'd', 'when', 'z']);
+});
+
 it('lists the same identifier fields as the .NET SDK', () => {
   expect(IDENTIFIER_FIELDS).toEqual([
     'actor.type',

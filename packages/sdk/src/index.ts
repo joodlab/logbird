@@ -366,7 +366,7 @@ export const IDENTIFIER_FIELDS: readonly string[] = Object.freeze([
   'targets[].id',
 ]);
 
-type Level = 'nested' | 'top' | 'actor' | 'impersonator' | 'executor' | 'tenant' | 'targets' | 'target';
+type Level = 'nested' | 'top' | 'actor' | 'impersonator' | 'executor' | 'tenant' | 'targets' | 'target' | 'changes' | 'change' | 'plain';
 
 const IDENTITY: Record<Level, readonly string[]> = {
   nested: [],
@@ -377,6 +377,9 @@ const IDENTITY: Record<Level, readonly string[]> = {
   tenant: ['id'],
   targets: [],
   target: ['id', 'type'],
+  changes: [],
+  change: [],
+  plain: [],
 };
 
 const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'impersonator', executor: 'executor', tenant: 'tenant', targets: 'targets' };
@@ -396,8 +399,10 @@ const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'imperson
  * names added like the .NET `AddKeys`), both redact exactly the same keys. A pattern of your own runs on each platform's
  * regular-expression engine, which can differ at the edges (in .NET, `$` also matches before a final line feed; flags
  * such as `i` fold case differently), so keep custom patterns to plain alternatives and anchors that mean the same in
- * both. It returns the event as JSON will send it (a `Date` becomes its ISO string; an object reached twice becomes two
- * copies), and throws a `TypeError` for an event with a cycle, which could not be sent either.
+ * both. It returns the event as JSON will send it, built in one pass: a matched key's value is replaced without being
+ * read (so a value JSON cannot hold, such as a `BigInt` under a secret key, never stops the event), `toJSON` is applied
+ * (a `Date` becomes its ISO string), values JSON leaves out are left out, an object reached twice becomes two copies, and
+ * an event with a cycle throws a `TypeError`, as serializing it would.
  */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
   const keys = options.keys ?? DEFAULT_SECRET_KEYS;
@@ -408,56 +413,107 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
     return pattern.test(key);
   };
   return (event) => {
-    // The copy is the event as JSON will send it: an object reached twice (an alias) becomes two copies, as on the wire and
-    // in the .NET SDK, so redacting one never changes the other; a cycle throws a TypeError, as serializing it would,
-    // instead of redacting forever.
-    const copy = JSON.parse(JSON.stringify(event)) as EventInput;
-    // Change values first, as the .NET SDK does; the walk below may then replace a matching key holding them. Only an
-    // object entry whose field is a string is matched (any other shape is left to the walk, never thrown on).
-    const changes: unknown = copy.changes;
-    if (Array.isArray(changes)) {
-      for (const change of changes) {
-        if (!change || typeof change !== 'object' || Array.isArray(change)) continue;
-        const entry = change as Record<string, unknown>;
-        if (typeof entry.field !== 'string' || !matches(fields, entry.field)) continue;
-        if (Object.hasOwn(entry, 'before')) entry.before = replacement;
-        if (Object.hasOwn(entry, 'after')) entry.after = replacement;
-      }
-    }
-    // Iterative, like the .NET SDK, so the walk itself never recurses (the copy is JSON's, within the engine's limits).
-    // Each decision depends only on the node's own key and level, so the visiting order does not change the result.
-    const pending: Array<{ node: unknown; level: Level; whole: boolean }> = [{ node: copy, level: 'top', whole: false }];
-    while (pending.length > 0) {
-      const { node, level, whole } = pending.pop()!;
-      if (!node || typeof node !== 'object') continue;
-      const record = node as Record<string, unknown>;
-      if (Array.isArray(node) && level === 'targets') {
-        // Target entries are parties: never replaced as a whole, and their type and id are kept. A pattern matching an
-        // entry's index (or the targets key) redacts the entry's other fields; a scalar entry is replaced.
-        node.forEach((entry, index) => {
-          const matched = whole || matches(keys, String(index));
-          if (entry && typeof entry === 'object' && !Array.isArray(entry)) pending.push({ node: entry, level: 'target', whole: matched });
-          else if (matched) node[index] = replacement;
-          else pending.push({ node: entry, level: 'nested', whole: false });
-        });
+    // One pass builds the copy and redacts it, the event as JSON will send it (the tree the .NET SDK redacts). It is
+    // iterative, so it never recurses. A matched value is replaced without being read. A child decision depends only on
+    // its own key, its parent's level and the source, so the visiting order does not change the result.
+    type Frame =
+      | { exit: false; value: unknown; key: string; level: Level; whole: boolean; changed: boolean; set: (value: unknown) => void }
+      | { exit: true; source: object };
+    const active = new Set<object>();
+    let result: unknown;
+    const stack: Frame[] = [
+      {
+        exit: false,
+        value: event,
+        key: '',
+        level: 'top',
+        whole: false,
+        changed: false,
+        set: (value) => {
+          result = value;
+        },
+      },
+    ];
+    const omitted = (value: unknown) => value === undefined || typeof value === 'function' || typeof value === 'symbol';
+    const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+    while (stack.length > 0) {
+      const frame = stack.pop()!;
+      if (frame.exit) {
+        active.delete(frame.source);
         continue;
       }
-      // Arrays are walked by their index keys ("0", "1", ...), as Object.entries gives them.
-      for (const [key, child] of Object.entries(record)) {
-        if (IDENTITY[level].includes(key)) continue;
-        if (whole) {
-          record[key] = replacement;
-          continue;
-        }
-        const party = level === 'top' && Object.hasOwn(PARTIES, key) ? PARTIES[key]! : 'nested';
-        const matched = matches(keys, key);
-        const isParty =
-          party !== 'nested' && (party === 'targets' ? Array.isArray(child) : !!child && typeof child === 'object' && !Array.isArray(child));
-        if (isParty) pending.push({ node: child, level: party, whole: matched });
-        else if (matched) record[key] = replacement;
-        else pending.push({ node: child, level: 'nested', whole: false });
+      let value = frame.value;
+      if (value && typeof value === 'object' && typeof (value as { toJSON?: unknown }).toJSON === 'function') {
+        value = (value as { toJSON: (key: string) => unknown }).toJSON(frame.key);
       }
+      if (!value || typeof value !== 'object') {
+        frame.set(value);
+        continue;
+      }
+      if (active.has(value)) throw new TypeError('redact(): the event has a cycle, so it cannot be sent as JSON.');
+      active.add(value);
+      const { level, whole, changed } = frame;
+      // Children are pushed last to first, so each is copied in order and keys keep their order.
+      const children: Frame[] = [];
+      const child = (value: unknown, key: string, childLevel: Level, childWhole: boolean, childChanged: boolean, set: (v: unknown) => void) =>
+        children.push({ exit: false, value, key, level: childLevel, whole: childWhole, changed: childChanged, set });
+      if (Array.isArray(value)) {
+        const out: unknown[] = new Array(value.length).fill(null);
+        frame.set(out);
+        const put = (index: number) => (v: unknown) => {
+          out[index] = omitted(v) ? null : v;
+        };
+        for (let index = 0; index < value.length; index++) {
+          const entry: unknown = value[index];
+          const key = String(index);
+          if (level === 'plain') {
+            child(entry, key, 'plain', false, false, put(index));
+          } else if (level === 'targets') {
+            // Target entries are parties: never replaced as a whole, and their type and id are kept. A pattern matching
+            // an entry's index (or the targets key) redacts the entry's other fields; a scalar entry is replaced.
+            const matched = whole || matches(keys, key);
+            if (isObject(entry)) child(entry, key, 'target', matched, false, put(index));
+            else if (matched) put(index)(replacement);
+            else child(entry, key, 'nested', false, false, put(index));
+          } else if (matches(keys, key)) {
+            // Arrays are matched by their index keys ("0", "1", ...), as Object.entries gives them.
+            put(index)(replacement);
+          } else if (level === 'changes' && isObject(entry)) {
+            // Change values are decided on the field as recorded; only an object entry with a string field is matched.
+            child(entry, key, 'change', false, typeof entry.field === 'string' && matches(fields, entry.field), put(index));
+          } else {
+            child(entry, key, 'nested', false, false, put(index));
+          }
+        }
+      } else {
+        const out: Record<string, unknown> = {};
+        frame.set(out);
+        const put = (key: string) => (v: unknown) => {
+          if (!omitted(v)) out[key] = v;
+          else delete out[key];
+        };
+        for (const [key, entry] of Object.entries(value)) {
+          // Reserve the key's place, so the copy keeps the source's order; a value JSON leaves out is removed again.
+          out[key] = undefined;
+          if (level === 'plain' || IDENTITY[level].includes(key)) {
+            child(entry, key, 'plain', false, false, put(key));
+            continue;
+          }
+          if (whole || (changed && (key === 'before' || key === 'after'))) {
+            put(key)(omitted(entry) ? undefined : replacement);
+            continue;
+          }
+          const party = level === 'top' && Object.hasOwn(PARTIES, key) ? PARTIES[key]! : 'nested';
+          const matched = matches(keys, key);
+          const isParty = party !== 'nested' && (party === 'targets' ? Array.isArray(entry) : isObject(entry));
+          if (isParty) child(entry, key, party, matched, false, put(key));
+          else if (matched) put(key)(omitted(entry) ? undefined : replacement);
+          else child(entry, key, level === 'top' && key === 'changes' && Array.isArray(entry) ? 'changes' : 'nested', false, false, put(key));
+        }
+      }
+      stack.push({ exit: true, source: value });
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]!);
     }
-    return copy;
+    return result as EventInput;
   };
 }
