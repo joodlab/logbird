@@ -298,12 +298,17 @@ public class Step4FollowUpTests
     [Fact]
     public async Task Identifier_warnings_skipped_together_count_one_lost_notification_each()
     {
-        // Warnings are queued for accepted events, one entry per event; the first OnError blocks the notifications.
+        // Track posts an event's identifier warnings as one notification; the first OnError blocks the notifications.
         var errorGate = new ManualResetEventSlim();
+        var blocked = new ManualResetEventSlim();
         await using var live = Client(Options(o =>
         {
             o.MaxQueueSize = 1_000;
-            o.OnError = _ => errorGate.Wait();
+            o.OnError = _ =>
+            {
+                blocked.Set();
+                errorGate.Wait();
+            };
 
             // One event per batch, so every event drains whatever the sender's timing (no partial batch waits an hour).
             o.BatchSize = 1;
@@ -311,13 +316,19 @@ public class Step4FollowUpTests
         try
         {
             var longId = new string('a', 300);
+
+            // The notification thread takes the first warning and blocks in OnError before the rest are posted, so the
+            // queue it leaves behind stays full (taking the first one later would free a slot for the event below).
+            live.Track(new AuditEvent("filler") { Actor = AuditActor.User(longId) });
+            Assert.True(blocked.Wait(TimeSpan.FromSeconds(10)));
             for (var i = 0; i < 1_100; i++)
             {
                 live.Track(new AuditEvent("filler") { Actor = AuditActor.User(longId) });
             }
 
             // The notification queue is now full of one-warning entries behind the blocked first one; an event with two
-            // warnings is skipped as one entry and counts two. The event queue is drained first, so tracking it evicts nothing.
+            // warnings is skipped as one entry and counts two, on the thread calling Track. The event queue is drained
+            // first, so tracking it evicts nothing.
             await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
             {
                 while (live.Stats.QueueLength > 0)
@@ -326,17 +337,7 @@ public class Step4FollowUpTests
                 }
             });
             var before = live.NotificationsLost;
-            var delivered = live.Stats.Delivered;
             live.Track(new AuditEvent("two warnings") { Actor = AuditActor.User(longId), Tenant = new AuditTenant(longId) });
-
-            // Its warnings are queued (and skipped) when the server accepts it, on the sender, after Track returns.
-            await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
-            {
-                while (live.Stats.Delivered <= delivered)
-                {
-                    await Task.Delay(10);
-                }
-            });
             Assert.Equal(before + 2, live.NotificationsLost);
         }
         finally
