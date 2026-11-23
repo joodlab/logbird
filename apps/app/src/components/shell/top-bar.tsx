@@ -16,6 +16,19 @@ import { absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange
 import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
+/**
+ * The project crumb's name: the list entry while the list is healthy, else the cached detail (the list failed its last
+ * refresh, or does not hold the project yet), else whatever the list last had.
+ */
+export function projectCrumbName(
+  listed: string | undefined,
+  listStatus: 'pending' | 'error' | 'success',
+  detail: string | undefined,
+): string | undefined {
+  if (listed !== undefined && listStatus === 'success') return listed;
+  return detail ?? listed;
+}
+
 export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalette: () => void; projectMissing?: boolean }) {
   // Range labels and the custom range editor follow the console zone; re-render when the reader switches it.
   const zone = useConsoleZone();
@@ -26,12 +39,13 @@ export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalett
   // stale link sends no request answering 404. A project the route found missing gets no crumb, sections or range.
   const projects = useQuery(projectsQuery());
   const listed = projects.data?.find((p) => p.id === params.projectId);
-  // While the list is unreadable or loading, the project the route loader already read names the crumb: read from the
-  // cache only, never fetched, so a stale id still sends nothing (#339).
-  // `enabled: false` subscribes to the cached detail (a rename updates it) without ever fetching it. Whichever of the
-  // list entry and the detail was read last names the project, so a failed list refresh never brings back an old name.
+  // While the list is unreadable, loading or lacks the project, the detail the route loader already read names the crumb
+  // (#339). `enabled: false` subscribes to that cached detail (a rename updates it) without ever fetching it, so a stale
+  // id still sends nothing. The list names the project while it is healthy; once its last refresh failed its entry is
+  // known to be stale, so the detail does. Never by arrival time: a slow response can arrive last and still be the
+  // older read (projects carry no version).
   const detail = useQuery({ ...projectQuery(params.projectId ?? ''), enabled: false });
-  const name = listed && (!detail.data || projects.dataUpdatedAt >= detail.dataUpdatedAt) ? listed.name : (detail.data?.name ?? listed?.name);
+  const name = projectCrumbName(listed?.name, projects.status, detail.data?.name);
   const projectId = projectMissing ? undefined : params.projectId;
   const dynamicCrumb = useCrumb();
   const { range, setRange, wholeHistory } = useRange();
