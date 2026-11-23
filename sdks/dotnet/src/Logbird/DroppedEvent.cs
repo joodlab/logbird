@@ -18,7 +18,10 @@ public enum DropReason
     /// <summary>The server answered a permanent HTTP error (a 4xx other than 429), for example an invalid key.</summary>
     HttpError = 2,
 
-    /// <summary>The serialized event is larger than 256 KB.</summary>
+    /// <summary>
+    /// The event as sent (after <see cref="LogbirdOptions.BeforeSend"/> and redaction) is larger than 256 KB, or its data is
+    /// more than 1 MiB of text before redaction (a memory guard, checked before anything copies it).
+    /// </summary>
     TooLarge = 3,
 
     /// <summary>
@@ -28,7 +31,10 @@ public enum DropReason
     /// </summary>
     Shutdown = 4,
 
-    /// <summary>The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw.</summary>
+    /// <summary>
+    /// The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw, or its metadata
+    /// or a change value nests JSON deeper than 1,000 levels.
+    /// </summary>
     Invalid = 5,
 
     // 6 is not used: it was an SDK-side identifier refusal, removed before the first release. The SDK sends identifiers

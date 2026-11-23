@@ -199,8 +199,8 @@ met the same rejection.
 | `Reason` | Why | `MayBeStored` |
 | --- | --- | --- |
 | `Rejected` | The server rejected this event (see `Code` and `Detail`) | `false`, except `true` for `stored_event_unreadable` or `unverified_after_parse_failure` when an earlier request carrying it had an unresolved outcome |
-| `TooLarge` | The serialized event is larger than 256 KB | always `false` |
-| `Invalid` | The event could not be prepared, for example `BeforeSend` threw | always `false` |
+| `TooLarge` | The event as sent (after `BeforeSend` and redaction) is larger than 256 KB, or its data is more than 1 MiB of text before redaction (a memory guard) | always `false` |
+| `Invalid` | The event could not be prepared, for example `BeforeSend` threw, or its metadata or a change value nests JSON deeper than 1,000 levels | always `false` |
 | `QueueFull` | Evicted from a full queue | `false` if it was never sent, or every answer said it was not stored; `true` if a request carrying it had an unresolved outcome |
 | `HttpError` | A 4xx other than 429, or a redirect | `false` if every answer said it was not stored; `true` if an earlier request had an unresolved outcome, or the final answer was a redirect |
 | `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if it was never sent, or every answer said it was not stored; `true` if it was in flight without a "not stored" answer, or an earlier request had an unresolved outcome |
@@ -265,7 +265,14 @@ What the client's own methods guarantee:
   callback, it returns `false` at once instead of waiting on itself.
 - **`DisposeAsync`** returns within `ShutdownTimeout` (10 seconds by default) plus at most 2 seconds to unwind a
   cancelled request, plus at most 5 seconds for pending callbacks. **`Dispose`** waits at most `ShutdownTimeout` plus 10
-  seconds. Events not sent by then are reported once each through `OnDrop` (`DropReason.Shutdown`).
+  seconds. Events not sent by then are dropped as `DropReason.Shutdown`. If the thread pool was too busy for `Dispose`
+  to finish in time, that accounting runs on the thread pool after `Dispose` returns, never on your thread; a process
+  that exits at once may not finish it.
+- **Size and depth** are decided on what is sent: the 256 KB limit applies after `BeforeSend` and redaction, so a large
+  secret that redaction replaces does not drop the event. Separately, data with more than 1 MiB of text before redaction
+  is refused before anything copies it (a memory guard). Metadata and change values may nest up to 1,000 levels (the
+  server's own limit for storing numbers exactly); the SDK walks them without recursion, so that depth is safe on any
+  thread.
 - **Memory** is bounded: at most `MaxQueueSize` queued events (each at most 256 KB), one in-flight batch (at most 5 MB),
   at most 4 abandoned requests, and at most `MaxQueueSize` (at least 1,000) pending callback notifications. Very large
   pre-parsed JSON (`JsonNode.Parse`) in metadata or change values is measured before it is refused, which builds its

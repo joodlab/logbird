@@ -47,12 +47,13 @@ internal sealed class BatchSender
     private readonly AuthenticationHeaderValue _authorization;
     private readonly int _maxRetries;
     private readonly TimeSpan _requestTimeout;
-    private readonly Action<QueuedEvent, DropReason, string?, string?> _drop;
+    // Prepares an event's drop report (null when nobody listens); it is posted inside the settlement, see State.TryReject.
+    private readonly Func<QueuedEvent, DropReason, string?, string?, Action?> _drop;
     private readonly Action<QueuedEvent, string> _warn;
     private readonly Action _progress;
 
-    // Settling and counting happen together (under the queue lock, see EventQueue.Settle), so a flush that sees an event
-    // settled also sees it counted; _drop then only notifies.
+    // Settling, counting and posting the drop report happen together (under the queue lock, see EventQueue.Settle), so a
+    // flush that sees an event settled also sees it counted and finds its report already posted.
     private readonly Action? _delivered;
     private readonly Action<DropReason>? _countDrop;
     private readonly Func<QueuedEvent, Action, bool> _settle;
@@ -68,7 +69,7 @@ internal sealed class BatchSender
         string ingestKey,
         int maxRetries,
         TimeSpan requestTimeout,
-        Action<QueuedEvent, DropReason, string?, string?> drop,
+        Func<QueuedEvent, DropReason, string?, string?, Action?> drop,
         Action<QueuedEvent, string> warn,
         Action progress,
         Action<Exception> report,
@@ -245,7 +246,12 @@ internal sealed class BatchSender
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
                 }
 
-                var status = response is null ? 0 : (int)response.StatusCode;
+                // A permanent answer (a redirect, or a 4xx other than 429) stays permanent when its body could not be read:
+                // the headers already decided it. Any other unread answer is handled as no answer (0) and retried, which is
+                // safe: the server keeps one copy per id.
+                var status = response is not null ? (int)response.StatusCode
+                    : answeredStatus is >= 300 and < 500 and not 429 ? answeredStatus
+                    : 0;
                 if (status is >= 200 and < 300)
                 {
                     // A success counts only for events the response acknowledges: rejected by index, or accepted by id. A
@@ -367,17 +373,12 @@ internal sealed class BatchSender
                     RecordAnswer(state, attempt, answeredStatus, dispatchNumbers!);
                 }
 
-                var retryable = response is null || status == 429 || status >= 500 || unacknowledged;
+                var retryable = status == 0 || status == 429 || status >= 500 || unacknowledged;
                 if (!retryable)
                 {
                     foreach (var index in state.PendingIndices())
                     {
-                        if (!state.TryReject(index, DropReason.HttpError))
-                        {
-                            continue;
-                        }
-
-                        _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture), null);
+                        state.TryReject(index, DropReason.HttpError, _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture), null));
                     }
 
                     _report(new LogbirdDeliveryException($"Logbird HTTP {status}; batch dropped.", (HttpStatusCode)status));
@@ -395,10 +396,9 @@ internal sealed class BatchSender
                         var count = 0;
                         foreach (var index in state.PendingIndices())
                         {
-                            if (state.TryReject(index, DropReason.Unacknowledged))
+                            if (state.TryReject(index, DropReason.Unacknowledged, _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.", null)))
                             {
                                 count++;
-                                _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.", null);
                             }
                         }
 
@@ -640,13 +640,12 @@ internal sealed class BatchSender
             var reason = Text(reasonElement);
             var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? SafeCode(Text(codeElement)) : "other";
             var index = attempt[(int)wire];
-            if (!state.TryReject(index, DropReason.Rejected))
+            if (!state.TryReject(index, DropReason.Rejected, _drop(state.Batch[index], DropReason.Rejected, reason, code)))
             {
                 continue;
             }
 
             codes.Add(code);
-            _drop(state.Batch[index], DropReason.Rejected, reason, code);
         }
 
         if (codes.Count > 0)
@@ -924,8 +923,15 @@ internal sealed class BatchSender
 
         public bool IsSettled(long index) => !Batch[index].IsPending;
 
-        /// <summary>Settles an event as rejected or dropped. False when it was already settled or abandoned by shutdown.</summary>
-        public bool TryReject(int index, DropReason reason) => settle(Batch[index], () => countDrop?.Invoke(reason));
+        /// <summary>
+        /// Settles an event as rejected or dropped, counting it and posting its prepared report in the same step, so no
+        /// flush can see it settled before its report is posted. False when it was already settled or abandoned by shutdown.
+        /// </summary>
+        public bool TryReject(int index, DropReason reason, Action? report) => settle(Batch[index], () =>
+        {
+            countDrop?.Invoke(reason);
+            report?.Invoke();
+        });
 
         public void Deliver(int index)
         {

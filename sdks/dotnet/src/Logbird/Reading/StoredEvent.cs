@@ -140,9 +140,17 @@ public sealed class EventDetail
     public long OperationSize { get; init; }
 }
 
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+// A stored payload may nest as deep as the SDK sends (1,000 levels in metadata) inside the detail envelope, beyond the
+// reader's default of 64.
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, MaxDepth = ReadDepth.Max)]
 [JsonSerializable(typeof(EventPage))]
 [JsonSerializable(typeof(EventDetail))]
 internal sealed partial class ReadJsonContext : JsonSerializerContext
 {
+}
+
+/// <summary>How deep a read answer may nest: a stored payload at the send limit plus the detail and page envelopes.</summary>
+internal static class ReadDepth
+{
+    public const int Max = Internal.JsonSize.MaxEventJson + 16;
 }

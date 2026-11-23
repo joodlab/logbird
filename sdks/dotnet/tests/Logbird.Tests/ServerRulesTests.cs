@@ -92,15 +92,15 @@ public class ServerRulesTests
     }
 
     [Fact]
-    public void The_client_depth_limit_is_far_below_the_servers_1000_levels()
-        => Assert.InRange(Logbird.Internal.JsonDepth.Max, 8, 64);
+    public void The_client_depth_limit_is_the_servers_1000_levels()
+        => Assert.Equal(1_000, Logbird.Internal.JsonSize.Max);
 
     [Fact]
-    public async Task The_depth_boundary_is_exact_for_metadata_and_change_values_and_the_deepest_body_stays_shallow()
+    public async Task The_depth_boundary_is_exact_for_metadata_and_change_values()
     {
         // Metadata is level 1, its "tree" member level 2, and Chain(n)'s leaf value level n + 3; a change value is itself
-        // level 1, so Chain(n)'s leaf is level n + 2. A node deeper than JsonDepth.Max is refused.
-        var max = Logbird.Internal.JsonDepth.Max;
+        // level 1, so Chain(n)'s leaf is level n + 2. A node deeper than JsonSize.Max is refused.
+        var max = Logbird.Internal.JsonSize.Max;
         var metadataOk = max - 3;
         var changeOk = max - 2;
         var big = 9_007_199_254_740_993L;
@@ -121,7 +121,7 @@ public class ServerRulesTests
             ["change.first_refused", "metadata.first_refused"],
             drops.Where(d => d.Reason == DropReason.Invalid).Select(d => d.Action).OrderBy(a => a, StringComparer.Ordinal).ToArray());
 
-        // The accepted boundary events on the wire: the envelope adds a few levels, far below the server's 1,000.
+        // The accepted boundary events on the wire: the envelope adds a few levels on top of the server's 1,000.
         var deepest = server.Requests.Max(r => Depth(r.Body));
         Assert.InRange(deepest, max, max + 8);
     }
@@ -139,7 +139,7 @@ public class ServerRulesTests
 
     private static int Depth(byte[] body)
     {
-        var reader = new Utf8JsonReader(body, new JsonReaderOptions { MaxDepth = 2_000 });
+        var reader = new Utf8JsonReader(body, new JsonReaderOptions { MaxDepth = 4_096 });
         var deepest = 0;
         while (reader.Read())
         {

@@ -900,7 +900,7 @@ public sealed class LogbirdReadClient : IDisposable
                 var shape = ResponseShape.For(typeof(T));
                 if (shape is not null)
                 {
-                    using var document = JsonDocument.Parse(body);
+                    using var document = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = ReadDepth.Max });
                     if (!shape(document.RootElement))
                     {
                         throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird returned a response without the members this SDK requires.");

@@ -160,19 +160,19 @@ public sealed class AuditEvent
     }
 
     /// <summary>Creates a copy whose lists, context and metadata can be changed without affecting this event.</summary>
-    /// <exception cref="InvalidOperationException">Metadata or a change value nests JSON deeper than 48 levels.</exception>
+    /// <exception cref="InvalidOperationException">Metadata or a change value nests JSON deeper than 1,000 levels.</exception>
     public AuditEvent Clone()
     {
-        if (JsonDepth.Exceeds(this))
+        if (JsonSize.Exceeds(this))
         {
-            throw new InvalidOperationException($"The event nests JSON deeper than {JsonDepth.Max} levels.");
+            throw new InvalidOperationException($"The event nests JSON deeper than {JsonSize.Max} levels.");
         }
 
         var copy = (AuditEvent)MemberwiseClone();
         copy._targets = _targets is null ? null : new List<AuditTarget>(_targets);
         copy._changes = _changes is null ? null : _changes.Select(change => change?.DeepClone()!).ToList();
         copy._context = _context?.Clone();
-        copy._metadata = (JsonObject?)_metadata?.DeepClone();
+        copy._metadata = (JsonObject?)JsonTree.Clone(_metadata);
         return copy;
     }
 }

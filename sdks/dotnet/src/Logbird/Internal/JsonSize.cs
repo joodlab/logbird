@@ -4,14 +4,21 @@ using System.Text.Json.Nodes;
 namespace Logbird.Internal;
 
 /// <summary>
-/// Measures caller-built event data iteratively, before anything walks it recursively (cloning, redaction, writing):
-/// a deeply nested tree is dropped as invalid instead of exhausting the host's stack, and an event whose text alone
-/// already exceeds the size limit is dropped before it is copied or serialized.
+/// Measures caller-built event data iteratively, before anything copies it: its depth against <see cref="Max"/>, and its
+/// text against the memory guard, so an event beyond either is dropped before it is copied.
 /// </summary>
-internal static class JsonDepth
+internal static class JsonSize
 {
-    /// <summary>Levels allowed inside metadata and change values; the event envelope adds a few on top.</summary>
-    public const int Max = 48;
+    /// <summary>
+    /// Levels allowed inside metadata and change values; the event envelope adds a few on top. This is the server's own limit
+    /// for storing numbers exactly (EXACT_NUMBER_MAX_DEPTH in its contracts). Every SDK step that walks the data (copying,
+    /// redaction, writing) is iterative; what still recurses per level is inside System.Text.Json (a node looks its options
+    /// up through its parents), which this limit keeps well inside even a 256 KB thread stack.
+    /// </summary>
+    public const int Max = 1_000;
+
+    /// <summary>Levels allowed in a whole event's JSON: <see cref="Max"/> plus the envelope.</summary>
+    public const int MaxEventJson = Max + 8;
 
     public enum Shape
     {
@@ -21,6 +28,12 @@ internal static class JsonDepth
     }
 
     public static bool Exceeds(AuditEvent e) => Measure(e, long.MaxValue) == Shape.TooDeep;
+
+    public static bool Exceeds(JsonNode? root, int max)
+    {
+        long size = 0;
+        return Walk(root, max, long.MaxValue, ref size) == Shape.TooDeep;
+    }
 
     /// <summary>
     /// Checks depth and a lower bound of the UTF-8 size (every UTF-16 code unit of text is at least one byte), stopping
@@ -96,12 +109,6 @@ internal static class JsonDepth
         }
 
         return Shape.Ok;
-    }
-
-    public static bool Exceeds(JsonNode? root, int max = Max)
-    {
-        long size = 0;
-        return Walk(root, max, long.MaxValue, ref size) == Shape.TooDeep;
     }
 
     private static Shape Walk(JsonNode? root, int max, long maxBytes, ref long size)

@@ -17,6 +17,9 @@ namespace Logbird.Tests;
 /// <summary>A captured ingest request.</summary>
 internal sealed class CapturedRequest(HttpRequestMessage request, byte[] body)
 {
+    // The client has no nesting limit of its own (the server has none for ordinary JSON), beyond the reader's default of 64.
+    private static readonly JsonDocumentOptions Deep = new() { MaxDepth = 65_536 };
+
     public HttpRequestMessage Request { get; } = request;
 
     public byte[] Body { get; } = body;
@@ -27,7 +30,7 @@ internal sealed class CapturedRequest(HttpRequestMessage request, byte[] body)
     {
         get
         {
-            using var document = JsonDocument.Parse(Body);
+            using var document = JsonDocument.Parse(Body, Deep);
             return document.RootElement.GetProperty("events").EnumerateArray().Select(e => e.Clone()).ToArray();
         }
     }
@@ -39,7 +42,7 @@ internal sealed class CapturedRequest(HttpRequestMessage request, byte[] body)
     {
         get
         {
-            using var document = JsonDocument.Parse(Body);
+            using var document = JsonDocument.Parse(Body, Deep);
             return document.RootElement.GetProperty("events").EnumerateArray().Select(e => e.GetRawText()).ToArray();
         }
     }

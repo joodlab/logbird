@@ -87,15 +87,15 @@ public sealed class Redactor
 
     /// <summary>Returns a redacted deep copy of an event JSON object. The input is not changed.</summary>
     /// <param name="eventJson">The event as JSON.</param>
-    /// <exception cref="ArgumentException">The JSON nests deeper than 64 levels.</exception>
+    /// <exception cref="ArgumentException">The JSON nests deeper than 1,008 levels (1,000 inside metadata, plus the event envelope).</exception>
     public JsonObject Redact(JsonObject eventJson)
     {
-        if (JsonDepth.Exceeds(Guard.NotNull(eventJson, nameof(eventJson)), 64))
+        if (JsonSize.Exceeds(Guard.NotNull(eventJson, nameof(eventJson)), JsonSize.MaxEventJson))
         {
-            throw new ArgumentException("The event JSON nests deeper than 64 levels.", nameof(eventJson));
+            throw new ArgumentException($"The event JSON nests deeper than {JsonSize.MaxEventJson} levels.", nameof(eventJson));
         }
 
-        var copy = (JsonObject)eventJson.DeepClone();
+        var copy = (JsonObject)JsonTree.Clone(eventJson)!;
         RedactInPlace(copy);
         return copy;
     }
@@ -166,59 +166,70 @@ public sealed class Redactor
         Target,
     }
 
-    private void Walk(JsonNode? node, Level level = Level.Nested)
+    /// <summary>
+    /// Replaces matching values without recursion: nodes still to visit wait on an explicit stack, so any depth the size
+    /// limit allows is redacted on any thread's stack. Each decision depends only on the node's own key and level, so the
+    /// visiting order does not change the result.
+    /// </summary>
+    private void Walk(JsonNode? root, Level rootLevel)
     {
-        switch (node)
+        var pending = new Stack<(JsonNode? Node, Level Level)>();
+        pending.Push((root, rootLevel));
+        while (pending.Count > 0)
         {
-            case JsonObject obj:
-                foreach (var key in obj.Select(pair => pair.Key).ToList())
-                {
-                    // Event identity and entity identifiers are structural: never replaced, whatever the pattern.
-                    // Only "id" is exempt on actor, impersonator, executor and tenant; "type" and "id" only on targets.
-                    if ((level == Level.Top && key is "id" or "action") || (level == Level.Entity && key == "id") || (level == Level.Target && key is "id" or "type"))
+            var (node, level) = pending.Pop();
+            switch (node)
+            {
+                case JsonObject obj:
+                    foreach (var key in obj.Select(pair => pair.Key).ToList())
                     {
-                        continue;
-                    }
-
-                    var child = level == Level.Top
-                        ? key switch
+                        // Event identity and entity identifiers are structural: never replaced, whatever the pattern.
+                        // Only "id" is exempt on actor, impersonator, executor and tenant; "type" and "id" only on targets.
+                        if ((level == Level.Top && key is "id" or "action") || (level == Level.Entity && key == "id") || (level == Level.Target && key is "id" or "type"))
                         {
-                            "actor" or "impersonator" or "executor" or "tenant" => Level.Entity,
-                            "targets" => Level.Targets,
-                            _ => Level.Nested,
+                            continue;
                         }
-                        : Level.Nested;
-                    if (child == Level.Nested && _keys.IsMatch(key))
-                    {
-                        obj[key] = _replacement;
-                    }
-                    else
-                    {
-                        Walk(obj[key], child);
-                    }
-                }
 
-                break;
-            case JsonArray array:
-                // JavaScript walks arrays by index keys ("0", "1", ...); match them the same way. Target entries are
-                // entities: never replaced as a whole, and their type and id are kept.
-                for (var i = 0; i < array.Count; i++)
-                {
-                    if (level == Level.Targets)
-                    {
-                        Walk(array[i], Level.Target);
+                        var child = level == Level.Top
+                            ? key switch
+                            {
+                                "actor" or "impersonator" or "executor" or "tenant" => Level.Entity,
+                                "targets" => Level.Targets,
+                                _ => Level.Nested,
+                            }
+                            : Level.Nested;
+                        if (child == Level.Nested && _keys.IsMatch(key))
+                        {
+                            obj[key] = _replacement;
+                        }
+                        else
+                        {
+                            pending.Push((obj[key], child));
+                        }
                     }
-                    else if (_keys.IsMatch(i.ToString(CultureInfo.InvariantCulture)))
-                    {
-                        array[i] = _replacement;
-                    }
-                    else
-                    {
-                        Walk(array[i]);
-                    }
-                }
 
-                break;
+                    break;
+                case JsonArray array:
+                    // JavaScript walks arrays by index keys ("0", "1", ...); match them the same way. Target entries are
+                    // entities: never replaced as a whole, and their type and id are kept.
+                    for (var i = 0; i < array.Count; i++)
+                    {
+                        if (level == Level.Targets)
+                        {
+                            pending.Push((array[i], Level.Target));
+                        }
+                        else if (_keys.IsMatch(i.ToString(CultureInfo.InvariantCulture)))
+                        {
+                            array[i] = _replacement;
+                        }
+                        else
+                        {
+                            pending.Push((array[i], Level.Nested));
+                        }
+                    }
+
+                    break;
+            }
         }
     }
 

@@ -206,11 +206,11 @@ internal static class Recording
         {
             // The client's own depth and size limits apply before anything is copied: an event they would reject is dropped
             // and reported here, under its id or a new one, without copying it or handing the caller's instance to any client.
-            var shape = JsonDepth.Measure(prepared, LogbirdClient.MaxEventBytes);
-            if (shape != JsonDepth.Shape.Ok)
+            var shape = JsonSize.Measure(prepared, LogbirdClient.MaxEventBytes);
+            if (shape != JsonSize.Shape.Ok)
             {
                 var dropped = SafeId(prepared) ?? LogbirdClient.NewEventId();
-                if (shape == JsonDepth.Shape.TooLarge)
+                if (shape == JsonSize.Shape.TooLarge)
                 {
                     client.Drop(DropReason.TooLarge, dropped, SafeAction(prepared), "the event exceeds 256 KB.");
                 }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -18,14 +19,43 @@ namespace Logbird.Internal;
 /// </summary>
 internal static class JsJson
 {
-    public static byte[] ToUtf8(JsonNode node)
+    public static byte[] ToUtf8(JsonNode node) => ToUtf8(node, long.MaxValue)!;
+
+    /// <summary>
+    /// The JSON as UTF-8, or null as soon as it is certain to exceed <paramref name="maxBytes"/>: every UTF-16 code unit
+    /// written is at least one UTF-8 byte, so writing stops once the text passes the limit and an oversized value is never
+    /// written whole.
+    /// </summary>
+    public static byte[]? ToUtf8(JsonNode node, long maxBytes)
     {
         var builder = new StringBuilder(512);
-        Write(builder, node);
+        var previous = _limit;
+        _limit = maxBytes;
+        try
+        {
+            Write(builder, node);
+        }
+        catch (TooLong)
+        {
+            return null;
+        }
+        finally
+        {
+            _limit = previous;
+        }
 
         // Lone surrogates were escaped above, so the text is valid UTF-16 and encodes to valid UTF-8.
         return Encoding.UTF8.GetBytes(builder.ToString());
     }
+
+    /// <summary>The current <see cref="ToUtf8(JsonNode, long)"/> call's limit on this thread; unlimited otherwise.</summary>
+    [ThreadStatic]
+    private static long _limit;
+
+    private static long Limit => _limit == 0 ? long.MaxValue : _limit;
+
+    /// <summary>Thrown by the writer once the output must pass the caller's limit; never escapes <see cref="ToUtf8(JsonNode, long)"/>.</summary>
+    private sealed class TooLong : Exception;
 
     public static string Quote(string value)
     {
@@ -34,7 +64,58 @@ internal static class JsJson
         return builder.ToString();
     }
 
-    private static void Write(StringBuilder builder, JsonNode? node)
+    /// <summary>
+    /// Writes a node without recursion: open objects and arrays wait on an explicit stack, so any depth the size limit
+    /// allows is written on any thread's stack.
+    /// </summary>
+    private static void Write(StringBuilder builder, JsonNode? root)
+    {
+        var open = new Stack<Frame>();
+        WriteOne(builder, root, open);
+        while (open.Count > 0)
+        {
+            var frame = open.Peek();
+            if (frame.Members is { } members)
+            {
+                if (!members.MoveNext())
+                {
+                    builder.Append('}');
+                    open.Pop();
+                    continue;
+                }
+
+                if (!frame.First)
+                {
+                    builder.Append(',');
+                }
+
+                frame.First = false;
+                AppendString(builder, members.Current.Key);
+                builder.Append(':');
+                WriteOne(builder, members.Current.Value, open);
+            }
+            else
+            {
+                var array = frame.Array!;
+                if (frame.Index >= array.Count)
+                {
+                    builder.Append(']');
+                    open.Pop();
+                    continue;
+                }
+
+                if (frame.Index > 0)
+                {
+                    builder.Append(',');
+                }
+
+                WriteOne(builder, array[frame.Index++], open);
+            }
+        }
+    }
+
+    /// <summary>Writes a leaf, or opens an object or array whose contents the caller's loop writes.</summary>
+    private static void WriteOne(StringBuilder builder, JsonNode? node, Stack<Frame> open)
     {
         switch (node)
         {
@@ -43,40 +124,33 @@ internal static class JsJson
                 break;
             case JsonObject obj:
                 builder.Append('{');
-                var first = true;
-                foreach (var pair in JavaScriptOrder(obj))
-                {
-                    if (!first)
-                    {
-                        builder.Append(',');
-                    }
-
-                    first = false;
-                    AppendString(builder, pair.Key);
-                    builder.Append(':');
-                    Write(builder, pair.Value);
-                }
-
-                builder.Append('}');
+                open.Push(new Frame { Members = JavaScriptOrder(obj).GetEnumerator() });
                 break;
             case JsonArray array:
                 builder.Append('[');
-                for (var i = 0; i < array.Count; i++)
-                {
-                    if (i > 0)
-                    {
-                        builder.Append(',');
-                    }
-
-                    Write(builder, array[i]);
-                }
-
-                builder.Append(']');
+                open.Push(new Frame { Array = array });
                 break;
             case JsonValue value:
                 WriteValue(builder, value);
                 break;
         }
+
+        if (builder.Length > Limit)
+        {
+            throw new TooLong();
+        }
+    }
+
+    /// <summary>An object or array being written: its remaining members, or its array and the next index.</summary>
+    private sealed class Frame
+    {
+        public IEnumerator<KeyValuePair<string, JsonNode?>>? Members;
+
+        public JsonArray? Array;
+
+        public int Index;
+
+        public bool First = true;
     }
 
     /// <summary>
@@ -365,6 +439,11 @@ internal static class JsJson
 
     private static void AppendString(StringBuilder builder, string value)
     {
+        if (builder.Length + value.Length > Limit)
+        {
+            throw new TooLong();
+        }
+
         builder.Append('"');
         for (var i = 0; i < value.Length; i++)
         {
