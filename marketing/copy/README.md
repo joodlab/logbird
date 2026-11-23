@@ -101,7 +101,7 @@ elements rather than loose text. Change a claim in the copy and on the page in t
 - **Field names.** Every field name is classified in `apps/web/src/lib/copy-claims.ts`. An unknown or misspelt name
   fails the test.
 - **Data modules.** Where a page renders a part from a data module (the comparison tables, sources, "what we couldn't
-  verify", and the /compare cards come from `apps/web/src/lib/comparisons.ts`), the copy file doesn't restate it. It
+  verify", and the /compare cards come from `apps/web/src/content/comparisons.ts`), the copy file doesn't restate it. It
   has a `data` field pointing at the module, its only source.
 - **Inventory.** Every file in this folder is either in the map above or listed in the test with the reason it has no
   page: this guide, the two legal briefs (the legal pages are their own owner-approved wording source;

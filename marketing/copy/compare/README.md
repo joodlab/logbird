@@ -23,7 +23,7 @@ path: /compare
 - **eyebrow:** Which tool fits
 - **heading:** Each tool answers a different question.
 - **data:** one card per comparison (name, one-line description, "Fits when: …" and a "Logbird and … compared" link) is
-  rendered from `apps/web/src/lib/comparisons.ts` (`card`, `fit`), its only source.
+  rendered from `apps/web/src/content/comparisons.ts` (`card`, `fit`), its only source.
 - **body:** **Logbird.** Fits when: your events must stay on your own servers, you want to send any event shape, and
   your team needs an operator console to answer "what happened?".
 - **visual:** none
