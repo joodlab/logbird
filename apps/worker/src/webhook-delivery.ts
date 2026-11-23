@@ -22,6 +22,8 @@ const SETTLE_LEASE_MARGIN_MS = 1000;
 // Leave room for two full settlement transactions, including acquisition, and a retry backoff.
 const SETTLE_RESERVE_MS = 2 * (SETTLE_MAX_WAIT_MS + SETTLE_TX_TIMEOUT_MS) + SETTLE_MAX_BACKOFF_MS + SETTLE_LEASE_MARGIN_MS;
 const MAX_ENDPOINT_ATTEMPTS_PER_SECOND = 50;
+// Selection rounds per pass: each round skips the rows and projects that the previous rounds could not claim.
+const CLAIM_ROUNDS = 4;
 type Claim = { delivery: WebhookDelivery; expired: boolean; leaseDeadline: number };
 type ScopeColumns = Parameters<typeof storedWebhookScope>[0];
 type DeliveryResult = Omit<AttemptResult, 'error'> & { error?: AttemptResult['error'] | 'scope_mismatch' };
@@ -96,43 +98,61 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
   const capacity = options.concurrency - liveLeases;
   if (capacity <= 0) return [];
   // Choose without locks, then claim each project's rows in its own transaction: a slow or failing claim for one
-  // project cannot roll back another project's claims.
-  const due = await prisma.$queryRaw<DueRow[]>(Prisma.sql`
-    SELECT d.id, d."endpointId", e."projectId", e."updatedAt" AS "scopeUpdatedAt", jsonb_build_object(
-      'scopeTenantId', e."scopeTenantId", 'scopeTargetType', e."scopeTargetType",
-      'scopeTargetId', e."scopeTargetId", 'scopeMask', e."scopeMask"
-    ) AS scope FROM "WebhookEndpoint" e
-    CROSS JOIN LATERAL (
-      SELECT id FROM "WebhookDelivery"
-      WHERE "endpointId" = e.id AND status = 'pending'
-        AND "nextAttemptAt" <= ${now} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${now})
-      ORDER BY "nextAttemptAt", id
-      LIMIT greatest(0, least(
-        ${options.perEndpoint} - (
-          SELECT count(*) FROM "WebhookDelivery"
-          WHERE "endpointId" = e.id AND status = 'pending' AND "leaseUntil" > ${now}
-        ),
-        ${MAX_ENDPOINT_ATTEMPTS_PER_SECOND} - (
-          SELECT count(*) FROM "WebhookAttempt" a JOIN "WebhookDelivery" recent ON recent.id = a."deliveryId"
-          WHERE recent."endpointId" = e.id AND a."startedAt" > ${new Date(+now - 1000)}
-        )
-      ))
-    ) candidate
-    JOIN "WebhookDelivery" d ON d.id = candidate.id
-    WHERE e.enabled AND NOT e."scopeReviewRequired" AND NOT e."filterReviewRequired"
-      ${projects ? Prisma.sql`AND e."projectId" = ANY(${projects}::text[])` : Prisma.empty}
-    ORDER BY d."nextAttemptAt", d.id LIMIT ${capacity}`);
-  const byProject = new Map<string, string[]>();
-  for (const row of due) {
-    if (storedWebhookScope(row.scope) === undefined) held.set(row.endpointId, { scope: row.scope, updatedAt: row.scopeUpdatedAt });
-    else byProject.set(row.projectId, [...(byProject.get(row.projectId) ?? []), row.id]);
-  }
+  // project cannot roll back another project's claims. Candidates alternate between projects (each project's oldest
+  // due row first, then each project's second, and so on), so one project's backlog cannot fill every slot.
+  const choose = (limit: number, skippedIds: string[], failedProjects: string[]) =>
+    prisma.$queryRaw<DueRow[]>(Prisma.sql`
+    SELECT id, "endpointId", "projectId", "scopeUpdatedAt", scope FROM (
+      SELECT d.id, d."endpointId", e."projectId", e."updatedAt" AS "scopeUpdatedAt", d."nextAttemptAt", jsonb_build_object(
+        'scopeTenantId', e."scopeTenantId", 'scopeTargetType', e."scopeTargetType",
+        'scopeTargetId', e."scopeTargetId", 'scopeMask', e."scopeMask"
+      ) AS scope,
+      row_number() OVER (PARTITION BY e."projectId" ORDER BY d."nextAttemptAt", d.id) AS turn
+      FROM "WebhookEndpoint" e
+      CROSS JOIN LATERAL (
+        SELECT id FROM "WebhookDelivery"
+        WHERE "endpointId" = e.id AND status = 'pending'
+          AND "nextAttemptAt" <= ${now} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${now})
+          AND NOT (id = ANY(${skippedIds}::text[]))
+        ORDER BY "nextAttemptAt", id
+        LIMIT greatest(0, least(
+          ${options.perEndpoint} - (
+            SELECT count(*) FROM "WebhookDelivery"
+            WHERE "endpointId" = e.id AND status = 'pending' AND "leaseUntil" > ${now}
+          ),
+          ${MAX_ENDPOINT_ATTEMPTS_PER_SECOND} - (
+            SELECT count(*) FROM "WebhookAttempt" a JOIN "WebhookDelivery" recent ON recent.id = a."deliveryId"
+            WHERE recent."endpointId" = e.id AND a."startedAt" > ${new Date(+now - 1000)}
+          )
+        ))
+      ) candidate
+      JOIN "WebhookDelivery" d ON d.id = candidate.id
+      WHERE e.enabled AND NOT e."scopeReviewRequired" AND NOT e."filterReviewRequired"
+        AND NOT (e."projectId" = ANY(${failedProjects}::text[]))
+        ${projects ? Prisma.sql`AND e."projectId" = ANY(${projects}::text[])` : Prisma.empty}
+    ) chosen
+    ORDER BY turn, "nextAttemptAt", id LIMIT ${limit}`);
   const claims: Claim[] = [];
-  for (const [project, ids] of byProject) {
-    try {
-      claims.push(...(await claimRows(ids, now, leaseDeadline)));
-    } catch {
-      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, deliveries: ids.length }));
+  const skippedIds: string[] = [];
+  const failedProjects: string[] = [];
+  // A chosen row can be locked elsewhere or change before its claim, and a project's claim can fail. Refill the
+  // unused capacity past those rows and projects within this pass, a bounded number of times.
+  for (let round = 0; round < CLAIM_ROUNDS && claims.length < capacity; round++) {
+    const due = await choose(capacity - claims.length, skippedIds, failedProjects);
+    if (!due.length) break;
+    const byProject = new Map<string, string[]>();
+    for (const row of due) {
+      skippedIds.push(row.id);
+      if (storedWebhookScope(row.scope) === undefined) held.set(row.endpointId, { scope: row.scope, updatedAt: row.scopeUpdatedAt });
+      else byProject.set(row.projectId, [...(byProject.get(row.projectId) ?? []), row.id]);
+    }
+    for (const [project, ids] of byProject) {
+      try {
+        claims.push(...(await claimRows(ids, now, leaseDeadline)));
+      } catch {
+        failedProjects.push(project);
+        console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, deliveries: ids.length }));
+      }
     }
   }
   // Mark endpoints after the claim transactions commit. Endpoint edits lock the endpoint before its deliveries.

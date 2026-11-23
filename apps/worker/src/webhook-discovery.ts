@@ -7,6 +7,7 @@ import {
   QueryError,
   read,
   toEvent,
+  WEBHOOK_FILTER,
 } from '@logbird/clickhouse';
 import { storedWebhookScope, type WebhookScope } from '@logbird/contracts';
 import { type Prisma, prisma, type WebhookEndpoint, withIngestReceiptGate } from '@logbird/database';
@@ -26,7 +27,7 @@ const PERMANENT_FILTER_ERRORS = new Set(['427', 'CANNOT_COMPILE_REGEXP']);
 
 /** The clock only checks that relative times stay in range: `now` in a webhook filter is each event's arrival time. */
 function scopePredicate(endpoint: EndpointFilter, scope: WebhookScope | null, clock: number) {
-  const filter = compileMaskedQuery(endpoint.filterQuery, scope?.mask, clock, { relativeTo: 'received_at' });
+  const filter = compileMaskedQuery(endpoint.filterQuery, scope?.mask, clock, WEBHOOK_FILTER);
   const tenant = scope?.tenantId ? 'AND tenant_id = {tenant:String}' : '';
   const target = scope?.target
     ? 'AND arrayExists((type, id) -> type = {targetType:String} AND id = {targetId:String}, target_types, target_ids)'

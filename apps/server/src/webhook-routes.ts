@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { compileMaskedQuery } from '@logbird/clickhouse';
+import { compileMaskedQuery, WEBHOOK_FILTER } from '@logbird/clickhouse';
 import {
   apiErrorSchema,
   createWebhookResponseSchema,
@@ -195,7 +195,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     validator('json', createWebhookSchema, webhookBody),
     async (c) => {
       const input = c.req.valid('json');
-      compileMaskedQuery(input.filterQuery ?? '', input.scope?.mask);
+      compileMaskedQuery(input.filterQuery ?? '', input.scope?.mask, undefined, WEBHOOK_FILTER);
       const url = await allowedUrl(c, input.url);
       const secret = generateWebhookSecret();
       const endpoint = await lockedProject(c, async (tx) => {
@@ -245,7 +245,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       const before = await findEndpoint(c, tx);
       if (input.scope !== undefined || input.filterQuery !== undefined) {
         const scope = input.scope === undefined ? storedWebhookScope(before) : input.scope;
-        compileMaskedQuery(input.filterQuery ?? before.filterQuery, scope?.mask);
+        compileMaskedQuery(input.filterQuery ?? before.filterQuery, scope?.mask, undefined, WEBHOOK_FILTER);
       }
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
       const scopeCorrected = input.scope !== undefined && (before.scopeReviewRequired || storedWebhookScope(before) === undefined);

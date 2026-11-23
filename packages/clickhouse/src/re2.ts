@@ -1,8 +1,9 @@
 /**
- * ClickHouse runs `match` with RE2, whose syntax differs from JavaScript's. JavaScript accepts constructs such as `\cK`,
- * `A` or `[]` that RE2 rejects or reads differently, so a pattern that only JavaScript accepts would fail every query.
- * This scanner accepts a conservative subset that RE2 parses. It may refuse a few rare RE2 constructs (named groups,
- * inline flags, `\Q…\E`), never the reverse. Run it after JavaScript's own parse, which catches unbalanced syntax.
+ * ClickHouse runs `match` with RE2 (https://github.com/google/re2/wiki/Syntax). Webhook filters are checked with RE2's
+ * grammar instead of JavaScript's, so a pattern only JavaScript accepts (`\cK`, `A`, lookaround, backreferences)
+ * is refused at save time, and RE2 syntax JavaScript lacks (`\Q…\E`, `(?i)`, `(?P<name>…)`, `[[:alpha:]]`) is accepted.
+ * The scanner refuses only constructs RE2 is known to reject. Anything it cannot decide, such as an unknown Unicode
+ * class name or a program that is too large, is left to ClickHouse, whose RE2 error holds the endpoint for review.
  */
 const POSIX_CLASSES = new Set([
   'alnum',
@@ -20,51 +21,41 @@ const POSIX_CLASSES = new Set([
   'word',
   'xdigit',
 ]);
-const UNICODE_CATEGORIES = new Set(
-  'Any C Cc Cf Co Cs L Ll Lm Lo Lt Lu M Mc Me Mn N Nd Nl No P Pc Pd Pe Pf Pi Po Ps S Sc Sk Sm So Z Zl Zp Zs'.split(' '),
-);
-// RE2 knows Unicode scripts by long name only. JavaScript also accepts the four-letter ISO 15924 aliases.
-const FOUR_LETTER_SCRIPTS = new Set(['Cham', 'Kawi', 'Lisu', 'Modi', 'Newa', 'Thai', 'Toto']);
+// Letters RE2 accepts after a backslash: escapes, classes, assertions, \C (any byte) and \Q…\E (literal text).
+const ESCAPE_LETTERS = new Set('afntrvxpPdDsSwWbBAzCQE');
 const MAX_REPEAT = 1000;
+type Step = 'none' | 'atom' | 'repeat' | 'lazy';
 
-function unicodeClass(name: string) {
-  if (UNICODE_CATEGORIES.has(name)) return true;
-  if (!/^[A-Z][A-Za-z_]+$/.test(name) || (name.length === 4 && !FOUR_LETTER_SCRIPTS.has(name))) return false;
-  try {
-    return new RegExp(`\\p{Script=${name}}`, 'u').unicode;
-  } catch {
-    return false;
-  }
-}
-
-/** Returns the index after a valid escape at `i`, or a reason RE2 would reject it. */
-function escapeEnd(p: string, i: number, inClass: boolean): number | string {
+/** Returns the index after the escape at `i`, or the reason RE2 rejects it. */
+function escapeEnd(p: string, i: number): number | string {
   const next = p[i + 1];
   if (next === undefined) return 'A regex cannot end with a backslash';
-  // RE2 accepts an escaped ASCII punctuation character as itself, but no other unknown escape.
-  if (/[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/.test(next)) return i + 2;
-  if ('afnrtvdDsSwW'.includes(next) || (!inClass && 'bBAz'.includes(next))) return i + 2;
   const rest = p.slice(i);
+  if (/[0-7]/.test(next)) {
+    // \0 and octal codes are accepted; a lone \1–\7 is a backreference, which RE2 does not support.
+    const octal = /^\\(?:0[0-7]{0,2}|[1-7][0-7]{1,2})/.exec(rest);
+    return octal ? i + octal[0].length : 'RE2 does not support backreferences';
+  }
+  if (/[89]/.test(next)) return 'RE2 does not support backreferences';
   if (next === 'x') {
-    const hex = /^\\x(?:[0-9A-Fa-f]{2}|\{([0-9A-Fa-f]{1,6})\})/.exec(rest);
-    if (hex && (hex[1] === undefined || Number.parseInt(hex[1], 16) <= 0x10_ff_ff)) return i + hex[0].length;
-    return 'Write a hex escape as \\xHH or \\x{H…}';
+    const hex = /^\\x(?:[0-9A-Fa-f]{2}|\{[0-9A-Fa-f]+\})/.exec(rest);
+    return hex ? i + hex[0].length : 'Write a hex escape as \\xHH or \\x{H…}';
   }
-  if (next === '0') return i + (/^\\0[0-7]{0,2}/.exec(rest)?.[0].length ?? 2);
   if (next === 'p' || next === 'P') {
-    const property = /^\\[pP](?:\{([A-Za-z_]+)\}|([CLMNPSZ]))/.exec(rest);
-    if (property && unicodeClass(property[1] ?? property[2] ?? '')) return i + property[0].length;
-    return 'Use a Unicode general category or script name RE2 supports, such as \\p{L} or \\p{Greek}';
+    // RE2 decides whether the class name exists.
+    const property = /^\\[pP](?:\{\^?[A-Za-z_]+\}|[A-Za-z])/.exec(rest);
+    return property ? i + property[0].length : 'Write a Unicode class as \\pL or \\p{Name}';
   }
-  return `RE2 does not support the escape \\${next}`;
+  if (/[A-Za-z]/.test(next) && !ESCAPE_LETTERS.has(next)) return `RE2 does not support the escape \\${next}`;
+  return i + 2;
 }
 
-/** Returns the index after the character class starting at `i`, or a reason RE2 would reject it. */
+/** Returns the index after the character class starting at `i`, or the reason RE2 rejects it. */
 function characterClass(p: string, i: number): number | string {
   let j = i + 1;
   if (p[j] === '^') j++;
-  // JavaScript reads [] and [^] as empty classes; RE2 reads the ] as a literal and keeps going.
-  if (p[j] === ']') return 'Write ] inside a character class as \\]';
+  // RE2 reads a ] right after [ or [^ as a literal.
+  if (p[j] === ']') j++;
   let single = false;
   while (j < p.length && p[j] !== ']') {
     if (p[j] === '[' && p[j + 1] === ':') {
@@ -83,7 +74,7 @@ function characterClass(p: string, i: number): number | string {
       j++;
     }
     if (p[j] === '\\') {
-      const next = escapeEnd(p, j, true);
+      const next = escapeEnd(p, j);
       if (typeof next === 'string') return next;
       single = !rangeEnd && !/[dDsSwWpP]/.test(p[j + 1] ?? '');
       j = next;
@@ -95,57 +86,102 @@ function characterClass(p: string, i: number): number | string {
   return j < p.length ? j + 1 : 'Close the character class with ]';
 }
 
-/** Returns why RE2 would reject the pattern, or null when the subset scanner accepts it. */
+/** Returns why RE2 rejects the pattern, or null when RE2 accepts it or only RE2 can decide. */
 export function re2Problem(p: string): string | null {
   // RE2 limits the product of nested counted repetitions to 1000.
   const groups: number[] = [1];
-  let last = 0;
+  let weight = 0;
+  let step: Step = 'none';
+  const repeat = (c: string): string | null => {
+    if (step === 'none') return 'A repetition needs something to repeat';
+    if (step === 'lazy' || (step === 'repeat' && c !== '?')) return 'RE2 does not support repeating a repetition';
+    step = step === 'repeat' ? 'lazy' : 'repeat';
+    return null;
+  };
   for (let i = 0; i < p.length; ) {
     const c = p[i];
-    if (c === '\\') {
-      const next = escapeEnd(p, i, false);
+    if (c === '\\' && p[i + 1] === 'Q') {
+      // \Q…\E is literal text, up to \E or the end of the pattern.
+      const end = p.indexOf('\\E', i + 2);
+      i = end < 0 ? p.length : end + 2;
+      weight = 1;
+      step = 'atom';
+    } else if (c === '\\') {
+      const next = escapeEnd(p, i);
       if (typeof next === 'string') return next;
       i = next;
-      last = 1;
+      weight = 1;
+      step = 'atom';
     } else if (c === '[') {
       const next = characterClass(p, i);
       if (typeof next === 'string') return next;
       i = next;
-      last = 1;
+      weight = 1;
+      step = 'atom';
     } else if (c === '(') {
-      if (p[i + 1] === '?' && p[i + 2] !== ':') return 'RE2 supports only plain (…) and non-capturing (?:…) groups here';
-      i += p[i + 1] === '?' ? 3 : 1;
+      if (p[i + 1] === '?') {
+        const kind = p[i + 2] ?? '';
+        // Lookaround, atomic groups, comments, branch reset and recursion are Perl and PCRE features RE2 rejects.
+        if ('=!>#|&+R'.includes(kind) || /\d/.test(kind) || (kind === '<' && /[=!]/.test(p[i + 3] ?? '')))
+          return 'RE2 does not support lookaround, backreferences or this group type';
+      }
       groups.push(1);
-      last = 0;
+      weight = 0;
+      step = 'none';
+      i++;
+      // A group's own prefix such as ?: or ?i: is not something to repeat.
+      if (p[i] === '?') {
+        const prefix = /^\?(?:P?<[A-Za-z_][A-Za-z0-9_]*>|[A-Za-z-]*[:)])/.exec(p.slice(i));
+        if (prefix) {
+          i += prefix[0].length;
+          if (prefix[0].endsWith(')')) {
+            // A flag group such as (?i) applies in place and closes immediately.
+            groups.pop();
+            step = 'atom';
+            weight = 1;
+          }
+        }
+      }
       continue;
     } else if (c === ')') {
       if (groups.length < 2) return 'Unbalanced parenthesis';
-      last = groups.pop() ?? 1;
+      weight = groups.pop() ?? 1;
+      step = 'atom';
       i++;
     } else if (c === '|') {
-      last = 0;
+      weight = 0;
+      step = 'none';
       i++;
       continue;
     } else if (c === '{') {
-      const repeat = /^\{(\d+)(?:(,)(\d*))?\}/.exec(p.slice(i));
-      if (repeat && last) {
-        const min = Number(repeat[1]);
-        const max = repeat[3] ? Number(repeat[3]) : repeat[2] ? -1 : min;
+      const counted = /^\{(\d+)(?:(,)(\d*))?\}/.exec(p.slice(i));
+      if (counted) {
+        const problem = repeat('{');
+        if (problem) return problem;
+        const min = Number(counted[1]);
+        const max = counted[3] ? Number(counted[3]) : counted[2] ? -1 : min;
         if (min > MAX_REPEAT || max > MAX_REPEAT) return `RE2 repetitions are limited to ${MAX_REPEAT}`;
+        if (max >= 0 && max < min) return 'A repetition range must not run backwards';
         const factor = max < 0 ? min : max;
-        last *= factor > 0 ? factor : 1;
-        if (last > MAX_REPEAT) return `RE2 limits nested repetitions to ${MAX_REPEAT} in total`;
-        i += repeat[0].length;
+        weight *= factor > 0 ? factor : 1;
+        if (weight > MAX_REPEAT) return `RE2 limits nested repetitions to ${MAX_REPEAT} in total`;
+        i += counted[0].length;
       } else {
-        last = 1;
+        // RE2 reads a { that does not start a counted repetition as a literal.
+        weight = 1;
+        step = 'atom';
         i++;
       }
+    } else if (c === '*' || c === '+' || c === '?') {
+      const problem = repeat(c);
+      if (problem) return problem;
+      i++;
     } else {
-      // *, + and ? keep the preceding atom's weight; any other character is a literal or an anchor.
-      if (c !== '*' && c !== '+' && c !== '?') last = 1;
+      weight = 1;
+      step = 'atom';
       i++;
     }
-    groups[groups.length - 1] = Math.max(groups.at(-1) ?? 1, last);
+    groups[groups.length - 1] = Math.max(groups.at(-1) ?? 1, weight);
   }
   return groups.length === 1 ? null : 'Unbalanced parenthesis';
 }

@@ -132,44 +132,32 @@ it('rewinds a valid cursor past a missed event with the documented SQL and deliv
     expect(before.cursorReviewRequired).toBe(false);
     expect(+before.cursorReceivedAt).toBeGreaterThan(+missedAt);
     const common = { project_id: projectId, evidence_ref: 'qa-incident-rewind', audit_namespace: namespace };
-    const variables = {
+    // eligible_start is no longer part of the procedure. It is still bound so that earlier versions of the statement,
+    // which trusted an operator-supplied start up to 60 s before creation, run here unchanged.
+    const variables = (endpoint: typeof before, checkpoint: Date, overrides: Record<string, string> = {}) => ({
       ...common,
-      endpoint_id: hook.id,
-      expected_cursor: before.cursorReceivedAt.toISOString(),
-      expected_event_id: before.cursorEventId ?? '',
-      eligible_start: createdAt.toISOString(),
-      checkpoint: missedAt.toISOString(),
-    };
-    // Compare and swap: a stale cursor value changes nothing.
-    await expect(rewind({ ...variables, expected_cursor: new Date(+before.cursorReceivedAt - 1).toISOString() })).rejects.toThrow(
-      'Rewind returned 0 rows',
-    );
-    // Never before the endpoint's eligible start, and never with an invented one.
-    await expect(rewind({ ...variables, checkpoint: new Date(+createdAt - 1).toISOString() })).rejects.toThrow('Rewind returned 0 rows');
-    await expect(
-      rewind({ ...variables, eligible_start: new Date(+floor - 1).toISOString(), checkpoint: new Date(+floor - 1).toISOString() }),
-    ).rejects.toThrow('Rewind returned 0 rows');
-    await expect(
-      rewind({
-        ...variables,
-        endpoint_id: rolling.id,
-        expected_cursor: rollingBefore.cursorReceivedAt.toISOString(),
-        eligible_start: new Date(+rollingCreatedAt - 60_001).toISOString(),
-        checkpoint: rollingStart.toISOString(),
-      }),
-    ).rejects.toThrow('Rewind returned 0 rows');
-    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id }, select: fields })).toEqual(before);
-
-    const [audit] = await rewind(variables);
-    // The rolling endpoint may go back to its first stored cursor, before its creation time.
-    await rewind({
-      ...common,
-      endpoint_id: rolling.id,
-      expected_cursor: rollingBefore.cursorReceivedAt.toISOString(),
-      expected_event_id: rollingBefore.cursorEventId ?? '',
-      eligible_start: rollingStart.toISOString(),
-      checkpoint: rollingStart.toISOString(),
+      endpoint_id: endpoint.id,
+      expected_cursor: endpoint.cursorReceivedAt.toISOString(),
+      expected_event_id: endpoint.cursorEventId ?? '',
+      eligible_start: checkpoint.toISOString(),
+      checkpoint: checkpoint.toISOString(),
+      ...overrides,
     });
+    const refused = (values: Record<string, string>) => expect(rewind(values)).rejects.toThrow('Rewind returned 0 rows');
+    // Compare and swap: a stale cursor value changes nothing.
+    await refused(variables(before, missedAt, { expected_cursor: new Date(+before.cursorReceivedAt - 1).toISOString() }));
+    // Never before the endpoint's start, max(createdAt, starting bound): not 1 ms before a new-API endpoint's creation,
+    // not below its floor, and not to a rolling endpoint's earlier first cursor, for which no verified record is stored.
+    await refused(variables(before, new Date(+createdAt - 1)));
+    await refused(variables(before, new Date(+floor - 1)));
+    await refused(variables(rollingBefore, rollingStart));
+    await refused(variables(rollingBefore, new Date(+rollingCreatedAt - 1)));
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id }, select: fields })).toEqual(before);
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: rolling.id }, select: fields })).toEqual(rollingBefore);
+
+    const [audit] = await rewind(variables(before, missedAt));
+    // The rolling endpoint rewinds as far as its creation time.
+    await rewind(variables(rollingBefore, rollingCreatedAt));
     const after = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id }, select: fields });
     const rollingAfter = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: rolling.id }, select: fields });
     expect(after).toMatchObject({
@@ -178,7 +166,12 @@ it('rewinds a valid cursor past a missed event with the documented SQL and deliv
       lastScannedAt: before.lastScannedAt,
       cursorReviewRequired: false,
     });
-    expect(rollingAfter).toMatchObject({ cursorReceivedAt: rollingStart, cursorEventId: null, lastScannedAt: null, cursorReviewRequired: false });
+    expect(rollingAfter).toMatchObject({
+      cursorReceivedAt: rollingCreatedAt,
+      cursorEventId: null,
+      lastScannedAt: rollingBefore.lastScannedAt,
+      cursorReviewRequired: false,
+    });
     const outbox = await prisma.auditOutbox.findUniqueOrThrow({ where: { id: audit?.id ?? '' } });
     expect(outbox).toMatchObject({ namespace, stream: `ws:${projectId}` });
     expect(outbox.payload).toMatchObject({
@@ -195,8 +188,9 @@ it('rewinds a valid cursor past a missed event with the documented SQL and deliv
     });
     const settled = await prisma.webhookEndpoint.findMany({ where: { id: { in: [hook.id, rolling.id] } }, select: fields });
     console.log(JSON.stringify({ b1: { before: [before, rollingBefore], after: [after, rollingAfter], settled, deliveries, received } }, null, 2));
-    // Each endpoint delivered every event once; the rewind added only the missed ones.
-    expect(received.sort()).toEqual(['qa-after', 'qa-after', 'qa-before', 'qa-before', 'qa-early-missed', 'qa-missed', 'qa-missed']);
+    // Each endpoint delivered every event once; the rewind added only the missed one. The rolling endpoint's event from
+    // before its creation is not delivered again: that is the documented limit of the procedure.
+    expect(received.sort()).toEqual(['qa-after', 'qa-after', 'qa-before', 'qa-before', 'qa-missed', 'qa-missed']);
     expect(deliveries.every(({ status, attemptNumber }) => status === 'succeeded' && attemptNumber === 1)).toBe(true);
     expect(settled.every(({ cursorReviewRequired }) => !cursorReviewRequired)).toBe(true);
   } finally {
