@@ -392,7 +392,10 @@ function ProjectExplorer({
       </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
-  const [retryingLookup, setRetryingLookup] = useState(false);
+  // The word whose lookup this button is retrying: a retry still running for an earlier word (another observer, such as
+  // the command palette, can keep it alive) never locks the current word's button.
+  const [retryingWord, setRetryingWord] = useState<string | null>(null);
+  const retryingLookup = retryingWord !== null && retryingWord === word;
   // The lookup settled without a full answer: it failed, or some entity kinds could not be searched.
   const lookupIncomplete = Boolean(word) && idSettled && !idMatch && (idLookup.isError || Boolean(idLookup.data?.partial));
   const outside = otherDatesLine({
@@ -474,8 +477,9 @@ function ProjectExplorer({
           aria-disabled={retryingLookup}
           onClick={() => {
             if (retryingLookup) return;
-            setRetryingLookup(true);
-            void idLookup.refetch().finally(() => setRetryingLookup(false));
+            const retried = word;
+            setRetryingWord(retried);
+            void idLookup.refetch().finally(() => setRetryingWord((current) => (current === retried ? null : current)));
           }}
           size="sm"
           variant="outline"
