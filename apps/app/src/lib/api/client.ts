@@ -3,6 +3,8 @@ import {
   acceptInviteLinkResponseSchema,
   type createApiKeySchema,
   createProjectResponseSchema,
+  createWebhookResponseSchema,
+  type createWebhookSchema,
   type EntityKind,
   type EntityProfileQuery,
   type EntitySort,
@@ -21,6 +23,7 @@ import {
   invitationPreviewSchema,
   inviteLinkPreviewSchema,
   inviteLinkSchema,
+  listWebhooksResponseSchema,
   meResponseSchema,
   overviewResponseSchema,
   type Project,
@@ -30,12 +33,15 @@ import {
   type QueryLang,
   retentionStatusSchema,
   type rollApiKeySchema,
+  rotateWebhookSecretResponseSchema,
   routes,
   type SavedView,
   sampleDataResponseSchema,
   savedViewSchema,
   searchResponseSchema,
   suggestResponseSchema,
+  type updateWebhookSchema,
+  webhookEndpointSchema,
   workspaceNameSuggestionSchema,
   workspaceSetupSchema,
 } from '@logbird/contracts';
@@ -198,6 +204,19 @@ export const api = {
     accept: (token: string) => request(acceptInviteLinkResponseSchema, 'POST', pathFor(routes.inviteLinks.accept.path, { token })),
   },
 
+  /** Webhook endpoints (owners and admins only, reads included: a stored URL can itself be a credential). */
+  webhooks: {
+    list: (projectId: string, signal?: AbortSignal) =>
+      request(listWebhooksResponseSchema, 'GET', pathFor(routes.webhooks.list.path, { projectId }), { signal }).then((r) => r.data),
+    /** The secret is returned once, here and by rotateSecret: never store the response. */
+    create: (projectId: string, body: z.input<typeof createWebhookSchema>) =>
+      request(createWebhookResponseSchema, 'POST', pathFor(routes.webhooks.create.path, { projectId }), { body }),
+    update: (projectId: string, id: string, body: z.input<typeof updateWebhookSchema>) =>
+      request(webhookEndpointSchema, 'PATCH', pathFor(routes.webhooks.update.path, { projectId, id }), { body }),
+    remove: (projectId: string, id: string) => request(ok, 'DELETE', pathFor(routes.webhooks.remove.path, { projectId, id })),
+    rotateSecret: (projectId: string, id: string, overlapSeconds: number) =>
+      request(rotateWebhookSecretResponseSchema, 'POST', pathFor(routes.webhooks.rotateSecret.path, { projectId, id }), { body: { overlapSeconds } }),
+  },
   keys: {
     list: (projectId: string, signal?: AbortSignal) =>
       request(listOf(issuedKeySchema), 'GET', pathFor(routes.keys.list.path, { projectId }), { signal }) as Promise<ApiKey[]>,

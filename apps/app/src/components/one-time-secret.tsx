@@ -43,7 +43,16 @@ export function useSecretCloseGuard(showingSecret: boolean) {
 }
 
 /** Inline "Close without copying?" step shown in place of the footer when a stray close was caught. */
-export function CloseWithoutCopying({ onKeep, onClose }: { onKeep: () => void; onClose: () => void }) {
+export function CloseWithoutCopying({
+  onKeep,
+  onClose,
+  consequence = 'You won’t see this key again — you would have to roll or revoke it and create another.',
+}: {
+  onKeep: () => void;
+  onClose: () => void;
+  /** What losing the secret means for this kind of secret. */
+  consequence?: string;
+}) {
   const titleId = useId();
   // Part of the open dialog (its focus scope), announced as an alert — not a nested dialog of its own.
   return (
@@ -56,8 +65,7 @@ export function CloseWithoutCopying({ onKeep, onClose }: { onKeep: () => void; o
       <p className="flex items-start gap-2 text-sm" id={titleId}>
         <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
         <span>
-          <span className="font-medium">Close without copying?</span> You won’t see this key again — you would have to roll or revoke it and create
-          another.
+          <span className="font-medium">Close without copying?</span> {consequence}
         </span>
       </p>
       <div className="flex flex-wrap justify-end gap-2">

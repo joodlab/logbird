@@ -47,6 +47,7 @@ import { Route as AuthedWorkspacePProjectIdSettingsDangerRouteImport } from './r
 import { Route as AuthedWorkspacePProjectIdSettingsKeysRouteImport } from './routes/_authed/_workspace/p.$projectId.settings.keys'
 import { Route as AuthedWorkspacePProjectIdSettingsMembersRouteImport } from './routes/_authed/_workspace/p.$projectId.settings.members'
 import { Route as AuthedWorkspacePProjectIdSettingsRetentionRouteImport } from './routes/_authed/_workspace/p.$projectId.settings.retention'
+import { Route as AuthedWorkspacePProjectIdSettingsWebhooksRouteImport } from './routes/_authed/_workspace/p.$projectId.settings.webhooks'
 import { Route as AuthedWorkspacePProjectIdSupportAgentIdRouteImport } from './routes/_authed/_workspace/p.$projectId.support.$agentId'
 import { Route as AuthedWorkspacePProjectIdTenantsIndexRouteImport } from './routes/_authed/_workspace/p.$projectId.tenants.index'
 import { Route as AuthedWorkspacePProjectIdTenantsEntityIdRouteImport } from './routes/_authed/_workspace/p.$projectId.tenants.$entityId'
@@ -266,6 +267,12 @@ const AuthedWorkspacePProjectIdSettingsRetentionRoute =
     path: '/retention',
     getParentRoute: () => AuthedWorkspacePProjectIdSettingsRoute,
   } as any)
+const AuthedWorkspacePProjectIdSettingsWebhooksRoute =
+  AuthedWorkspacePProjectIdSettingsWebhooksRouteImport.update({
+    id: '/webhooks',
+    path: '/webhooks',
+    getParentRoute: () => AuthedWorkspacePProjectIdSettingsRoute,
+  } as any)
 const AuthedWorkspacePProjectIdSupportAgentIdRoute =
   AuthedWorkspacePProjectIdSupportAgentIdRouteImport.update({
     id: '/support/$agentId',
@@ -331,6 +338,7 @@ export interface FileRoutesByFullPath {
   '/p/$projectId/settings/keys': typeof AuthedWorkspacePProjectIdSettingsKeysRoute
   '/p/$projectId/settings/members': typeof AuthedWorkspacePProjectIdSettingsMembersRoute
   '/p/$projectId/settings/retention': typeof AuthedWorkspacePProjectIdSettingsRetentionRoute
+  '/p/$projectId/settings/webhooks': typeof AuthedWorkspacePProjectIdSettingsWebhooksRoute
   '/p/$projectId/support/$agentId': typeof AuthedWorkspacePProjectIdSupportAgentIdRoute
   '/p/$projectId/tenants/$entityId': typeof AuthedWorkspacePProjectIdTenantsEntityIdRoute
   '/p/$projectId/workers/$entityId': typeof AuthedWorkspacePProjectIdWorkersEntityIdRoute
@@ -369,6 +377,7 @@ export interface FileRoutesByTo {
   '/p/$projectId/settings/keys': typeof AuthedWorkspacePProjectIdSettingsKeysRoute
   '/p/$projectId/settings/members': typeof AuthedWorkspacePProjectIdSettingsMembersRoute
   '/p/$projectId/settings/retention': typeof AuthedWorkspacePProjectIdSettingsRetentionRoute
+  '/p/$projectId/settings/webhooks': typeof AuthedWorkspacePProjectIdSettingsWebhooksRoute
   '/p/$projectId/support/$agentId': typeof AuthedWorkspacePProjectIdSupportAgentIdRoute
   '/p/$projectId/tenants/$entityId': typeof AuthedWorkspacePProjectIdTenantsEntityIdRoute
   '/p/$projectId/workers/$entityId': typeof AuthedWorkspacePProjectIdWorkersEntityIdRoute
@@ -415,6 +424,7 @@ export interface FileRoutesById {
   '/_authed/_workspace/p/$projectId/settings/keys': typeof AuthedWorkspacePProjectIdSettingsKeysRoute
   '/_authed/_workspace/p/$projectId/settings/members': typeof AuthedWorkspacePProjectIdSettingsMembersRoute
   '/_authed/_workspace/p/$projectId/settings/retention': typeof AuthedWorkspacePProjectIdSettingsRetentionRoute
+  '/_authed/_workspace/p/$projectId/settings/webhooks': typeof AuthedWorkspacePProjectIdSettingsWebhooksRoute
   '/_authed/_workspace/p/$projectId/support/$agentId': typeof AuthedWorkspacePProjectIdSupportAgentIdRoute
   '/_authed/_workspace/p/$projectId/tenants/$entityId': typeof AuthedWorkspacePProjectIdTenantsEntityIdRoute
   '/_authed/_workspace/p/$projectId/workers/$entityId': typeof AuthedWorkspacePProjectIdWorkersEntityIdRoute
@@ -460,6 +470,7 @@ export interface FileRouteTypes {
     | '/p/$projectId/settings/keys'
     | '/p/$projectId/settings/members'
     | '/p/$projectId/settings/retention'
+    | '/p/$projectId/settings/webhooks'
     | '/p/$projectId/support/$agentId'
     | '/p/$projectId/tenants/$entityId'
     | '/p/$projectId/workers/$entityId'
@@ -498,6 +509,7 @@ export interface FileRouteTypes {
     | '/p/$projectId/settings/keys'
     | '/p/$projectId/settings/members'
     | '/p/$projectId/settings/retention'
+    | '/p/$projectId/settings/webhooks'
     | '/p/$projectId/support/$agentId'
     | '/p/$projectId/tenants/$entityId'
     | '/p/$projectId/workers/$entityId'
@@ -543,6 +555,7 @@ export interface FileRouteTypes {
     | '/_authed/_workspace/p/$projectId/settings/keys'
     | '/_authed/_workspace/p/$projectId/settings/members'
     | '/_authed/_workspace/p/$projectId/settings/retention'
+    | '/_authed/_workspace/p/$projectId/settings/webhooks'
     | '/_authed/_workspace/p/$projectId/support/$agentId'
     | '/_authed/_workspace/p/$projectId/tenants/$entityId'
     | '/_authed/_workspace/p/$projectId/workers/$entityId'
@@ -829,6 +842,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedWorkspacePProjectIdSettingsRetentionRouteImport
       parentRoute: typeof AuthedWorkspacePProjectIdSettingsRoute
     }
+    '/_authed/_workspace/p/$projectId/settings/webhooks': {
+      id: '/_authed/_workspace/p/$projectId/settings/webhooks'
+      path: '/webhooks'
+      fullPath: '/p/$projectId/settings/webhooks'
+      preLoaderRoute: typeof AuthedWorkspacePProjectIdSettingsWebhooksRouteImport
+      parentRoute: typeof AuthedWorkspacePProjectIdSettingsRoute
+    }
     '/_authed/_workspace/p/$projectId/support/$agentId': {
       id: '/_authed/_workspace/p/$projectId/support/$agentId'
       path: '/support/$agentId'
@@ -892,6 +912,7 @@ interface AuthedWorkspacePProjectIdSettingsRouteChildren {
   AuthedWorkspacePProjectIdSettingsKeysRoute: typeof AuthedWorkspacePProjectIdSettingsKeysRoute
   AuthedWorkspacePProjectIdSettingsMembersRoute: typeof AuthedWorkspacePProjectIdSettingsMembersRoute
   AuthedWorkspacePProjectIdSettingsRetentionRoute: typeof AuthedWorkspacePProjectIdSettingsRetentionRoute
+  AuthedWorkspacePProjectIdSettingsWebhooksRoute: typeof AuthedWorkspacePProjectIdSettingsWebhooksRoute
   AuthedWorkspacePProjectIdSettingsIndexRoute: typeof AuthedWorkspacePProjectIdSettingsIndexRoute
 }
 
@@ -907,6 +928,8 @@ const AuthedWorkspacePProjectIdSettingsRouteChildren: AuthedWorkspacePProjectIdS
       AuthedWorkspacePProjectIdSettingsMembersRoute,
     AuthedWorkspacePProjectIdSettingsRetentionRoute:
       AuthedWorkspacePProjectIdSettingsRetentionRoute,
+    AuthedWorkspacePProjectIdSettingsWebhooksRoute:
+      AuthedWorkspacePProjectIdSettingsWebhooksRoute,
     AuthedWorkspacePProjectIdSettingsIndexRoute:
       AuthedWorkspacePProjectIdSettingsIndexRoute,
   }
