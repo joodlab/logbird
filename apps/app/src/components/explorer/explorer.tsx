@@ -17,6 +17,7 @@ import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histogramQuery } from '@/lib/api/queries';
+import { allTimeCheckNeedsAsking, otherDatesLine } from '@/lib/empty-state';
 import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
@@ -343,8 +344,10 @@ function ProjectExplorer({
   const idSettled = !word || idLookup.isSuccess || idLookup.isError;
   // Whether anything older matches: only then is the range the reason, and only then is widening offered. In SQL mode
   // the check runs the reader's predicate over every partition, so it runs only when asked (#239).
-  const [checkSqlAllTime, setCheckSqlAllTime] = useState<string | null>(null);
-  const sqlCheckAsked = lang !== 'sql' || checkSqlAllTime === `${effectiveQ}\u0000${range}`;
+  // The search the reader asked to check (remembered per expression and range, so a new search asks again).
+  const [checkAskedFor, setCheckAskedFor] = useState<string | null>(null);
+  const checkKey = JSON.stringify([effectiveQ, range]);
+  const sqlCheckAsked = !allTimeCheckNeedsAsking(lang, effectiveQ) || checkAskedFor === checkKey;
   const widerWanted = showsEmpty && !complete && idSettled && !idMatch;
   const wider = useQuery({
     ...histogramQuery(projectId, ALL_RANGE, effectiveQ, lang),
@@ -363,20 +366,12 @@ function ProjectExplorer({
         Retry the check
       </Button>
     ) : widerWanted && !sqlCheckAsked ? (
-      <Button data-testid="check-all-time" onClick={() => setCheckSqlAllTime(`${effectiveQ}\u0000${range}`)} size="sm" variant="outline">
+      <Button data-testid="check-all-time" onClick={() => setCheckAskedFor(checkKey)} size="sm" variant="outline">
         Check other dates
       </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
-  const outside = wider.isError
-    ? 'Could not check other dates.'
-    : checking
-      ? 'Checking other dates…'
-      : olderMatches
-        ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
-        : widerWanted && !sqlCheckAsked
-          ? 'Other dates are checked only when you ask, since that runs the expression over all stored events.'
-          : 'Remove a filter or change the query.';
+  const outside = otherDatesLine({ failed: wider.isError, checking, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
 
   // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
   // so a search opened straight from a link still gets its offer once they arrive).
