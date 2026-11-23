@@ -10,8 +10,8 @@ export const allTimeCheckNeedsAsking = (lang: QueryLang, q: string) => lang === 
 
 /**
  * The empty state's line about other dates, after "Nothing in this range matches …". No advice while the check is
- * still running: it may yet say that the range is the reason (#239). Nor while an id lookup is: it may yet say the text
- * is an id (in a range that already holds every event, where there are no other dates to check, the line stays empty).
+ * still running: it may yet say that the range is the reason (#239). While an id lookup runs, the line names it (in any
+ * range), since the text may yet be an id; an incomplete lookup says so instead of advising a change (#334).
  */
 export function otherDatesLine(check: {
   failed: boolean;

@@ -337,7 +337,9 @@ function ProjectExplorer({
   // Every kind with exactly this id (an actor and a tenant can share one): offer each, once the lookup has settled, so a
   // cached hit being refreshed gives no advice the refresh may take back. One per kind (the literal id first within a
   // kind), so case variants of one kind never crowd out another kind. The id is the literal as written, spaces kept.
-  const idMatches = settledIdMatches(word, idSettled, idLookup.data?.entities);
+  // Only from a lookup whose last read succeeded: a failed refresh keeps its older answer, which may no longer hold
+  // (#334). A successful partial answer can still confirm a hit.
+  const idMatches = settledIdMatches(word, idSettled && idLookup.status === 'success', idLookup.data?.entities);
   const idMatch = idMatches[0];
   // "a tenant id", or "the id of a tenant and an actor".
   const idPhrase =
@@ -390,6 +392,7 @@ function ProjectExplorer({
       </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
+  const [retryingLookup, setRetryingLookup] = useState(false);
   // The lookup settled without a full answer: it failed, or some entity kinds could not be searched.
   const lookupIncomplete = Boolean(word) && idSettled && !idMatch && (idLookup.isError || Boolean(idLookup.data?.partial));
   const outside = otherDatesLine({
@@ -465,9 +468,19 @@ function ProjectExplorer({
         </Button>
       ) : null}
       {widen}
-      {lookupIncomplete ? (
-        <Button onClick={() => idLookup.refetch()} size="sm" variant="outline">
-          Try the lookup again
+      {/* Stays mounted while its own retry runs, so keyboard focus is not dropped; the line above says what it found. */}
+      {lookupIncomplete || retryingLookup ? (
+        <Button
+          aria-disabled={retryingLookup}
+          onClick={() => {
+            if (retryingLookup) return;
+            setRetryingLookup(true);
+            void idLookup.refetch().finally(() => setRetryingLookup(false));
+          }}
+          size="sm"
+          variant="outline"
+        >
+          {retryingLookup ? 'Looking up…' : 'Try the lookup again'}
         </Button>
       ) : null}
     </EmptyState>

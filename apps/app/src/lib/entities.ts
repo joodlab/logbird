@@ -1,4 +1,4 @@
-import { type EntityKind, formatRecordTerm, parseQueryExpression } from '@logbird/contracts';
+import { type EntityKind, entityListQuerySchema, formatRecordTerm, parseQueryExpression } from '@logbird/contracts';
 import { Bot, Building2, Cog, type LucideIcon, Package, User } from 'lucide-react';
 import { formatTerm } from './query-language';
 
@@ -142,9 +142,10 @@ export type EntityMatchRank = 0 | 1 | 2 | 3 | 4 | 5;
 export const isExactId = (rank: EntityMatchRank) => rank <= 1;
 
 /**
- * The id that free text could be, or '' when it cannot be one: a single bare word (no field, operator, group or
- * wildcard), or one quoted term (`"acme:27"`, `"acme\"27"`), read as the server's parser reads it: the literal text,
- * escapes resolved.
+ * The id that free text could be, or '' when it cannot be one: a single bare word (no field, operator, group or bare
+ * trailing wildcard), or one quoted term (`"acme:27"`, `"acme\"27"`, `"x*"` — quoted, a star is literal), read as the
+ * server's parser reads it: the literal text, escapes resolved. Never longer than the entity directory accepts as a
+ * search (its `q` limit), since a longer one could only fail to be looked up.
  */
 export function idFromFreeText(text: string): string {
   const t = text.trim();
@@ -153,8 +154,12 @@ export function idFromFreeText(text: string): string {
   if (!t || t.startsWith('/') || /^(AND|OR|NOT)$/.test(t)) return '';
   // A bare word is read by the server's own parser too, so whatever it takes as one literal word is a possible id —
   // `o'brien` included (#334). A wildcard (`foo*`) is a prefix search, never an exact id.
-  return singleTerm(t, { wildcard: false });
+  return withinLookupLimit(singleTerm(t, { wildcard: false }));
 }
+
+/** The longest text the entity directory searches (`entityListQuerySchema.q`): a longer id cannot be looked up. */
+const LOOKUP_MAX = entityListQuerySchema.shape.q.unwrap().maxLength ?? 1024;
+const withinLookupLimit = (id: string) => (id.length <= LOOKUP_MAX ? id : '');
 
 /**
  * Where Jump to goes for pasted text. An entity whose id is exactly the text wins: a tenant `op_customer` is that
@@ -163,7 +168,7 @@ export function idFromFreeText(text: string): string {
  */
 /** The literal text of `t` when the server reads it as exactly one quoted term, else ''. */
 function quotedTerm(t: string): string {
-  return singleTerm(t, { wildcard: true });
+  return withinLookupLimit(singleTerm(t, { wildcard: true }));
 }
 
 /**

@@ -161,3 +161,11 @@ describe('idFromFreeText, as the server parses a bare word (#334)', () => {
     for (const t of ['actor:x', '-x', 'foo*', '/x/', 'a b', 'AND', '(x)', '']) expect(idFromFreeText(t)).toBe('');
   });
 });
+
+describe('idFromFreeText within the directory search limit (#334)', () => {
+  it('never offers a lookup the entity directory would refuse as too long', () => {
+    expect(idFromFreeText(`${'x'.repeat(1023)}'`)).toBe(`${'x'.repeat(1023)}'`);
+    expect(idFromFreeText(`${'x'.repeat(1024)}'`)).toBe('');
+    expect(idFromFreeText(`"${'y'.repeat(1025)}"`)).toBe('');
+  });
+});
