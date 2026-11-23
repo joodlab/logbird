@@ -152,6 +152,23 @@ describe('webhooks after delivery (#179)', () => {
     expect(states.find((s) => s.key === 'cursor')?.todo).toMatch(/nothing to do here/);
     expect(endpointStates(endpoint({}))).toEqual([]);
   });
+  it('explains a filter that cannot run as its own hold: what is wrong, that nothing is sent, and that editing clears it', () => {
+    const held = endpoint({ filterWarning: 'webhook_filter_invalid' });
+    const [state] = endpointStates(held);
+    expect(state).toMatchObject({ key: 'filter', kind: 'hold', badge: 'Held: fix filter' });
+    expect(state?.what).toMatch(/cannot be run/);
+    expect(state?.what).toMatch(/RE2/);
+    expect(state?.lost).toMatch(/Nothing is sent while it is held/);
+    expect(state?.todo).toMatch(/^Edit the filter/);
+    expect(state?.todo).not.toMatch(/confirm/i);
+    expect(sendBlockedCopy({ enabled: true, filterWarning: 'webhook_filter_invalid', scopeWarning: undefined }, 'send a test ping')).toBe(
+      'To send a test ping, fix its filter.',
+    );
+    // The API answers both filter holds with one code; the endpoint says which, and so does the copy.
+    const refused = new ApiRequestError(409, 'webhook_filter_review_required', 'held');
+    expect(webhookErrorCopy(refused, held)).toBe('This endpoint is held because its filter cannot run. Edit the filter first.');
+    expect(webhookErrorCopy(refused, endpoint({ filterWarning: 'webhook_filter_review_required' }))).toMatch(/until its filter is confirmed/);
+  });
   it('renders an attempt error this console does not know as a generic error with its code', () => {
     expect(attemptErrorCopy('timeout')).toMatch(/did not answer in time/);
     expect(attemptErrorCopy('brand_new_error')).toBe('The attempt failed (brand_new_error).');

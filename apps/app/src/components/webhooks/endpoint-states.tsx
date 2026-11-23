@@ -44,15 +44,22 @@ export function EndpointStates({
                   {filterError} Edit the filter to fix it.
                 </p>
               ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button disabled={confirming} onClick={onConfirmFilter} size="sm">
-                  {confirming ? <Loader2Icon className="animate-spin" /> : null}
-                  Confirm this filter
-                </Button>
-                <Button onClick={onEdit} size="sm" variant="outline">
+              {endpoint.filterWarning === 'webhook_filter_invalid' ? (
+                // A filter that cannot run cannot be confirmed as it is: only an edit lifts this hold.
+                <Button className="self-start" onClick={onEdit} size="sm">
                   Edit the filter
                 </Button>
-              </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <Button disabled={confirming} onClick={onConfirmFilter} size="sm">
+                    {confirming ? <Loader2Icon className="animate-spin" /> : null}
+                    Confirm this filter
+                  </Button>
+                  <Button onClick={onEdit} size="sm" variant="outline">
+                    Edit the filter
+                  </Button>
+                </div>
+              )}
             </>
           ) : state.key === 'scope' ? (
             <Button className="self-start" onClick={onEdit} size="sm" variant="outline">

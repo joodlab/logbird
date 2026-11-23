@@ -70,7 +70,7 @@ export const webhookRetry = {
 };
 
 /** What went wrong, in words, for errors the endpoint forms can meet. */
-export function webhookErrorCopy(error: unknown): string {
+export function webhookErrorCopy(error: unknown, endpoint?: Pick<WebhookEndpoint, 'filterWarning'>): string {
   if (!(error instanceof ApiRequestError)) return 'Something went wrong. Try again.';
   switch (error.code) {
     case 'webhook_url_not_allowed':
@@ -89,8 +89,11 @@ export function webhookErrorCopy(error: unknown): string {
       return 'This endpoint is off. Turn it on first.';
     case 'webhook_invalid_scope':
       return 'This endpoint is held until its scope is corrected. Edit the scope first.';
+    // One code for both filter holds: the endpoint says which.
     case 'webhook_filter_review_required':
-      return 'This endpoint is held until its filter is confirmed. Confirm or edit the filter first.';
+      return endpoint?.filterWarning === 'webhook_filter_invalid'
+        ? 'This endpoint is held because its filter cannot run. Edit the filter first.'
+        : 'This endpoint is held until its filter is confirmed. Confirm or edit the filter first.';
     case 'webhook_delivery_pending':
       return 'This delivery is already waiting to be sent.';
     default:
@@ -199,7 +202,7 @@ export function sendBlockedCopy(
 ): string | null {
   const steps = [
     ...(e.enabled ? [] : ['turn this endpoint on']),
-    ...(e.filterWarning ? ['confirm its filter'] : []),
+    ...(e.filterWarning === 'webhook_filter_invalid' ? ['fix its filter'] : e.filterWarning ? ['confirm its filter'] : []),
     ...(e.scopeWarning ? ['fix its scope'] : []),
   ];
   if (!steps.length) return null;
@@ -226,7 +229,17 @@ export function endpointStates(e: WebhookEndpoint): EndpointState[] {
   const blocked = Boolean(e.filterWarning || e.scopeWarning);
   const kept =
     'Nothing is sent while it is held, and nothing is skipped: it keeps its place. When it resumes, it checks the events that arrived meanwhile against its filter and scope, and sends the ones that match and are still stored.';
-  if (e.filterWarning) {
+  if (e.filterWarning === 'webhook_filter_invalid') {
+    states.push({
+      key: 'filter',
+      kind: 'hold',
+      badge: 'Held: fix filter',
+      title: 'Paused because its filter cannot run',
+      what: 'The stored filter cannot be run, for example because it has a /regular expression/ the search engine does not support (patterns follow RE2: no lookarounds or backreferences). Rather than skip events or send ones it cannot check, Logbird paused the endpoint.',
+      lost: kept,
+      todo: 'Edit the filter so it can run. Saving a working filter resumes delivery where it paused.',
+    });
+  } else if (e.filterWarning) {
     states.push({
       key: 'filter',
       kind: 'hold',

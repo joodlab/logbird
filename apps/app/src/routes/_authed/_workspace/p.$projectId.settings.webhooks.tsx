@@ -249,7 +249,7 @@ function EndpointCard({
       toast.success('Test ping queued', { description: 'It is sent within seconds and shows up in the delivery log.' });
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'deliveries'] });
     },
-    onError: (error) => toast.error('Could not send a test ping', { description: webhookErrorCopy(error) }),
+    onError: (error) => toast.error('Could not send a test ping', { description: webhookErrorCopy(error, endpoint) }),
   });
   const [logOpen, setLogOpen] = useState(false);
   const off = !endpoint.enabled;
@@ -516,7 +516,7 @@ function EndpointDialog({
             error={errors.filter}
             id={`${ids}-filter`}
             label="Filter"
-            limits="The query language you use in the explorer, up to 4,096 characters. It is checked when you save, and it cannot use a field the endpoint’s scope hides."
+            limits="The query language you use in the explorer, up to 4,096 characters. It is checked when you save, and it cannot use a field the endpoint’s scope hides. In a filter, now (occurredAt:>now-1h) means the time each event arrived."
             multiline
             onChange={(filter) => set({ filter })}
             optional

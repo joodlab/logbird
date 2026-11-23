@@ -106,7 +106,7 @@ export function DeliveryLog({
           ) : (
             <ul aria-busy={log.isFetchingNextPage || undefined} className="flex flex-col gap-2" data-testid="webhook-deliveries">
               {rows.map((d) => (
-                <DeliveryRow blocked={Boolean(sendBlocked)} delivery={d} endpointId={endpoint.id} key={d.id} projectId={projectId} />
+                <DeliveryRow blocked={Boolean(sendBlocked)} delivery={d} endpoint={endpoint} key={d.id} projectId={projectId} />
               ))}
             </ul>
           )}
@@ -126,7 +126,18 @@ function statusTone(status: string): 'brand' | 'neutral' | 'warning' {
   return status === 'failed' ? 'warning' : status === 'succeeded' ? 'brand' : 'neutral';
 }
 
-function DeliveryRow({ projectId, endpointId, delivery, blocked }: { projectId: string; endpointId: string; delivery: Delivery; blocked: boolean }) {
+function DeliveryRow({
+  projectId,
+  endpoint,
+  delivery,
+  blocked,
+}: {
+  projectId: string;
+  endpoint: Pick<WebhookEndpoint, 'id' | 'filterWarning'>;
+  delivery: Delivery;
+  blocked: boolean;
+}) {
+  const endpointId = endpoint.id;
   const ids = useId();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(delivery.status === 'failed');
@@ -137,7 +148,7 @@ function DeliveryRow({ projectId, endpointId, delivery, blocked }: { projectId: 
       toast.success('Queued again', { description: 'It is sent within seconds; this log updates when it is.' });
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpointId, 'deliveries'] });
     },
-    onError: (error) => toast.error('Could not send it again', { description: webhookErrorCopy(error) }),
+    onError: (error) => toast.error('Could not send it again', { description: webhookErrorCopy(error, endpoint) }),
   });
   const last = delivery.attempts.at(-1);
   const why = last ? attemptWhy(last, delivery.status === 'pending') : null;
