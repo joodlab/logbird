@@ -640,7 +640,8 @@ internal sealed class StandIn : IDisposable
             id = Guid.NewGuid().ToString();
         }
 
-        if (Encoding.UTF8.GetByteCount(raw.Length > 0 ? raw : e!.ToJsonString()) > MaxEventBytes)
+        // The server measures the event re-serialized compactly (JSON.stringify of the parsed event), not the wire bytes.
+        if (Encoding.UTF8.GetByteCount(Compact(raw.Length > 0 ? raw : e!.ToJsonString())) > MaxEventBytes)
         {
             return ("invalid_event", "invalid_event: event exceeds 256 KB");
         }
@@ -694,6 +695,40 @@ internal sealed class StandIn : IDisposable
         => c is (char)9 or (char)10 or (char)11 or (char)12 or (char)13 or (char)32 or (char)0xA0 or (char)0x1680
             or (char)0x2028 or (char)0x2029 or (char)0x202F or (char)0x205F or (char)0x3000 or (char)0xFEFF
             || (c >= (char)0x2000 && c <= (char)0x200A);
+
+    /// <summary>JSON text without the whitespace outside strings: the compact form JSON.stringify gives the parsed event.</summary>
+    private static string Compact(string json)
+    {
+        var builder = new StringBuilder(json.Length);
+        var inString = false;
+        for (var i = 0; i < json.Length; i++)
+        {
+            var c = json[i];
+            if (inString)
+            {
+                builder.Append(c);
+                if (c == (char)92 && i + 1 < json.Length)
+                {
+                    builder.Append(json[++i]);
+                }
+                else if (c == (char)34)
+                {
+                    inString = false;
+                }
+            }
+            else if (c == (char)34)
+            {
+                inString = true;
+                builder.Append(c);
+            }
+            else if (c is not ((char)32 or (char)9 or (char)10 or (char)13))
+            {
+                builder.Append(c);
+            }
+        }
+
+        return builder.ToString();
+    }
 
     /// <summary>Each event's raw JSON text, in the order the server reads the body (never decoded, so always available).</summary>
     private static string[] RawEvents(byte[] body)
@@ -850,8 +885,8 @@ internal sealed class StandIn : IDisposable
         exchange.Status = status;
         exchange.RetryAfter = retryAfter;
         exchange.Response = body;
-        _samples.Add(exchange);
         await WriteRawAsync(stream, status, Encoding.UTF8.GetBytes(body.ToJsonString()), retryAfter, close).ConfigureAwait(false);
+        _samples.Add(exchange);
 
         // Only an answer that reached the client acknowledges anything.
         Acknowledge(status, body);
@@ -1026,17 +1061,37 @@ internal sealed class Samples : IDisposable
             return;
         }
 
-        var line = new JsonObject
+        string text;
+        try
         {
-            ["kind"] = "exchange",
-            ["fault"] = exchange.Fault.ToString(),
-            ["status"] = exchange.Status,
-            ["retryAfter"] = exchange.RetryAfter,
-            ["request"] = exchange.Request is null ? null : TryParse(exchange.Request),
-            ["response"] = exchange.Response?.DeepClone(),
-            ["dispositions"] = new JsonArray(exchange.Dispositions.Select(d => (JsonNode?)JsonValue.Create(d)).ToArray()),
-        };
-        var text = line.ToJsonString();
+            text = new JsonObject
+            {
+                ["kind"] = "exchange",
+                ["fault"] = exchange.Fault.ToString(),
+                ["status"] = exchange.Status,
+                ["retryAfter"] = exchange.RetryAfter,
+                ["request"] = exchange.Request is null ? null : TryParse(exchange.Request),
+                ["response"] = exchange.Response?.DeepClone(),
+                ["dispositions"] = new JsonArray(exchange.Dispositions.Select(d => (JsonNode?)JsonValue.Create(d)).ToArray()),
+            }.ToJsonString();
+        }
+        catch (InvalidOperationException)
+        {
+            // The request holds text .NET cannot re-encode (a lone surrogate). Sampling never stops an answer: record the
+            // exchange without its request, flagged, so the check verifies only its status and code.
+            text = new JsonObject
+            {
+                ["kind"] = "exchange",
+                ["fault"] = exchange.Fault.ToString(),
+                ["status"] = exchange.Status,
+                ["retryAfter"] = exchange.RetryAfter,
+                ["request"] = null,
+                ["response"] = null,
+                ["dispositions"] = new JsonArray(),
+                ["undecodable"] = true,
+            }.ToJsonString();
+        }
+
         lock (_gate)
         {
             _writer.WriteLine(text);

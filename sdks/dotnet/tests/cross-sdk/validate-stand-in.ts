@@ -33,6 +33,7 @@ type Exchange = {
   request: unknown;
   response: unknown;
   dispositions: string[];
+  undecodable?: boolean;
 };
 
 const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
@@ -40,7 +41,10 @@ const config = JSON.parse(lines[0] ?? '{}') as { kind?: unknown; mode?: unknown;
 const faultWeights =
   config.faults && typeof config.faults === 'object' && !Array.isArray(config.faults) ? (config.faults as Record<string, unknown>) : {};
 if (config.kind !== 'config' || (config.mode !== 'stand-in' && config.mode !== 'upstream')) throw new Error('the first line must be the config line');
-if (!Object.values(faultWeights).some((w) => typeof w === 'number' && w > 0)) throw new Error('the config lists no fault with a positive weight');
+if (!Object.values(faultWeights).every((w) => typeof w === 'number' && Number.isInteger(w) && w >= 0))
+  throw new Error('every fault weight must be a whole number');
+if (!Object.values(faultWeights).some((w) => (w as number) > 0)) throw new Error('the config lists no fault with a positive weight');
+const dispositionValues = new Set(['accepted', 'rejected', 'unresolved']);
 const exchanges = lines.slice(1).map((line, index) => {
   const x = JSON.parse(line) as Exchange;
   const shaped =
@@ -48,7 +52,11 @@ const exchanges = lines.slice(1).map((line, index) => {
     typeof x.fault === 'string' &&
     (x.status === null || typeof x.status === 'number') &&
     (x.retryAfter === null || typeof x.retryAfter === 'string') &&
-    Array.isArray(x.dispositions);
+    'request' in x &&
+    'response' in x &&
+    Array.isArray(x.dispositions) &&
+    x.dispositions.every((d) => dispositionValues.has(d)) &&
+    (x.undecodable === undefined || typeof x.undecodable === 'boolean');
   if (!shaped) throw new Error(`line ${index + 2} is not an exchange record`);
   return x;
 });
@@ -102,9 +110,11 @@ function settle(
 
   for (let index = 0; index < events.length; index++) {
     if (outcome[index] !== 'unsettled') continue;
-    if (ids.length === 0) fail(`event ${index} is neither rejected, unresolved nor in ids`);
+    // The server generates a non-empty id (uuidv7) for an event without one.
+    const generated = ids.findIndex((candidate) => candidate.trim().length > 0);
+    if (generated < 0) fail(`event ${index} is neither rejected, unresolved nor given a generated id`);
     else {
-      ids.shift();
+      ids.splice(generated, 1);
       outcome[index] = 'accepted';
     }
   }
@@ -136,6 +146,9 @@ for (const [number, x] of exchanges.entries()) {
   if (shows[x.fault] === true) seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
   else if (!wholeRequest && !(x.status === 413 && code === 'payload_too_large'))
     fail(`the ${x.fault} fault answered ${x.status ?? 'nothing'} ${code ?? ''}`.trim());
+
+  // A request .NET could not re-encode (a lone surrogate) is sampled without its body: only its status and code, above.
+  if (x.undecodable) continue;
   // In stand-in mode, every event the stand-in stored must be one the server's schema accepts, also when the answer
   // acknowledges nothing (a reset after storing, or 202 {}).
   const requestEvents = x.request === null || x.request === undefined ? [] : eventsOf(x.request);
@@ -151,7 +164,9 @@ for (const [number, x] of exchanges.entries()) {
   // or 202 {}; none for an answer about the whole request (401, 400, 422, 413, 429, 503 unavailable) or a reset or hang
   // before the body was read.
   const stores =
-    x.fault === 'ResetAfterStore' || x.fault === 'EmptyAck' || x.status === 202 || (x.status === 503 && x.fault === 'PartialUnavailable');
+    ((x.fault === 'ResetAfterStore' || x.fault === 'EmptyAck') && (x.status === null || x.status === 202)) ||
+    x.status === 202 ||
+    (x.status === 503 && code === 'ingest_pending');
   if (config.mode === 'stand-in' && !stores && x.dispositions.length)
     fail(`dispositions ${JSON.stringify(x.dispositions)} on an answer about the whole request`);
   // A reset after storing, or 202 {}, stored every valid event first (a 401 or 413 answering these faults stored nothing).

@@ -60,7 +60,8 @@ internal static class Program
         JsonObject report;
         try
         {
-            report = await new SoakRun(options).ExecuteAsync().ConfigureAwait(false);
+            using var run = new SoakRun(options);
+            report = await run.ExecuteAsync().ConfigureAwait(false);
         }
         catch (Exception e)
         {
@@ -91,7 +92,7 @@ internal static class Program
         => await Task.WhenAny(task, Task.Delay(limit)).ConfigureAwait(false) == task ? await task.ConfigureAwait(false) : null;
 }
 
-internal sealed class SoakRun(SoakOptions options)
+internal sealed class SoakRun(SoakOptions options) : IDisposable
 {
     /// <summary>The SDK's batch size, which the harness leaves at its default.</summary>
     private static readonly int BatchSize = new LogbirdOptions().BatchSize;
@@ -106,6 +107,10 @@ internal sealed class SoakRun(SoakOptions options)
     private readonly List<ResourceSample> _samples = [];
     private readonly List<double> _flushSeconds = [];
     private readonly List<LogbirdClient> _clients = [];
+
+    // Producers hold the read lock around Track; a restart swaps the client under the write lock, so once the swap returns
+    // no Track can still be running on the old client and its counters are final when it is retired.
+    private readonly ReaderWriterLockSlim _swap = new(LockRecursionPolicy.NoRecursion);
     private long _retiredDelivered;
     private long _retiredRejected;
     private long _retiredDropped;
@@ -122,6 +127,8 @@ internal sealed class SoakRun(SoakOptions options)
     private long _sent;
     private LogbirdClient? _client;
     private double _loadSeconds;
+
+    public void Dispose() => _swap.Dispose();
 
     public async Task<JsonObject> ExecuteAsync()
     {
@@ -320,17 +327,26 @@ internal sealed class SoakRun(SoakOptions options)
                 }
                 .Target("record", "soak_" + producer + "_" + n)
                 .WithMetadata("soakRun", _runId);
-                var started = Stopwatch.GetTimestamp();
+                _swap.EnterReadLock();
                 try
                 {
-                    Volatile.Read(ref _client)!.Track(e);
-                }
-                catch (Exception)
-                {
-                    Interlocked.Increment(ref _trackThrew);
-                }
+                    var client = _client!;
+                    var started = Stopwatch.GetTimestamp();
+                    try
+                    {
+                        client.Track(e);
+                    }
+                    catch (Exception)
+                    {
+                        Interlocked.Increment(ref _trackThrew);
+                    }
 
-                _trackLatency.Add(Stopwatch.GetTimestamp() - started);
+                    _trackLatency.Add(Stopwatch.GetTimestamp() - started);
+                }
+                finally
+                {
+                    _swap.ExitReadLock();
+                }
             }
 
             try
@@ -359,8 +375,19 @@ internal sealed class SoakRun(SoakOptions options)
 
             // Swap first, then dispose the old client while producers already write to the new one. A flush of the old
             // client may return false only once its disposal has begun.
-            var old = Interlocked.Exchange(ref _client, NewClient(endpoint))!;
-            await Task.Delay(100).ConfigureAwait(false);
+            var replacement = NewClient(endpoint);
+            LogbirdClient old;
+            _swap.EnterWriteLock();
+            try
+            {
+                old = _client!;
+                Volatile.Write(ref _client, replacement);
+            }
+            finally
+            {
+                _swap.ExitWriteLock();
+            }
+
             _retiring.GetValue(old, _ => new object());
             var disposing = old.DisposeAsync().AsTask();
             if (await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromMinutes(1))).ConfigureAwait(false) != disposing || disposing.IsFaulted)

@@ -9,8 +9,8 @@ cd sdks/dotnet
 dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --duration 30m --rate 200 --report ../../soak-report
 ```
 
-`--rate` x `--duration` may be at most 4 million events (for example 2 h at 500/s or 5 h at 200/s), and producers stop
-at exactly that total. The exact bookkeeping is allocated once, up front, in tables of about 700 MB at that size.
+`--rate` x `--duration` may be at most 4 million events (for example 2 h at 500/s or 5 h at 200/s), and producers never
+exceed that total (the run may end a few events short of it when the duration elapses). The exact bookkeeping is allocated once, up front, in tables of about 700 MB at that size.
 
 The run ends with a list of checks and exits 1 if any fails. A watchdog writes a failing report and exits 1 if the run
 is still going 15 minutes after its duration. `soak-report/` holds:
@@ -64,15 +64,16 @@ host is refused. Everything else comes from the environment:
 
 ```bash
 # From the repository root, with the root .env (local services) and a server from master on 127.0.0.1:4741.
+# dotenv -o: the local .env overrides anything inherited (a DATABASE_URL pointing elsewhere is never used).
 F=/path/outside/the/repo/soak.env
-pnpm exec dotenv -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
-set -a; . "$F"; . ./.env; set +a
-export LOGBIRD_SOAK_INGEST_KEY="$LOGBIRD_IT_INGEST_KEY" LOGBIRD_SOAK_READ_KEY="$LOGBIRD_IT_READ_KEY"
-export LOGBIRD_SOAK_PROJECT_ID="$LOGBIRD_IT_PROJECT_ID" LOGBIRD_SOAK_CLICKHOUSE_URL="$CLICKHOUSE_URL"
-export LOGBIRD_SOAK_CLICKHOUSE_USER="$CLICKHOUSE_USER" LOGBIRD_SOAK_CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD"
-export LOGBIRD_SOAK_CLICKHOUSE_DATABASE="$CLICKHOUSE_DATABASE"
-(cd sdks/dotnet && dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --upstream http://127.0.0.1:4741 --duration 2h --rate 50)
-pnpm exec dotenv -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts delete "$F"
+pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
+pnpm exec dotenv -o -e .env -e "$F" -- sh -c '
+  export LOGBIRD_SOAK_INGEST_KEY="$LOGBIRD_IT_INGEST_KEY" LOGBIRD_SOAK_READ_KEY="$LOGBIRD_IT_READ_KEY"
+  export LOGBIRD_SOAK_PROJECT_ID="$LOGBIRD_IT_PROJECT_ID" LOGBIRD_SOAK_CLICKHOUSE_URL="$CLICKHOUSE_URL"
+  export LOGBIRD_SOAK_CLICKHOUSE_USER="$CLICKHOUSE_USER" LOGBIRD_SOAK_CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD"
+  export LOGBIRD_SOAK_CLICKHOUSE_DATABASE="$CLICKHOUSE_DATABASE"
+  cd sdks/dotnet && dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --upstream http://127.0.0.1:4741 --duration 2h --rate 50'
+pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts delete "$F"
 ```
 
 The fixture file holds fresh keys with owner-only permissions; keep it outside the repository. `delete` purges the
@@ -117,9 +118,9 @@ master, with its report attached to the gate brief.
   - **Threads:** at most baseline + 50.
   - **Queue:** its high-water mark, polled every 50 ms, stays within `MaxQueueSize` plus one batch.
     `MaxQueueSize` bounds the events waiting to be sent, while `Stats.QueueLength` also counts the batch being sent.
-  - **Bookkeeping:** the harness's tables never grow during the run, and the stand-in writes its samples to disk as they
-    arrive, so the harness's own memory stays flat during the measurement. Transient allocations (event objects,
-    answers) are collected by the full collection before each heap sample.
+  - **Bookkeeping:** the harness's per-event tables never grow during the run, and the stand-in writes its samples to
+    disk as they arrive. The harness keeps only one small record per resource sample and per periodic flush (a few
+    kilobytes an hour); transient allocations are collected by the full collection before each heap sample.
 
 ## Fidelity
 

@@ -206,7 +206,8 @@ internal sealed class SoakOptions
     {
         var list = (Environment.GetEnvironmentVariable("NO_PROXY") ?? Environment.GetEnvironmentVariable("no_proxy") ?? string.Empty)
             .Split(',').Select(v => v.Trim()).ToArray();
-        return list.Contains("*") || (list.Contains("127.0.0.1") && list.Contains("localhost") && (list.Contains("::1") || list.Contains("[::1]")));
+        // Explicit entries only: .NET does not treat "*" as bypassing every host.
+        return list.Contains("127.0.0.1") && list.Contains("localhost") && (list.Contains("::1") || list.Contains("[::1]"));
     }
 
     private static string Required(string variable)
