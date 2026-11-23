@@ -638,3 +638,13 @@ it('resolves an awaited refresh only after a read the fetcher started re-entrant
   expect(trail.data.value.map((e) => e.id)).toEqual(['call-3']);
   mounted.wrapper.unmount();
 });
+
+// Round 10: disposal settles an awaited refresh even when the fetcher ignores its abort signal.
+it('settles an awaited refresh on disposal when the fetcher never settles', async () => {
+  const fetcher = vi.fn((): Promise<Awaited<ReturnType<AuditFetcher>>> => new Promise(() => undefined));
+  const scope = effectScope();
+  const trail = scope.run(() => useAuditTrail(() => ({ fetcher, tenant: 'acme' }))) as ReturnType<typeof useAuditTrail>;
+  const waiting = trail.refresh();
+  scope.stop();
+  await expect(waiting).resolves.toBeUndefined();
+});

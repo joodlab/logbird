@@ -150,6 +150,11 @@ function createTrail(source: () => RawRequest) {
     const state = snapshot();
     return revision === selection ? state : undefined;
   };
+  /** Settles every waiter on disposal, even when a fetcher ignores its abort signal and never settles. */
+  let settleDisposal: () => void = () => undefined;
+  const disposal = new Promise<void>((resolve) => {
+    settleDisposal = resolve;
+  });
   /** The newest read, so an overtaken explicit call can resolve when the read that won finishes. */
   let latest: Promise<void> = Promise.resolve();
   const start = (state: State, append: boolean): Promise<void> => {
@@ -160,7 +165,8 @@ function createTrail(source: () => RawRequest) {
     return follow(read);
   };
   /** Resolves when this read, or the read that superseded it, has finished. */
-  const follow = (read: Promise<void>): Promise<void> => read.then(() => (disposed || latest === read ? undefined : follow(latest)));
+  const follow = (read: Promise<void>): Promise<void> =>
+    Promise.race([disposal, read.then(() => (disposed || latest === read ? undefined : follow(latest)))]);
   // The queued run is scheduled before this continuation, so `latest` is already the winning read when it runs.
   const afterQueued = () => Promise.resolve().then(() => follow(latest));
   const refresh = () => {
@@ -211,6 +217,7 @@ function createTrail(source: () => RawRequest) {
   );
   onScopeDispose(() => {
     disposed = true;
+    settleDisposal();
     generation++;
     controller?.abort();
   });
