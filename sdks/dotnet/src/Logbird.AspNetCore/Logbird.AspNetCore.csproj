@@ -19,6 +19,18 @@
   </ItemGroup>
 
   <!--
+    This package calls internal members of Logbird (Logbird grants InternalsVisibleTo), so it must depend on exactly the
+    Logbird it was built with: [x.y.z], never the default ">= x.y.z" range a project reference packs as. A range could
+    bind to another Logbird build without those members and fail at run time (issue #208). Only the Logbird reference is
+    pinned. CI and the release job check the packed manifests (sdks/dotnet/check-packages.py).
+  -->
+  <Target Name="DependOnExactlyThisLogbird" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)" Condition="'%(Filename)' == 'Logbird'" ProjectVersion="[%(ProjectVersion)]" />
+    </ItemGroup>
+  </Target>
+
+  <!--
     The public API is recorded in PublicAPI.Shipped.txt (what a published version contains) and PublicAPI.Unshipped.txt
     (what is added since). The analyzer fails the build (RS0016, RS0017) when the public surface differs from those
     files, so any API change is a visible edit to them. Before the first publication everything is unshipped.

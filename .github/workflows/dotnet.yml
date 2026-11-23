@@ -52,6 +52,9 @@ jobs:
       - run: dotnet test Logbird.slnx -c Release --no-build
       - run: dotnet pack src/Logbird/Logbird.csproj -c Release --no-build -o ${{ runner.temp }}/nupkg
       - run: dotnet pack src/Logbird.AspNetCore/Logbird.AspNetCore.csproj -c Release --no-build -o ${{ runner.temp }}/nupkg
+      # Logbird.AspNetCore calls Logbird's internals, so it must depend on exactly the Logbird packed with it (#208).
+      - name: Check the packed packages
+        run: python3 check-packages.py "${{ runner.temp }}/nupkg"
       - uses: actions/upload-artifact@v7
         with:
           name: nuget-packages

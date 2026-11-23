@@ -35,7 +35,10 @@ describe('metadata', () => {
     const head = pageHead('/product');
     expect(head.links).toContainEqual({ rel: 'canonical', href: `${SITE_URL}/product` });
     expect(head.meta).toContainEqual({ title: 'Product · Logbird' });
-    expect(head.meta).toContainEqual({ property: 'og:image', content: `${SITE_URL}/og/product.png` });
+    // The card's URL carries a version of its words (seo.ts ogImageHref), so a changed card is never served stale.
+    const image = head.meta.find((tag) => 'property' in tag && tag.property === 'og:image') as { content: string } | undefined;
+    expect(image?.content.startsWith(`${SITE_URL}/og/product.png?v=`)).toBe(true);
+    expect(image?.content).toMatch(/\.png\?v=[0-9a-f]{8}$/);
     expect(head.meta).toContainEqual({ property: 'og:image:width', content: '1200' });
     expect(head.meta).toContainEqual({ property: 'og:image:height', content: '630' });
     expect(head.meta).toContainEqual({ name: 'twitter:card', content: 'summary_large_image' });

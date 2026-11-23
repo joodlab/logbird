@@ -161,7 +161,18 @@ export const clips: VideoEntry[] = [
   },
 ];
 
-export const imageWidths = (width: number) => [...new Set([640, 1024, 1600].map((size) => Math.min(size, width)))];
+/**
+ * The encoder's options (scripts/media.ts passes each object to sharp as is) and the widths. Part of every media
+ * version (scripts/asset-versions-lib.ts): changing any of them gives every affected file a new URL.
+ */
+export const MEDIA_ENCODING = {
+  avif: { quality: 55, effort: 4 },
+  webp: { quality: 82, effort: 4 },
+  poster: { quality: 82, effort: 4 },
+  widths: [640, 1024, 1600],
+} as const;
+
+export const imageWidths = (width: number) => [...new Set(MEDIA_ENCODING.widths.map((size) => Math.min(size, width)))];
 
 /** Entries whose capture still needs replacing before a public build. */
 export const interimMedia = () => [...screenshots.filter((entry) => entry.interim), ...clips.filter((clip) => clip.interim)].map((entry) => entry.id);

@@ -318,6 +318,8 @@ jobs:
               exit 1
             fi
           done
+          # Logbird.AspNetCore calls Logbird's internals, so it must depend on exactly the Logbird packed with it (#208).
+          python3 check-packages.py "$RUNNER_TEMP/nupkg" "$RELEASE_VERSION"
       - name: Push Logbird, then wait until nuget.org serves it
         if: steps.gate.outputs.publish == 'true'
         env:

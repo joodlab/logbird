@@ -1,5 +1,6 @@
 import { PauseIcon, PlayIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { mediaUrl } from '../lib/asset-url';
 import { clips } from '../lib/media-manifest';
 export function Clip({ id }: { id: string }) {
   const entry = clips.find((item) => item.id === id);
@@ -42,8 +43,8 @@ export function Clip({ id }: { id: string }) {
     <div className="clip relative">
       <video
         ref={ref}
-        src={`/media/${entry.id}.webm`}
-        poster={`/media/${entry.id}-poster.webp`}
+        src={mediaUrl(`${entry.id}.webm`, `${entry.id}.webm`)}
+        poster={mediaUrl(`${entry.id}-poster.webp`, `${entry.id}-poster`)}
         muted
         playsInline
         loop
