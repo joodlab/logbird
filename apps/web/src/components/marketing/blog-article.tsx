@@ -1,12 +1,16 @@
+import { blogPost } from '../../content/blog-post';
 import { type Post, publicationDate } from '../../lib/publications';
 import { Rich } from './rich';
 
-/** One post: title, byline and paragraphs. Router-free, so it renders the same in tests and in the route. */
+/**
+ * One post: title, byline and paragraphs. Router-free, so it renders the same in tests and in the route. Words: the post
+ * (lib/publications.ts) and content/blog-post.ts; this file is layout only (content-modules.test.ts).
+ */
 export function BlogArticle({ post }: { post: Post }) {
   return (
     <article className="container-site flex max-w-3xl flex-col gap-6 py-16 md:py-24">
       <header className="flex flex-col gap-4 border-b pb-8">
-        <p className="eyebrow">Blog</p>
+        <p className="eyebrow">{blogPost.eyebrow}</p>
         <h1 className="h1">{post.title}</h1>
         <p className="lead">{post.description}</p>
         <p className="text-muted-foreground text-sm">
@@ -14,7 +18,8 @@ export function BlogArticle({ post }: { post: Post }) {
           {post.modified ? (
             <>
               {' '}
-              · updated <time dateTime={post.modified}>{publicationDate(post.modified)}</time>
+              {blogPost.updated}
+              <time dateTime={post.modified}>{publicationDate(post.modified)}</time>
             </>
           ) : null}
         </p>
