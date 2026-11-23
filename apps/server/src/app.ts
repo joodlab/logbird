@@ -1,5 +1,5 @@
 import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from '@logbird/auth';
-import { CursorError, isPendingMutationBlockingReads, QueryError } from '@logbird/clickhouse';
+import { CursorError, foreignMutationPending, isPendingMutationBlockingReads, QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
 import { failedRepairStatus } from '@logbird/worker/project-repair';
@@ -104,7 +104,7 @@ app.use('*', async (c, next) => {
     }),
   );
 });
-app.onError((error, c) => {
+app.onError(async (error, c) => {
   if (error instanceof ProjectBusyError) {
     c.header('Retry-After', '1');
     return c.json({ error: { code: 'project_busy', message: error.message } }, 503);
@@ -147,9 +147,10 @@ app.onError((error, c) => {
     c.header('Retry-After', deleteFailure.retryAfter);
     return c.json(deleteFailure.body, deleteFailure.status);
   }
-  // A foreign mutation that ClickHouse cannot apply on the fly is pending: say so (no fallback to plain reads, which
-  // could show expired events or double-counted rollups while Logbird's own DELETEs finish).
-  if (isPendingMutationBlockingReads(error)) {
+  // A mutation created outside Logbird is pending and broke this read, either because ClickHouse cannot apply it on
+  // the fly or because its predicate failed when the read applied it: say so (no fallback to plain reads, which could
+  // show expired events or double-counted rollups while Logbird's own DELETEs finish).
+  if (isPendingMutationBlockingReads(error) || ('code' in error && (await foreignMutationPending(clickhouse).catch(() => false)))) {
     c.header('Retry-After', '30');
     return c.json(
       {

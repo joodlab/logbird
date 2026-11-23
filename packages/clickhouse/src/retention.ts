@@ -158,6 +158,36 @@ export async function applyRetention(
   }
 }
 
+/**
+ * Functions Logbird's own mutation predicates use (literal-only DELETEs: `project_id = '…'`, `_CAST` timestamps,
+ * `IN` lists, `arrayZip` pairs, `hasAny` in the demo cleanup). A pending mutation that calls anything else was created
+ * outside Logbird.
+ */
+export const LOGBIRD_MUTATION_FUNCTIONS = new Set(['_CAST', 'arrayZip', 'hasAny', 'tuple']);
+/**
+ * Whether a mutation created outside Logbird is pending on a Logbird table. While one is, an on-the-fly read can fail
+ * in ways that are not ours: the mutation cannot be applied on the fly, or its predicate errors when a read applies
+ * it. Readers then answer 503 store_maintenance_blocking instead of a generic error.
+ */
+export async function foreignMutationPending(ch: ClickHouseClient) {
+  const pending = await rows<{ command: string }>(
+    ch,
+    "SELECT command FROM system.mutations WHERE database=currentDatabase() AND is_done=0 AND table IN ('events','event_ids','events_by_minute','entities','attribute_keys')",
+    {},
+    CLICKHOUSE_PLAIN_READ,
+  );
+  return pending.some(({ command }) => isForeignMutationCommand(command));
+}
+/** A stored mutation command (system.mutations.command) that calls a function Logbird's own predicates never use. */
+export function isForeignMutationCommand(command: string) {
+  // String literals first (a type name such as '…DateTime64(3)' is text, not a call). ClickHouse formats a call with
+  // the parenthesis right after the name (`now()`), and a keyword with a space (`WHERE (`), so only the former counts.
+  const code = command.replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  // A subquery is never ours either.
+  if (/\bSELECT\b/i.test(code)) return true;
+  return [...code.matchAll(/([A-Za-z_]\w*)\(/g)].some((m) => !LOGBIRD_MUTATION_FUNCTIONS.has(m[1] as string));
+}
+
 /** Unfinished mutations on `events`, every project's: each one adds to every on-the-fly read of the table. */
 export async function pendingEventMutations(ch: ClickHouseClient) {
   const counted = await rows<{ n: number }>(
