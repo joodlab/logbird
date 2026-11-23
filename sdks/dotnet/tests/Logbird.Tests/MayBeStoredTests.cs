@@ -563,16 +563,30 @@ public class MayBeStoredTests
     {
         var abandonedFirst = new Internal.QueuedEvent([], "evt_a", "x", 1);
         Assert.True(abandonedFirst.TryAbandon());
-        Assert.False(abandonedFirst.TryStartDispatch());
+        Assert.False(abandonedFirst.TryStartDispatch(out _));
         Assert.False(abandonedFirst.MayBeStoredWhenAbandoned);
 
         var dispatchedFirst = new Internal.QueuedEvent([], "evt_b", "x", 2);
-        Assert.True(dispatchedFirst.TryStartDispatch());
+        Assert.True(dispatchedFirst.TryStartDispatch(out var dispatch));
         Assert.True(dispatchedFirst.TryAbandon());
 
         // A later answer cannot change what shutdown already reported.
-        dispatchedFirst.OnNotStored();
+        dispatchedFirst.OnNotStored(dispatch);
         Assert.True(dispatchedFirst.MayBeStoredWhenAbandoned);
+    }
+
+    [Fact]
+    public void A_late_answer_to_an_older_request_cannot_clear_a_newer_one()
+    {
+        // The first request times out and a retry is dispatched; then the first request's 429 arrives. The retry may still
+        // store the event, so the flag stays set; only the retry's own "not stored" answer clears it.
+        var e = new Internal.QueuedEvent([], "evt_retry", "x", 1);
+        Assert.True(e.TryStartDispatch(out var first));
+        Assert.True(e.TryStartDispatch(out var retry));
+        e.OnNotStored(first);
+        Assert.True(e.MayBeStored);
+        e.OnNotStored(retry);
+        Assert.False(e.MayBeStored);
     }
 
     [Theory]

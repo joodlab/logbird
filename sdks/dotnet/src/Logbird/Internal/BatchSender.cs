@@ -166,6 +166,7 @@ internal sealed class BatchSender
             Exception? error;
             var headersStatus = new StrongBox<int>();
             var dispatched = false;
+            Dictionary<int, int>? dispatchNumbers = null;
             if (Volatile.Read(ref _abandonedAttempts) >= MaxAbandonedAttempts)
             {
                 // Earlier requests are still stuck in the handler: do not pile up more, and do not dispatch these events,
@@ -176,32 +177,50 @@ internal sealed class BatchSender
             {
                 // From here the server may store these events, whatever happens to its answer. An event shutdown already
                 // took is left out of the request, so its report stays true.
-                var dispatchable = attempt.Where(index => batch[index].TryStartDispatch()).ToArray();
-                if (dispatchable.Length == 0)
+                var dispatchList = new List<int>(attempt.Length);
+                var numberList = new List<int>(attempt.Length);
+                foreach (var index in attempt)
+                {
+                    if (batch[index].TryStartDispatch(out var number))
+                    {
+                        dispatchList.Add(index);
+                        numberList.Add(number);
+                    }
+                }
+
+                if (dispatchList.Count == 0)
                 {
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
                 }
 
-                if (dispatchable.Length < attempt.Length)
+                if (dispatchList.Count < attempt.Length)
                 {
-                    attempt = dispatchable;
+                    attempt = dispatchList.ToArray();
                     body = EventJson.BuildBatchBody(batch, attempt);
+                }
+
+                // Each answer quotes the dispatch numbers of its own request, so a late answer to an older request can
+                // never clear the flag a newer request set.
+                dispatchNumbers = new Dictionary<int, int>(dispatchList.Count);
+                for (var i = 0; i < dispatchList.Count; i++)
+                {
+                    dispatchNumbers[dispatchList[i]] = numberList[i];
                 }
 
                 dispatched = true;
 
                 // A 4xx counts the moment its headers arrive, before the body is read: shutdown can take the events while
                 // the body is still coming, and must then see that the server did not store them.
-                var carried = attempt;
+                var carried = dispatchNumbers;
                 void OnHeaders(int status)
                 {
                     if (status is >= 400 and < 500)
                     {
-                        foreach (var index in carried)
+                        foreach (var entry in carried)
                         {
-                            if (!state.IsSettled(index))
+                            if (!state.IsSettled(entry.Key))
                             {
-                                batch[index].OnNotStored();
+                                batch[entry.Key].OnNotStored(entry.Value);
                             }
                         }
                     }
@@ -220,7 +239,7 @@ internal sealed class BatchSender
                     // Nothing below runs; record what this answer said about the events it carried.
                     if (dispatched)
                     {
-                        RecordAnswer(state, attempt, answeredStatus);
+                        RecordAnswer(state, attempt, answeredStatus, dispatchNumbers!);
                     }
 
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
@@ -345,7 +364,7 @@ internal sealed class BatchSender
 
                 if (dispatched)
                 {
-                    RecordAnswer(state, attempt, answeredStatus);
+                    RecordAnswer(state, attempt, answeredStatus, dispatchNumbers!);
                 }
 
                 var retryable = response is null || status == 429 || status >= 500 || unacknowledged;
@@ -421,18 +440,18 @@ internal sealed class BatchSender
     /// stored; anything else (no answer, a 5xx, a redirect, a 2xx that did not acknowledge them) leaves the outcome unknown
     /// for good.
     /// </summary>
-    private static void RecordAnswer(State state, int[] attempt, int status)
+    private static void RecordAnswer(State state, int[] attempt, int status, Dictionary<int, int> dispatchNumbers)
     {
         foreach (var index in attempt)
         {
-            if (state.IsSettled(index))
+            if (state.IsSettled(index) || !dispatchNumbers.TryGetValue(index, out var dispatch))
             {
                 continue;
             }
 
             if (status is >= 400 and < 500)
             {
-                state.Batch[index].OnNotStored();
+                state.Batch[index].OnNotStored(dispatch);
             }
             else
             {

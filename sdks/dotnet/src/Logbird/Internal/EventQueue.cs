@@ -58,6 +58,7 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
     private bool _mayBeStored;
     private bool _answerLost;
     private bool _mayBeStoredWhenAbandoned;
+    private int _dispatches;
 
     /// <summary>True when the event was put on the wire at least once and no answer settled it, so the server may have stored it.</summary>
     public bool MayBeStored
@@ -97,28 +98,35 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
 
     /// <summary>
     /// A request carrying this event is about to be dispatched. Returns false, and changes nothing, when shutdown took the
-    /// event: it must then be left out of the request. An event already settled may stay in a resent body unchanged.
+    /// event: it must then be left out of the request. Otherwise returns the dispatch number, which the answer to this
+    /// request must quote. An event already settled may stay in a resent body unchanged.
     /// </summary>
-    public bool TryStartDispatch()
+    public bool TryStartDispatch(out int dispatch)
     {
         lock (_wire)
         {
+            dispatch = 0;
             if (Volatile.Read(ref _state) == Abandoned)
             {
                 return false;
             }
 
             _mayBeStored = true;
+            dispatch = ++_dispatches;
             return true;
         }
     }
 
-    /// <summary>The server answered that request without storing this event (a 4xx such as 429 or 401).</summary>
-    public void OnNotStored()
+    /// <summary>
+    /// The server answered request number <paramref name="dispatch"/> without storing this event (a 4xx such as 429 or
+    /// 401). An answer to an older request (one that arrives after a retry was dispatched) changes nothing: the newer
+    /// request may still store the event.
+    /// </summary>
+    public void OnNotStored(int dispatch)
     {
         lock (_wire)
         {
-            if (!_answerLost)
+            if (!_answerLost && dispatch == _dispatches)
             {
                 _mayBeStored = false;
             }
