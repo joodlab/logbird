@@ -4,7 +4,7 @@ import { Kbd } from '@logbird/ui/components/ui/kbd';
 import { Separator } from '@logbird/ui/components/ui/separator';
 import { SidebarTrigger } from '@logbird/ui/components/ui/sidebar';
 import { cn } from '@logbird/ui/lib/utils';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useMatches, useParams } from '@tanstack/react-router';
 import { ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { useMemo } from 'react';
@@ -28,8 +28,10 @@ export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalett
   const listed = projects.data?.find((p) => p.id === params.projectId);
   // While the list is unreadable or loading, the project the route loader already read names the crumb: read from the
   // cache only, never fetched, so a stale id still sends nothing (#339).
-  const queryClient = useQueryClient();
-  const cachedName = params.projectId ? queryClient.getQueryData(projectQuery(params.projectId).queryKey)?.name : undefined;
+  // `enabled: false` subscribes to the cached detail (a rename updates it) without ever fetching it. Whichever of the
+  // list entry and the detail was read last names the project, so a failed list refresh never brings back an old name.
+  const detail = useQuery({ ...projectQuery(params.projectId ?? ''), enabled: false });
+  const name = listed && (!detail.data || projects.dataUpdatedAt >= detail.dataUpdatedAt) ? listed.name : (detail.data?.name ?? listed?.name);
   const projectId = projectMissing ? undefined : params.projectId;
   const dynamicCrumb = useCrumb();
   const { range, setRange, wholeHistory } = useRange();
@@ -62,7 +64,7 @@ export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalett
             params={{ projectId }}
             to="/p/$projectId"
           >
-            {listed?.name ?? cachedName ?? '…'}
+            {name ?? '…'}
           </Link>
         ) : null}
         {sections.map((s, i) => {

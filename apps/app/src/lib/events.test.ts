@@ -1,6 +1,16 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { actorLabel, causedCount, directChildren, distinctParties, eventSentence, humanizeNoun, partyKey, unlinkedPartyLabel } from './events';
+import {
+  actorLabel,
+  causedCount,
+  directChildren,
+  distinctParties,
+  eventSentence,
+  humanizeNoun,
+  partyKey,
+  sentenceSubject,
+  unlinkedPartyLabel,
+} from './events';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -81,6 +91,18 @@ describe('eventSentence', () => {
     expect(eventSentence(e)).toContain('Lina');
     // The actor as the subject still reads without repeating themself.
     expect(eventSentence({ ...e, executor: null, action: 'member.joined_via_link' })).toBe('Lina joined via link');
+  });
+
+  it('keeps the object when a worker and the actor share a display name (#333)', () => {
+    const e = event({
+      action: 'user.updated',
+      description: '',
+      actor: { type: 'user', id: 'usr_42', name: 'Lina', email: '' },
+      executor: { type: 'worker', id: 'wrk_lina', name: 'Lina', jobId: '', attempt: 0 },
+      targets: [{ type: 'user', id: 'usr_42', name: 'Lina' }],
+    });
+    expect(eventSentence(e)).not.toBe('Lina updated');
+    expect(sentenceSubject(e).party).toBe('executor');
   });
 
   it('never says "Something" for an action-only event', () => {

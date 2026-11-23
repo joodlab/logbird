@@ -1,28 +1,37 @@
 import type { AuditEvent } from '@logbird/contracts';
-import { eventSentence, personLabel } from '@/lib/events';
+import { eventSentence, personLabel, sentenceSubject, usesDescription } from '@/lib/events';
 import { displayTimeZone, formatTimestamp } from '@/lib/format';
 import { jobHint, supportPhrase } from '@/lib/impersonation';
 import { shortZoneLabel } from '@/lib/time-zone';
+
+const WORD = '[\\p{L}\\p{M}\\p{N}_]';
+const JOINER = '[.@\\-]';
+
+/**
+ * Whether `text` names `name` whole: "Jo" is not in "Job finished", "علي" is not in "عليّان" (a combining mark
+ * continues the word), and "lia@example.org" is not in "lia@example.org.uk" (a dot, @ or hyphen followed by a letter
+ * or digit continues an address or a name). Both sides are compared in NFC (#333).
+ */
+export function namesWhole(text: string, name: string): boolean {
+  const n = name.normalize('NFC');
+  if (!n) return false;
+  const escaped = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<!${WORD})(?<!${WORD}${JOINER})${escaped}(?!${WORD})(?!${JOINER}${WORD})`, 'iu').test(text.normalize('NFC'));
+}
 
 /**
  * The row's accessible name: what happened (actor, action, target), who was really at the keyboard, how it ended,
  * which background job ran it, and when. Screen readers announce it when the roving focus lands on the row, so it
  * must stand on its own without the visual columns (the in-cell support marker and job hint are not tab stops).
  */
-/** Whether `text` names `name` as a whole word or phrase: "Jo" is not in "Job finished" (#333). */
-export function namesWhole(text: string, name: string): boolean {
-  if (!name) return false;
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu').test(text);
-}
-
 export function eventRowLabel(e: AuditEvent, now = Date.now()): string {
   const sentence = eventSentence(e);
   const actor = personLabel(e.actor);
   const parts = [sentence];
   // "done by support agent X while acting as Y" names the actor itself, so it replaces "by Y" — unless the sentence
-  // already says who (generated sentences start with the actor), then only the agent is added.
-  const named = namesWhole(sentence, actor);
+  // already credits the actor (a built sentence whose subject is the actor, or a description naming them), then only
+  // the agent is added. A built sentence crediting a worker names the actor at most as its object, never as who acted.
+  const named = usesDescription(e) ? namesWhole(sentence, actor) : sentenceSubject(e).party === 'actor';
   const support = e.impersonator ? (named ? `done by support agent ${e.impersonator.name || e.impersonator.id}` : supportPhrase(e)) : null;
   if (support) parts.push(support);
   // Producer descriptions do not always name who acted ("Booking cancelled"): add the actor when it is missing.

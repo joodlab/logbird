@@ -188,6 +188,28 @@ describe('row label attribution (#333)', () => {
     expect(namesWhole('Sent to lina@example.invalid', 'lina@example.invalid')).toBe(true);
     expect(namesWhole('Anything', '')).toBe(false);
   });
+  it("never takes a longer address or an Arabic name with a mark for the actor's own", () => {
+    expect(namesWhole('Sent to lia@example.org.uk', 'lia@example.org')).toBe(false);
+    expect(namesWhole('Sent to lia@example.org.', 'lia@example.org')).toBe(true);
+    expect(namesWhole('حجز عليّان', 'علي')).toBe(false);
+    expect(namesWhole('حجز علي اليوم', 'علي')).toBe(true);
+    expect(namesWhole('Booked by Ana-Maria', 'Ana')).toBe(false);
+  });
+  it(`keeps "while acting as Lina" when a worker is the sentence's subject and Lina is only its object`, () => {
+    const lina = { type: 'user', id: 'usr_42', name: 'Lina', email: '' };
+    const label = eventRowLabel(
+      event({
+        action: 'user.updated',
+        description: '',
+        actor: lina,
+        impersonator: { id: 'agt_sam', name: 'Sam' },
+        executor: { type: 'worker', id: 'wrk_1', name: 'Billing', jobId: '', attempt: 0 },
+        targets: [{ type: 'user', id: 'usr_42', name: 'Lina' }],
+      }),
+    );
+    expect(label).toMatch(/Sam/);
+    expect(label).toMatch(/acting as Lina/);
+  });
   it('adds "by Jo" to a producer description that only contains the name inside a word', () => {
     const label = eventRowLabel(event({ description: 'Job finished', actor: { type: 'user', id: 'u1', name: 'Jo', email: '' } }));
     expect(label).toContain('by Jo');
