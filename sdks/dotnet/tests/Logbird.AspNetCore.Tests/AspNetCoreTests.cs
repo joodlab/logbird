@@ -955,7 +955,8 @@ public class AspNetCoreTests
     {
         var drops = new ConcurrentQueue<DroppedEvent>();
         var zeroes = new JsonArray();
-        for (var i = 0; i < 150_000; i++)
+        // 600,000 zeroes with their separators measure 1.2 MB, over the 1 MiB pre-copy guard.
+        for (var i = 0; i < 600_000; i++)
         {
             zeroes.Add(0);
         }
@@ -965,7 +966,52 @@ public class AspNetCoreTests
             a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record(prepared))),
             options: o => o.OnDrop = drops.Enqueue);
         (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
-        Assert.Equal(DropReason.TooLarge, Assert.Single(await Eventually(drops, 1)).Reason);
+        var drop = Assert.Single(await Eventually(drops, 1));
+        Assert.Equal(DropReason.TooLarge, drop.Reason);
+
+        // Refused by the pre-copy guard, not by the wire limit after a copy.
+        Assert.Equal("The event's data exceeds 1 MiB before redaction.", drop.Detail);
+        Assert.Null(prepared.Id);
+    }
+
+    [Fact]
+    public async Task R02_both_recording_overloads_send_a_secret_that_redaction_shrinks()
+    {
+        // 270,000 characters before redaction, "[redacted]" after: the 256 KB limit is decided on what is sent, through
+        // either overload, and the 1 MiB guard is the only check before the copy.
+        var prepared = new AuditEvent("prepared.secret") { Metadata = { ["token"] = new string('s', 270_000) } };
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                audit.Record(prepared);
+                audit.Record("new.secret", e => e.Metadata["token"] = new string('s', 270_000));
+                return Results.Ok();
+            }),
+            options: o => o.OnDrop = drops.Enqueue);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        var events = await app.FlushedEventsAsync();
+
+        Assert.Empty(drops);
+        Assert.Equal(["new.secret", "prepared.secret"], events.Select(e => e.GetProperty("action").GetString()!).OrderBy(a => a, StringComparer.Ordinal).ToArray());
+        Assert.All(events, e => Assert.Equal("[redacted]", e.GetProperty("metadata").GetProperty("token").GetString()));
+        Assert.Null(prepared.Id);
+    }
+
+    [Fact]
+    public async Task R02_a_prepared_event_over_the_guard_is_refused_with_the_clients_own_detail()
+    {
+        var prepared = new AuditEvent("prepared.huge") { Metadata = { ["token"] = new string('s', 1_100_000) } };
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record(prepared))),
+            options: o => o.OnDrop = drops.Enqueue);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+
+        var drop = Assert.Single(await Eventually(drops, 1));
+        Assert.Equal(DropReason.TooLarge, drop.Reason);
+        Assert.Equal("The event's data exceeds 1 MiB before redaction.", drop.Detail);
+        Assert.False(drop.MayBeStored);
         Assert.Null(prepared.Id);
     }
 
@@ -974,7 +1020,7 @@ public class AspNetCoreTests
     {
         var fake = new FakeLogbirdClient();
         var drops = new ConcurrentQueue<DroppedEvent>();
-        var prepared = new AuditEvent("oversized.prepared") { Description = new string('d', 262_145) };
+        var prepared = new AuditEvent("oversized.prepared") { Description = new string('d', 1_100_000) };
         var ids = new List<string>();
         await using (var app = await App.StartAsync(
             _ => { },
@@ -1007,7 +1053,7 @@ public class AspNetCoreTests
         await using var app = await App.StartAsync(
             a => a.MapPost("/", (IAuditLog audit) =>
             {
-                id = audit.Record(new AuditEvent("oversized") { Description = new string('d', 262_145) });
+                id = audit.Record(new AuditEvent("oversized") { Description = new string('d', 1_100_000) });
                 return Results.Ok();
             }),
             options: o => o.Enabled = false);

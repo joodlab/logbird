@@ -51,7 +51,10 @@ public sealed class LogbirdOptions
     /// <summary>Events per request, 1 to 1000. Defaults to 100. A batch is sent as soon as it is full.</summary>
     public int BatchSize { get; set; } = 100;
 
-    /// <summary>The longest an event waits before its batch is sent. Defaults to one second.</summary>
+    /// <summary>
+    /// The batching interval: how long a batch that is not yet full waits before it is sent. Defaults to one second. It is
+    /// not a bound on delivery: while an earlier batch is being sent or retried, later events wait for it.
+    /// </summary>
     public TimeSpan FlushInterval { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>Retries for one batch after a network error, 429 or 5xx, with exponential backoff. Defaults to 5.</summary>

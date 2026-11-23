@@ -96,12 +96,12 @@ internal static class EventJson
                 var node = new JsonObject { ["field"] = change.Field };
                 if (change.HasBefore)
                 {
-                    node["before"] = change.Before?.DeepClone();
+                    node["before"] = JsonTree.Clone(change.Before);
                 }
 
                 if (change.HasAfter)
                 {
-                    node["after"] = change.After?.DeepClone();
+                    node["after"] = JsonTree.Clone(change.After);
                 }
 
                 changes.Add((JsonNode)node);
@@ -132,7 +132,7 @@ internal static class EventJson
 
         if (fullEnvelope || e.MetadataOrNull is not null)
         {
-            json["metadata"] = e.MetadataOrNull?.DeepClone() ?? new JsonObject();
+            json["metadata"] = JsonTree.Clone(e.MetadataOrNull) ?? new JsonObject();
         }
 
         Add(json, "schemaVersion", e.SchemaVersion);

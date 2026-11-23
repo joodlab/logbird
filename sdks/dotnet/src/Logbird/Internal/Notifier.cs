@@ -18,13 +18,20 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed, Fu
     private readonly Func<WaitCallback, bool> _schedule = schedule ?? (callback => ThreadPool.UnsafeQueueUserWorkItem(callback, null));
 
     private readonly object _gate = new();
-    private readonly Queue<Action> _pending = new();
+
+    // In posting order. A reserved place stays at its position until it is filled, so the count-based waits below stay
+    // exact: entries complete in the order they were accepted.
+    private readonly Queue<Slot> _pending = new();
     private readonly List<Entry> _waiters = [];
     private bool _running;
     private long _accepted;
     private long _completed;
 
-    public void Post(Action notification)
+    /// <summary>
+    /// Queues a notification standing for <paramref name="weight"/> callbacks; past the capacity it is skipped and all of
+    /// them count as lost.
+    /// </summary>
+    public void Post(Action notification, int weight = 1)
     {
         bool accepted;
         var start = false;
@@ -33,7 +40,7 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed, Fu
             accepted = _pending.Count < capacity;
             if (accepted)
             {
-                _pending.Enqueue(notification);
+                _pending.Enqueue(new Slot(notification, weight));
                 _accepted++;
                 start = !_running;
                 _running = true;
@@ -42,7 +49,69 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed, Fu
 
         if (!accepted)
         {
-            lost(1);
+            lost(weight);
+        }
+        else if (start)
+        {
+            Start();
+        }
+    }
+
+    /// <summary>
+    /// Holds a place in the order for a notification that is not ready yet, counted by waits from now on; null when the
+    /// backlog is full (posting it later then counts it as lost). Every place must be filled or released with
+    /// <see cref="PostReserved"/>; notifications behind it wait for it.
+    /// </summary>
+    public Slot? Reserve()
+    {
+        lock (_gate)
+        {
+            if (_pending.Count >= capacity)
+            {
+                return null;
+            }
+
+            var slot = new Slot(null, 1) { Ready = false };
+            _pending.Enqueue(slot);
+            _accepted++;
+            return slot;
+        }
+    }
+
+    /// <summary>Fills a reserved place with its notification, or releases it with null.</summary>
+    public void PostReserved(Slot? slot, Action? notification)
+    {
+        if (slot is null)
+        {
+            if (notification is not null)
+            {
+                lost(1);
+            }
+
+            return;
+        }
+
+        bool start;
+        bool abandoned;
+        lock (_gate)
+        {
+            slot.Run = notification;
+            slot.Ready = true;
+            abandoned = slot.Abandoned;
+            start = !abandoned && !_running;
+            if (start)
+            {
+                _running = true;
+            }
+        }
+
+        if (abandoned)
+        {
+            // The drain was refused while this place waited; its notification is lost like the others then.
+            if (notification is not null)
+            {
+                lost(1);
+            }
         }
         else if (start)
         {
@@ -128,13 +197,25 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed, Fu
     /// </summary>
     private void Abandon()
     {
-        int dropped;
+        var dropped = 0;
         List<TaskCompletionSource<bool>>? done = null;
         lock (_gate)
         {
-            dropped = _pending.Count;
+            foreach (var slot in _pending)
+            {
+                if (slot.Ready)
+                {
+                    dropped += slot.Run is null ? 0 : slot.Weight;
+                }
+                else
+                {
+                    // Counted when its notification arrives.
+                    slot.Abandoned = true;
+                }
+            }
+
+            _completed += _pending.Count;
             _pending.Clear();
-            _completed += dropped;
             _running = false;
             for (var i = _waiters.Count - 1; i >= 0; i--)
             {
@@ -171,21 +252,22 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed, Fu
     {
         while (true)
         {
-            Action notification;
+            Action? notification;
             lock (_gate)
             {
-                if (_pending.Count == 0)
+                // An unfilled reserved place blocks the entries behind it; filling it restarts the drain.
+                if (_pending.Count == 0 || !_pending.Peek().Ready)
                 {
                     _running = false;
                     return;
                 }
 
-                notification = _pending.Dequeue();
+                notification = _pending.Dequeue().Run;
             }
 
             try
             {
-                notification();
+                notification?.Invoke();
             }
             catch
             {
@@ -223,6 +305,18 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed, Fu
                 }
             }
         }
+    }
+
+    /// <summary>A queued notification standing for <see cref="Weight"/> callbacks, or a reserved place for one.</summary>
+    internal sealed class Slot(Action? run, int weight)
+    {
+        public Action? Run { get; set; } = run;
+
+        public int Weight { get; } = weight;
+
+        public bool Ready { get; set; } = true;
+
+        public bool Abandoned { get; set; }
     }
 
     private sealed class Entry(long target)

@@ -162,8 +162,11 @@ var options = new LogbirdOptions
 - `OnDrop`, `OnError` and log messages run in order on a background thread, never on the thread that called `Track`
   and never on the shutdown path, so a slow callback cannot slow your requests. If the callbacks fall more than
   `MaxQueueSize` (at least 1,000) notifications behind, further notifications are skipped and counted on the
-  `logbird.notifications.lost` meter; the counters below still record every event. `FlushAsync` returns after the
-  callbacks for what it settled have run.
+  `logbird.notifications.lost` meter; the counters below still record every event. The first time any is skipped, one
+  notice saying so goes to the logger and `OnError` straight from the thread pool (the ordered queue is full at that
+  moment): it can run while another callback is still running, and `FlushAsync` does not wait for it. `FlushAsync`
+  returns after the callbacks for what it settled have run, except those skipped because the callbacks were behind
+  (counted, never run), so `OnDrop` is a report, not a durability mechanism.
 - `client.Stats` gives counts of tracked, delivered, rejected, dropped, filtered and warned events, as a snapshot only
   the SDK fills (a test double for `ILogbirdClient` can return `default(LogbirdStats)`, every count zero). The `Logbird` meter
   publishes the same counts for OpenTelemetry (`logbird.events.*`, `logbird.batches.failed`, `logbird.queue.length`,
@@ -199,8 +202,8 @@ met the same rejection.
 | `Reason` | Why | `MayBeStored` |
 | --- | --- | --- |
 | `Rejected` | The server rejected this event (see `Code` and `Detail`) | `false`, except `true` for `stored_event_unreadable` or `unverified_after_parse_failure` when an earlier request carrying it had an unresolved outcome |
-| `TooLarge` | The serialized event is larger than 256 KB | always `false` |
-| `Invalid` | The event could not be prepared, for example `BeforeSend` threw | always `false` |
+| `TooLarge` | The event as sent (after `BeforeSend` and redaction) is larger than 256 KB of UTF-8 JSON; or its data measures more than 1 MiB before redaction (one byte per character of text, plus punctuation and parsed numbers' digits), in which case it is refused without being copied, whatever redaction would have removed (a memory guard) | always `false` |
+| `Invalid` | The event could not be prepared, for example `BeforeSend` threw; or its metadata or a change value nests JSON deeper than 1,000 levels as given, before `BeforeSend` and redaction (tested on a 256 KB thread stack; see "Size and depth" under [The contract with your code](#the-contract-with-your-code)) | always `false` |
 | `QueueFull` | Evicted from a full queue | `false` if it was never sent, or every answer said it was not stored; `true` if a request carrying it had an unresolved outcome |
 | `HttpError` | A 4xx other than 429, or a redirect | `false` if every answer said it was not stored; `true` if an earlier request had an unresolved outcome, or the final answer was a redirect |
 | `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if it was never sent, or every answer said it was not stored; `true` if it was in flight without a "not stored" answer, or an earlier request had an unresolved outcome |
@@ -257,15 +260,31 @@ What the client's own methods guarantee:
   microseconds for a typical event) and returns. Your own `BeforeSend` and redaction patterns are the only code that
   can make it slower.
 - **`FlushAsync()`** never throws. It returns `true` when every event queued before the call is stored or permanently
-  settled, after the `OnDrop`/`OnError` callbacks for those events have run. It has **no time limit of its own**:
+  settled, after the `OnDrop`/`OnError` callbacks for those events have run (a callback skipped because the
+  callbacks fell behind is counted on `logbird.notifications.lost` and never runs). It has **no time limit of its own**:
   delivery of each batch is bounded (`MaxRetries`, `RequestTimeout`, five minutes per batch), and a blocking callback
   holds it. Pass a token or use `FlushAsync(TimeSpan)` / `Flush(TimeSpan)` for a hard limit.
 - **`Flush(TimeSpan)`** blocks for at most the timeout (the deadline starts on your thread, even when the thread pool is
   busy) and cannot deadlock on a UI or classic ASP.NET synchronization context. Called from inside an `OnDrop`/`OnError`
   callback, it returns `false` at once instead of waiting on itself.
-- **`DisposeAsync`** returns within `ShutdownTimeout` (10 seconds by default) plus at most 2 seconds to unwind a
-  cancelled request, plus at most 5 seconds for pending callbacks. **`Dispose`** waits at most `ShutdownTimeout` plus 10
-  seconds. Events not sent by then are reported once each through `OnDrop` (`DropReason.Shutdown`).
+- **`DisposeAsync`** waits up to `ShutdownTimeout` (10 seconds by default) for delivery, then up to 2 seconds for a
+  cancelled request to unwind. Events not sent by then are dropped as `DropReason.Shutdown`: in-memory work with no I/O,
+  proportional to the events left. Then it waits up to 5 seconds for pending callbacks.
+- **`Dispose`** runs the same steps on the thread pool, never on your thread, and blocks for at most `ShutdownTimeout`
+  plus 10 seconds, counted from the call. If the thread pool was too busy to finish in time, the `Shutdown` accounting
+  still runs on the thread pool after `Dispose` returns; a process that exits at once may not finish it.
+- **Size and depth.** The 256 KB limit applies to what is sent, after `BeforeSend` and redaction, so a large secret that
+  redaction replaces does not drop the event. Separately, data measuring more than 1 MiB before redaction is refused
+  before anything copies it (a memory guard; it counts one byte per character of text, plus punctuation and parsed
+  numbers' digits, so it never refuses JSON smaller than that). Metadata and each change value may nest up to 1,000
+  levels (a value that is part of a larger tree of yours also counts the parents it has there, which System.Text.Json
+  walks through), checked on the event as given: a deep part that `BeforeSend` or redaction would remove still counts, because
+  walking it is the risk. The SDK walks them without recursion, and that depth is tested on a 256 KB thread stack. The
+  number is the server's limit for exact numbers, which the server applies to the objects and arrays of the whole event,
+  and only when the event holds, anywhere, a number a double cannot keep exactly. So a deeper tree in an event without
+  such a number, which the server would store, is refused here; and because a change value sits three levels into the
+  event, a change value whose objects or arrays nest more than 997 levels (a leaf at level 999 or deeper), in an event
+  holding such a number, is rejected by the server.
 - **Memory** is bounded: at most `MaxQueueSize` queued events (each at most 256 KB), one in-flight batch (at most 5 MB),
   at most 4 abandoned requests, and at most `MaxQueueSize` (at least 1,000) pending callback notifications. Very large
   pre-parsed JSON (`JsonNode.Parse`) in metadata or change values is measured before it is refused, which builds its
