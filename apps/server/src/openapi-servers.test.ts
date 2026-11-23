@@ -31,9 +31,10 @@ it("serves the deployment's APP_URL and exports the fixed local default", async 
   expect(response.status).toBe(200);
   const served = (await response.json()) as { servers: { url: string; description: string }[] };
   expect(served.servers).toStrictEqual([{ url: deployment, description: 'This Logbird instance' }]);
-  // Only `servers` differs: info, components, paths and everything else are carried over unchanged.
-  expect(committedOpenApiDocument(served)).toStrictEqual({
-    ...served,
-    servers: [{ url: 'http://localhost:4600', description: 'This Logbird instance' }],
-  });
+  // Only `servers` differs: info, components, paths and everything else are carried over unchanged, and the served
+  // document is not modified (the expectation is built from a copy taken before the call).
+  const expected = { ...structuredClone(served), servers: [{ url: 'http://localhost:4600', description: 'This Logbird instance' }] };
+  const before = structuredClone(served);
+  expect(committedOpenApiDocument(served)).toStrictEqual(expected);
+  expect(served).toStrictEqual(before);
 });

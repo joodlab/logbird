@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { prisma } from '@logbird/database';
 import { app } from '../apps/server/src/app';
@@ -51,11 +51,15 @@ try {
     // nobody committed (untracked), and staged-only changes. Git errors throw and fail the check without this message.
     const changes = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all', '--', 'openapi'], { encoding: 'utf8' });
     if (changes) {
-      console.log(changes);
-      console.log(execFileSync('git', ['diff', '--', 'openapi'], { encoding: 'utf8' }));
-      const message = 'The exported API differs from the committed openapi/ files. Run `pnpm openapi:export` and commit the result.';
-      console.log(process.env.GITHUB_ACTIONS === 'true' ? `::error title=openapi/ is out of date::${message}` : message);
+      // The verdict and the instruction come first, so a diagnostic that fails or runs long cannot hide them.
       process.exitCode = 1;
+      const message =
+        'The exported API differs from the committed openapi/ files. Run `pnpm openapi:export` and commit the result ' +
+        '(if the regenerated files are already staged, only the commit is missing).';
+      console.log(process.env.GITHUB_ACTIONS === 'true' ? `::error title=openapi/ is out of date::${message}` : message);
+      console.log(changes);
+      // Against the commit, so staged changes show too; streamed, so a large diff needs no buffer.
+      spawnSync('git', ['--no-pager', 'diff', 'HEAD', '--', 'openapi'], { stdio: 'inherit' });
     }
   }
 } finally {

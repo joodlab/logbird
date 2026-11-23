@@ -1,7 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
-// Pure regressions only (exports, failure HTTP mapping, source boundaries): no test-services.ts hooks, sockets, environment files
-// or shared backing services.
+// Pure regressions only (exports, failure HTTP mapping, source boundaries, the served OpenAPI document): no test-services.ts
+// hooks, environment files or running backing services. openapi-servers.test.ts loads the app, whose Redis clients try a
+// placeholder address when none is configured; nothing has to listen there.
 export default defineConfig({
   test: {
     include: [
