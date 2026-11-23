@@ -161,9 +161,11 @@ for (const [number, x] of exchanges.entries()) {
       rejected.some((r) => r?.code === 'invalid_event' && typeof r.reason === 'string' && r.reason.endsWith('(fault injection)')),
     Latency: typeof x.delayMs === 'number' && x.delayMs > 0,
   };
-  // Upstream mode: a passthrough answer is the server's own, forwarded unchanged because the fault did not apply (for
-  // example a 429 from the server during emptyack). It is legal for any fault and validated as a server answer below,
-  // but it earns no fault-specific coverage.
+  // Upstream mode: a passthrough answer is the server's own (status, body and Retry-After), forwarded because the fault
+  // did not apply (for example a 429 from the server during emptyack). It is legal for any fault and validated as a
+  // server answer below, but it earns no fault-specific coverage.
+  // Only the proxy passes the server's answers through; a stand-in sample claiming it would dodge the checks below.
+  if (x.passthrough && config.mode !== 'upstream') fail('a passthrough exchange outside upstream mode');
   if (covers[x.fault] === true && (!x.passthrough || x.fault === 'Ok' || x.fault === 'Latency'))
     seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
   if (!x.passthrough && legal[x.fault] !== true && !wholeRequest && !(x.status === 413 && code === 'payload_too_large'))

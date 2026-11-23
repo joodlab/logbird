@@ -20,9 +20,14 @@ namespace Logbird.Soak;
 /// reads send <c>final=0</c> (a profile with <c>final=1</c> would apply FINAL and hide duplicates),
 /// <c>empty_result_for_aggregation_by_empty_set=0</c> (a count over no rows is 0, not an empty result),
 /// <c>max_rows_to_group_by=0</c> and <c>group_by_overflow_mode=throw</c> (no GROUP BY may silently drop ids),
-/// <c>max_result_rows=0</c> and <c>result_overflow_mode=throw</c> (no result may be silently cut);
+/// <c>max_result_rows=0</c> and <c>result_overflow_mode=throw</c> (no result may be silently cut),
+/// every other <c>*_overflow_mode=throw</c> (read, read leaf, distinct, sort, set, join, transfer, timeout, timeout leaf:
+/// a limit a profile sets fails the query instead of returning part of it), <c>limit=0</c> and <c>offset=0</c> (no
+/// profile-wide row cap), <c>additional_table_filters={}</c> and <c>additional_result_filter=</c> (no profile-wide
+/// filter), and <c>use_query_cache=0</c> (no cached, stale answer);
 /// the self-test insert sends <c>optimize_on_insert=0</c>, <c>async_insert=0</c> (its rows must be visible to the count
-/// that follows) and <c>insert_deduplicate=0</c>.
+/// that follows), <c>insert_deduplicate=0</c>, <c>limit=0</c> and <c>offset=0</c> (both rows of its SELECT are inserted).
+/// Ids are read as hex, one prefixed line per id, so no id is lost or altered by the text format.
 /// </para>
 /// </summary>
 internal sealed class ClickHouseCheck : IDisposable
@@ -35,6 +40,20 @@ internal sealed class ClickHouseCheck : IDisposable
         ("!group_by_overflow_mode", "throw"),
         ("!max_result_rows", "0"),
         ("!result_overflow_mode", "throw"),
+        ("!read_overflow_mode", "throw"),
+        ("!read_overflow_mode_leaf", "throw"),
+        ("!distinct_overflow_mode", "throw"),
+        ("!sort_overflow_mode", "throw"),
+        ("!set_overflow_mode", "throw"),
+        ("!join_overflow_mode", "throw"),
+        ("!transfer_overflow_mode", "throw"),
+        ("!timeout_overflow_mode", "throw"),
+        ("!timeout_overflow_mode_leaf", "throw"),
+        ("!limit", "0"),
+        ("!offset", "0"),
+        ("!additional_table_filters", "{}"),
+        ("!additional_result_filter", ""),
+        ("!use_query_cache", "0"),
     ];
 
     private static readonly (string Name, string Value)[] InsertSettings =
@@ -42,6 +61,8 @@ internal sealed class ClickHouseCheck : IDisposable
         ("!optimize_on_insert", "0"),
         ("!async_insert", "0"),
         ("!insert_deduplicate", "0"),
+        ("!limit", "0"),
+        ("!offset", "0"),
     ];
 
     private readonly HttpClient _http;
@@ -77,20 +98,41 @@ internal sealed class ClickHouseCheck : IDisposable
             "SELECT count() FROM (SELECT event_id FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String} GROUP BY event_id HAVING count() > 1) FORMAT TabSeparated",
             With(ReadSettings, ("p", _projectId), ("r", runTag))).ConfigureAwait(false));
 
-    /// <summary>The run's distinct event ids in the raw rows, as id hashes.</summary>
+    /// <summary>
+    /// The run's distinct event ids in the raw rows, as id hashes. Each id comes back as <c>x</c> plus its bytes in hex, so
+    /// an empty id is a line of its own and no character is escaped or lost by the text format.
+    /// </summary>
     public async Task<LongMap> DistinctIdsAsync(string runTag, long expected)
     {
         var text = await QueryAsync(
-            "SELECT DISTINCT event_id FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String} FORMAT TabSeparated",
+            "SELECT DISTINCT concat('x', hex(event_id)) FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String} FORMAT TabSeparated",
             With(ReadSettings, ("p", _projectId), ("r", runTag))).ConfigureAwait(false);
         var ids = new LongMap(expected);
         foreach (var line in text.Split([(char)10], StringSplitOptions.RemoveEmptyEntries))
         {
-            ids.TryAdd(LongMap.Hash(line.TrimEnd((char)13)), 0);
+            var hex = line.TrimEnd((char)13);
+            if (hex.Length == 0 || hex[0] != 'x' || hex.Length % 2 == 0)
+            {
+                throw new InvalidOperationException("ClickHouse answered a line that is not a prefixed hex id: " + new string(hex.Take(80).ToArray()));
+            }
+
+            var bytes = new byte[(hex.Length - 1) / 2];
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = (byte)((Nibble(hex[1 + (2 * i)]) << 4) | Nibble(hex[2 + (2 * i)]));
+            }
+
+            ids.TryAdd(LongMap.Hash(Encoding.UTF8.GetString(bytes)), 0);
         }
 
         return ids;
     }
+
+    private static int Nibble(char c)
+        => c is >= '0' and <= '9' ? c - '0'
+            : c is >= 'A' and <= 'F' ? c - 'A' + 10
+            : c is >= 'a' and <= 'f' ? c - 'a' + 10
+            : throw new InvalidOperationException("ClickHouse answered a character that is not hex");
 
     /// <summary>
     /// Inserts one event id twice, at timestamps one millisecond apart, under a fresh self-test tag, and returns whether

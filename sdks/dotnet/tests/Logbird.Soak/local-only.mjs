@@ -11,15 +11,24 @@ for (const name of ['DATABASE_URL', 'CLICKHOUSE_URL', 'REDIS_URL']) {
     continue;
   }
 
-  let host;
+  let url;
   try {
-    host = new URL(value).hostname;
+    url = new URL(value);
   } catch {
     failures.push(`${name} is not a URL`);
     continue;
   }
 
-  if (!loopback.has(host)) failures.push(`${name} points at ${host}, not this machine`);
+  // An empty host lets a driver fall back to its own environment (PGHOST); the Postgres driver also takes host and
+  // hostaddr from the query string, overriding the URL's host. Every one of them must be this machine.
+  const hosts = [url.hostname];
+  for (const key of ['host', 'hostaddr']) {
+    for (const entry of url.searchParams.getAll(key)) hosts.push(...entry.split(','));
+  }
+
+  for (const host of hosts) {
+    if (!loopback.has(host.trim())) failures.push(`${name} points at ${host.trim() || 'an empty host'}, not this machine`);
+  }
 }
 
 if (failures.length) {

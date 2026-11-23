@@ -137,6 +137,9 @@ internal sealed class StandIn : IDisposable
     /// <summary>First-seen fingerprints by id hash.</summary>
     public LongMap FirstSeen => _firstSeen;
 
+    /// <summary>Upstream mode: ids the server itself acknowledged (null in stand-in mode).</summary>
+    public LongMap? UpstreamAcknowledged => _upstreamAcknowledged;
+
     /// <summary>Times an id arrived with content different from its first arrival (the client changed a retried event).</summary>
     public long Conflicts => Interlocked.Read(ref _conflicts);
 
@@ -546,13 +549,27 @@ internal sealed class StandIn : IDisposable
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, _upstreamEvents) { Content = new ByteArrayContent(body) };
 
-        // Every request header goes through except the hop-by-hop ones, so the server parses and records exactly what the
-        // SDK sent (Content-Encoding, X-Logbird-SDK, Logbird-Retry, Authorization, User-Agent, ...).
+        // Every request header goes through except the hop-by-hop ones (RFC 9110 7.6.1: the fixed list plus every field the
+        // Connection header nominates), so the server parses and records exactly what the SDK sent (Content-Encoding,
+        // X-Logbird-SDK, Logbird-Retry, Authorization, User-Agent, ...).
+        var nominated = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var header in head.All)
+        {
+            if (string.Equals(header.Key, "connection", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var token in header.Value.Split((char)44))
+                {
+                    nominated.Add(token.Trim().ToLowerInvariant());
+                }
+            }
+        }
+
         foreach (var header in head.All)
         {
             var name = header.Key.ToLowerInvariant();
-            if (name is "host" or "content-length" or "connection" or "keep-alive" or "transfer-encoding" or "expect" or "te" or "upgrade"
-                || name.StartsWith("proxy-", StringComparison.Ordinal))
+            if (name is "host" or "content-length" or "connection" or "keep-alive" or "transfer-encoding" or "expect" or "te" or "trailer"
+                    or "upgrade" or "proxy-authorization" or "proxy-authenticate" or "proxy-connection"
+                || nominated.Contains(name))
             {
                 continue;
             }
@@ -564,15 +581,6 @@ internal sealed class StandIn : IDisposable
             else
             {
                 message.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-        }
-
-        // A forwarded event the server already acknowledged is a resend: it exercises the server's deduplication.
-        foreach (var e in events ?? [])
-        {
-            if (Text(e is JsonObject o ? o["id"] : null, out var id, out _) && _upstreamAcknowledged!.Contains(LongMap.Hash(JsTrim(id!))))
-            {
-                Interlocked.Increment(ref _upstreamResends);
             }
         }
 
@@ -917,7 +925,11 @@ internal sealed class StandIn : IDisposable
         }
     }
 
-    /// <summary>Upstream mode: ids the server acknowledged in its own answer, whatever the stand-in then tells the client.</summary>
+    /// <summary>
+    /// Upstream mode: ids the server acknowledged in its own answer, whatever the stand-in then tells the client. An id the
+    /// server acknowledges again, after an earlier answer had already acknowledged it, is a resend its deduplication had to
+    /// absorb; only those are counted, so a resend that never reached the server or was refused counts for nothing.
+    /// </summary>
     private void RecordUpstreamAcknowledgements(int status, JsonNode? answer)
     {
         var ids = answer is not JsonObject root ? null
@@ -926,9 +938,9 @@ internal sealed class StandIn : IDisposable
             : null;
         foreach (var id in ids ?? [])
         {
-            if (id is JsonValue v && v.TryGetValue<string>(out var text))
+            if (id is JsonValue v && v.TryGetValue<string>(out var text) && !_upstreamAcknowledged!.TryAdd(LongMap.Hash(text), 0))
             {
-                _upstreamAcknowledged!.TryAdd(LongMap.Hash(text), 0);
+                Interlocked.Increment(ref _upstreamResends);
             }
         }
     }
@@ -1153,7 +1165,8 @@ internal sealed class Samples : IDisposable
 
     public void Add(Exchange exchange)
     {
-        var kind = exchange.Fault + ":" + (exchange.Status?.ToString(CultureInfo.InvariantCulture) ?? "none");
+        // Passthrough answers have their own quota, so the server's own answers can never crowd out the injected ones.
+        var kind = exchange.Fault + ":" + (exchange.Status?.ToString(CultureInfo.InvariantCulture) ?? "none") + (exchange.Passthrough ? ":passthrough" : string.Empty);
         if (_counts.AddOrUpdate(kind, 1, (_, n) => n + 1) > PerKind)
         {
             return;
@@ -1188,6 +1201,8 @@ internal sealed class Samples : IDisposable
                 ["request"] = null,
                 ["response"] = null,
                 ["dispositions"] = new JsonArray(),
+                ["delayMs"] = exchange.DelayMs,
+                ["passthrough"] = exchange.Passthrough,
                 ["undecodable"] = true,
             }.ToJsonString();
         }

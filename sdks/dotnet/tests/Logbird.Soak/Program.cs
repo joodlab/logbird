@@ -200,7 +200,7 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
             // Partial answers, resets after forwarding and empty acknowledgements make the client resend events the server
             // already stored; at least one such resend must have reached the server for its deduplication to be exercised.
             var resendFaults = weights.Where(w => w.Value > 0 && w.Key is Fault.PartialUnavailable or Fault.ResetAfterStore or Fault.EmptyAck).Select(w => w.Key).ToArray();
-            upstreamChecks.Add(Program.Check("the server's deduplication was exercised", resendFaults.Length == 0 || standIn.UpstreamResends > 0, $"{standIn.UpstreamResends} events forwarded again after the server had acknowledged them"));
+            upstreamChecks.Add(Program.Check("the server's deduplication was exercised", resendFaults.Length == 0 || standIn.UpstreamResends > 0, $"{standIn.UpstreamResends} event ids acknowledged by the server again after an earlier answer had acknowledged them"));
         }
 
         return Report(standIn, stored, drained, drainSeconds, disposed, quiet, clock.Elapsed, preflight, upstreamChecks);
@@ -619,7 +619,7 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = options.Upstream, ReadKey = options.ReadKey, AllowInsecureHttp = true }, readerHttp);
         var expected = acknowledged.Entries().Select(e => e.Key).ToArray();
         var budget = TimeSpan.FromMinutes(5) + TimeSpan.FromMilliseconds(100.0 * (expected.Length / 200 + 1));
-        var deadline = DateTime.UtcNow + budget;
+        using var deadline = new CancellationTokenSource(budget);
         var stored = new LongMap(options.ExpectedEvents);
         var missing = expected.Length;
         string? lastError = null;
@@ -629,18 +629,26 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
             var search = new EventSearch { Query = "metadata.soakRun:" + (char)34 + _runId + (char)34, From = started.AddMinutes(-5), Limit = 200 };
             var complete = false;
             lastError = null;
-            while (DateTime.UtcNow < deadline)
+            while (!deadline.IsCancellationRequested)
             {
                 EventPage page;
                 try
                 {
-                    page = await reader.SearchAsync(search).ConfigureAwait(false);
+                    page = await reader.SearchAsync(search, deadline.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+                {
+                    break;
                 }
                 catch (LogbirdApiException e)
                 {
                     // Transient (rate limit, unavailable): the same page is asked for again; earlier pages are kept.
                     lastError = e.Code;
-                    await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                    if (!await DelayUntil(TimeSpan.FromSeconds(2), deadline.Token).ConfigureAwait(false))
+                    {
+                        break;
+                    }
+
                     continue;
                 }
 
@@ -665,7 +673,7 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
                 lastError = null;
             }
 
-            if ((complete && missing == 0) || DateTime.UtcNow >= deadline)
+            if ((complete && missing == 0) || deadline.IsCancellationRequested || !await DelayUntil(TimeSpan.FromSeconds(10), deadline.Token).ConfigureAwait(false))
             {
                 if (!complete)
                 {
@@ -674,8 +682,6 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
 
                 break;
             }
-
-            await Task.Delay(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
         }
 
         checks.Add(Program.Check("every event the server acknowledged is read back", missing == 0 && lastError is null, $"{missing} of {expected.Length} acknowledged ids missing{(lastError is null ? string.Empty : ", last read error " + lastError)} (deadline {budget.TotalMinutes:F0} min)"));
@@ -697,7 +703,23 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         return stored;
     }
 
-    private int Growths(StandIn standIn) => _tracked.Growths + _dropped.Growths + standIn.Stored.Growths + standIn.Acknowledged.Growths + standIn.FirstSeen.Growths;
+    /// <summary>Waits, unless the deadline comes first; returns false when it did.</summary>
+    private static async Task<bool> DelayUntil(TimeSpan delay, CancellationToken deadline)
+    {
+        try
+        {
+            await Task.Delay(delay, deadline).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    private int Growths(StandIn standIn)
+        => _tracked.Growths + _dropped.Growths + standIn.Stored.Growths + standIn.Acknowledged.Growths + standIn.FirstSeen.Growths
+            + (standIn.UpstreamAcknowledged?.Growths ?? 0);
 
     private JsonObject Report(StandIn standIn, LongMap stored, bool drained, double drainSeconds, bool disposed, bool quiet, TimeSpan elapsed, JsonArray preflight, JsonArray upstreamChecks)
     {
