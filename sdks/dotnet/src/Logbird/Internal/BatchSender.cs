@@ -160,7 +160,15 @@ internal sealed class BatchSender
 
             var progressed = false;
             var unacknowledged = false;
+
+            // From here the server may store these events, whatever happens to its answer.
+            foreach (var index in attempt)
+            {
+                batch[index].OnRequestStart();
+            }
+
             var (response, responseBody, error) = await AttemptAsync(body, remaining < _requestTimeout ? remaining : _requestTimeout, stop).ConfigureAwait(false);
+            var answeredStatus = response is null ? 0 : (int)response.StatusCode;
 
             using (response)
             {
@@ -283,6 +291,25 @@ internal sealed class BatchSender
                                 }
                             }
                         }
+                    }
+                }
+
+                // Events this answer did not settle: a 4xx (429 included) says the batch was not stored; anything else (no
+                // answer, a 5xx, a 2xx that did not acknowledge them) leaves the outcome unknown for good.
+                foreach (var index in attempt)
+                {
+                    if (state.IsSettled(index))
+                    {
+                        continue;
+                    }
+
+                    if (answeredStatus is >= 400 and < 500)
+                    {
+                        batch[index].OnNotStored();
+                    }
+                    else
+                    {
+                        batch[index].OnAnswerLost();
                     }
                 }
 

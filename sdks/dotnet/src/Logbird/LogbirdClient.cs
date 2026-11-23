@@ -334,7 +334,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 }
 
                 overflow.TrySettle();
-                Drop(DropReason.QueueFull, overflow.Id, overflow.Action, overflow.Json, "The queue is full.");
+                Drop(DropReason.QueueFull, overflow.Id, overflow.Action, overflow.Json, "The queue is full.", mayBeStored: overflow.MayBeStored);
                 LogQueueFull();
             }
         }
@@ -598,12 +598,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             // In-flight events already left the queue-length gauge when they were dequeued.
             foreach (var item in inFlight)
             {
-                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
+                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.", mayBeStored: item.MayBeStored);
             }
 
             foreach (var item in queued)
             {
-                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
+                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.", mayBeStored: item.MayBeStored);
             }
 
             var abandoned = queued.Count + inFlight.Count;
@@ -863,7 +863,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     /// <summary>Accounts an event evicted from a full queue. Runs under the queue lock: counters and a posted notification only.</summary>
     private void OnEvicted(QueuedEvent item)
     {
-        Drop(DropReason.QueueFull, item.Id, item.Action, item.Json, "The queue is full.");
+        Drop(DropReason.QueueFull, item.Id, item.Action, item.Json, "The queue is full.", mayBeStored: item.MayBeStored);
         LogQueueFull();
     }
 
@@ -871,8 +871,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         => value is null || value.Length <= max ? value : value.Substring(0, max);
 
     // The sender counted the drop when it settled the event (under the queue lock); this only notifies.
+    // A rejection is the server's answer for this event: it was not stored, whatever happened to earlier requests.
     private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail, string? code)
-        => Drop(reason, item.Id, item.Action, item.Json, detail, counted: true, code: code);
+        => Drop(reason, item.Id, item.Action, item.Json, detail, counted: true, code: code, mayBeStored: reason != DropReason.Rejected && item.MayBeStored);
 
     // A server reason can quote the event's values; the message and log line keep only its leading field or code.
     private void OnSenderWarning(QueuedEvent item, string reason)
@@ -938,7 +939,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
     }
 
-    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, bool counted = false, string? code = null)
+    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, bool counted = false, string? code = null, bool mayBeStored = false)
     {
         if (!counted)
         {
@@ -949,7 +950,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         {
             // Display fields are bounded (an oversized action or id must not be kept whole in the backlog); the JSON, when
             // kept, carries the event for replay.
-            var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024), code);
+            var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024), code, mayBeStored);
             Notify(() => onDrop(dropped));
         }
     }

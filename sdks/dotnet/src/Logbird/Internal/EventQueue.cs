@@ -34,6 +34,31 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
     public bool TrySettle() => Interlocked.CompareExchange(ref _state, Settled, Pending) == Pending;
 
     public bool TryAbandon() => Interlocked.CompareExchange(ref _state, Abandoned, Pending) == Pending;
+
+    // Whether the server may already hold this event: set when a request carrying it starts, cleared by an answer that
+    // says it was not stored, unless an earlier request carrying it ended without an answer (then it stays set for good).
+    private volatile bool _mayBeStored;
+    private volatile bool _answerLost;
+
+    /// <summary>
+    /// True when the event was put on the wire at least once and no answer settled it, so the server may have stored it.
+    /// </summary>
+    public bool MayBeStored => _mayBeStored;
+
+    /// <summary>A request carrying this event is about to start.</summary>
+    public void OnRequestStart() => _mayBeStored = true;
+
+    /// <summary>The server answered that request without storing this event (a 4xx such as 429 or 401).</summary>
+    public void OnNotStored()
+    {
+        if (!_answerLost)
+        {
+            _mayBeStored = false;
+        }
+    }
+
+    /// <summary>That request ended without an answer that settles this event (a network error, a 5xx, an unacknowledged 2xx).</summary>
+    public void OnAnswerLost() => _answerLost = true;
 }
 
 /// <summary>One flush target, shared by every caller waiting for the same events.</summary>
