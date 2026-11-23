@@ -25,9 +25,9 @@ internal static class LogbirdMetrics
         Counter("logbird.events.delivered", "{event}", "Events the server stored.", s => s.Delivered),
         Counter("logbird.events.rejected", "{event}", "Events the server rejected individually.", s => s.Rejected),
         Counter("logbird.events.filtered", "{event}", "Events skipped by BeforeSend.", s => s.Filtered),
-        Counter("logbird.events.warned", "{warning}", "Warnings about events (identifier whitespace found before sending, server warnings about stored events).", s => s.Warnings),
+        Counter("logbird.events.warned", "{warning}", "Warnings about events (identifiers a server may index differently, found before sending; server warnings about stored events).", s => s.Warnings),
         Counter("logbird.batches.failed", "{batch}", "Batches that failed after all retries and were queued again.", s => s.FailedSends),
-        Create(() => Meter?.CreateObservableCounter("logbird.events.dropped", DroppedByReason, "{event}", "Events that will not be stored, by reason.")),
+        Create(() => Meter?.CreateObservableCounter("logbird.events.dropped", DroppedByReason, "{event}", "Events the SDK stopped trying to deliver, by reason; some may already be stored (DroppedEvent.MayBeStored).")),
         Create(() => Meter?.CreateObservableCounter(
             "logbird.notifications.lost", () => Sum(client => client.NotificationsLost), "{notification}", "OnDrop/OnError notifications skipped because the callbacks fell too far behind.")),
         Create(() => Meter?.CreateObservableCounter(
