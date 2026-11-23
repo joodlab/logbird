@@ -538,15 +538,24 @@ public class FinalCycleTests
     public async Task Missing_and_non_protocol_rejection_codes_become_other()
     {
         var errors = new ConcurrentQueue<Exception>();
+        var drops = new ConcurrentQueue<DroppedEvent>();
         var server = new FakeServer().Then(request => FakeServer.Json(
             HttpStatusCode.Accepted,
-            "{\"accepted\":0,\"ids\":[],\"rejected\":[{\"index\":0,\"reason\":\"x\"},{\"index\":1,\"reason\":\"y\",\"code\":\"invalid_entity_id\"},{\"index\":2,\"reason\":\"z\",\"code\":7}]}"));
-        await using var client = Client(Options(o => o.OnError = errors.Enqueue), server);
+            "{\"accepted\":0,\"ids\":[],\"rejected\":[{\"index\":0,\"reason\":\"x\"},{\"index\":1,\"reason\":\"y\",\"code\":\"not_a_protocol_code\"},{\"index\":2,\"reason\":\"z\",\"code\":7}]}"));
+        await using var client = Client(Options(o =>
+        {
+            o.OnError = errors.Enqueue;
+            o.OnDrop = drops.Enqueue;
+        }), server);
         client.Track(new AuditEvent("a"));
         client.Track(new AuditEvent("b"));
         client.Track(new AuditEvent("c"));
         Assert.True(await client.FlushAsync());
         Assert.Equal(["other", "other", "other"], errors.OfType<LogbirdRejectedException>().Single().Codes);
+
+        // Each drop carries the sanitized code too, never the server's own text for an unknown code.
+        Assert.Equal(["other", "other", "other"], drops.OrderBy(d => d.Action, StringComparer.Ordinal).Select(d => d.Code));
+        Assert.All(errors, e => Assert.DoesNotContain("not_a_protocol_code", e.Message, StringComparison.Ordinal));
     }
 
     [Fact]

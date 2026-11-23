@@ -58,7 +58,6 @@ internal static class LogbirdMetrics
         DropReason.HttpError => "http_error",
         DropReason.TooLarge => "too_large",
         DropReason.Shutdown => "shutdown",
-        DropReason.InvalidEntityId => "invalid_entity_id",
         DropReason.Unacknowledged => "unacknowledged",
         _ => "invalid",
     };

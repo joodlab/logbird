@@ -26,6 +26,9 @@ internal static class JsonDepth
     /// Checks depth and a lower bound of the UTF-8 size (every UTF-16 code unit of text is at least one byte), stopping
     /// as soon as either limit is passed.
     /// </summary>
+    /// <summary>The fewest bytes a target adds besides its text: <c>{"type":"","id":""}</c>.</summary>
+    internal const int TargetFraming = 19;
+
     public static Shape Measure(AuditEvent e, long maxBytes)
     {
         long size = 0;
@@ -35,9 +38,16 @@ internal static class JsonDepth
             return size > maxBytes;
         }
 
+        bool AddBytes(int bytes)
+        {
+            size += bytes;
+            return size > maxBytes;
+        }
+
         if (Add(e.Action) || Add(e.Id) || Add(e.Description) || Add(e.Environment) || Add(e.Outcome) || Add(e.Severity) || Add(e.Source)
-            || Add(e.Actor?.Id) || Add(e.Actor?.Name) || Add(e.Actor?.Email) || Add(e.Tenant?.Id) || Add(e.Tenant?.Name)
-            || Add(e.Executor?.Id) || Add(e.Executor?.Name) || Add(e.Impersonator?.Name))
+            || Add(e.Actor?.Type) || Add(e.Actor?.Id) || Add(e.Actor?.Name) || Add(e.Actor?.Email) || Add(e.Tenant?.Id) || Add(e.Tenant?.Name)
+            || Add(e.Executor?.Type) || Add(e.Executor?.Id) || Add(e.Executor?.Name) || Add(e.Executor?.JobId)
+            || Add(e.Impersonator?.Id) || Add(e.Impersonator?.Name))
         {
             return Shape.TooLarge;
         }
@@ -46,7 +56,9 @@ internal static class JsonDepth
         {
             foreach (var target in e.Targets)
             {
-                if (target is not null && (Add(target.Type) || Add(target.Id) || Add(target.Name)))
+                // Each target is written as {"type":…,"id":…} at least: 19 bytes of framing ({"type":"","id":""}) besides
+                // its text, so a long list of empty targets is measured too, before anything copies it.
+                if (target is not null && (AddBytes(TargetFraming) || Add(target.Type) || Add(target.Id) || Add(target.Name)))
                 {
                     return Shape.TooLarge;
                 }
