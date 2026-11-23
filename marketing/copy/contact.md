@@ -4,6 +4,8 @@ description: Join the Logbird Cloud waitlist or send us a question. We store you
 path: /contact
 ---
 
+Page text renders from `apps/web/src/content/contact.ts` (the form's labels, options and states from `apps/web/src/components/waitlist-form.tsx`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Contact
 
 > **Cloud open (`WEB_APP_URL` set).** H1 "Request access, or ask us anything."; lead "Logbird Cloud is in early access,
