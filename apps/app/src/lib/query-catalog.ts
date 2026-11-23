@@ -97,7 +97,9 @@ export function attributeKey(key: string): string {
  * collide with a core field (`actor.name` the attribute must stay `attr.actor.name`).
  */
 export function attributeQueryKey(attr: string): string {
-  return coreField(attr) || attr === '' ? `attr.${attr}` : attr;
+  // A key the query language would read as something else gets the explicit `attr.` prefix: a core field, an empty
+  // key, a key that itself starts with `attr.`/`attributes.` (the prefix is stripped once), or `_exists_`.
+  return coreField(attr) || attr === '' || attr === '_exists_' || /^(attr|attributes)\./.test(attr) ? `attr.${attr}` : attr;
 }
 
 export const TYPE_BADGE: Record<QueryFieldType | 'map' | 'fn' | 'kw' | 'attr', string> = {

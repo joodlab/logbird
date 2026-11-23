@@ -18,7 +18,7 @@ import {
   sqlSignature,
   TYPE_BADGE,
 } from '@/lib/query-catalog';
-import { formatTerm, type QueryCompletion, queryCompletionAt, quoteIfNeeded } from '@/lib/query-language';
+import { formatField, formatTerm, type QueryCompletion, queryCompletionAt, quoteIfNeeded } from '@/lib/query-language';
 import { lintQuery, type QueryFix } from '@/lib/query-lint';
 import type { RecentQuery } from '@/lib/recent-queries';
 import { type SqlCompletion, sqlCallAt, sqlCompletionAt, sqlLiteralBody } from '@/lib/sql-language';
@@ -430,13 +430,15 @@ const OPERATOR_ROWS: { op: string; detail: string; insert?: string; back?: numbe
   { op: '( )', detail: 'Group terms: (a OR b) c', insert: '()', back: 1 },
 ];
 
-function keyItem(
+/** One field-name suggestion (exported for tests of what it inserts). */
+export function keyItem(
   key: string,
   spec: Pick<Suggestion, 'id' | 'kind' | 'badge' | 'detail' | 'meta' | 'group'>,
   c: { from: number; to: number },
 ): Suggestion {
   // Re-keying an existing term (`act|or:usr_1`) replaces through its colon, so the value is kept.
-  const insert = `${key}:`;
+  // A key that is not a plain name (`ticket status`) is quoted, as the server reads it.
+  const insert = `${formatField(key)}:`;
   return { ...spec, label: key, from: c.from, to: c.to, insert, caret: c.from + insert.length, keepOpen: true };
 }
 
@@ -571,7 +573,7 @@ function querySuggestions(input: CompletionInput): Suggestion[] {
     const attrs = ranked(input.attributes, (a) => matchScore(p, a.key), 20).map((a) => attributeQueryKey(a.key));
     const space = /^\s/.test(after(context.to)) ? '' : ' ';
     return [...keys, ...attrs].map((key) => {
-      const term = `${key}:*`;
+      const term = `${formatField(key)}:*`;
       return {
         id: `ex:${key}`,
         kind: 'term' as const,
