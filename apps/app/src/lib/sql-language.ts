@@ -251,7 +251,7 @@ export type SqlCompletion =
 /** ClickHouse's single-character escapes (`parseEscapeSequence`); any other character stands for itself. */
 const SQL_ESCAPES: Record<string, string> = { a: '\x07', b: '\b', e: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', 0: '\0' };
 /** Escaped characters ClickHouse writes without their backslash; for any other printable one it keeps it (`\z`, `\%`). */
-const SQL_BARE_ESCAPES = new Set(['\\', "'", '"', '`', '/']);
+const SQL_BARE_ESCAPES = new Set(['\\', "'", '"', '`', '/', '=']);
 const utf8 = new TextEncoder();
 // A leading byte-order mark is data in a literal (ClickHouse keeps all three bytes), never something to strip.
 const utf8Text = new TextDecoder('utf-8', { ignoreBOM: true });
