@@ -323,7 +323,17 @@ public class Step4FollowUpTests
                 }
             });
             var before = live.NotificationsLost;
+            var delivered = live.Stats.Delivered;
             live.Track(new AuditEvent("two warnings") { Actor = AuditActor.User(longId), Tenant = new AuditTenant(longId) });
+
+            // Its warnings are queued (and skipped) when the server accepts it, on the sender, after Track returns.
+            await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+            {
+                while (live.Stats.Delivered <= delivered)
+                {
+                    await Task.Delay(10);
+                }
+            });
             Assert.Equal(before + 2, live.NotificationsLost);
         }
         finally
