@@ -86,6 +86,63 @@ it('keeps key order and writes exactly what JSON.stringify would for what it kee
   expect(Object.keys((result as unknown as { metadata: object }).metadata)).toEqual(['b', 'd', 'when', 'z']);
 });
 
+it('decides changes and parties on what toJSON returns, as sending does', () => {
+  const event = {
+    id: 'e',
+    action: 'a',
+    actor: { toJSON: () => ({ type: 'user', id: 'user_1', name: 'Fictional User' }) },
+    changes: [{ toJSON: () => ({ field: 'token', before: 'visible', after: 'also visible' }) }],
+  } as unknown as EventInput;
+  expect(JSON.stringify(redact({ keys: /actor|token/ })(event))).toBe(
+    '{"id":"e","action":"a","actor":{"type":"user","id":"user_1","name":"[redacted]"},"changes":[{"field":"token","before":"[redacted]","after":"[redacted]"}]}',
+  );
+});
+
+it('reads every value exactly as sending it reads it', () => {
+  const make = () => {
+    let x = 0;
+    return {
+      id: 'e',
+      action: 'a',
+      metadata: {
+        a: {
+          get v() {
+            x += 1;
+            return x;
+          },
+        },
+        get b() {
+          return x;
+        },
+      },
+    } as unknown as EventInput;
+  };
+  expect(JSON.stringify(redact({ keys: /^never$/ })(make()))).toBe(JSON.stringify(make()));
+
+  // A change whose field is a getter: it runs once, and the change is still redacted.
+  let reads = 0;
+  const change = {
+    get field() {
+      reads += 1;
+      return 'password';
+    },
+    after: 'secret',
+  };
+  const result = redact()({ id: 'e', action: 'a', changes: [change] } as unknown as EventInput);
+  expect(reads).toBe(1);
+  expect(JSON.stringify(result)).toBe('{"id":"e","action":"a","changes":[{"field":"password","after":"[redacted]"}]}');
+});
+
+it('keeps a literal __proto__ key and unwraps boxed primitives, as JSON does', () => {
+  const metadata = JSON.parse('{"__proto__":5,"n":0}') as Record<string, unknown>;
+  metadata.n = new Object(7);
+  const result = redact({ keys: /^never$/ })({ id: 'e', action: 'a', metadata } as unknown as EventInput);
+  expect(JSON.stringify(result)).toBe('{"id":"e","action":"a","metadata":{"__proto__":5,"n":7}}');
+  expect(Object.hasOwn((result as unknown as { metadata: object }).metadata, '__proto__')).toBe(true);
+  const hidden = redact()({ id: 'e', action: 'a', metadata: { token: new Object(7) } } as unknown as EventInput);
+  expect(JSON.stringify(hidden)).toBe('{"id":"e","action":"a","metadata":{"token":"[redacted]"}}');
+});
+
 it('lists the same identifier fields as the .NET SDK', () => {
   expect(IDENTIFIER_FIELDS).toEqual([
     'actor.type',
