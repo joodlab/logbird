@@ -207,7 +207,8 @@ audit log. A request can reach the server and store the event while its answer i
   that failed before any byte left the process), and it stays true unless an answer settled the event. The server may
   have stored it.
 - **`false`**: no request carrying the event was ever started, or every request carrying it was answered "not
-  stored" (a 4xx). One request without such an answer keeps it `true`, whatever later requests are told.
+  stored" (a 4xx). A later 4xx alone cannot clear an earlier request that had no such answer; only a rejection of the
+  event's own content settles it (below).
 
 `MayBeStored` follows what happened to the event's requests, not the reason. These are the values each reason can have:
 
