@@ -87,3 +87,13 @@ describe('Enter never changes a query the server accepts (the reader chooses a c
     }
   });
 });
+
+describe('fixes for a query the server accepts', () => {
+  it('respell whole server terms only, and only into a query that still parses', () => {
+    // The console's tokenizer reads `ab"cd` as opening a quote; the server reads two field terms. No fix spans both.
+    expect(lintQuery('action: (ab"cd OR next) tenant:west', isField).filter((f) => f.end > 24)).toEqual([]);
+    // `action:OR` does not parse, so `action=OR` is not offered as a filter.
+    expect(lintQuery('action=OR', isField)).toEqual([]);
+    expect(lintQuery('action=booked', isField)[0]).toMatchObject({ start: 0, end: 13, replacement: 'action:booked' });
+  });
+});

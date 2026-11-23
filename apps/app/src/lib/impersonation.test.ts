@@ -48,6 +48,9 @@ describe('who did it', () => {
     // `/.*/` also matches the empty impersonator of self activity, so the union is everything.
     expect(whoFilter('impersonator:(* OR /.*/)')).toBe('all');
     expect(whoFilter('impersonator:(amy OR /.*/)')).toBe('all');
+    // So does an exact empty id.
+    expect(whoFilter('impersonator:(* OR "")')).toBe('all');
+    expect(whoFilter('impersonator:(amy OR "")')).toBe('all');
   });
 
   it('drops specific agents with the split, so the timeline never contradicts itself (M1)', () => {

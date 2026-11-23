@@ -498,6 +498,20 @@ describe('neighbourSafeInsert (accepting a completion changes only its own term)
     expect(neighbourSafeInsert('action:booked ', 14, 14, 'OR ', 3, false, false)).toBe('OR ');
   });
 
+  it('never glues a completion onto an operator: it goes after a space, or not at all', () => {
+    // `one ANDimpersonator:*` would be a field named `ANDimpersonator`; `one ORNOT two` would lose the OR.
+    expect(neighbourSafeInsert('one AND two', 7, 7, 'impersonator:*', 14)).toBe(' impersonator:*');
+    expect(neighbourSafeInsert('one OR', 6, 6, 'NOT ', 4, false, false)).toBe(' NOT ');
+    // Right before `two`, NOT would negate it: declined.
+    expect(neighbourSafeInsert('one OR two', 6, 6, 'NOT ', 4, false, false)).toBeNull();
+  });
+
+  it('checks the neighbours even when the rest of the query cannot be finished yet', () => {
+    // `attempt:[` cannot be finished by a word; the text before it is checked: `booked` unquoted would turn the
+    // attribute `-tenant` into NOT tenant.
+    expect(neighbourSafeInsert('action:"b"-tenant:west attempt:[', 7, 10, 'booked ', 7, true)).toBe('"booked"');
+  });
+
   it('refuses a key that would take the next term as its value', () => {
     expect(neighbourSafeInsert('action:booked', 0, 0, 'outcome:', 8)).toBeNull();
     expect(neighbourSafeInsert('fixed in #290', 6, 8, 'impersonator:', 13)).toBeNull();
