@@ -41,8 +41,11 @@ app.MapPut("/invoices/{id}", (string id, IAuditLog audit) =>
 - **Configure callbacks** must complete synchronously; prepare anything asynchronous before calling `Record`. If the
   callback throws, the half-built event is not recorded and is reported through `OnDrop` as `Invalid`. A prepared
   `AuditEvent` passed to `Record` is copied and never changed.
-- **Correlation headers**: `X-Logbird-Operation` and `X-Request-Id` (up to 256 characters; a longer value is ignored, never
-  cut) and `traceparent`. A request re-executed by an exception handler keeps its first operation id.
+- **Correlation headers**: `traceparent` always. `X-Logbird-Operation` and `X-Request-Id` (up to 256 characters; a longer
+  value is ignored, never cut) only when you turn on `UseOperationHeader` and `UseRequestIdHeader`, both off by default:
+  any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or
+  overwrites what a client sent. Otherwise each request gets a new operation id and its `TraceIdentifier` as request
+  id. A request re-executed by an exception handler keeps its first operation id.
 - **Background jobs**: capture `audit.Carrier(parentEventId)` when you enqueue work, store it in the job payload
   (`carrier.ToJson()` and `AuditCarrier.FromJson(json)` work in trimmed and AOT apps, or include `AuditCarrier` in your
   own source-generated context), and record from the worker with

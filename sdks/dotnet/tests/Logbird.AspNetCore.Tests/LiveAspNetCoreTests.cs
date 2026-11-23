@@ -44,6 +44,8 @@ public class LiveAspNetCoreTests(ITestOutputHelper output)
             {
                 r.ServiceName = "billing-api";
                 r.ActorEmailClaimTypes.Add("email");
+                r.UseRequestIdHeader = true;
+                r.UseOperationHeader = true;
             });
         var app = builder.Build();
         app.Use((context, next) =>

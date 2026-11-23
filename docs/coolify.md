@@ -31,6 +31,16 @@ All four application roles use `pull_policy: always` and contain no build sectio
 The migration dependency still gates the API and worker. Live Coolify upgrade
 acceptance remains tracked in #77.
 
+### First webhook delivery upgrade
+
+After blocking ingress and draining in-flight requests, run `docker compose stop app server worker`
+on the destination host with the resource's generated project, Compose file and environment described above.
+Check `docker compose ps --all app server worker` with the same invocation and verify every old `server`
+container has stopped before pressing **Redeploy**. Stop any previous-version servers outside that resource
+that can still ingest. An event accepted during overlap with the new worker can remain searchable while
+its webhook delivery is missed. See [Webhook delivery on upgrade](self-hosting.md#webhook-delivery-on-upgrade)
+for the search and cursor reconciliation procedure.
+
 ## Build from source
 
 For unreleased/custom code, configure the Compose Location to load

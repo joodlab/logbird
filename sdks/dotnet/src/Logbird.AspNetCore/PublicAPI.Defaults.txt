@@ -11,5 +11,5 @@ Logbird.AspNetCore.LogbirdRequestOptions
   ResolveTenant = null
   ServiceName = null
   TenantIdClaimTypes = mutable List ["tenant_id"]
-  UseOperationHeader = true
-  UseRequestIdHeader = true
+  UseOperationHeader = false
+  UseRequestIdHeader = false

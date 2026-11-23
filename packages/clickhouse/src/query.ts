@@ -10,6 +10,7 @@ import {
   RECORD_HINT,
 } from '@logbird/contracts';
 
+import { re2Problem } from './re2';
 import { pairedTargetSql } from './target-pair';
 
 export { QueryError } from '@logbird/contracts';
@@ -28,9 +29,22 @@ export function recordTargetPredicate(type: string, id: string, index?: number) 
 }
 
 export type Term = { field: string; value: string; negate: boolean; start: number; end: number };
+export type CompileOptions = {
+  /**
+   * Webhook filters only. `now` in relative times is each event's `received_at` instead of one clock, so a filter selects
+   * the same events whenever and however often discovery runs, and its offset range does not depend on the scan time.
+   * Regexes are checked against RE2's syntax instead of JavaScript's, refusing only what RE2 is known to reject.
+   * Explorer, search, facets and exports never pass this, so they keep their existing behaviour.
+   */
+  webhook?: boolean;
+};
+/** Compile options for webhook filters: discovery, the send-time recheck, and create and PATCH validation. */
+export const WEBHOOK_FILTER: CompileOptions = { webhook: true };
+/** Relative offsets in webhook filters, fixed independently of any clock: about 100 years either way. */
+export const WEBHOOK_RELATIVE_LIMIT_MS = 36_500 * 86_400_000;
 
 // Parse with the same grammar used by the console. All data values are bound as parameters.
-function compile(q: string, now: number, tokens?: ParsedQueryToken[]) {
+function compile(q: string, now: number, tokens?: ParsedQueryToken[], options: CompileOptions = {}) {
   const params: Record<string, string | number> = {};
   let terms = 0;
   let parameter = 0;
@@ -67,14 +81,24 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[]) {
       const date = info?.type === 'date' || (!info && /^(?:\d{4}-\d{2}-\d{2}|now(?:$|[-+/]))/.test(token.value));
       if (date) {
         let raw = token.value;
+        let relativeSql: string | undefined;
         if (raw.startsWith('now')) {
           const relative = /^now(?:([+-])(\d+)([smhdw]))?(\/d)?$/.exec(raw);
           if (!relative) fail('type', token.start, token.end, 'Use now, now-7d or now/d (s/m/h/d/w)');
           const units: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
-          const instant = now + (relative[1] === '-' ? -1 : 1) * Number(relative[2] ?? 0) * units[relative[3] ?? 's']!;
-          const rounded = relative[4] ? Math.floor(instant / 86_400_000) * 86_400_000 : instant;
-          if (!Number.isFinite(rounded) || Math.abs(rounded) > 8.64e15) fail('type', token.start, token.end, 'Relative date is out of range');
-          raw = new Date(rounded).toISOString();
+          const offset = (relative[1] === '-' ? -1 : 1) * Number(relative[2] ?? 0) * units[relative[3] ?? 's']!;
+          if (options.webhook) {
+            // Measured from each arrival, so the accepted range must not depend on when the filter is compiled.
+            if (!(Math.abs(offset) <= WEBHOOK_RELATIVE_LIMIT_MS)) fail('type', token.start, token.end, 'Relative date is out of range');
+            const shifted = `received_at + toIntervalMillisecond(${bind(offset, 'Int64')})`;
+            relativeSql = relative[4] ? `toDateTime64(toStartOfDay(${shifted}, 'UTC'), 3, 'UTC')` : shifted;
+            raw = new Date(0).toISOString();
+          } else {
+            const instant = now + offset;
+            const rounded = relative[4] ? Math.floor(instant / 86_400_000) * 86_400_000 : instant;
+            if (!Number.isFinite(rounded) || Math.abs(rounded) > 8.64e15) fail('type', token.start, token.end, 'Relative date is out of range');
+            raw = new Date(rounded).toISOString();
+          }
         }
         const calendar = raw.slice(0, 10);
         const midnight = new Date(`${calendar}T00:00:00Z`);
@@ -88,7 +112,7 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[]) {
         )
           fail('type', token.start, token.end, `${field} is a date; use YYYY-MM-DD or ISO-8601`);
         if (!col) expr = `parseDateTime64BestEffortOrNull(${expr},3,'UTC')`;
-        return `${expr} ${operator} parseDateTime64BestEffort(${bind(d.toISOString())},3,'UTC')`;
+        return `${expr} ${operator} ${relativeSql ?? `parseDateTime64BestEffort(${bind(d.toISOString())},3,'UTC')`}`;
       }
       if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(token.value) || !Number.isFinite(Number(token.value)))
         fail('type', token.start, token.end, `${field} is a number`);
@@ -98,14 +122,19 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[]) {
     let test: string;
     const x = info?.type === 'array' ? 'x' : expr;
     if (token.kind === 'regex') {
-      try {
-        const pattern = new RegExp(token.value);
-        if ([...pattern.source.matchAll(/(?<!\\)\{(\d+)(?:,(\d*))?\}/g)].some((m) => Number(m[1]) > 1000 || Number(m[2] ?? 0) > 1000))
-          throw new Error('RE2 repetitions are limited to 1000');
-        if (/\(\?[=!<]|\\[1-9]|\(\?>/.test(token.value)) throw new Error('Unsupported RE2 construct');
-      } catch {
-        fail('type', token.start, token.end, 'Use a valid RE2 regex without lookaround or backreferences');
-      }
+      if (options.webhook) {
+        // ClickHouse runs the pattern with RE2. Refuse what RE2 is known to reject; anything else is left to RE2.
+        const problem = re2Problem(token.value);
+        if (problem) fail('type', token.start, token.end, problem);
+      } else
+        try {
+          const pattern = new RegExp(token.value);
+          if ([...pattern.source.matchAll(/(?<!\\)\{(\d+)(?:,(\d*))?\}/g)].some((m) => Number(m[1]) > 1000 || Number(m[2] ?? 0) > 1000))
+            throw new Error('RE2 repetitions are limited to 1000');
+          if (/\(\?[=!<]|\\[1-9]|\(\?>/.test(token.value)) throw new Error('Unsupported RE2 construct');
+        } catch {
+          fail('type', token.start, token.end, 'Use a valid RE2 regex without lookaround or backreferences');
+        }
       test = `match(${x}, ${bind(`^(?:${token.value})$`)})`;
     } else if (presence) test = info?.type === 'number' || info?.type === 'date' ? '1' : `${x} != ''`;
     else if (token.wildcard) test = `startsWith(${x}, ${bind(token.value.slice(0, -1))})`;
@@ -174,8 +203,8 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[]) {
 
   return { sql: disjunction(parseQueryExpression(q, tokens)), params };
 }
-export function compileQuery(q = '', now = Date.now()) {
-  return compile(q, now);
+export function compileQuery(q = '', now = Date.now(), options?: CompileOptions) {
+  return compile(q, now, undefined, options);
 }
 export function parseQuery(q = '') {
   const tokens: ParsedQueryToken[] = [];

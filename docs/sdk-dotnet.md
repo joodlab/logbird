@@ -103,7 +103,9 @@ You did not pass the user or the tenant. `IAuditLog` fills every field the event
   is added only if you opt in. Only the request's authenticated primary identity is read.
 - **Tenant**: from the `tenant_id` claim.
 - **Executor**: `api:<your application name>` (set `ServiceName` to choose the name).
-- **Context**: operation, request and trace ids, client IP and user agent, from the request.
+- **Context**: operation, request and trace ids, client IP and user agent, from the request. The `X-Request-Id` and
+  `X-Logbird-Operation` headers are used only when you turn on `UseRequestIdHeader` and `UseOperationHeader` (off by
+  default): any caller can send them, so enable them only behind an ingress that sets or strips them.
 
 Your claims are different? Change the claim types or supply your own resolvers. These options go into your one
 `AddLogbird` call (it is registered once; a second call changes nothing):

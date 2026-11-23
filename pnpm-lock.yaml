@@ -354,9 +354,18 @@ importers:
       '@logbird/clickhouse':
         specifier: workspace:*
         version: link:../../packages/clickhouse
+      '@logbird/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@logbird/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@logbird/email':
+        specifier: workspace:*
+        version: link:../../packages/email
+      '@logbird/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@7.0.2)(valibot@1.4.2(typescript@7.0.2))(zod@4.6.7)
@@ -621,6 +630,9 @@ importers:
 
   packages/email:
     dependencies:
+      '@logbird/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@7.0.2)(valibot@1.4.2(typescript@7.0.2))(zod@4.6.7)

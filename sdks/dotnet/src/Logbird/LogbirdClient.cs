@@ -679,18 +679,20 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     internal static bool IsInsideDelivery => InsideLogbird.Value;
 
-    private static HttpClient CreateHttpClient()
-    {
-#if NET8_0_OR_GREATER
-        var handler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false };
-#else
-        var handler = new HttpClientHandler { AllowAutoRedirect = false };
-#endif
+    private static HttpClient CreateHttpClient() => new(CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
 
-        // Never follow redirects: a redirect would forward the audit body to another origin. A 3xx is reported as a
-        // permanent HTTP error instead.
-        return new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-    }
+    /// <summary>
+    /// The handler of a client this SDK creates. It never follows redirects (a redirect would forward the audit body to
+    /// another origin; a 3xx is reported as a permanent HTTP error instead) and never uses a proxy (a system or environment
+    /// proxy would read the ingest key on an HTTP endpoint, or behind TLS interception). To send through a proxy, pass your own
+    /// <see cref="HttpClient"/>.
+    /// </summary>
+    internal static HttpMessageHandler CreateHandler()
+#if NET8_0_OR_GREATER
+        => new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false, UseProxy = false };
+#else
+        => new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false };
+#endif
 
     private static string ReadVersion()
     {
@@ -925,9 +927,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         LogQueueFull();
     }
 
-    private static string? Bounded(string? value, int max = 256)
-        => value is null || value.Length <= max ? value : value.Substring(0, max);
-
     // The sender counted the drop when it settled the event (under the queue lock); this only notifies.
     // A rejection is the server's answer about this event's content, which an earlier request would have met too: it was
     // not stored. Two codes say nothing about content: stored_event_unreadable (something with this id is stored and cannot
@@ -1061,9 +1060,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             return null;
         }
 
-        // Display fields are bounded (an oversized action or id must not be kept whole in the backlog); the JSON, when
-        // kept, carries the event for replay.
-        var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024), code, mayBeStored);
+        // Fields are bounded (DroppedEvent: an oversized action or id must not be kept whole in the backlog); a cut id is
+        // identified by its fingerprint, and the JSON, when kept, carries the event for replay.
+        var dropped = new DroppedEvent(reason, id, action, json, detail, code, mayBeStored);
         return () => Notify(() => onDrop(dropped));
     }
 
