@@ -340,26 +340,66 @@ it('cannot be moved by an app instance clock: fences use the database clock, and
   expect(await prisma.retentionRun.count({ where: { projectId: f.project } })).toBe(before);
 });
 
+/** Kills this project's pending mutations on `events` by id (a held mutation must never stay on the shared table). */
+async function killHeld(project: string) {
+  for (const m of await pendingProjectMutations(maintenanceClickhouse, project))
+    if (m.table === 'events')
+      await maintenanceClickhouse.command({
+        query: `KILL MUTATION WHERE database = currentDatabase() AND mutation_id = '${m.mutationId.replace(/[^\w.-]/g, '')}' SYNC`,
+      });
+}
+/**
+ * A hard ceiling on a held mutation (RULES, shared store): after `ms` it is killed by id whatever the assertions are
+ * doing, so a held mutation that went wrong never sits on the shared `events` table waiting for a `finally`.
+ */
+function holdCeiling(project: string, ms = 90_000) {
+  let fired = false;
+  const timer = setTimeout(() => {
+    fired = true;
+    void killHeld(project);
+  }, ms);
+  return {
+    get fired() {
+      return fired;
+    },
+    clear: () => clearTimeout(timer),
+  };
+}
+/** Whether this exact mutation is still pending (checked at the end of each held-mutation test). */
+async function stillPending(mutationId: string) {
+  const [row] = await maintenanceClickhouse
+    .query({
+      query: 'SELECT count() n FROM system.mutations WHERE database = currentDatabase() AND mutation_id = {id:String} AND is_done = 0',
+      query_params: { id: mutationId },
+      format: 'JSONEachRow',
+    })
+    .then((r) => r.json<{ n: string }>());
+  return Number(row?.n ?? 0) > 0;
+}
+
 it(
   'never refuses ingest while a foreign mutation that cannot be applied on the fly is pending; reads say so and readiness holds',
   purgeLimit(180_000),
   async () => {
     await f.authorize();
     const foreign = `${f.project}-foreign`;
-    // 40,000 rows: the held mutation sleeps 0.25 ms per row, about 2 s per 8,192-row block, under ClickHouse's 3 s
-    // background cap (so it never fails and retries), for roughly 10 s pending in total.
-    for (let start = 0; start < 40_000; start += 10_000)
-      await insertEvents(
-        clickhouse,
-        Array.from({ length: 10_000 }, (_, k) =>
-          f.row({ id: `foreign-${start + k}`, action: 'qa.foreign', occurredAt: new Date(Date.now() - DAY).toISOString() }),
-        ).map((row) => ({ ...row, project_id: foreign })),
-      );
+    // 8,000 rows sleeping 0.35 ms each: at most 2.8 s even if every one of them lands in one block, whatever block size
+    // the store applies mutations in (30,000 rows was seen), so the held mutation stays under ClickHouse's 3 s
+    // background sleep cap and never fails and retries. The DELETE's normal pass over the table's parts keeps it pending
+    // for the assertions. Fewer than 10,000 rows, so this fixture is not a load run by itself.
+    await insertEvents(
+      clickhouse,
+      Array.from({ length: 8000 }, (_, k) =>
+        f.row({ id: `foreign-${k}`, action: 'qa.foreign', occurredAt: new Date(Date.now() - DAY).toISOString() }),
+      ).map((row) => ({ ...row, project_id: foreign })),
+    );
+    let heldId: string | undefined;
+    let ceiling: ReturnType<typeof holdCeiling> | undefined;
     try {
       // An operator's mutation with now() in its predicate, created without Logbird's initiator settings.
       await maintenanceClickhouse.command({
         query:
-          'ALTER TABLE events DELETE WHERE project_id = {fp:String} AND timestamp < now() AND if(project_id = {fp:String}, sleepEachRow(0.00025), 0) = 0',
+          'ALTER TABLE events DELETE WHERE project_id = {fp:String} AND timestamp < now() AND if(project_id = {fp:String}, sleepEachRow(0.00035), 0) = 0',
         query_params: { fp: foreign },
         clickhouse_settings: {
           mutations_sync: '0',
@@ -369,7 +409,10 @@ it(
           mutations_execute_subqueries_on_initiator: 0,
         } as never,
       });
-      expect((await pendingProjectMutations(maintenanceClickhouse, foreign)).length).toBe(1);
+      const [held] = await pendingProjectMutations(maintenanceClickhouse, foreign);
+      expect(held).toBeDefined();
+      heldId = held?.mutationId;
+      ceiling = holdCeiling(foreign);
       // Ingest is never refused: a new event and an exact retry (which goes through the identity lookups) both land.
       const event = liveEvent(7000);
       expect((await f.post(event)).status).toBe(202);
@@ -385,20 +428,19 @@ it(
       // Readiness does not flip.
       expect((await f.management('/readyz')).status).toBe(200);
       expect((await pendingProjectMutations(maintenanceClickhouse, foreign)).length).toBe(1);
-      const deadline = Date.now() + slowStore(120_000);
       while ((await pendingProjectMutations(maintenanceClickhouse, foreign)).length) {
-        if (Date.now() > deadline) throw new Error('The foreign mutation did not finish');
+        if (ceiling.fired) throw new Error('The held foreign mutation passed its 90 s ceiling and was killed by id');
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
+      if (ceiling.fired) throw new Error('The held foreign mutation passed its 90 s ceiling and was killed by id');
       const recovered = await f.management(`/api/projects/${f.project}/events?from=${new Date(Date.now() - 7 * DAY).toISOString()}`);
       expect(recovered.status).toBe(200);
       expect((await recovered.json()).data.map((e: { id: string }) => e.id)).toContain(event.id);
     } finally {
       // Never leave the held mutation behind, even when an assertion failed: it would hold other mutations on its part.
-      for (const m of await pendingProjectMutations(maintenanceClickhouse, foreign))
-        await maintenanceClickhouse.command({
-          query: `KILL MUTATION WHERE database = currentDatabase() AND mutation_id = '${m.mutationId.replace(/[^\w.-]/g, '')}' SYNC`,
-        });
+      ceiling?.clear();
+      await killHeld(foreign);
+      if (heldId) expect(await stillPending(heldId)).toBe(false);
       for (const table of ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys'])
         await maintenanceClickhouse.command({
           query: `DELETE FROM ${table} WHERE project_id = {fp:String}`,
@@ -414,14 +456,16 @@ it(
   purgeLimit(180_000),
   async () => {
     await f.authorize();
-    // An operator's mutation on this project's own rows. 20,000 rows in one part: the background mutation sleeps 0.3 ms
-    // a row per 8,192-row block (about 2.5 s, under ClickHouse's 3 s cap, so it completes and never blocks other work);
-    // a read takes the part as one larger block, so applying the predicate exceeds the cap and fails the read. Only
-    // reads that reach these rows fail; that is the case readers must report clearly.
+    // An operator's mutation on this project's own rows whose predicate errors when applied: 20,000 rows sleeping 0.3 ms
+    // each exceed ClickHouse's 3 s sleep cap in one block, so a read that reaches them fails, which is the case readers
+    // must report clearly. The background mutation fails and retries in the same way (the store applies mutations in
+    // blocks of about 30,000 rows), so the hold is bounded by a 90 s ceiling and killed by id in `finally`.
     await insertEvents(
       clickhouse,
       Array.from({ length: 20_000 }, (_, i) => f.row({ id: `held-${i}`, action: 'qa.held', occurredAt: new Date(Date.now() - DAY).toISOString() })),
     );
+    let heldId: string | undefined;
+    let ceiling: ReturnType<typeof holdCeiling> | undefined;
     try {
       await maintenanceClickhouse.command({
         query:
@@ -429,7 +473,10 @@ it(
         query_params: { p: f.project },
         clickhouse_settings: { mutations_sync: '0', allow_nondeterministic_mutations: 1, short_circuit_function_evaluation: 'force_enable' } as never,
       });
-      expect((await pendingProjectMutations(maintenanceClickhouse, f.project)).length).toBe(1);
+      const [held] = await pendingProjectMutations(maintenanceClickhouse, f.project);
+      expect(held).toBeDefined();
+      heldId = held?.mutationId;
+      ceiling = holdCeiling(f.project);
       // The read fails because the predicate errors when applied, not because the mutation cannot be applied on the fly.
       const direct = await clickhouse
         .query({ query: 'SELECT count() n FROM events WHERE project_id={p:String}', query_params: { p: f.project }, format: 'JSONEachRow' })
@@ -448,13 +495,12 @@ it(
       expect(blocked.headers.get('Retry-After')).toBe('30');
       expect((await blocked.json()).error.code).toBe('store_maintenance_blocking');
       expect((await f.management('/readyz')).status).toBe(200);
+      if (ceiling.fired) throw new Error('The held mutation passed its 90 s ceiling and was killed by id');
     } finally {
       // Never leave the held mutation behind, even when an assertion failed.
-      for (const m of await pendingProjectMutations(maintenanceClickhouse, f.project))
-        if (m.table === 'events')
-          await maintenanceClickhouse.command({
-            query: `KILL MUTATION WHERE database = currentDatabase() AND mutation_id = '${m.mutationId.replace(/[^\w.-]/g, '')}' SYNC`,
-          });
+      ceiling?.clear();
+      await killHeld(f.project);
+      if (heldId) expect(await stillPending(heldId)).toBe(false);
     }
   },
 );
