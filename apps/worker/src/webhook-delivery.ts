@@ -33,6 +33,10 @@ type DeliveryOptions = {
   failureLimit: number;
   transport?: WebhookTransportOptions;
   beforeRequest?: (tx: Prisma.TransactionClient, delivery: WebhookDelivery) => Promise<void>;
+  /** Internal: statement timeout of each claim statement. Default 2 s. */
+  claimTimeoutMs?: number;
+  /** Tests only: make the claim scan of one endpoint slow, to force a statement timeout there. */
+  claimScanDelay?: { endpointId: string; seconds: number };
 };
 
 const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }: ScopeColumns) => ({
@@ -45,7 +49,14 @@ const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }
 // Bind UTC wall time to the timestamp columns independently of the session time zone.
 const at = (time: Date) => Prisma.sql`${time.toISOString()}::timestamp`;
 
-type PassScope = { now: Date; leaseDeadline: number; perEndpoint: number; excludeEndpoints: string[] };
+type PassScope = {
+  now: Date;
+  leaseDeadline: number;
+  perEndpoint: number;
+  excludeEndpoints: string[];
+  timeoutMs: number;
+  scanDelay?: DeliveryOptions['claimScanDelay'];
+};
 
 const eligibleEndpoint = (excludeEndpoints: string[]) => Prisma.sql`
   e.enabled AND NOT e."scopeReviewRequired" AND NOT e."filterReviewRequired" AND NOT (e.id = ANY(${excludeEndpoints}::text[]))`;
@@ -77,7 +88,7 @@ function rankProjects(scope: PassScope, projects?: string[]) {
  * scanned in order and skipping rows another transaction holds (`FOR UPDATE SKIP LOCKED` inside the scan), at most the
  * endpoint's room (fewer than `perEndpoint` live leases and 50 attempts per second), and at most `cap` per endpoint.
  */
-function claimableRows(scope: PassScope, project: Prisma.Sql, cap?: number) {
+function claimableRows(scope: PassScope, project: Prisma.Sql, cap?: number, endpointId?: string) {
   const { now, perEndpoint } = scope;
   const room = Prisma.sql`least(
     ${perEndpoint} - (
@@ -100,7 +111,9 @@ function claimableRows(scope: PassScope, project: Prisma.Sql, cap?: number) {
       LIMIT greatest(0, ${room})
       FOR UPDATE SKIP LOCKED
     ) row
-    WHERE e."projectId" = ${project} AND ${eligibleEndpoint(scope.excludeEndpoints)}`;
+    WHERE e."projectId" = ${project} AND ${eligibleEndpoint(scope.excludeEndpoints)}
+      ${endpointId ? Prisma.sql`AND e.id = ${endpointId}` : Prisma.empty}
+      ${scope.scanDelay ? Prisma.sql`AND CASE WHEN e.id = ${scope.scanDelay.endpointId} THEN (SELECT true FROM pg_sleep(${scope.scanDelay.seconds}) WHERE e.id IS NOT NULL) ELSE true END` : Prisma.empty}`;
 }
 
 /**
@@ -110,13 +123,13 @@ function claimableRows(scope: PassScope, project: Prisma.Sql, cap?: number) {
  * leases, writes the attempts and records the project's claim time for the rotation. An expired row only takes the lease,
  * so the claimant can settle its ended retry window without a new attempt.
  */
-async function claimProject(scope: PassScope, projectId: string, limit: number): Promise<Claim[]> {
+async function claimProject(scope: PassScope, projectId: string, limit: number, endpointId?: string): Promise<Claim[]> {
   const { now, leaseDeadline } = scope;
   const [, rows] = await prisma.$transaction([
-    prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', '2s', true)`,
+    prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', ${`${scope.timeoutMs}ms`}, true)`,
     prisma.$queryRaw<(WebhookDelivery & { expired: boolean })[]>(Prisma.sql`
       WITH picked AS (
-        SELECT id, "previousNumber", leased FROM (${claimableRows(scope, Prisma.sql`${projectId}`)}) candidates
+        SELECT id, "previousNumber", leased FROM (${claimableRows(scope, Prisma.sql`${projectId}`, undefined, endpointId)}) candidates
         ORDER BY "nextAttemptAt", id LIMIT ${limit}
       ),
       interrupted AS (
@@ -157,7 +170,7 @@ async function claimProject(scope: PassScope, projectId: string, limit: number):
 async function claimFair(scope: PassScope, ranked: string[], limit: number): Promise<{ claims: Claim[]; projects: string[] }> {
   const { now, leaseDeadline } = scope;
   const [, rows] = await prisma.$transaction([
-    prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', '2s', true)`,
+    prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', ${`${scope.timeoutMs}ms`}, true)`,
     prisma.$queryRaw<(WebhookDelivery & { expired: boolean; claimProjectId: string; turn: bigint })[]>(Prisma.sql`
       WITH picked AS (
         SELECT ranked."projectId", ranked.turn, first.id, first."previousNumber", first.leased
@@ -197,6 +210,22 @@ async function claimFair(scope: PassScope, ranked: string[], limit: number): Pro
     claims: rows.map(({ expired, claimProjectId: _project, turn: _turn, ...delivery }) => ({ delivery, expired, leaseDeadline })),
     projects: rows.map(({ claimProjectId }) => claimProjectId),
   };
+}
+
+/** A project's eligible endpoints with a due, lease-free row, by their oldest due row. At most 10 per project. */
+async function projectEndpoints(scope: PassScope, projectId: string) {
+  const { now } = scope;
+  const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+    SELECT e.id FROM "WebhookEndpoint" e
+    CROSS JOIN LATERAL (
+      SELECT "nextAttemptAt" FROM "WebhookDelivery"
+      WHERE "endpointId" = e.id AND status = 'pending'
+        AND "nextAttemptAt" <= ${at(now)} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${at(now)})
+      ORDER BY "nextAttemptAt", id LIMIT 1
+    ) due
+    WHERE e."projectId" = ${projectId} AND ${eligibleEndpoint(scope.excludeEndpoints)}
+    ORDER BY due."nextAttemptAt", e.id`);
+  return rows.map(({ id }) => id);
 }
 
 /**
@@ -253,9 +282,15 @@ async function invalidScopedEndpoints(now: Date, projects?: string[]) {
  * one is claimed within ceil(P / N) passes, and the r-th oldest claimable row of a project within r * ceil(P / N) passes.
  * Implementation: the fair phase is one statement per pass (`claimFair`) and the fill phase claims per project. A failed
  * fair-phase statement rolls back as a whole (no lease, attempt or rotation change), and the pass then retries the fair
- * phase one project at a time; only a failure before any claim (holding scopes, ranking) fails the pass.
+ * phase one project at a time. A project whose claim fails or times out is retried one endpoint at a time (at most its
+ * 10 endpoints, oldest due row first), so one endpoint's scan cannot block a sibling. Only a failure before any claim
+ * (holding scopes, ranking) fails the pass. These bounds hold for row locks Logbird itself creates; see the self-hosting
+ * guide for transactions held by other clients.
  */
-export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint'>, projectId?: string | readonly string[]) {
+export async function claimWebhookDeliveries(
+  options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimScanDelay'>,
+  projectId?: string | readonly string[],
+) {
   const projects = projectId === undefined ? undefined : typeof projectId === 'string' ? [projectId] : [...projectId];
   // Sample before PostgreSQL's clock so the local retry deadline is conservative and immune to host clock skew.
   const leaseDeadline = performance.now() + LEASE_MS;
@@ -267,7 +302,14 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
   });
   const capacity = options.concurrency - liveLeases;
   if (capacity <= 0) return [];
-  const scope: PassScope = { now, leaseDeadline, perEndpoint: options.perEndpoint, excludeEndpoints: [] };
+  const scope: PassScope = {
+    now,
+    leaseDeadline,
+    perEndpoint: options.perEndpoint,
+    excludeEndpoints: [],
+    timeoutMs: options.claimTimeoutMs ?? 2000,
+    scanDelay: options.claimScanDelay,
+  };
   // An endpoint with an invalid stored scope gets the existing scope hold before it can take a slot.
   for (const { id, scope: columns, updatedAt } of await invalidScopedEndpoints(now, projects)) {
     scope.excludeEndpoints.push(id);
@@ -284,8 +326,27 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
     } catch {
       // A failed claim cannot hold up the other projects; claims committed so far are still dispatched.
       console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, claimed: claims.length }));
-      return 0;
     }
+    // Retry the project one endpoint at a time, each in its own statement and with its own timeout, so an endpoint whose
+    // scan fails or times out (for example behind rows another transaction holds) cannot keep its siblings from claiming.
+    let count = 0;
+    let endpoints: string[] = [];
+    try {
+      endpoints = await projectEndpoints(scope, project);
+    } catch {
+      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_endpoints_failed', projectId: project }));
+    }
+    for (const endpointId of endpoints) {
+      if (count >= limit || claims.length >= capacity) break;
+      try {
+        const claimed = await claimProject(scope, project, Math.min(limit - count, capacity - claims.length), endpointId);
+        claims.push(...claimed);
+        count += claimed.length;
+      } catch {
+        console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_endpoint_failed', projectId: project, endpointId }));
+      }
+    }
+    return count;
   };
   try {
     const fair = await claimFair(scope, ranked, capacity);

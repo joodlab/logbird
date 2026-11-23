@@ -18,7 +18,7 @@ import { deliverWebhooks } from './webhook-delivery';
 
 const ch = createClickHouseClient();
 const runId = randomUUID();
-const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11', 'p12', 'p13', 'p14', 'p15', 'p16', 'p17', 'p18'].map(
+const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11', 'p12', 'p13', 'p14', 'p15', 'p16', 'p17', 'p18', 'p19'].map(
   (name) => `qa-webhook-claims-${name}-${runId}`,
 );
 const secretKey = Buffer.alloc(32, 9);
@@ -679,4 +679,35 @@ it('fills every slot from endpoints with room when two endpoints have deep older
   expect(received.filter(({ id }) => mine.includes(id))).toHaveLength(8);
   for (const hook of hooks)
     expect(received.filter(({ path, id }) => path.endsWith(hook.url.split('/').pop() ?? '') && mine.includes(id))).toHaveLength(2);
+});
+
+it("claims a project's healthy endpoint on the first pass when its sibling endpoint's scan times out", { timeout: 60_000 }, async () => {
+  const project = projects[18] ?? '';
+  const { now } = await webhookCursorClock(prisma);
+  const slow = await endpoint(project, 'timeout-slow');
+  const healthy = await endpoint(project, 'timeout-healthy');
+  const lockedRows = await Promise.all(
+    Array.from({ length: 3 }, (_, index) => ping(slow.id, `timeout-slow-${index}`, new Date(+now - 300_000 + index))),
+  );
+  const healthyRow = await ping(healthy.id, 'timeout-healthy', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const unlock = await holdLocked(lockedRows.map(({ id }) => id));
+  const errors = vi.spyOn(console, 'error');
+  try {
+    // Test hook: a 300 ms claim statement timeout, and a 1 s sleep in the slow endpoint's scan, so every statement that
+    // scans that endpoint times out deterministically.
+    await deliverWebhooks(ch, { ...options(), claimTimeoutMs: 300, claimScanDelay: { endpointId: slow.id, seconds: 1 } }, project);
+    expect(sent(healthyRow.eventId)).toBe(1);
+    const endpointFailures = errors.mock.calls
+      .map(([message]) => String(message))
+      .filter((message) => message.includes('webhook.claim_endpoint_failed'));
+    expect(endpointFailures.some((message) => message.includes(slow.id))).toBe(true);
+  } finally {
+    errors.mockRestore();
+    await unlock();
+  }
+  for (const row of lockedRows) {
+    expect(sent(row.eventId)).toBe(0);
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
+  }
 });
