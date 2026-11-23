@@ -473,8 +473,9 @@ public sealed class LogbirdReadClient : IDisposable
             throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached: " + e.GetType().Name);
         }
 
-        // Disposed exactly once: after a destination failure it is disposed quietly, and never again (a response that
-        // throws from Dispose would otherwise replace that failure).
+        // This method disposes the response once: after a destination failure quietly, and then not again (a response
+        // that throws from Dispose would otherwise replace that failure). Cancelling also disposes it, to end a stalled
+        // body read.
         var responseDisposed = false;
         try
         {
