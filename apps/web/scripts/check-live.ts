@@ -1,8 +1,11 @@
 import { siteDecision } from '../../app/server/site-paths';
+import { siteConfigFrom } from '../src/env';
 import { inlineScripts, scriptHash, scriptSources } from '../src/lib/csp';
 import { OBFUSCATED_EMAIL } from '../src/lib/email-off';
+import { bodyText, collectAssetUrls, compareAssets, manifestIconUrls } from '../src/lib/live-assets';
 import { securityHeaders } from '../src/lib/security-headers';
 import { prerenderPaths } from '../src/lib/site-map';
+import { loadPublicEnv } from './public-env';
 
 /**
  * Checks a running site the way a browser sees it: every page and a set of unknown, dotted, escaped and API paths.
@@ -27,6 +30,12 @@ import { prerenderPaths } from '../src/lib/site-map';
  * console-owned paths (sign-in, API, unknown paths) must answer from the console, never with a site page.
  *
  *   SHARED_ORIGIN=1 BASE_URL=https://<console origin> tsx scripts/check-live.ts
+ *
+ * Files served stale: every /media/, /og/, /brand/ and web-manifest URL a page references (and the manifest's icons)
+ * is fetched twice, as written and with a random extra query that no cache has seen, and the bytes must be identical.
+ * A difference means a cache (the CDN or a browser) is serving an old file under a URL whose page now describes a new
+ * one; the run fails and lists the files. An unversioned URL to such a file, or a capture page that references no
+ * /media/ file, fails too. Run it after each deploy.
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
 const shared = process.env.SHARED_ORIGIN === '1';
@@ -63,6 +72,24 @@ const SITE_MARKER = 'logbird.site.theme';
 const api = process.env.NO_API === '1' ? [] : ['/site-api/no-such-endpoint', '/site-api/waitlist/x'];
 const problems: string[] = [];
 const rows: Record<string, string | number>[] = [];
+/** Fixed-name files the pages reference (src/lib/live-assets.ts), as the exact absolute URLs visitors request. */
+const assetUrls = new Set<string>();
+/** Pages that show console captures: each must reference at least one /media/ file, so a lost image fails the run. */
+const MEDIA_PAGES = ['/', '/product', '/use-cases/compliance-evidence', '/use-cases/customer-audit-logs', '/use-cases/support-investigations'];
+
+/** The origin the built pages name in absolute URLs (canonical, cards, JSON-LD): the build's WEB_SITE_URL. */
+const publicOrigin = siteConfigFrom(loadPublicEnv()).SITE_URL;
+
+function collectAssets(path: string, pageUrl: string, body: string, capturePage: boolean) {
+  const { urls: found, problems: collected } = collectAssetUrls(body, pageUrl, [base, publicOrigin]);
+  for (const url of found) assetUrls.add(url);
+  const fail = (problem: string) => problems.push(`${path}: ${problem}`);
+  for (const { path: asset, problem } of collected) fail(`${asset}: ${problem}`);
+  const paths = [...found].map((url) => new URL(url).pathname);
+  if (capturePage && MEDIA_PAGES.includes(path) && !paths.some((p) => p.startsWith('/media/'))) fail('references no /media/ file');
+  if (!paths.includes('/brand/logbird-favicon.svg')) fail('references no favicon');
+  if (!paths.includes('/site.webmanifest')) fail('references no web manifest');
+}
 
 async function checkHtml(path: string, expected: number) {
   let expectedStatus = expected;
@@ -107,6 +134,8 @@ async function checkHtml(path: string, expected: number) {
     }
   }
   rows.push({ path, status: response.status, inline: scripts.length, uncovered: missing, url: response.url.replace(base, '') });
+  // Every site page is checked, 404 pages too (they share the layout: favicon, manifest), against its own final URL.
+  collectAssets(path, response.url, body, expectedStatus === 200);
 }
 
 for (const path of prerenderPaths) {
@@ -151,6 +180,31 @@ for (const path of consoleOwned) {
   }
   rows.push({ path: `console ${path}`, status: response.status, inline: '-', uncovered: '-', url: response.headers.get('content-type') ?? '-' });
 }
+// The manifest's own icons are fixed-name files too. They are read from the very bodies compared (as written and
+// uncached), never from a separate request that could answer differently; a manifest with no 200 body has already
+// failed the comparison.
+const manifests = [...assetUrls].filter((url) => new URL(url).pathname === '/site.webmanifest');
+const manifestBodies = new Map<string, Buffer[]>();
+const assetProblems = await compareAssets(manifests, fetch, manifestBodies);
+const manifestProblems = new Set<string>();
+for (const manifest of manifests) {
+  for (const body of manifestBodies.get(manifest) ?? []) {
+    const icons = manifestIconUrls(bodyText(body), manifest, [base, publicOrigin]);
+    for (const icon of icons.urls) assetUrls.add(icon);
+    for (const { path, problem } of icons.problems) manifestProblems.add(`${path}: ${problem}`);
+  }
+}
+// Appended one by one: spreading a long list into push() could exceed the argument limit and lose the report.
+for (const problem of manifestProblems) problems.push(problem);
+for (const problem of await compareAssets([...assetUrls].filter((url) => !manifests.includes(url)))) assetProblems.push(problem);
+for (const { path, problem } of assetProblems) problems.push(`${path}: ${problem}`);
+rows.push({
+  path: `assets ${assetUrls.size} URLs`,
+  status: assetProblems.length ? 'problems' : 'same',
+  inline: '-',
+  uncovered: assetProblems.length,
+  url: 'as written vs uncached',
+});
 console.table(rows);
 if (problems.length) {
   console.error(`check-live: ${problems.length} problems at ${base}:\n${problems.join('\n')}`);
