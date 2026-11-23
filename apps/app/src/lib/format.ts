@@ -158,8 +158,10 @@ export function formatDuration(ms: number): string {
   if (ms < 1) return '0 ms';
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
+  // Round to whole seconds before splitting, so 119,999 ms reads "2 m", never "1 m 60 s".
+  const total = Math.round(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   if (m < 60) return s ? `${m} m ${s} s` : `${m} m`;
   const h = Math.floor(m / 60);
   return `${h} h ${m % 60} m`;

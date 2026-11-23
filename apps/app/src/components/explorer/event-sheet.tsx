@@ -51,7 +51,7 @@ import {
   roundsLargeNumbers,
   unlinkedPartyLabel,
 } from '@/lib/events';
-import { formatTimeMs } from '@/lib/format';
+import { formatDuration, formatNumber, formatTimeMs } from '@/lib/format';
 import { andQuery, formatTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
@@ -392,6 +392,69 @@ function FilterButton({ term, onFilter }: { term: string; onFilter?: (term: stri
   );
 }
 
+/**
+ * The drawer's title, at most three lines: a producer description can run to paragraphs and push the event's facts
+ * below the fold. "Show all" expands it when it overflows. The clamp is visual only, so screen readers read it whole.
+ */
+function ClampedTitle({ text }: { text: string }) {
+  const ref = useRef<HTMLHeadingElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  // Overflow is measured only while clamped: expanded, the title never overflows, and dropping the toggle then would
+  // take keyboard focus with it when "Show less" is pressed.
+  const openRef = useRef(open);
+  openRef.current = open;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: measure again when the text changes
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      if (!openRef.current) setOverflows(el.scrollHeight > el.clientHeight + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    // A web font arriving can rewrap the text without resizing the clamped box.
+    document.fonts?.ready.then(measure).catch(() => undefined);
+    return () => observer.disconnect();
+  }, [text]);
+  return (
+    <div className="flex flex-col items-start gap-1">
+      {/* Expanded, a very long title (up to 4,096 characters) scrolls inside its own region, so the toggle and the event's
+          facts below stay reachable on a phone. */}
+      <div className={cn('w-full', open && 'max-h-[40svh] overflow-y-auto')}>
+        <SheetTitle
+          className={cn('font-semibold text-[17px] leading-snug tracking-tight [overflow-wrap:anywhere]', !open && 'line-clamp-3')}
+          dir="auto"
+          ref={ref}
+        >
+          {text}
+        </SheetTitle>
+      </div>
+      {overflows ? (
+        <button
+          aria-expanded={open}
+          className="rounded-sm text-muted-foreground text-xs underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+          onClick={() => setOpen((v) => !v)}
+          type="button"
+        >
+          {open ? 'Show less' : 'Show all'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** How long after it happened an event was received, never negative (a clock ahead of ours reads 0). */
+const receivedAfterMs = (e: Pick<AuditEvent, 'receivedAt' | 'timestamp'>) => Math.max(0, Date.parse(e.receivedAt) - Date.parse(e.timestamp));
+
+/** "20:04:49.796 (1 m 1 s after it happened · 61,002 ms)": rounded for reading, exact beside it once past a second. */
+function receivedLine(e: Pick<AuditEvent, 'receivedAt' | 'timestamp'>): string {
+  const ms = receivedAfterMs(e);
+  const exact = ms >= 1000 ? ` · ${formatNumber(ms)} ms` : '';
+  return `${formatTimeMs(e.receivedAt)} (${formatDuration(ms)} after it happened${exact})`;
+}
+
 function KV({
   label,
   value,
@@ -399,6 +462,7 @@ function KV({
   term,
   onFilter,
   copy = true,
+  title,
 }: {
   label: string;
   value: string;
@@ -406,6 +470,8 @@ function KV({
   term?: string;
   onFilter?: (t: string) => void;
   copy?: boolean;
+  /** The exact value behind a rounded one, on hover (non-copy values only). */
+  title?: string;
 }) {
   if (!value) return null;
   return (
@@ -418,7 +484,9 @@ function KV({
           {copy ? (
             <CopyValue className={mono ? undefined : 'font-sans text-[13px]'} value={value} />
           ) : (
-            <span className={cn(mono ? 'break-all font-mono text-[12px]' : '[overflow-wrap:anywhere]')}>{value}</span>
+            <span className={cn(mono ? 'break-all font-mono text-[12px]' : '[overflow-wrap:anywhere]')} title={title}>
+              {value}
+            </span>
           )}
         </span>
         <span className="flex items-center">{term ? <FilterButton onFilter={onFilter} term={term} /> : null}</span>
@@ -569,9 +637,8 @@ function EventDetailBody({
           <TypePill>{e.environment}</TypePill>
           {e.source ? <TypePill tone="brand">via {e.source}</TypePill> : null}
         </div>
-        <SheetTitle className="font-semibold text-[17px] leading-snug tracking-tight" dir="auto">
-          {eventSentence(e)}
-        </SheetTitle>
+        {/* Keyed by event: the next event starts clamped, even when its sentence is the same. */}
+        <ClampedTitle key={e.id} text={eventSentence(e)} />
         <SheetDescription className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
           <ActionName action={e.action} className="text-[12.5px]" />
           <span className="text-muted-foreground">
@@ -833,12 +900,9 @@ function EventDetailBody({
             <KV label="Trace" onFilter={onFilter} term={formatTerm('trace', ctx.traceId)} value={ctx.traceId} />
             <KV label="IP" value={ctx.ip} />
             <KV label="User agent" mono={false} value={ctx.userAgent} />
-            <KV
-              copy={false}
-              label="Received"
-              mono={false}
-              value={`${formatTimeMs(e.receivedAt)} (${Math.max(0, Date.parse(e.receivedAt) - Date.parse(e.timestamp))} ms after it happened)`}
-            />
+            {/* "1 m 1 s after", not "61002 ms after": the delay reads at a glance, and the exact milliseconds follow it in
+                plain text for keyboard, touch and screen-reader users alike. */}
+            <KV copy={false} label="Received" mono={false} value={receivedLine(e)} />
             <KV copy={false} label="Conformance" mono={false} value={`${e.conformance}% of the recommended envelope`} />
             <KV copy={false} label="SDK" value={[e.sdk, e.schemaVersion ? `schema v${e.schemaVersion}` : ''].filter(Boolean).join(' · ')} />
           </dl>
