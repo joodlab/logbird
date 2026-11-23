@@ -624,17 +624,7 @@ public sealed class LogbirdReadClient : IDisposable
     private static string FailureName(Exception e) => e is TransportFailureException t ? t.TypeName : e.GetType().Name;
 
     /// <summary>Disposes a response, content or stream of the transport's; a throwing Dispose never replaces the outcome.</summary>
-    private static void DisposeQuietly(IDisposable disposable)
-    {
-        try
-        {
-            disposable.Dispose();
-        }
-        catch
-        {
-            // Transport cleanup: whatever it throws is not the read's outcome, and its message is not reported.
-        }
-    }
+    private static void DisposeQuietly(IDisposable disposable) => Internal.BatchSender.DisposeQuietly(disposable);
 
     /// <summary>Writes to the caller's stream, marking its failures so they are never reported as a network failure.</summary>
     private static async Task WriteToDestinationAsync(System.IO.Stream destination, byte[] buffer, int count, CancellationToken cancellationToken)
@@ -791,8 +781,9 @@ public sealed class LogbirdReadClient : IDisposable
         // A caller that already cancelled sends nothing (a viewer token must not be minted for a caller that never gets it).
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Like the ingest sender: a handler that never completes holds one slot per abandoned read, never more than the
-        // limit, and while they are all held a read fails at once instead of adding another.
+        // Like the ingest sender: a handler that never completes holds one slot per abandoned read, and while the limit's
+        // worth are held a read fails at once instead of adding another. Reads admitted before that can still be abandoned
+        // (see MaxAbandonedReads).
         if (Volatile.Read(ref _abandonedReads) >= MaxAbandonedReads)
         {
             throw new TimeoutException("Logbird has not answered earlier reads that timed out; no new read was sent.");

@@ -240,6 +240,35 @@ public class Step4SecurityFollowUpTests
         Assert.Equal(cts.Token, cancelled.CancellationToken);
     }
 
+    [Fact]
+    public async Task Cancelling_an_export_while_it_reads_an_error_body_never_throws_into_the_canceller()
+    {
+        var reading = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new Answer((request, _) => Task.FromResult<HttpResponseMessage>(IsProbe(request)
+            ? Version020()
+            : new ThrowingDisposeResponse(HttpStatusCode.Forbidden) { Content = new StreamContent(new StallingStream(reading, () => new IOException("stalled read ended"))) }));
+        using var reader = Reader(handler);
+        using var cts = new CancellationTokenSource();
+
+        var export = reader.ExportAsync(new ExportQuery(ExportFormat.Jsonl), new MemoryStream(), cts.Token);
+        await reading.Task;
+        cts.Cancel();
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => export);
+        AssertNoSecret(cancelled);
+    }
+
+    [Fact]
+    public async Task A_body_stream_that_throws_from_dispose_never_replaces_a_body_read_in_full()
+    {
+        using var reader = Reader(new Answer((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StreamContent(new ThrowingDisposeStream(Encoding.UTF8.GetBytes("{}"))),
+        })));
+
+        Assert.Null(await reader.GetEventAsync("evt_1"));
+    }
+
     // ---------------------------------------------------------------- A17-5: a cancelled export carries no transport data
 
     [Fact]
@@ -314,6 +343,16 @@ public class Step4SecurityFollowUpTests
     }
 
     private sealed class ThrowingDisposeResponse(HttpStatusCode status) : HttpResponseMessage(status)
+    {
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            throw new InvalidOperationException(Secret);
+        }
+    }
+
+    /// <summary>A body that reads in full, then throws from Dispose.</summary>
+    private sealed class ThrowingDisposeStream(byte[] body) : MemoryStream(body)
     {
         protected override void Dispose(bool disposing)
         {
