@@ -13,7 +13,7 @@
     <Compile Include="..\Logbird.Tests\FakeServer.cs" Link="FakeServer.cs" />
     <Compile Include="..\Logbird.Tests\Deadline.cs" Link="Deadline.cs" />
     <Compile Include="..\Logbird.IntegrationTests\LiveServer.cs" Link="LiveServer.cs" />
-    <Compile Include="..\Shared\PublicApiListing.cs" Link="PublicApiListing.cs" />
+    <Compile Include="..\Shared\OptionDefaults.cs" Link="OptionDefaults.cs" />
   </ItemGroup>
 
   <ItemGroup>

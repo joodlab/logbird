@@ -26,7 +26,7 @@
 
   <ItemGroup>
     <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
-    <Compile Include="..\Shared\PublicApiListing.cs" Link="PublicApiListing.cs" />
+    <Compile Include="..\Shared\OptionDefaults.cs" Link="OptionDefaults.cs" />
   </ItemGroup>
 
   <ItemGroup>

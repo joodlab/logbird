@@ -17,4 +17,20 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
     <InternalsVisibleTo Include="Logbird.AspNetCore.Tests" />
   </ItemGroup>
+
+  <!--
+    The public API is recorded in PublicAPI.Shipped.txt (what a published version contains) and PublicAPI.Unshipped.txt
+    (what is added since). The analyzer fails the build (RS0016, RS0017) when the public surface differs from those
+    files, so any API change is a visible edit to them. Before the first publication everything is unshipped.
+    RS0026 and RS0027 (overloads with optional parameters) are API design rules, not part of this record; the existing
+    cases are listed for the pre-publication review instead of being changed here.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
 </Project>
