@@ -24,8 +24,9 @@ export function createReadHandler(options: ReadOptions, hooks: LogbirdHooks) {
       const value = (trusted as Record<string, unknown>)[key];
       if (value !== undefined) (outbound as Record<string, unknown>)[key] = value;
     }
-    // A trusted query without a selector would read the whole project: refuse it rather than forward it.
-    if (typeof outbound.q !== 'string' || !outbound.q.trim())
+    // A trusted query without a selector would read the whole project: refuse it rather than forward it. A lone UTF-16
+    // surrogate would become U+FFFD in the URL and could name a different identifier: refuse that too.
+    if (typeof outbound.q !== 'string' || !outbound.q.trim() || /[\uD800-\uDFFF]/u.test(outbound.q))
       throw createError({ statusCode: 400, statusMessage: 'Audit trail query is incomplete' });
     return readAuditTrail(options, outbound);
   });

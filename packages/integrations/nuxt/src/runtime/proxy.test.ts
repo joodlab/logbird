@@ -99,3 +99,23 @@ it('sends exactly the validated query, even when authorize returns a getter or a
   expect(urls).toHaveLength(2);
   for (const url of urls) expect(new URL(url).searchParams.get('q')).toBe('tenant:"acme"');
 });
+
+it('refuses a trusted query with an unpaired surrogate before it is serialized', async () => {
+  let upstream = 0;
+  const app = createApp();
+  app.use(
+    createReadHandler(
+      {
+        endpoint: 'http://logbird.test',
+        readKey: 'lb_read_fake',
+        fetch: async () => {
+          upstream++;
+          return Response.json({ data: [], nextCursor: null, total: 0, tookMs: 0 });
+        },
+      },
+      { authorize: () => ({ q: 'tenant:"acme\uD83D"' }) },
+    ),
+  );
+  expect((await toWebHandler(app)(new Request('http://local/'))).status).toBe(400);
+  expect(upstream).toBe(0);
+});

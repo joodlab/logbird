@@ -1,15 +1,24 @@
-import { type AuditTrailOptions, useAuditTrail as useVueAuditTrail } from '@logbird/vue';
+import { trailQuery } from '@logbird/sdk/read';
+import { type AuditFetcher, type AuditTrailOptions, useAuditTrailRequests } from '@logbird/vue';
 import { type MaybeRefOrGetter, toValue } from 'vue';
 import { useRequestFetch } from '#imports';
+
+const SELECTORS = ['target', 'actor', 'tenant'] as const;
+/**
+ * The trail through this app's read route (/api/_logbird/events). The route's authorize hook decides the scope on the
+ * server, so a trail with no selector key and no query is sent as is (the route refuses a trusted query without `q`);
+ * anything else is built by trailQuery, so a selector passed without a value still throws on the client (#263).
+ */
 export function useAuditTrail(options: MaybeRefOrGetter<Omit<AuditTrailOptions, 'fetcher'>>) {
-  const fetcher = useRequestFetch();
-  // The read route's authorize hook decides the scope on the server, so an empty client trail is allowed here; a
-  // selector passed without a value still throws on the client (#263).
-  // Layered over the caller's options (not spread), so inherited or non-enumerable selectors still count.
-  return useVueAuditTrail(() =>
-    Object.assign(Object.create(toValue(options)) as AuditTrailOptions, {
-      scopedByServer: true,
-      fetcher: ((query, signal) => fetcher('/api/_logbird/events', { query, signal })) as AuditTrailOptions['fetcher'],
-    }),
-  );
+  const request = useRequestFetch();
+  // One stable fetcher, bound to the fixed route: rows and cursor belong to it.
+  const fetcher: AuditFetcher = (query, signal) => request('/api/_logbird/events', { query, signal });
+  return useAuditTrailRequests(() => {
+    const input = toValue(options);
+    const q = input.q;
+    const empty =
+      SELECTORS.every((key) => (input as Record<string, unknown>)[key] === undefined && !(key in input)) &&
+      (q === undefined || (typeof q === 'string' && !q.trim()));
+    return { query: empty ? { ...input.range, limit: input.limit } : trailQuery(input), fetcher };
+  });
 }

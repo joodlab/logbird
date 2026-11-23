@@ -19,7 +19,8 @@ replace newer selectors. Pagination deduplicates event IDs.
 
 `AuditTimeline` accepts `options` and a default slot receiving the same state. It renders no markup.
 A trail with no selector and no non-blank query, or a selector passed without a value (a tenant id not loaded yet),
-sets `error` and fetches nothing; it never falls back to a wider read. Ingest and read keys stay on your backend. Authenticate the browser request, authorize tenant and
+sets `error` and fetches nothing; it never falls back to a wider read. `useAuditTrailRequests(source)` runs a query you
+build yourself, with no selector checks (Nuxt's read route uses it, because its server decides the scope). Ingest and read keys stay on your backend. Authenticate the browser request, authorize tenant and
 record, then call `readAuditTrail` from `@logbird/sdk/read` on the server with an enforced query.
 Never trust a browser's tenant or q as authorization. Proxy errors should keep their HTTP failure status.
 See [design](../../../docs/integrations.md) and [example](../../../examples/vue).

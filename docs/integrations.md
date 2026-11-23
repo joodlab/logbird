@@ -15,6 +15,8 @@ A project read key is project-wide; a query filter is not authorization.
 `trailQuery` never widens a read: it throws a `TypeError` for a trail with no target, actor, tenant or query, and for a
 selector key passed without a value (`tenant: session.tenantId` with no tenant id), and the Vue, Nuxt and TanStack
 integrations then report an error instead of fetching.
+The read helpers require Logbird 0.2.0 or later: against an older server a selector value containing `*` is read as a
+prefix, so it can match more than the named tenant, actor or record.
 
 Actor means who caused the action; executor means the API or worker performing it. Resolve
 actor and tenant from authenticated server state, never directly from untrusted headers.

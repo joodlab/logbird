@@ -2,79 +2,105 @@ import { type SearchQuery, type SearchResponse, type TrailQuery, trailQuery } fr
 import { defineComponent, type MaybeRefOrGetter, onScopeDispose, type PropType, shallowRef, toValue, watch } from 'vue';
 export type AuditFetcher = (query: Partial<SearchQuery>, signal?: AbortSignal) => Promise<SearchResponse>;
 export interface AuditTrailOptions extends TrailQuery {
+  /** Pass a stable function (defined once): rows and cursor belong to the fetcher that produced them. */
   fetcher: AuditFetcher;
-  /** The fetcher's own server decides the scope (Nuxt's read route); see TrailQueryOptions.scopedByServer. */
-  scopedByServer?: boolean;
 }
-const asError = (cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause)));
-export function useAuditTrail(options: MaybeRefOrGetter<AuditTrailOptions>) {
+/** One read the composable can run: a complete query (no cursor) and the fetcher it is sent to. */
+export interface AuditTrailRequest {
+  query: Partial<SearchQuery>;
+  fetcher: AuditFetcher;
+}
+/** Error conversion that cannot itself throw (a thrown null-prototype object has no toString). */
+function asError(cause: unknown): Error {
+  if (cause instanceof Error) return cause;
+  try {
+    return new Error(String(cause));
+  } catch {
+    return new Error('The audit trail could not be read.');
+  }
+}
+type Snapshot = { key: string; query: Partial<SearchQuery>; fetcher: AuditFetcher } | { error: Error };
+
+/**
+ * The composable's engine, for callers that build the query themselves: `source` returns the complete query and the
+ * fetcher for it. It applies no selector checks of its own, exactly like calling the fetcher yourself; the Nuxt
+ * integration uses it because its fixed read route decides the scope on the server. Use `useAuditTrail` otherwise.
+ */
+export function useAuditTrailRequests(source: () => AuditTrailRequest) {
   const data = shallowRef<SearchResponse['data']>([]);
   const loading = shallowRef(false);
   const error = shallowRef<Error>();
   const nextCursor = shallowRef<string | null>(null);
   let generation = 0;
   let controller: AbortController | undefined;
-  /** Builds the trail's query from the options, reading each value once (never through an object spread). */
-  const build = () => {
-    const input = toValue(options);
-    return { input, query: trailQuery(input, { scopedByServer: Boolean(input?.scopedByServer) }) };
+  /** What the shown rows and cursor belong to; a different trail or fetcher never continues them. */
+  let owner: { key: string; fetcher: AuditFetcher } | undefined;
+  const snapshot = (): Snapshot => {
+    try {
+      const request = source();
+      const { cursor: _cursor, ...query } = request.query;
+      return { key: JSON.stringify(query), query, fetcher: request.fetcher };
+    } catch (cause) {
+      return { error: asError(cause) };
+    }
   };
-  async function load(append: boolean) {
+  const clear = () => {
+    data.value = [];
+    nextCursor.value = null;
+    owner = undefined;
+  };
+  async function run(state: Snapshot, append: boolean) {
     const current = ++generation;
     controller?.abort();
     controller = new AbortController();
     error.value = undefined;
-    if (!append) {
-      data.value = [];
-      nextCursor.value = null;
-    }
-    let built: ReturnType<typeof build>;
-    try {
-      built = build();
-    } catch (cause) {
-      // An incomplete trail (a tenant id not loaded yet) or failing options: an error, never a wider read. Nothing is
-      // fetched, the earlier rows and cursor go too, and loading ends (#263).
-      error.value = asError(cause);
-      data.value = [];
-      nextCursor.value = null;
+    if ('error' in state) {
+      // An incomplete trail (a tenant id not loaded yet) or failing options: an error, never a wider read (#263).
+      clear();
+      error.value = state.error;
       loading.value = false;
       return;
     }
-    const query = append ? { ...built.query, cursor: nextCursor.value ?? undefined } : built.query;
+    const continues = append && owner !== undefined && owner.key === state.key && owner.fetcher === state.fetcher;
+    if (!continues) clear();
+    owner = { key: state.key, fetcher: state.fetcher };
+    // Page one never carries a cursor (not even one in the caller's options); later pages carry ours.
+    const query = continues ? { ...state.query, cursor: nextCursor.value ?? undefined } : state.query;
     loading.value = true;
     try {
-      const page = await built.input.fetcher(query, controller.signal);
+      const page = await state.fetcher(query, controller.signal);
       if (current !== generation) return;
-      const unique = new Map((append ? data.value : []).map((event) => [event.id, event]));
+      const unique = new Map((continues ? data.value : []).map((event) => [event.id, event]));
       for (const event of page.data) unique.set(event.id, event);
       data.value = [...unique.values()];
       nextCursor.value = page.nextCursor;
     } catch (cause) {
-      if (current === generation) error.value = asError(cause);
+      if (current === generation) {
+        // A failed or refused read leaves nothing of this trail on screen.
+        clear();
+        error.value = asError(cause);
+      }
     } finally {
       if (current === generation) loading.value = false;
     }
   }
-  const refresh = () => load(false);
-  const loadMore = () => (nextCursor.value && !loading.value ? load(true) : Promise.resolve());
-  // Watches the trail's query, or why it cannot be built; load() then reports that error without fetching. The
-  // selectors are read with `in`, so Vue also tracks a selector key added to reactive options later.
-  watch(
-    () => {
-      try {
-        return build().query;
-      } catch (cause) {
-        return { invalid: asError(cause).message };
-      }
-    },
-    refresh,
-    { immediate: true, deep: true },
-  );
+  const refresh = () => run(snapshot(), false);
+  const loadMore = () => (nextCursor.value && !loading.value ? run(snapshot(), true) : Promise.resolve());
+  // The callback runs exactly the snapshot the watcher validated (never a second read of the options).
+  watch(snapshot, (state) => run(state, false), { immediate: true, deep: true });
   onScopeDispose(() => {
     generation++;
     controller?.abort();
   });
   return { data, loading, error, nextCursor, refresh, loadMore };
+}
+
+/** A record's, actor's or tenant's trail. The query is built by `trailQuery`, so it never reads wider than asked (#263). */
+export function useAuditTrail(options: MaybeRefOrGetter<AuditTrailOptions>) {
+  return useAuditTrailRequests(() => {
+    const input = toValue(options);
+    return { query: trailQuery(input), fetcher: input.fetcher };
+  });
 }
 export const AuditTimeline = defineComponent({
   name: 'AuditTimeline',

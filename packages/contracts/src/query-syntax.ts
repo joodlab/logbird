@@ -1,4 +1,5 @@
-import { QUERY_DIALECT_PREFIX, type QueryErrorDetails } from './query';
+import type { QueryErrorDetails } from './query';
+import { QUERY_DIALECT_PREFIX } from './query-dialect';
 import { readQueryValue, scanBareRecordValue } from './record-selector';
 
 export class QueryError extends Error {

@@ -112,8 +112,20 @@ it('refuses unpaired UTF-16 surrogates in selectors and q, and keeps valid pairs
   expect(trailQuery({ tenant: 'team-\u{1F600}' }).q).toBe('tenant:"team-\u{1F600}"');
 });
 
-it('lets only a server-scoped fetcher send an empty trail, and never a selector without a value', () => {
-  expect(trailQuery({ limit: 20 }, { scopedByServer: true })).toEqual({ limit: 20, cursor: undefined });
-  expect(() => trailQuery({ tenant: undefined }, { scopedByServer: true })).toThrow(/`tenant`/);
-  expect(() => trailQuery({ limit: 20 })).toThrow(/an empty trail would be the whole project/);
+it('honours a selector a Proxy serves even when its has trap denies the key, and has no option to allow an empty trail', () => {
+  const backing = { target: { id: 'inv_1' } };
+  const proxied = new Proxy(backing, { get: (object, key) => (key === 'tenant' ? 'acme' : Reflect.get(object, key)) });
+  expect('tenant' in proxied).toBe(false);
+  expect(trailQuery(proxied as unknown as Parameters<typeof trailQuery>[0]).q).toBe('target:"inv_1" AND tenant:"acme"');
+  // The only way to read project-wide is an explicit query to readAuditTrail; trailQuery itself never allows it.
+  expect(() => (trailQuery as (input: unknown, options: unknown) => unknown)({ limit: 20 }, { scopedByServer: true })).toThrow(
+    /an empty trail would be the whole project/,
+  );
 });
+
+// The malformed-grammar corpus from the server parser's own tests (packages/clickhouse/src/query.test.ts): trailQuery
+// checks q with that same parser (contracts query-syntax), so each one is refused before it is spliced next to a selector.
+it.each(['OR a', 'a OR', 'a OR OR b', '()', '(a', 'a)', 'a ()', 'record:', `${'('.repeat(17)}x${')'.repeat(17)}`])(
+  'refuses the server-parser malformed query %s',
+  (q) => expect(() => trailQuery({ tenant: 'acme', q })).toThrow(/`q` is not a complete Logbird query/),
+);
