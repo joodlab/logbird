@@ -80,8 +80,8 @@ const MEDIA_PAGES = ['/', '/product', '/use-cases/compliance-evidence', '/use-ca
 /** The origin the built pages name in absolute URLs (canonical, cards, JSON-LD): the build's WEB_SITE_URL. */
 const publicOrigin = siteConfigFrom(loadPublicEnv()).SITE_URL;
 
-function collectAssets(path: string, body: string, capturePage: boolean) {
-  const { urls: found, problems: collected } = collectAssetUrls(body, base, publicOrigin);
+function collectAssets(path: string, pageUrl: string, body: string, capturePage: boolean) {
+  const { urls: found, problems: collected } = collectAssetUrls(body, pageUrl, publicOrigin);
   for (const url of found) assetUrls.add(url);
   const fail = (problem: string) => problems.push(`${path}: ${problem}`);
   for (const { path: asset, problem } of collected) fail(`${asset}: ${problem}`);
@@ -133,8 +133,8 @@ async function checkHtml(path: string, expected: number) {
     }
   }
   rows.push({ path, status: response.status, inline: scripts.length, uncovered: missing, url: response.url.replace(base, '') });
-  // 404 pages share the layout (favicon, manifest), so their references are checked too.
-  if (body.includes(SITE_MARKER)) collectAssets(path, body, expectedStatus === 200);
+  // Every site page is checked, 404 pages too (they share the layout: favicon, manifest), against its own final URL.
+  collectAssets(path, response.url, body, expectedStatus === 200);
 }
 
 for (const path of prerenderPaths) {
@@ -182,7 +182,10 @@ for (const path of consoleOwned) {
 // The manifest's own icons are fixed-name files too.
 for (const manifest of [...assetUrls].filter((url) => url.startsWith('/site.webmanifest'))) {
   const response = await fetch(new URL(manifest, base));
-  if (response.ok) for (const icon of manifestIconUrls(await response.text(), base)) assetUrls.add(icon);
+  if (!response.ok) continue;
+  const icons = manifestIconUrls(await response.text(), response.url, publicOrigin);
+  for (const icon of icons.urls) assetUrls.add(icon);
+  for (const { path, problem } of icons.problems) problems.push(`${manifest}: ${path}: ${problem}`);
 }
 const assetProblems = await compareAssets(assetUrls, base);
 for (const { path, problem } of assetProblems) problems.push(`${path}: ${problem}`);

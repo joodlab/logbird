@@ -7,15 +7,26 @@ import { elements, parsePage } from './page-dom';
  */
 const ASSET = /^\/(?:media|og|brand)\/|^\/site\.webmanifest(?:\?|$)/;
 
-export function collectAssetUrls(html: string, base: string, publicOrigin = base) {
+/** A reference that names a fixed-name file kind; it must resolve to the site's own directory for that kind. */
+const ASSET_LIKE = /\/(?:media|og|brand)\/|site\.webmanifest/;
+
+/**
+ * `pageUrl` is the page's own (final) URL, against which relative references resolve as in a browser; `publicOrigin`
+ * is the origin the build names in absolute URLs.
+ */
+export function collectAssetUrls(html: string, pageUrl: string, publicOrigin = pageUrl) {
   const urls = new Set<string>();
   const problems: AssetProblem[] = [];
-  const origins = new Set([new URL(base).origin, new URL(publicOrigin).origin]);
+  const origins = new Set([new URL(pageUrl).origin, new URL(publicOrigin).origin]);
   const add = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
-    const url = new URL(value, base);
-    if (!ASSET.test(url.pathname)) return;
+    const url = new URL(value, pageUrl);
+    if (!ASSET.test(url.pathname)) {
+      if (ASSET_LIKE.test(url.pathname))
+        problems.push({ path: `${url.pathname}${url.search}`, problem: `resolves outside the site's asset directories (${value})` });
+      return;
+    }
     const path = `${url.pathname}${url.search}`;
     // An absolute URL on another host would point visitors somewhere this check never fetched.
     if (!origins.has(url.origin)) problems.push({ path, problem: `on ${url.origin}, not the site's origin` });
@@ -47,13 +58,19 @@ export function collectAssetUrls(html: string, base: string, publicOrigin = base
   return { urls, problems };
 }
 
-/** The icon URLs a web app manifest names. */
-export function manifestIconUrls(manifest: string, base: string) {
+/** The icon URLs a web app manifest names, resolved against the manifest's URL; an icon on another host is a problem. */
+export function manifestIconUrls(manifest: string, manifestUrl: string, publicOrigin = manifestUrl) {
   const parsed = JSON.parse(manifest) as { icons?: { src: string }[] };
-  return (parsed.icons ?? []).map((icon) => {
-    const url = new URL(icon.src, base);
-    return `${url.pathname}${url.search}`;
-  });
+  const origins = new Set([new URL(manifestUrl).origin, new URL(publicOrigin).origin]);
+  const urls: string[] = [];
+  const problems: AssetProblem[] = [];
+  for (const icon of parsed.icons ?? []) {
+    const url = new URL(icon.src, manifestUrl);
+    const path = `${url.pathname}${url.search}`;
+    if (!origins.has(url.origin)) problems.push({ path, problem: `manifest icon on ${url.origin}, not the site's origin` });
+    urls.push(path);
+  }
+  return { urls, problems };
 }
 
 export interface AssetProblem {
@@ -87,7 +104,16 @@ export async function compareAssets(paths: Iterable<string>, base: string, fetch
     const plain = await bytesAt(path);
     const fresh = await bytesAt(`${path}${path.includes('?') ? '&' : '?'}cb=${crypto.randomUUID()}`);
     const expected = TYPES.find(([extension]) => extension.test(path.replace(/\?.*$/, '')))?.[1];
-    if (expected && !expected.test(plain.type)) problems.push({ path, problem: `served as ${plain.type || 'no content type'}` });
+    if (!expected) {
+      problems.push({ path, problem: 'not a known media, card, brand or manifest file type' });
+    } else {
+      for (const [label, response] of [
+        ['as written', plain],
+        ['uncached', fresh],
+      ] as const) {
+        if (!expected.test(response.type)) problems.push({ path, problem: `served as ${response.type || 'no content type'} (${label})` });
+      }
+    }
     if (plain.status !== 200 || fresh.status !== 200) {
       problems.push({ path, problem: `answered ${plain.status} as written and ${fresh.status} uncached` });
     } else if (!plain.bytes.equals(fresh.bytes)) {
