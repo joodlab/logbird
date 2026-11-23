@@ -143,7 +143,8 @@ CI checks the samples with `tests/cross-sdk/validate-stand-in.ts`:
   events.
 - **Headers and codes:** 429 and 503 carry `Retry-After`, and every error code is the server's for its status.
 - **Events:** every accepted event is valid by `eventInputSchema`.
-- **Coverage:** every configured fault appears.
+- **Coverage:** every configured fault appears, and a fault counts only when its exchange shows that fault's own answer
+  (for example a 429 `rate_limited` for `ratelimited`). Any other answer fails, unless a whole-request error came first.
 
 The `reject` fault rejects valid events on purpose, to exercise the rejection path; that is the safe direction.
 

@@ -116,7 +116,26 @@ function settle(
 for (const [number, x] of exchanges.entries()) {
   const key = `${x.fault} ${x.status ?? 'no answer'}`;
   const fail = (why: string) => failures.push(`line ${number + 2} (${key}): ${why}`);
-  seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
+  // A fault counts as exercised only when its exchange shows that fault's own answer. Whole-request errors (a body the
+  // server refuses, a bad key, an oversized request) may answer first; any other answer is a mismatch.
+  const code = (x.response as { error?: { code?: unknown } } | null)?.error?.code;
+  const wholeRequest = x.status !== null && [400, 401, 422].includes(x.status);
+  const shows: Record<string, boolean> = {
+    RateLimited: x.status === 429 && code === 'rate_limited',
+    Unavailable: x.status === 503 && code === 'ingest_unavailable',
+    TooLarge: x.status === 413 && code === 'payload_too_large',
+    Reset: x.status === null,
+    Hang: x.status === null,
+    ResetAfterStore: x.status === null,
+    EmptyAck: x.status === 202 && JSON.stringify(x.response) === '{}',
+    PartialUnavailable: (x.status === 503 && code === 'ingest_pending') || x.status === 202,
+    Reject: x.status === 202,
+    Ok: true,
+    Latency: true,
+  };
+  if (shows[x.fault] === true) seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
+  else if (!wholeRequest && !(x.status === 413 && code === 'payload_too_large'))
+    fail(`the ${x.fault} fault answered ${x.status ?? 'nothing'} ${code ?? ''}`.trim());
   // In stand-in mode, every event the stand-in stored must be one the server's schema accepts, also when the answer
   // acknowledges nothing (a reset after storing, or 202 {}).
   const requestEvents = x.request === null || x.request === undefined ? [] : eventsOf(x.request);
