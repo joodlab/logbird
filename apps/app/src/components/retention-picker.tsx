@@ -12,7 +12,8 @@ const COMMON = [
 /**
  * Retention chooser: every supported window as ONE radio group (one Tab stop, arrow keys move the selection), with
  * three common windows repeated above as large cards. The cards are pointer shortcuts that set the same value, hidden
- * from assistive tech and out of the Tab order so the value is never announced twice.
+ * from assistive tech and out of the Tab order so the value is never announced twice. On a phone they are left out:
+ * there the same choice would show twice, and the chips already fit.
  */
 export function RetentionPicker({
   value,
@@ -32,7 +33,7 @@ export function RetentionPicker({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <div aria-hidden className="grid grid-cols-3 gap-2" data-testid="retention-shortcuts">
+      <div aria-hidden className="grid grid-cols-3 gap-2 max-sm:hidden" data-testid="retention-shortcuts">
         {COMMON.map(({ days, hint }) => (
           <button
             className={cn(
