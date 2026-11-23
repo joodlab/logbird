@@ -83,9 +83,15 @@ function sqlState(error: unknown) {
 }
 
 /**
- * Give a project its turn without a claim: stamp its rotation as a claim would, so ranking puts it behind every project not
- * tried since. Used when its claim failed and nothing was claimed. A failure here is logged and costs nothing else; the
- * project then keeps its place for one more pass.
+ * Projects whose last turn in this worker ended with a failed claim and nothing claimed. They rank after every other project
+ * until they are tried again, even when their rotation stamp could not be written (`moveToBack`).
+ */
+const failedTurns = new Set<string>();
+
+/**
+ * Give a project its turn without a claim: stamp its rotation strictly after every other project's (a claim stamps the
+ * current time), so ranking puts it behind all of them, ties included. Used when its claim failed and nothing was claimed. A
+ * failure here is logged; `failedTurns` keeps the project last in this worker until it is tried again.
  */
 async function moveToBack(scope: PassScope, projectId: string) {
   try {
@@ -93,7 +99,10 @@ async function moveToBack(scope: PassScope, projectId: string) {
       prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', ${`${scope.timeoutMs}ms`}, true)`,
       prisma.$executeRaw`
         INSERT INTO "WebhookClaimRotation" ("projectId", "lastClaimedAt")
-        VALUES (${projectId}, (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
+        VALUES (${projectId}, greatest(
+          (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3),
+          (SELECT max("lastClaimedAt") + interval '1 millisecond' FROM "WebhookClaimRotation")
+        ))
         ON CONFLICT ("projectId") DO UPDATE
           SET "lastClaimedAt" = greatest("WebhookClaimRotation"."lastClaimedAt", EXCLUDED."lastClaimedAt")`,
     ]);
@@ -341,8 +350,9 @@ async function invalidScopedEndpoints(now: Date, projects?: string[]) {
  * the same statement timeout. A pass starts no claim statement after its claim budget (10 s; normal passes take
  * milliseconds), so statements that keep timing out cannot use up the dispatch budget of rows already claimed; the budget
  * typically binds only when claim statements fail or time out, outside the conditions of the bound above. A project
- * whose claim failed and that claimed nothing is moved to the back of the rotation like a claimed one, so with F projects
- * failing at once every other project with a due row is tried within F + 1 passes: a failing project cannot starve them. Only a failure before any claim
+ * whose claim failed and that claimed nothing is moved to the back of the rotation (stamped after every other project), and
+ * this worker tries it after all other projects until it is tried again, so a failing project cannot starve the others:
+ * it is never tried before a project that is not failing, and the rest of its pass is used by the others first. Only a failure before any claim
  * (holding scopes, ranking) fails the pass. These bounds hold for row locks Logbird itself creates; see the self-hosting
  * guide for transactions held by other clients.
  */
@@ -384,7 +394,11 @@ export async function claimWebhookDeliveries(
     scope.excludeEndpoints.push(id);
     await holdInvalidScope(id, columns, updatedAt);
   }
-  const ranked = (await rankProjects(scope, projects)).map(({ projectId: id }) => id);
+  const due = (await rankProjects(scope, projects)).map(({ projectId: id }) => id);
+  // A project whose last turn here failed with nothing claimed goes after all others until it is tried again, so it cannot
+  // spend the budget of consecutive passes while others wait, whatever its rotation stamp says.
+  for (const id of [...failedTurns]) if (!due.includes(id)) failedTurns.delete(id);
+  const ranked = [...due.filter((id) => !failedTurns.has(id)), ...due.filter((id) => failedTurns.has(id))];
   const claims: Claim[] = [];
   const claimable = new Set<string>();
   let budgetLogged = false;
@@ -402,6 +416,7 @@ export async function claimWebhookDeliveries(
     try {
       const claimed = await claimProject(scope, project, limit);
       claims.push(...claimed);
+      failedTurns.delete(project);
       return claimed.length;
     } catch (error) {
       // A failed claim cannot hold up the other projects; claims committed so far are still dispatched.
@@ -413,7 +428,11 @@ export async function claimWebhookDeliveries(
     // A claim advances the project's rotation. A project whose claim failed and whose retries claimed nothing (they failed,
     // timed out or ran into the budget) moves to the back as well, so it cannot be tried first again, and use the budget
     // again, before every other project with due rows has had its turn.
-    if (!count) await moveToBack(scope, project);
+    if (count) failedTurns.delete(project);
+    else {
+      failedTurns.add(project);
+      await moveToBack(scope, project);
+    }
     return count;
   };
   // Retry the project one endpoint at a time, each in its own statement and with its own timeout, so an endpoint whose
@@ -447,7 +466,10 @@ export async function claimWebhookDeliveries(
     try {
       const fair = await claimFair(scope, ranked, capacity);
       claims.push(...fair.claims);
-      for (const project of fair.projects) claimable.add(project);
+      for (const project of fair.projects) {
+        claimable.add(project);
+        failedTurns.delete(project);
+      }
       if (testing) options.claimAfterFair?.();
     } catch {
       // The statement rolled back as a whole. Retry the fair phase one project at a time, so a failing project cannot

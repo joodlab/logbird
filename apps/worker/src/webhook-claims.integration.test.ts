@@ -43,6 +43,8 @@ const projects = [
   'p22',
   'p23',
   'p24',
+  'p25',
+  'p26',
 ].map((name) => `qa-webhook-claims-${name}-${runId}`);
 const secretKey = Buffer.alloc(32, 9);
 const received: { path: string; id: string }[] = [];
@@ -877,4 +879,41 @@ it('a project whose claims keep failing cannot take every pass: a healthy projec
   // Its rows stay eligible: once its scans are healthy again, it is claimed.
   await deliverWebhooks(ch, { ...options(), concurrency: 10, perEndpoint: 1 }, failingProject);
   expect(failingRows.map((row) => sent(row.eventId))).toEqual(failingRows.map(() => 1));
+});
+
+it('keeps a failing project behind the others even when its rotation stamp cannot be written', { timeout: 60_000 }, async () => {
+  const failingProject = projects[24] ?? '';
+  const healthyProject = projects[25] ?? '';
+  const { now } = await webhookCursorClock(prisma);
+  await prisma.webhookClaimRotation.create({ data: { projectId: healthyProject, lastClaimedAt: new Date(+now - 3_600_000) } });
+  const failingIds: string[] = [];
+  for (let index = 0; index < 10; index++) {
+    const hook = await endpoint(failingProject, `stamp-failing-${index}`);
+    failingIds.push(hook.id);
+    await ping(hook.id, `stamp-failing-${index}`, new Date(+now - 300_000 + index));
+  }
+  const healthyRow = await ping((await endpoint(healthyProject, 'stamp-healthy')).id, 'stamp-healthy', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const fn = `qa_fail_rotation_${randomBytes(4).toString('hex')}`;
+  await prisma.$executeRawUnsafe(
+    `CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'QA rotation write failure'; END $$`,
+  );
+  // Every rotation write for the failing project fails, so only the worker's own record can keep it behind.
+  await prisma.$executeRawUnsafe(
+    `CREATE TRIGGER ${fn} BEFORE INSERT OR UPDATE ON "WebhookClaimRotation" FOR EACH ROW WHEN (NEW."projectId" = '${failingProject}') EXECUTE FUNCTION ${fn}()`,
+  );
+  const failing = { ...options(), concurrency: 2, claimTimeoutMs: 300, claimBudgetMs: 2000, claimScanDelay: { endpointIds: failingIds, seconds: 2 } };
+  const errors = vi.spyOn(console, 'error');
+  try {
+    await deliverWebhooks(ch, failing, [failingProject, healthyProject]);
+    expect(logged(errors, 'webhook.claim_rotation_failed').some((message) => message.includes(failingProject))).toBe(true);
+    expect(sent(healthyRow.eventId)).toBe(0);
+    await deliverWebhooks(ch, failing, [failingProject, healthyProject]);
+    expect(sent(healthyRow.eventId)).toBe(1);
+    expect(await prisma.webhookClaimRotation.findUnique({ where: { projectId: failingProject } })).toBeNull();
+  } finally {
+    errors.mockRestore();
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${fn} ON "WebhookClaimRotation"`);
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${fn}()`);
+  }
 });
