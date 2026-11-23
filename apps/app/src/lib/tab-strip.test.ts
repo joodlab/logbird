@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { logicalScroll, logicalTabSpan, physicalScroll, revealScroll, stripEdges, stripMask } from './tab-strip';
+import { logicalScroll, logicalTabSpan, physicalScroll, revealScroll, stripFades, stripMask } from './tab-strip';
 
 /** A 390px phone strip holding 600px of tabs: the viewport rect of the strip and its tabs. */
 const strip = { left: 16, right: 374 };
@@ -34,11 +34,20 @@ describe('tab strip geometry', () => {
     expect(revealScroll({ start: 100, end: 180 }, view, FADE)).toBeNull();
   });
 
-  it('reports hidden edges logically and flips the fade in RTL', () => {
-    expect(stripEdges({ scroll: 0, width, scrollWidth })).toEqual({ start: false, end: true });
-    expect(stripEdges({ scroll: scrollWidth - width, width, scrollWidth })).toEqual({ start: true, end: false });
-    expect(stripMask({ start: false, end: false }, FADE, false)).toBeUndefined();
-    expect(stripMask({ start: false, end: true }, FADE, false)).toMatch(/^linear-gradient\(to right, #000,.*transparent\)$/);
-    expect(stripMask({ start: false, end: true }, FADE, true)).toMatch(/^linear-gradient\(to left, #000,.*transparent\)$/);
+  it('fades the edges with hidden tabs, logically, and flips the fade in RTL', () => {
+    expect(stripFades({ scroll: 0, width, scrollWidth }, FADE)).toEqual({ start: 0, end: FADE });
+    expect(stripFades({ scroll: scrollWidth - width, width, scrollWidth }, FADE)).toEqual({ start: FADE, end: 0 });
+    expect(stripMask({ start: 0, end: 0 }, false)).toBeUndefined();
+    expect(stripMask({ start: 0, end: FADE }, false)).toBe(`linear-gradient(to right, #000, #000 0px, #000 calc(100% - ${FADE}px), transparent)`);
+    expect(stripMask({ start: 0, end: FADE }, true)).toMatch(/^linear-gradient\(to left, #000,.*transparent\)$/);
+  });
+
+  it('fades only as much as is hidden: a strip 3px too wide never dims a tab that is all but whole', () => {
+    // Four settings tabs on a 390px phone: 361px of tabs in a 358px strip.
+    expect(stripFades({ scroll: 0, width: 358, scrollWidth: 361 }, FADE)).toEqual({ start: 0, end: 3 });
+    expect(stripFades({ scroll: 3, width: 358, scrollWidth: 361 }, FADE)).toEqual({ start: 3, end: 0 });
+    // A pixel of rounding is not a hidden tab.
+    expect(stripFades({ scroll: 0, width: 358, scrollWidth: 359 }, FADE)).toEqual({ start: 0, end: 0 });
+    expect(stripMask({ start: 0, end: 3 }, false)).toBe('linear-gradient(to right, #000, #000 0px, #000 calc(100% - 3px), transparent)');
   });
 });

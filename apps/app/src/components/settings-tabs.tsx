@@ -1,7 +1,7 @@
 import { cn } from '@logbird/ui/lib/utils';
 import { Link, useRouter } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
-import { logicalScroll, logicalTabSpan, physicalScroll, revealScroll, stripEdges, stripMask } from '@/lib/tab-strip';
+import { logicalScroll, logicalTabSpan, physicalScroll, revealScroll, stripFades, stripMask } from '@/lib/tab-strip';
 
 /** Width of the edge fade that tells a phone user the tab strip scrolls. */
 const FADE = 28;
@@ -23,13 +23,13 @@ function revealTab(nav: HTMLElement, tab: HTMLElement) {
  */
 export function useTabStrip(activeKey: string) {
   const ref = useRef<HTMLElement>(null);
-  const [state, setState] = useState({ start: false, end: false, rtl: false });
+  const [state, setState] = useState({ start: 0, end: 0, rtl: false });
   useEffect(() => {
     const nav = ref.current;
     if (!nav) return;
     const update = () => {
       const rtl = getComputedStyle(nav).direction === 'rtl';
-      const edges = stripEdges({ scroll: logicalScroll(nav.scrollLeft), width: nav.clientWidth, scrollWidth: nav.scrollWidth });
+      const edges = stripFades({ scroll: logicalScroll(nav.scrollLeft), width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
       setState((prev) => (prev.start === edges.start && prev.end === edges.end && prev.rtl === rtl ? prev : { ...edges, rtl }));
     };
     update();
@@ -60,7 +60,7 @@ export function useTabStrip(activeKey: string) {
     // `onRendered`, possibly after this effect: check again then (it subscribed first, so it has already run).
     return router.subscribe('onRendered', reveal);
   }, [activeKey, router]);
-  const mask = stripMask(state, FADE, state.rtl);
+  const mask = stripMask(state, state.rtl);
   return { ref, style: mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined };
 }
 

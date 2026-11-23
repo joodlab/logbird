@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { ActionName } from '@/components/action-name';
 import { EntityLink } from '@/components/entity-link';
 import { EventSheet } from '@/components/explorer/event-sheet';
+import { NotRecorded } from '@/components/not-recorded';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { operationQuery } from '@/lib/api/queries';
@@ -215,16 +216,20 @@ function OperationPage() {
         ))}
       </dl>
 
-      {actors.length > 0 || executors.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+      {/* Both parties, always once the events are in: one the events did not name says so, as in the event drawer. */}
+      {events.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm" data-testid="operation-parties">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">Caused by</span>
+            {actors.length === 0 ? <NotRecorded /> : null}
             {actors
               .slice(0, 4)
               .map((a) => (a ? <EntityLink id={a.id} key={a.id} kind="actor" name={a.name} projectId={projectId} type={a.type} /> : null))}
+            {actors.length > 4 ? <span className="text-muted-foreground text-xs">and {formatNumber(actors.length - 4)} more</span> : null}
           </span>
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">Performed by</span>
+            {executors.length === 0 ? <NotRecorded /> : null}
             {executors.map((x) =>
               x ? <EntityLink id={x.id} key={x.id} kind="executor" meta={x.type} name={x.name} projectId={projectId} type={x.type} /> : null,
             )}

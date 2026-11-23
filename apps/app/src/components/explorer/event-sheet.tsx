@@ -35,6 +35,7 @@ import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
+import { NotRecorded } from '@/components/not-recorded';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries';
@@ -455,7 +456,7 @@ function MissingActor({ event, detail, projectId }: { event: AuditEvent; detail?
   const fromParent = detail ? parentActor(detail.parents) : null;
   return (
     <div className="flex min-w-0 flex-col gap-1" data-testid="missing-actor">
-      <span className="text-muted-foreground text-sm">Not recorded</span>
+      <NotRecorded />
       {fromAttribute ? (
         <span className="text-muted-foreground text-xs">
           Its <span className="font-mono">{fromAttribute.key}</span> attribute names{' '}
@@ -659,7 +660,7 @@ function EventDetailBody({
                   </span>
                 </div>
               ) : (
-                <span className="text-muted-foreground text-sm">Not recorded</span>
+                <NotRecorded />
               )}
             </PartyCard>
             {e.impersonator ? (
