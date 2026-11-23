@@ -744,11 +744,22 @@ it("costs one claim timeout, not the pass, when the fallback's endpoint listing 
   const row = await ping(slow.id, 'listing-slow', new Date(+now - 60_000));
   const errors = vi.spyOn(console, 'error');
   try {
-    // Test hook: a 300 ms statement timeout, and a 5 s sleep in the slow endpoint's scans and in the fallback listing. The
-    // listing must be cancelled by its timeout (logged as a listing failure); a listing without one would finish its sleep
-    // and succeed, and log nothing.
-    await deliverWebhooks(ch, { ...options(), claimTimeoutMs: 300, claimScanDelay: { endpointIds: [slow.id], seconds: 5, listing: true } }, project);
-    expect(logged(errors, 'webhook.claim_endpoints_failed').some((message) => message.includes(project))).toBe(true);
+    // Test hooks: a 300 ms statement timeout, a 5 s sleep in the slow endpoint's scans and in the fallback listing, and a
+    // budget clock that never runs out (so host load cannot skip the listing). The listing must be cancelled by its
+    // statement timeout (SQLSTATE 57014); a listing without one would finish its sleep, succeed and log nothing.
+    await deliverWebhooks(
+      ch,
+      {
+        ...options(),
+        claimTimeoutMs: 300,
+        claimBudgetClock: () => 0,
+        claimScanDelay: { endpointIds: [slow.id], seconds: 5, listing: true },
+      },
+      project,
+    );
+    const listingFailures = logged(errors, 'webhook.claim_endpoints_failed').filter((message) => message.includes(project));
+    expect(listingFailures).toHaveLength(1);
+    expect(JSON.parse(listingFailures[0] ?? '{}')).toMatchObject({ projectId: project, sqlState: '57014' });
   } finally {
     errors.mockRestore();
   }
@@ -795,7 +806,12 @@ it('dispatches what it claimed when the budget runs out mid-pass and leaves the 
   // Test hooks: the budget clock stands still until the fair statement's claims are collected, then jumps past the
   // deadline, however often it is read. The fair statement claims the project's oldest row; the fill phase starts nothing.
   let clock = 0;
-  const hooks = { claimBudgetClock: () => clock, claimAfterFair: () => (clock = 60_000) };
+  const hooks = {
+    claimBudgetClock: () => clock,
+    claimAfterFair: () => {
+      clock = 60_000;
+    },
+  };
   const errors = vi.spyOn(console, 'error');
   try {
     await deliverWebhooks(ch, { ...options(), concurrency: 2, perEndpoint: 1, ...hooks }, project);

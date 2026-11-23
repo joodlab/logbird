@@ -73,6 +73,15 @@ type PassScope = {
   scanDelay?: DeliveryOptions['claimScanDelay'];
 };
 
+/** PostgreSQL SQLSTATE of a failed query, when Prisma reports one (57014: statement timeout, 55P03: lock timeout). */
+function sqlState(error: unknown) {
+  const meta = (error && typeof error === 'object' && 'meta' in error ? error.meta : undefined) as
+    | { code?: unknown; driverAdapterError?: { cause?: { originalCode?: unknown } } }
+    | undefined;
+  const code = meta?.code ?? meta?.driverAdapterError?.cause?.originalCode;
+  return typeof code === 'string' ? code : undefined;
+}
+
 const scanSleep = (scope: PassScope) =>
   scope.scanDelay
     ? Prisma.sql`AND CASE WHEN e.id = ANY(${scope.scanDelay.endpointIds}::text[]) THEN (SELECT true FROM pg_sleep(${scope.scanDelay.seconds}) WHERE e.id IS NOT NULL) ELSE true END`
@@ -372,9 +381,11 @@ export async function claimWebhookDeliveries(
       const claimed = await claimProject(scope, project, limit);
       claims.push(...claimed);
       return claimed.length;
-    } catch {
+    } catch (error) {
       // A failed claim cannot hold up the other projects; claims committed so far are still dispatched.
-      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, claimed: claims.length }));
+      console.error(
+        JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, claimed: claims.length, sqlState: sqlState(error) }),
+      );
     }
     // Retry the project one endpoint at a time, each in its own statement and with its own timeout, so an endpoint whose
     // scan fails or times out (for example behind rows another transaction holds) cannot keep its siblings from claiming.
@@ -383,8 +394,8 @@ export async function claimWebhookDeliveries(
     if (spent()) return count;
     try {
       endpoints = await projectEndpoints(scope, project);
-    } catch {
-      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_endpoints_failed', projectId: project }));
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_endpoints_failed', projectId: project, sqlState: sqlState(error) }));
     }
     for (const endpointId of endpoints) {
       if (count >= limit || claims.length >= capacity || spent()) break;
@@ -392,8 +403,10 @@ export async function claimWebhookDeliveries(
         const claimed = await claimProject(scope, project, Math.min(limit - count, capacity - claims.length), endpointId);
         claims.push(...claimed);
         count += claimed.length;
-      } catch {
-        console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_endpoint_failed', projectId: project, endpointId }));
+      } catch (error) {
+        console.error(
+          JSON.stringify({ level: 'error', event: 'webhook.claim_endpoint_failed', projectId: project, endpointId, sqlState: sqlState(error) }),
+        );
       }
     }
     return count;
