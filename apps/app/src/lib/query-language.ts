@@ -181,9 +181,9 @@ function readingOutside(text: string, from: number, to: number): string | null {
   return `${covered.slice(0, from).join('')}|${covered.slice(to).join('')}`;
 }
 
-/** Endings that close what is still open: a word, a quote, a range, then up to eight groups (`((a`). */
+/** Endings that close what is still open: a word, a quote, a range, then up to 16 groups (`((a`), the parser's limit. */
 const CLOSINGS = ['', ' x', 'x', '"', 'x"', ' x]', 'x]', 'x TO x]', '/', 'x/'].flatMap((inner) =>
-  Array.from({ length: 9 }, (_, depth) => inner + ')'.repeat(depth)),
+  Array.from({ length: 17 }, (_, depth) => inner + ')'.repeat(depth)),
 );
 
 /**
@@ -224,8 +224,8 @@ export function neighbourSafeInsert(
   structural = true,
 ): string | null {
   const finished = finishable(q, to);
-  // Nothing around the span can be read yet: only an insertion at the very end, with nothing after it, goes unchecked.
-  if (!finished) return q.slice(to).trim() ? null : insert;
+  // Nothing around the span can be read yet, so nothing can be checked: the completion is declined.
+  if (!finished) return null;
   const { base, ending } = finished;
   const shape = (out: string | null) => (out === null || structural ? out : out.replace(/(^|\|)\["[^"]*/g, '$1["'));
   // At the end of the text the placeholder ending stands for what the reader types next, so it is no neighbour.

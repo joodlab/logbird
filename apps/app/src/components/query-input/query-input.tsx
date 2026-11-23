@@ -207,7 +207,9 @@ export function QueryInput({
 
   // Reset the highlight, and any row chosen with the arrows, whenever the rows change: a row that moved into the chosen
   // place (field names arriving, values loading) was never chosen.
-  const shape = `${completions.context.kind}|${suggestions.map((s) => s.id).join(' ')}`;
+  // The completed span is part of it: the same rows for another term (`action:` here, `outcome:` there) are new rows.
+  const span = 'from' in completions.context ? `${completions.context.from}-${completions.context.to}` : '';
+  const shape = `${completions.context.kind}:${span}|${suggestions.map((s) => s.id).join(' ')}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the list's shape on purpose
   useEffect(() => {
     setActive(0);
