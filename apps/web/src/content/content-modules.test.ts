@@ -318,7 +318,7 @@ describe('evidence limits', () => {
     expect(home[1]?.limit).toBe(evidenceLimits.shortenRetention);
     expect(home[2]?.limit).toBe(evidenceLimits.exportMatch);
     const sections = complianceEvidenceContent(SITE).sections;
-    expect(sections.find((section) => section.id === 'retention')?.limits?.rows.map((row) => row.limit)).toContain(evidenceLimits.shortenRetention);
+    expect(sections.find((section) => section.id === 'retention')?.limits?.rows[1]?.limit).toBe(evidenceLimits.shortenRetention);
     expect(sections.find((section) => section.id === 'export')?.limit?.text).toBe(evidenceLimits.exportMatch);
 
     // Both pages show both sentences, and no page says the deletion starts "immediately" (maintainer rule).
