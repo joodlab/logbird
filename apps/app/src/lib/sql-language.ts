@@ -248,8 +248,51 @@ export type SqlCompletion =
   | { kind: 'operand'; column: string }
   | { kind: 'none' };
 
+/** ClickHouse's single-character escapes (`parseEscapeSequence`); any other character stands for itself. */
+const SQL_ESCAPES: Record<string, string> = { a: '\x07', b: '\b', e: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', 0: '\0' };
+/** Escaped characters ClickHouse writes without their backslash; for any other printable one it keeps it (`\z`, `\%`). */
+const SQL_BARE_ESCAPES = new Set(['\\', "'", '"', '`', '/', '=']);
+const utf8 = new TextEncoder();
+// A leading byte-order mark is data in a literal (ClickHouse keeps all three bytes), never something to strip.
+const utf8Text = new TextDecoder('utf-8', { ignoreBOM: true });
+
+/**
+ * The text of a single-quoted literal's body, decoded in one pass as ClickHouse decodes it: `\'` and `''` are each one
+ * apostrophe (so `a\'\'b`, as `sqlString` writes two, never collapses to one), `\xHH` are bytes read as UTF-8 together
+ * with the text around them (`\xC3\xA9` is é), and an unknown escape such as `\z` keeps its backslash.
+ */
 export function unquoteSql(raw: string): string {
-  return raw.replace(/\\([\s\S])/g, (_, escaped: string) => (escaped === 'r' ? '\r' : escaped)).replaceAll("''", "'");
+  const bytes: number[] = [];
+  const text = (s: string) => bytes.push(...utf8.encode(s));
+  for (let i = 0; i < raw.length; ) {
+    const ch = raw[i] as string;
+    if (ch === "'" && raw[i + 1] === "'") {
+      text("'");
+      i += 2;
+    } else if (ch === '\\' && i + 1 < raw.length) {
+      const hex = /^x([0-9A-Fa-f]{2})/.exec(raw.slice(i + 1, i + 4));
+      if (hex) {
+        bytes.push(Number.parseInt(hex[1] as string, 16));
+        i += 4;
+        continue;
+      }
+      const next = String.fromCodePoint(raw.codePointAt(i + 1) as number);
+      if (next === 'N') {
+        // ClickHouse reads `\N` as nothing at all (its NULL marker in text formats).
+        i += 2;
+        continue;
+      }
+      const decoded = SQL_ESCAPES[next] ?? next;
+      const control = decoded.length === 1 && (decoded.charCodeAt(0) < 0x20 || decoded.charCodeAt(0) === 0x7f);
+      text(SQL_BARE_ESCAPES.has(decoded) || control ? decoded : `\\${decoded}`);
+      i += 1 + next.length;
+    } else {
+      const cp = String.fromCodePoint(raw.codePointAt(i) as number);
+      text(cp);
+      i += cp.length;
+    }
+  }
+  return utf8Text.decode(new Uint8Array(bytes));
 }
 
 /** A column reference ending at solid index `k`: an allowed identifier or `attributes['key']`. */
@@ -398,6 +441,10 @@ export function sqlString(value: string): string {
   return `'${value.replace(/[\\']/g, '\\$&').replaceAll('\r', '\\r')}'`;
 }
 
+/** A literal's body exactly as `sqlString` writes it: a CR stays the escape `
+`, never a raw CR a textarea turns into LF. */
+export const sqlLiteralBody = (value: string) => sqlString(value).slice(1, -1);
+
 /**
  * Top-level `AND` conjuncts of an expression. An expression with a top-level `OR` (or a single
  * predicate) is one conjunct; parenthesised groups stay whole.
@@ -489,14 +536,31 @@ export function removeSqlConjuncts(q: string, test: (conjunct: string) => boolea
   return kept.length === parts.length ? q.trim() : joinConjuncts(kept);
 }
 
-/** Equality / membership predicates for one column, as facets write them. */
-function columnPredicatePrefixes(column: string, attr?: string): string[] {
+/** Equality / membership predicates for one column, as facets write them, with whether each opens a call. */
+function columnPredicatePrefixes(column: string, attr?: string): [string, boolean][] {
   const ref = attr !== undefined ? `attributes[${sqlString(attr)}]` : column;
-  return [`${ref} = '`, `${ref} != '`, `has(${ref}, '`, `NOT has(${ref}, '`];
+  return [
+    [`${ref} = '`, false],
+    [`${ref} != '`, false],
+    [`has(${ref}, '`, true],
+    [`NOT has(${ref}, '`, true],
+  ];
+}
+
+/**
+ * Whether `conjunct` is exactly `prefix` followed by one closed string literal (and the `)` the prefix opened), with
+ * nothing else: `outcome = 'failure' OR actor_id = 'A'` starts and ends like a facet predicate but is not one.
+ */
+function isSinglePredicate(conjunct: string, prefix: string, call: boolean): boolean {
+  if (!conjunct.startsWith(prefix)) return false;
+  // `call` comes from the prefix's shape, never from scanning it: `attributes['phase(v2)'] = '` opens no call.
+  const rest = tokenizeSql(conjunct.slice(prefix.length - 1)).filter((t) => t.kind !== 'space');
+  const literal = rest[0];
+  return literal?.kind === 'string' && literal.closed === true && rest.length === (call ? 2 : 1) && (!call || rest[1]?.raw === ')');
 }
 
 export function isColumnPredicate(conjunct: string, column: string, attr?: string): boolean {
-  return columnPredicatePrefixes(column, attr).some((p) => conjunct.startsWith(p) && /'\)?$/.test(conjunct));
+  return columnPredicatePrefixes(column, attr).some(([p, call]) => isSinglePredicate(conjunct, p, call));
 }
 
 /** Facet toggle in SQL mode: include replaces this column's other equality predicates, exclude stacks. */
@@ -504,7 +568,7 @@ export function toggleSqlPredicate(q: string, predicate: string, column: string,
   if (hasSqlPredicate(q, predicate)) return removeSqlConjuncts(q, (c) => c === normalize(predicate));
   if (mode === 'include') {
     const ref = attr !== undefined ? `attributes[${sqlString(attr)}]` : column;
-    const cleaned = removeSqlConjuncts(q, (c) => (c.startsWith(`${ref} = '`) || c.startsWith(`has(${ref}, '`)) && /'\)?$/.test(c));
+    const cleaned = removeSqlConjuncts(q, (c) => isSinglePredicate(c, `${ref} = '`, false) || isSinglePredicate(c, `has(${ref}, '`, true));
     return appendSqlPredicate(cleaned, predicate);
   }
   return appendSqlPredicate(q, predicate);
