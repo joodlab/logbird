@@ -301,6 +301,9 @@ public class Step4FollowUpTests
         {
             o.MaxQueueSize = 1_000;
             o.OnError = _ => errorGate.Wait();
+
+            // One event per batch, so every event drains whatever the sender's timing (no partial batch waits an hour).
+            o.BatchSize = 1;
         }), new FakeServer());
         try
         {
@@ -404,6 +407,119 @@ public class Step4FollowUpTests
 
         Assert.True(await client.FlushAsync());
         Assert.Single(reports.OfType<LogbirdRejectedException>());
+    }
+
+    [Fact]
+    public void An_empty_root_is_checked_against_the_budget()
+    {
+        // "x" is 1 byte and an empty metadata object 2: 3 fits a 3-byte budget and not a 2-byte one.
+        var auditEvent = new AuditEvent("x") { Metadata = new JsonObject() };
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(auditEvent, 3));
+        Assert.Equal(JsonSize.Shape.TooLarge, JsonSize.Measure(auditEvent, 2));
+    }
+
+    [Fact]
+    public void A_copy_keeps_keys_that_differ_only_by_case_under_a_case_insensitive_parent()
+    {
+        // A child filled case-sensitively, then attached under a case-insensitive parent, holds "Plan" and "plan". Its
+        // copy follows the rule its own dictionary follows, so both survive, through AuditEvent.Clone as well.
+        var child = new JsonObject { ["Plan"] = "first", ["plan"] = "second" };
+        var parent = new JsonObject(CaseInsensitive) { ["child"] = child, ["Kept"] = 1 };
+
+        var copy = (JsonObject)JsonTree.Clone(parent)!;
+        var copiedChild = (JsonObject)copy["child"]!;
+        Assert.Equal(["Plan", "plan"], copiedChild.Select(p => p.Key).ToArray());
+        Assert.Equal("first", copiedChild["Plan"]!.GetValue<string>());
+        Assert.NotNull(copy["kept"]);
+
+        var auditEvent = new AuditEvent("x") { Metadata = parent };
+        var cloned = auditEvent.Clone();
+        Assert.Equal(2, ((JsonObject)cloned.Metadata["child"]!).Count);
+    }
+
+    [Fact]
+    public async Task A_shallow_value_under_many_ancestors_outside_the_event_is_copied_and_sent_from_a_small_stack()
+    {
+        // The value attached to the event is small, but it sits under 100,000 levels of the caller's own tree, none with
+        // options. Asking it for its options would climb all of them; the copy never asks.
+        JsonNode outer = new JsonObject { ["value"] = new JsonObject { ["plan"] = "pro", ["seats"] = 3, ["tags"] = new JsonArray("a", true) } };
+        var value = outer["value"]!;
+        for (var i = 0; i < 100_000; i++)
+        {
+            outer = new JsonObject { ["n"] = outer };
+        }
+
+        var server = new FakeServer();
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using var client = Client(Options(o => o.OnDrop = drops.Enqueue), server);
+        Exception? failure = null;
+        var thread = new Thread(
+            () =>
+            {
+                try
+                {
+                    Assert.Equal(value.ToJsonString(), JsonTree.Clone(value)!.ToJsonString());
+                    client.Track(new AuditEvent("subtree").Change("plan", null, value));
+                }
+                catch (Exception e)
+                {
+                    failure = e;
+                }
+            },
+            256 * 1024);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+        Assert.True(await client.FlushAsync());
+
+        Assert.Empty(drops);
+        var sent = Assert.Single(server.Requests.SelectMany(r => r.Events));
+        Assert.Equal("pro", sent.GetProperty("changes")[0].GetProperty("after").GetProperty("plan").GetString());
+    }
+
+    [Fact]
+    public async Task A_successful_answer_reserves_no_report()
+    {
+        var reservations = 0;
+        var server = new FakeServer().Then(request => FakeServer.Accept(request));
+        var sender = new BatchSender(
+            new HttpClient(server),
+            Endpoint,
+            "lb_ingest_fictional",
+            0,
+            TimeSpan.FromSeconds(10),
+            drop: (_, _, _, _) => null,
+            warn: (_, _) => { },
+            progress: () => { },
+            report: _ => { },
+            reserveReport: () =>
+            {
+                reservations++;
+                return _ => { };
+            });
+        var json = Encoding.UTF8.GetBytes("{\"id\":\"evt_1\",\"action\":\"x\",\"occurredAt\":\"2026-11-23T00:00:00.000Z\"}");
+        await sender.SendAsync([new QueuedEvent(json, "evt_1", "x", 1)], CancellationToken.None);
+
+        Assert.Equal(0, reservations);
+    }
+
+    [Fact]
+    public async Task An_event_tracked_after_Dispose_returns_is_dropped_as_shutdown()
+    {
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var client = Client(Options(o => o.OnDrop = drops.Enqueue), new FakeServer());
+        client.Dispose();
+        client.Track(new AuditEvent("late"));
+
+        Assert.Equal(0, client.Stats.Tracked);
+        await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+        {
+            while (drops.IsEmpty)
+            {
+                await Task.Delay(10);
+            }
+        });
+        Assert.Equal(DropReason.Shutdown, Assert.Single(drops).Reason);
     }
 
     // ---------------------------------------------------------------- R06 (maintainer ruling b): depth is checked as given

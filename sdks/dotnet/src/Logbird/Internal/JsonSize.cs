@@ -164,6 +164,11 @@ internal static class JsonSize
         var frames = new Frame[16];
         var open = 0;
         size += Open(root, 1, ref frames, ref open);
+        if (size > maxBytes)
+        {
+            // An empty root is counted whole and opens no level, so the loop below would not check it.
+            return Shape.TooLarge;
+        }
         while (open > 0)
         {
             ref var frame = ref frames[open - 1];

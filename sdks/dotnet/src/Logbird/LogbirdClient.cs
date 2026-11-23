@@ -663,6 +663,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             // The deadline starts on entry and disposal starts (or is joined) on the thread pool, never on this thread: its
             // accounting takes the queue lock and walks the queue. The proxy task returned by Task.Run cannot be inlined by
             // Wait. Past the deadline, taking ownership of the remaining events is handed to the thread pool as well.
+            // Admission closes on this thread first, so no event is accepted while disposal waits for the pool.
+            _closing = true;
             var dispose = Task.Run(StartDispose);
             if (!dispose.Wait(_shutdownTimeout + TimeSpan.FromSeconds(10)) && _queue is not null)
             {

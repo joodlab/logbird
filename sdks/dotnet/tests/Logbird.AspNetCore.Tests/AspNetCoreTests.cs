@@ -966,7 +966,11 @@ public class AspNetCoreTests
             a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record(prepared))),
             options: o => o.OnDrop = drops.Enqueue);
         (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
-        Assert.Equal(DropReason.TooLarge, Assert.Single(await Eventually(drops, 1)).Reason);
+        var drop = Assert.Single(await Eventually(drops, 1));
+        Assert.Equal(DropReason.TooLarge, drop.Reason);
+
+        // Refused by the pre-copy guard, not by the wire limit after a copy.
+        Assert.Equal("The event's data exceeds 1 MiB before redaction.", drop.Detail);
         Assert.Null(prepared.Id);
     }
 

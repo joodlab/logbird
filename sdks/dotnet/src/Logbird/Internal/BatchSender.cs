@@ -640,7 +640,9 @@ internal sealed class BatchSender
 
     private void Reject(State state, int[] attempt, JsonElement rejections)
     {
-        if (rejections.ValueKind != JsonValueKind.Array)
+        // An empty list (every successful answer) reserves nothing: a released place still holds notifier capacity until
+        // the drain reaches it, so successful batches would crowd real reports out behind a slow callback.
+        if (rejections.ValueKind != JsonValueKind.Array || rejections.GetArrayLength() == 0)
         {
             return;
         }

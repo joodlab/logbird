@@ -41,12 +41,12 @@ public enum DropReason
     /// or a change value nests JSON deeper than 1,000 levels, checked on the event as given (before
     /// <see cref="LogbirdOptions.BeforeSend"/> and redaction: a deep part they would remove still counts, because walking it
     /// is the risk). The limit keeps System.Text.Json's internal recursion (a node looks its options up through its parents)
-    /// well inside any thread's stack, where an overflow would end the host process; it is tested on a 256 KB stack. It is
-    /// the number the server uses for exact numbers, but the server applies it differently: to the whole event, and only
-    /// when the event holds a number a double cannot keep exactly. So a deeper tree without such a number (strings,
-    /// booleans, nulls, ordinary numbers), which the server would store, is refused here; and a change value sits three
-    /// levels into the event, so one holding such a number more than 997 levels deep is rejected by the server
-    /// (<see cref="Rejected"/>).
+    /// within the stack, where an overflow would end the host process; it is tested on a 256 KB thread stack. It is the
+    /// number the server uses for exact numbers, but the server applies it differently: to the objects and arrays of the
+    /// whole event, and only when the event holds, anywhere, a number a double cannot keep exactly. So a deeper tree in an
+    /// event without such a number, which the server would store, is refused here; and because a change value sits three
+    /// levels into the event, a change value whose objects or arrays nest more than 997 levels (a leaf at level 999 or
+    /// deeper), in an event holding such a number, is rejected by the server (<see cref="Rejected"/>).
     /// </summary>
     Invalid = 5,
 
