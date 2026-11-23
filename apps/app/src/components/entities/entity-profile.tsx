@@ -22,7 +22,7 @@ import { current } from '@/lib/api/current';
 import { ApiRequestError } from '@/lib/api/errors';
 import { entityProfileQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
-import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIcon } from '@/lib/entities';
+import { ENTITY_SECTIONS, type EntitySection, entityBaseQuery, splitTargetId, typeIcon } from '@/lib/entities';
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
@@ -56,7 +56,7 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
   const displayId = kind === 'target' ? splitTargetId(entityId, targetType ?? p?.entity.type).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
-  const baseQuery = kind === 'target' && !p ? '' : entityQuery(kind, entityId, p?.entity.type);
+  const baseQuery = entityBaseQuery(kind, entityId, targetType, p?.entity.type);
   const support = useSupportCounts(projectId, kind, entityId, baseQuery, timeline.range);
   const lang = timeline.lang ?? 'query';
   const who = whoFilter(timeline.q, lang);
@@ -189,7 +189,19 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
 
         <StatTileGrid className="grid-cols-2 sm:grid-cols-4">
           <StatTile label={`Events · ${rangeInSentence(rangeLabel(timeline.range))}`} loading={!p} value={p ? formatNumber(outcomeTotal) : ''} />
-          <StatTile label="Events · all time" loading={!p} value={p ? formatNumber(p.entity.events) : ''} />
+          <StatTile
+            label={
+              kind === 'target' ? (
+                // The rollup counts each time an event names the record (twice if it lists it twice), and a record whose
+                // type and id join into another's key shares that count: no exact event count is claimed for a record.
+                <span title="How many times events named this record. An event that lists it twice counts twice.">Mentions · all time</span>
+              ) : (
+                'Events · all time'
+              )
+            }
+            loading={!p}
+            value={p ? formatNumber(p.entity.events) : ''}
+          />
           <StatTile label="First seen" loading={!p} value={p ? <Timestamp format="date" iso={p.entity.firstSeen} /> : ''} />
           <StatTile label="Last seen" loading={!p} value={p ? <Timestamp format="relative" iso={p.entity.lastSeen} /> : ''} />
         </StatTileGrid>

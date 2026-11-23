@@ -66,6 +66,17 @@ export function entityQuery(kind: EntityKind, id: string, targetType?: string): 
 }
 
 /**
+ * The filter an entity page's history runs under, or '' while it is not known yet. A record's filter needs its type: a
+ * link that carries the exact pair (`?targetType=`, consistent with the id) already has it, so the history starts at
+ * once; otherwise it comes with the profile (#220). Other entities never wait.
+ */
+export function entityBaseQuery(kind: EntityKind, id: string, linkedType: string | undefined, profileType: string | undefined): string {
+  if (kind !== 'target') return entityQuery(kind, id);
+  const type = linkedType !== undefined && id.startsWith(`${linkedType}:`) ? linkedType : profileType;
+  return type === undefined ? '' : entityQuery(kind, id, type);
+}
+
+/**
  * How well an entity matches what was typed, best first, the same order the server ranks a search by: 0 the exact id
  * as typed, 1 the id in another case, 2 id prefix, 3 name prefix, 4 id or name contains it, 5 a fuzzy match only. A record's bare id (`article_27_2` for
  * `article:article_27_2`) counts as its id.

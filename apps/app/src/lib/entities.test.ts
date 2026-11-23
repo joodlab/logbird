@@ -1,5 +1,6 @@
+import { formatRecordTerm } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { entityMatchRank, entityQuery, exactPerKind, idFromFreeText, resolveJump } from './entities';
+import { entityBaseQuery, entityMatchRank, entityQuery, exactPerKind, idFromFreeText, resolveJump } from './entities';
 
 describe('entity match rank (the order Jump to lists entities in)', () => {
   const tenant = (id: string, name = '') => ({ kind: 'tenant' as const, id, name, type: '' });
@@ -77,5 +78,17 @@ describe('exact ids, one per kind', () => {
       e('target', 'doc:ACME', 'doc'),
     ];
     expect(exactPerKind(found, 'acme').map((x) => `${x.kind}:${x.id}`)).toEqual(['actor:acme', 'tenant:acme', 'executor:ACME', 'target:doc:ACME']);
+  });
+});
+
+describe('a record page history starts from the link when it carries the exact pair (#220 item 5)', () => {
+  it('uses the linked type at once, falls back to the profile, and never guesses', () => {
+    expect(entityBaseQuery('target', 'order:archived:A1', 'order:archived', undefined)).toBe(formatRecordTerm('order:archived', 'A1'));
+    // Before the profile arrives and without a linked type: no history yet, rather than a guessed split.
+    expect(entityBaseQuery('target', 'order:archived:A1', undefined, undefined)).toBe('');
+    expect(entityBaseQuery('target', 'order:archived:A1', undefined, 'order:archived')).toBe(formatRecordTerm('order:archived', 'A1'));
+    // A linked type that does not belong to the id is ignored.
+    expect(entityBaseQuery('target', 'order:archived:A1', 'invoice', undefined)).toBe('');
+    expect(entityBaseQuery('actor', 'qa-user-1', undefined, undefined)).toBe('actor:qa-user-1');
   });
 });
