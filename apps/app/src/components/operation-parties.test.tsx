@@ -89,4 +89,10 @@ describe('OperationParties', () => {
     const { executors } = show([ev(1, null, executor('', 'west', 'service:billing')), ev(2, null, executor('', 'billing:west', 'service'))]);
     expect(executors.textContent).toBe('Performed bywestbilling:west');
   });
+
+  it('names a party recorded by an email or a name alone (as the read API now returns it), never "Not recorded"', () => {
+    const { actors, executors } = show([ev(1, actor('', '', 'lina@example.test', ''), executor('', 'Billing worker', ''))]);
+    expect(actors.textContent).toBe('Caused bylina@example.test');
+    expect(executors.textContent).toBe('Performed byBilling worker');
+  });
 });

@@ -631,11 +631,11 @@ function EventDetailBody({
                     <span className="truncate text-sm">{personLabel(e.actor)}</span>
                   )}
                   <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-                    <TypePill>{e.actor.type || 'unknown'}</TypePill>
+                    <PartyType type={e.actor.type} />
                     {e.actor.id ? <span className="truncate font-mono">{e.actor.id}</span> : null}
                   </span>
-                  {/* Without an id or a name, the email is already the first line: say it once. */}
-                  {e.actor.email && (e.actor.id || e.actor.name.trim()) ? (
+                  {/* The email once: not again when the first line already shows it (no name, or a name that is the email). */}
+                  {e.actor.email && actorFirstLine(e.actor, Boolean(projectId)) !== e.actor.email.trim() ? (
                     <span className="truncate text-muted-foreground text-xs">{e.actor.email}</span>
                   ) : null}
                 </div>
@@ -660,7 +660,7 @@ function EventDetailBody({
                     <span className="truncate text-sm">{e.executor.name || e.executor.id}</span>
                   )}
                   <span className="flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
-                    <TypePill>{e.executor.type || 'unknown'}</TypePill>
+                    <PartyType type={e.executor.type} />
                     {e.executor.jobId ? <span className="font-mono">job {e.executor.jobId}</span> : null}
                     {e.executor.attempt > 0 ? (
                       <TypePill tone={e.executor.attempt > 1 ? 'warning' : 'neutral'}>attempt {e.executor.attempt}</TypePill>
@@ -886,6 +886,24 @@ function EventDetailBody({
         </Collapsible>
       </div>
     </div>
+  );
+}
+
+/** The text the actor card's first line shows: the profile link's name or id, else the plain label. */
+function actorFirstLine(actor: { id: string; name: string; email: string }, linked: boolean): string {
+  if (!actor.id) return unlinkedPartyLabel(actor);
+  return linked ? actor.name.trim() || actor.id : personLabel(actor);
+}
+
+/** A party's type pill: a long type (up to 64 characters) truncates inside the card, with the whole type as its title. */
+function PartyType({ type }: { type: string }) {
+  const label = type || 'unknown';
+  return (
+    <TypePill className="min-w-0 max-w-full">
+      <span className="min-w-0 truncate" title={label}>
+        {label}
+      </span>
+    </TypePill>
   );
 }
 
