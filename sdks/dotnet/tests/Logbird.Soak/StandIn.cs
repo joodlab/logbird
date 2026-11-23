@@ -27,35 +27,36 @@ internal enum Fault
     /// <summary>503 ingest_pending whose details settle some events and list the rest as unresolved (indices/eventIds).</summary>
     PartialUnavailable,
 
-    /// <summary>503 ingest_unavailable without details: the whole batch is retried.</summary>
+    /// <summary>503 ingest_unavailable without details, without forwarding: the whole batch is retried.</summary>
     Unavailable,
 
-    /// <summary>429 rate_limited with Retry-After.</summary>
+    /// <summary>429 rate_limited with Retry-After, without forwarding.</summary>
     RateLimited,
 
-    /// <summary>The connection is reset after the request headers, before the body is read.</summary>
+    /// <summary>The connection is reset after the request headers, before the body is read, without forwarding.</summary>
     Reset,
 
-    /// <summary>The events are stored, then the connection is reset before the answer.</summary>
+    /// <summary>The events are stored (or forwarded and stored), then the connection is reset before the answer.</summary>
     ResetAfterStore,
 
-    /// <summary>No answer until after the client's request timeout, then a reset.</summary>
+    /// <summary>No answer until after the client's request timeout, then a reset, without forwarding.</summary>
     Hang,
 
-    /// <summary>202 <c>{}</c> (a proxy answering for the server): nothing is acknowledged. The events are stored first.</summary>
+    /// <summary>202 <c>{}</c> (a proxy answering for the server): nothing is acknowledged. Stored or forwarded first.</summary>
     EmptyAck,
 
-    /// <summary>202 with some not-yet-stored events rejected per event (code invalid_event).</summary>
+    /// <summary>202 with some not-yet-stored events rejected per event (code invalid_event). Stand-in mode only.</summary>
     Reject,
 
-    /// <summary>413 payload_too_large: a permanent HTTP error for the batch.</summary>
+    /// <summary>413 payload_too_large without forwarding: a permanent HTTP error for the batch.</summary>
     TooLarge,
 }
 
 /// <summary>
 /// An in-process Logbird ingest stand-in on a real loopback socket. It answers <c>POST /v1/events</c> the way the server
 /// does (apps/server ingest.ts, immutable-ingest.ts, rate-limit.ts; shapes from packages/contracts), records every event
-/// it stores, every id it acknowledges to the client and each id's first-seen content, and injects faults.
+/// it stores, every id it acknowledges to the client and each id's first-seen content, and injects faults. With an
+/// upstream it forwards to a real Logbird instead of storing, with the same transport faults.
 /// </summary>
 internal sealed class StandIn : IDisposable
 {
@@ -71,6 +72,8 @@ internal sealed class StandIn : IDisposable
     private readonly object _randomGate = new();
     private readonly TimeSpan _hang;
     private readonly string _authorization;
+    private readonly HttpClient? _upstream;
+    private readonly Uri? _upstreamEvents;
     private readonly CancellationTokenSource _stop = new();
     private readonly LongMap _stored;
     private readonly LongMap _firstSeen;
@@ -86,7 +89,7 @@ internal sealed class StandIn : IDisposable
     private int _inFlight;
     private int _cycled;
 
-    public StandIn(IReadOnlyDictionary<Fault, int> weights, int seed, TimeSpan hang, string ingestKey, Samples samples, long expectedEvents)
+    public StandIn(IReadOnlyDictionary<Fault, int> weights, int seed, TimeSpan hang, string ingestKey, Samples samples, Uri? upstream, long expectedEvents)
     {
         _stored = new LongMap(expectedEvents);
         _firstSeen = new LongMap(expectedEvents);
@@ -97,13 +100,20 @@ internal sealed class StandIn : IDisposable
         _hang = hang;
         _authorization = "Bearer " + ingestKey;
         _samples = samples;
+        if (upstream is not null)
+        {
+            // No redirects and no proxy: the forwarded requests carry the real ingest key and must stay on this machine.
+            _upstream = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromSeconds(60) };
+            _upstreamEvents = new Uri(upstream, "v1/events");
+        }
+
         _listener = new TcpListener(IPAddress.Loopback, 0);
     }
 
     /// <summary>The endpoint to give the client (http on loopback, which the SDK allows).</summary>
     public Uri Endpoint => new("http://127.0.0.1:" + ((IPEndPoint)_listener.LocalEndpoint).Port.ToString(CultureInfo.InvariantCulture));
 
-    /// <summary>When set, every request is answered with no fault: used to drain at the end.</summary>
+    /// <summary>When set, every request is answered (or forwarded) with no fault: used to drain at the end.</summary>
     public bool Healthy { get; set; }
 
     /// <summary>Id hashes the stand-in stored (stand-in mode only).</summary>
@@ -133,7 +143,7 @@ internal sealed class StandIn : IDisposable
         _accept = Task.Run(AcceptLoopAsync);
     }
 
-    /// <summary>Waits until no request is being handled, or the limit passes; false on timeout.</summary>
+    /// <summary>Waits until no request is being handled (forwards included), or the limit passes; false on timeout.</summary>
     public async Task<bool> QuiesceAsync(TimeSpan limit)
     {
         var deadline = DateTime.UtcNow + limit;
@@ -174,6 +184,7 @@ internal sealed class StandIn : IDisposable
             }
         }
 
+        _upstream?.Dispose();
         _stop.Dispose();
     }
 
@@ -346,7 +357,7 @@ internal sealed class StandIn : IDisposable
         }
 
         // Every arrival is fingerprinted as soon as its body is read, whatever the answer will be, so a retry with changed
-        // content is caught, also after a 429, a 503 or a 413.
+        // content is caught in both modes, also after a 429, a 503 or a 413.
         for (var i = 0; i < (events?.Count ?? 0); i++)
         {
             if (Text(events![i] is JsonObject o ? o["id"] : null, out var id, out _) && JsTrim(id!).Length > 0)
@@ -375,7 +386,7 @@ internal sealed class StandIn : IDisposable
                 break;
         }
 
-        if (!string.Equals(head.Header("authorization"), _authorization, StringComparison.Ordinal))
+        if (_upstream is null && !string.Equals(head.Header("authorization"), _authorization, StringComparison.Ordinal))
         {
             await WriteAsync(stream, exchange, 401, Error("invalid_api_key", "A valid API key is required."), null).ConfigureAwait(false);
             return true;
@@ -399,7 +410,9 @@ internal sealed class StandIn : IDisposable
             return true;
         }
 
-        return await StoreAsync(stream, socket, exchange, events, raw, fault).ConfigureAwait(false);
+        return _upstream is null
+            ? await StoreAsync(stream, socket, exchange, events, raw, fault).ConfigureAwait(false)
+            : await ForwardAsync(stream, socket, exchange, head, body, events, fault).ConfigureAwait(false);
     }
 
     private async Task<bool> StoreAsync(NetworkStream stream, Socket socket, Exchange exchange, List<JsonNode?> events, string[] raw, Fault fault)
@@ -498,6 +511,94 @@ internal sealed class StandIn : IDisposable
 
         await WriteAsync(stream, exchange, 202, result, null).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>Forwards a request to the real server, then applies the faults that need its answer.</summary>
+    private async Task<bool> ForwardAsync(NetworkStream stream, Socket socket, Exchange exchange, RequestHead head, byte[] body, List<JsonNode?> events, Fault fault)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, _upstreamEvents) { Content = new ByteArrayContent(body) };
+        message.Content.Headers.TryAddWithoutValidation("Content-Type", head.Header("content-type") ?? "application/json");
+        foreach (var name in new[] { "authorization", "user-agent", "logbird-retry" })
+        {
+            if (head.Header(name) is { } value)
+            {
+                message.Headers.TryAddWithoutValidation(name, value);
+            }
+        }
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _upstream!.SendAsync(message).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        {
+            _samples.Add(exchange);
+            Reset(socket);
+            return false;
+        }
+
+        using (response)
+        {
+            var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            var status = (int)response.StatusCode;
+            var answer = TryParse(bytes);
+            if (fault == Fault.ResetAfterStore)
+            {
+                _samples.Add(exchange);
+                Reset(socket);
+                return false;
+            }
+
+            if (fault == Fault.EmptyAck && status == 202)
+            {
+                await WriteAsync(stream, exchange, 202, new JsonObject(), null).ConfigureAwait(false);
+                return true;
+            }
+
+            if (fault == Fault.PartialUnavailable && status == 202 && answer is JsonObject stored && stored["ids"] is JsonArray storedIds)
+            {
+                // The server stored the batch; report some stored events as unresolved so the client resends them and the
+                // server's own deduplication is exercised.
+                var ids = storedIds.Select(n => n!.GetValue<string>()).ToList();
+                var unresolved = new List<int>();
+                for (var index = 0; index < events.Count; index++)
+                {
+                    var id = (events[index] as JsonObject)?["id"]?.GetValue<string>()?.Trim();
+                    if (id is not null && ids.Contains(id) && NextInt(2) == 0)
+                    {
+                        unresolved.Add(index);
+                        ids.Remove(id);
+                    }
+                }
+
+                if (unresolved.Count > 0)
+                {
+                    var details = new JsonObject
+                    {
+                        ["accepted"] = ids.Count,
+                        ["ids"] = new JsonArray(ids.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray()),
+                        ["rejected"] = stored["rejected"]?.DeepClone() ?? new JsonArray(),
+                        ["warnings"] = new JsonArray(),
+                        ["indices"] = new JsonArray(unresolved.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray()),
+                        ["eventIds"] = new JsonArray(unresolved.Select(i => (JsonNode?)JsonValue.Create(((JsonObject)events[i]!)["id"]!.GetValue<string>().Trim())).ToArray()),
+                    };
+                    await WriteAsync(stream, exchange, 503, Error("ingest_pending", "Some events need a retry; listed indices are unresolved.", details), "1").ConfigureAwait(false);
+                    return true;
+                }
+            }
+
+            var retryAfter = response.Headers.TryGetValues("Retry-After", out var values) ? values.FirstOrDefault() : null;
+            exchange.Status = status;
+            exchange.RetryAfter = retryAfter;
+            exchange.Response = answer;
+            _samples.Add(exchange);
+            await WriteRawAsync(stream, status, bytes, retryAfter, close: false).ConfigureAwait(false);
+
+            // Only an answer that reached the client acknowledges anything.
+            Acknowledge(status, answer);
+            return true;
+        }
     }
 
     /// <summary>
