@@ -64,9 +64,11 @@ describe('landing visuals', () => {
     const zoomable = frames.filter((frame) => frame.includes('aria-label="Open the image full size: '));
     expect(zoomable.length).toBeGreaterThanOrEqual(4);
     for (const frame of frames) {
+      const expected = zoomable.includes(frame) ? 1 : 0;
       const bar = frame.slice(0, frame.indexOf('class="screenshot"'));
-      const hints = (bar.match(/>Full size</g) ?? []).length;
-      expect(hints, bar.slice(0, 160)).toBe(zoomable.includes(frame) ? 1 : 0);
+      // Counted inside the bar and across the whole frame, so a second hint over the image fails too.
+      expect((bar.match(/>Full size</g) ?? []).length, bar.slice(0, 160)).toBe(expected);
+      expect((frame.match(/>Full size</g) ?? []).length, frame.slice(0, 160)).toBe(expected);
     }
     // `.screenshot a` must not set display: it would outrank `.theme-dark { display: none }` and show both themes.
     const css = readFileSync(fileURLToPath(new URL('../styles.css', import.meta.url)), 'utf8');

@@ -226,6 +226,9 @@ try {
       const sheet = page.getByRole('dialog');
       await sheet.getByText(/raw payload/i).click();
       await page.waitForTimeout(400);
+      // The full id, not only its first eight characters: the raw payload's exportId must be this run's export.
+      const rawText = (await sheet.innerText()).replace(/\s+/g, '');
+      assert.ok(rawText.includes(`"metadata.export.exportId":"${exportId}"`), "The open record's exportId is this run's export");
       const start = sheet.getByText('"attributes"', { exact: false }).last();
       // The raw payload has its own scroll area inside the sheet: bring its attributes block to the top of that area.
       await start.evaluate((el) => el.scrollIntoView({ block: 'start' }));

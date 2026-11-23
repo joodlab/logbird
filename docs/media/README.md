@@ -4,7 +4,7 @@ Captured on 2026-11-09 from the real local console and API against Postgres, Cli
 
 `marketing/media/staydesk/` contains WebP stills at 1440×900 (desktop) and 390×844 (phone), including light/dark explorer, overview, changes, SQL and phone views. `walkthrough.gif` and `walkthrough.webm` contain the same short journey: real email OTP sign-in, overview, explorer search, event detail with a changes diff, and live tail receiving three newly ingested fictional bookings. The original Playwright recording remains ignored under `.tmp/`.
 
-Since 2026-11-24 (design pass 2) every shot has a real dark-theme capture as well, and two shots serve the landing page:
+Since 2026-11-23 (design pass 2) every shot has a real dark-theme capture as well, and two shots serve the landing page:
 `explorer-hero` (the explorer with the visible query `-actor.type:system`, desktop and phone, the phone one at 2x
 because it sits above the fold; the site's tests compile the query) and `export-record` (a real completed `jsonl-evidence` export's record in Workspace activity). The record's
 attribute table truncates long keys and the digest, so the capture opens its raw payload and keeps two real regions of
@@ -15,7 +15,7 @@ page is edited. `tenant-summary` is a crop of `tenant-{light,dark}` (box 250, 70
 counts and "who did it" panel (`tenant-account` keeps its 2026-11-09 crop and size). `event-detail` is the sheet panel of
 `event-sheet-{light,dark}` (box 801, 0 to 1440, 860). A shot that gains a dark variant is replaced in light and dark
 together, from one fixture, so both themes show the same data. The 2026-11-09 stills that showed the capture machine's
-time zone (overview, explorer, event sheet, SQL and their phone views) were recaptured in UTC on 2026-11-24.
+time zone (overview, explorer, event sheet, SQL and their phone views) were recaptured in UTC on 2026-11-23.
 
 ## Reproduce
 
@@ -26,14 +26,14 @@ pnpm --filter @logbird/app exec playwright install chromium
 node --env-file=.env --import tsx apps/app/scripts/prepare-media.ts
 node apps/app/scripts/capture-media.mjs
 CAPTURE_VIDEO=1 node apps/app/scripts/capture-media.mjs
-node apps/app/scripts/encode-media.mjs
+VIDEO_START=1.0 node apps/app/scripts/encode-media.mjs
 pnpm --filter @logbird/web test
 pnpm --filter @logbird/web build
 ```
 
-On PowerShell, set `$env:CAPTURE_VIDEO='1'` before the video command, then remove it with `Remove-Item Env:CAPTURE_VIDEO`. `BASE_URL`, `MAILPIT_API`, `OUT_DIR` and `FFMPEG` may override local endpoints, screenshot output and the encoder executable. Capture state in `.tmp/media-fixture.json` contains a private fixture ingest key: never print or commit it. The capture browser always closes in `finally`. Stop all servers/workers you started; leave shared backing services and other contributors' fixtures intact.
+On PowerShell, set `$env:CAPTURE_VIDEO='1'` before the video command, then remove it with `Remove-Item Env:CAPTURE_VIDEO`. Encode with `$env:VIDEO_START='1.0'; node apps/app/scripts/encode-media.mjs`, then `Remove-Item Env:VIDEO_START`. `BASE_URL`, `MAILPIT_API`, `OUT_DIR` and `FFMPEG` may override local endpoints, screenshot output and the encoder executable. Capture state in `.tmp/media-fixture.json` contains a private fixture ingest key: never print or commit it. The capture browser always closes in `finally`. Stop all servers/workers you started; leave shared backing services and other contributors' fixtures intact.
 
-The walkthrough (`walkthrough.gif`, `walkthrough.webm`) was re-recorded in UTC on 2026-11-24 and encoded with
+The walkthrough (`walkthrough.gif`, `walkthrough.webm`) was re-recorded in UTC on 2026-11-23 and encoded with
 `VIDEO_START=1.0`: sign-in is faster than in 2026-11-09, and the old 5.8 s start cut the sign-in and the overview.
 Review the raw recording before choosing the start, and keep the GIF under the 6,000,000-byte budget.
 
