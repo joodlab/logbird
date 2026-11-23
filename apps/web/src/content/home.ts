@@ -158,7 +158,7 @@ export function homeContent(site: SiteState) {
         caption:
           "A customer account's page in the console: its events, activity, outcomes, top actions and the people, workers and records involved.",
       },
-      cta: { label: 'Read the integration guide', to: '/developers', hash: 'integrations' } satisfies Cta,
+      cta: { label: 'How to show customers their history', to: '/use-cases/customer-audit-logs' } satisfies Cta,
     },
     evidence: {
       eyebrow: 'Compliance evidence',
