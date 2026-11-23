@@ -38,6 +38,9 @@ const MOVED = [
   'routes/developers.tsx',
   'routes/open-source.tsx',
   'components/marketing/feature-row.tsx',
+  'routes/about.tsx',
+  'routes/contact.tsx',
+  'routes/changelog.tsx',
 ];
 
 /** Props and keys whose string value is always wording, even one word. */
