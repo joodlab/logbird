@@ -68,7 +68,7 @@ describe('use-case pages', () => {
       expect(html.match(/<h1[\s>]/g)?.length).toBe(1);
       const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id);
       expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([]);
-      expect(html).toMatch(/<a aria-label="Open the image full size: Customer account"[^>]*href="\/media\/tenant-account-/);
+      expect(html).toMatch(/<a aria-label="Open the image full size: Customer account"[^>]*href="\/media\/tenant-summary-/);
     }
   }, 60_000);
 });

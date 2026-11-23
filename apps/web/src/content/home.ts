@@ -103,10 +103,13 @@ export function homeContent(site: SiteState) {
       github: site.githubUrl ? { label: 'Source on GitHub', href: site.githubUrl } : undefined,
       sample: { title: 'Send your first event', code: curl, caption: "That's a valid event. Only `action` is required." },
     },
+    /** The hero's real console capture (docs/media/README.md). `query` is what the capture shows; tests compile it. */
     explorer: {
-      label: 'The Logbird explorer',
+      id: 'explorer-hero',
+      query: '-actor.type:system',
       frameLabel: 'Explorer',
-      caption: 'The explorer: search, facets, a histogram you can zoom, and every event in a dense table.',
+      caption:
+        'The explorer, filtered with -actor.type:system to leave out the scheduler: what people did over seven days, with a histogram and every event.',
     },
     customers: {
       eyebrow: 'Customer-facing audit logs',
@@ -157,9 +160,10 @@ export function homeContent(site: SiteState) {
       },
       limitLabel: 'The limit',
       screenshot: {
+        id: 'tenant-summary',
         label: 'Customer account',
         caption:
-          "A customer account's page in the console: its events, activity, outcomes, top actions and the people, workers and records involved.",
+          "A customer account's page in the console: its event counts, and how many events support did while signed in as the customer, by agent.",
       },
       cta: { label: 'How to show customers their history', to: '/use-cases/customer-audit-logs' } satisfies Cta,
     },
@@ -189,10 +193,13 @@ export function homeContent(site: SiteState) {
           limit: "It doesn't record who searched or opened events.",
         },
       ] satisfies Limit[],
+      /** A real completed evidence export's record. The caption says only what the image shows; the limit sits beside it. */
       screenshot: {
-        label: 'Retention',
-        caption: "A project's retention settings: the current window and the policies you can choose.",
+        id: 'export-record',
+        label: 'Workspace activity',
+        caption: "The completed export's record in Workspace activity: its period, query, row count, size, fixed query clock and SHA-256.",
       },
+      screenshotLimit: { label: 'What a match shows', text: evidenceLimits.exportMatch },
       cta: { label: 'How to answer an auditor', to: '/use-cases/compliance-evidence' } satisfies Cta,
     },
     operators: {
@@ -200,9 +207,10 @@ export function homeContent(site: SiteState) {
       title: 'Answer "what happened in this account?" in one search.',
       lead: 'Support and operations open a customer account or a single record and see its events in order, with the before and after values you send.',
       screenshot: {
+        id: 'event-sheet',
         label: 'Event detail',
         caption:
-          'An event in detail: who asked, what did the work, whose account, which records, and the before and after values sent for each change (the first 256 per event).',
+          'An event in detail: who acted, what ran it, whose account, which records, and the before and after values sent for each change (the first 256 per event).',
       },
       features: {
         search: { title: 'Search', body: '`actor:usr_42 action:booking.* outcome:failure`, or a guarded SQL `WHERE` expression.' },

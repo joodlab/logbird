@@ -19,6 +19,9 @@ const browser = await chromium.launch();
 const context = await browser.newContext({
   viewport: view,
   colorScheme: 'light',
+  // UTC, not the capturing machine's zone: the console labels times with the browser's time zone.
+  timezoneId: 'UTC',
+  locale: 'en-US',
   ...(videoOnly ? { recordVideo: { dir: '.tmp/media-video', size: view } } : {}),
 });
 const page = await context.newPage();
@@ -32,6 +35,12 @@ async function settle() {
 async function go(path) {
   await page.goto(`${p}${path}`);
   await settle();
+}
+async function crop(from, name, region) {
+  await sharp(resolve(output, `${from}.webp`))
+    .extract(region)
+    .webp({ quality: 88 })
+    .toFile(resolve(output, `${name}.webp`));
 }
 async function shot(name) {
   await sharp(await page.screenshot())
@@ -84,6 +93,8 @@ try {
       await page.locator('[data-index]').first().click();
       await settle();
       await shot(`event-sheet-${theme}`);
+      // event-detail: the sheet panel of this capture, at the size the site uses (docs/media/README.md).
+      await crop(`event-sheet-${theme}`, `event-detail-${theme}`, { left: 801, top: 0, width: 639, height: 860 });
       await page.keyboard.press('Escape');
       await go(`/events?range=7d&lang=sql&q=${encodeURIComponent("job_attempt > 1 AND outcome = 'success'")}`);
       await shot(`sql-${theme}`);
@@ -95,41 +106,123 @@ try {
       await shot(`phone-event-sheet-${theme}`);
       await page.setViewportSize(view);
     }
-    await page.emulateMedia({ colorScheme: 'light' });
-    await go('/events?range=7d');
-    await page.getByRole('combobox', { name: 'Query', exact: true }).fill('outcome:');
-    await page.getByRole('option').first().waitFor();
-    await shot('query-suggestions-light');
-    const rejectedAt = problems.length;
-    await go(`/events?range=7d&lang=sql&q=${encodeURIComponent('action IN (SELECT action FROM events)')}`);
-    await page
-      .getByText(/subqueries are not allowed/i)
-      .first()
-      .waitFor();
-    assert.ok(
-      problems.slice(rejectedAt).every((problem) => problem.includes('422')),
-      'Only expected SQL validation errors',
-    );
-    problems.splice(rejectedAt);
-    await shot('sql-rejected-light');
-    await go('/tenants');
-    await page.locator('main a[href*="/tenants/"]').first().click();
-    await settle();
-    await shot('tenant-light');
-    await go('/actors');
-    await page.locator('main a[href*="/actors/"]').first().click();
-    await settle();
-    await shot('actor-light');
-    await go('/setup');
-    await shot('setup-light');
-    await go('/settings/retention');
-    await shot('retention-light');
-    await go('/events?range=7d&q=attempt:>1');
-    await page.locator('[data-index]').first().click();
-    await settle();
-    await page.getByRole('button', { name: /view operation/i }).click();
-    await settle();
-    await shot('operation-light');
+    // These shots were light-only; the marketing site's dark theme needs real dark captures too. The light files keep
+    // their paths and sizes; the dark ones are new files with the -dark suffix.
+    for (const theme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: theme });
+      await go('/events?range=7d');
+      await page.getByRole('combobox', { name: 'Query', exact: true }).fill('outcome:');
+      // Wait for real values with their counts, not an operator row shown while values load.
+      await page
+        .getByRole('option', { name: /success/ })
+        .first()
+        .waitFor();
+      await page.getByText(/loading values/i).waitFor({ state: 'hidden' });
+      await page.waitForTimeout(300);
+      await shot(`query-suggestions-${theme}`);
+      const rejectedAt = problems.length;
+      await go(`/events?range=7d&lang=sql&q=${encodeURIComponent('action IN (SELECT action FROM events)')}`);
+      await page
+        .getByText(/subqueries are not allowed/i)
+        .first()
+        .waitFor();
+      assert.ok(
+        problems.slice(rejectedAt).every((problem) => problem.includes('422')),
+        'Only expected SQL validation errors',
+      );
+      problems.splice(rejectedAt);
+      await shot(`sql-rejected-${theme}`);
+      await go('/tenants');
+      await page.locator('main a[href*="/tenants/"]').first().click();
+      await settle();
+      await shot(`tenant-${theme}`);
+      // tenant-summary: the account's header, counts and "who did it" from this capture (docs/media/README.md).
+      await crop(`tenant-${theme}`, `tenant-summary-${theme}`, { left: 250, top: 70, width: 1160, height: 425 });
+      await go('/actors');
+      await page.locator('main a[href*="/actors/"]').first().click();
+      await settle();
+      await shot(`actor-${theme}`);
+      await go('/setup');
+      await shot(`setup-${theme}`);
+      await go('/settings/retention');
+      await shot(`retention-${theme}`);
+      await go('/events?range=7d&q=attempt:>1');
+      await page.locator('[data-index]').first().click();
+      await settle();
+      await page.getByRole('button', { name: /view operation/i }).click();
+      await settle();
+      await shot(`operation-${theme}`);
+    }
+
+    // The landing page's explorer: a visible query that shows people's actions rather than the scheduler's.
+    // marketing (apps/web) compiles the same query in its tests.
+    const heroQuery = '-actor.type:system';
+    // The phone hero sits above the fold on a phone, so it is captured at 2x (780 x 1688) for high-density screens.
+    const phoneHero = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 2,
+      timezoneId: 'UTC',
+      locale: 'en-US',
+      storageState: await context.storageState(),
+    });
+    const phonePage = await phoneHero.newPage();
+    const phoneProblems = watch(phonePage);
+    for (const theme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: theme });
+      await go(`/events?range=7d&q=${encodeURIComponent(heroQuery)}`);
+      await shot(`explorer-hero-${theme}`);
+      await phonePage.emulateMedia({ colorScheme: theme });
+      await phonePage.goto(`${p}/events?range=7d&q=${encodeURIComponent(heroQuery)}`);
+      await phonePage.waitForLoadState('networkidle');
+      await phonePage.waitForFunction(() => document.querySelectorAll('[data-slot=skeleton]').length === 0);
+      await phonePage.waitForTimeout(400);
+      await sharp(await phonePage.screenshot())
+        .webp({ quality: 88 })
+        .toFile(resolve(output, `phone-explorer-hero-${theme}.webp`));
+    }
+    await phoneHero.close();
+    problems.push(...phoneProblems);
+
+    // A real completed evidence export: download it through the console's own API (the whole body, so the export
+    // completes), then open its completed record in Workspace activity. Nothing on the page is edited.
+    const to = new Date();
+    const from = new Date(to.getTime() - 7 * 24 * 3600 * 1000);
+    const exportParams = new URLSearchParams({ format: 'jsonl-evidence', q: 'action:booking.*', from: from.toISOString(), to: to.toISOString() });
+    const download = await page.request.get(`${base}/api/projects/${fixture.projectId}/export?${exportParams}`);
+    assert.equal(download.status(), 200, 'The evidence export downloads');
+    assert.ok((await download.body()).length > 0, 'The evidence export has rows');
+    // The record's evidence (period, query, clock, SHA-256, size, rows) is its attributes. The attribute table truncates
+    // long keys and the digest, so open the raw payload, scroll its attributes block to just under the sheet's sticky
+    // header (the record's title and action), and keep the sheet from its top to the end of that block: one real,
+    // contiguous region of the screen, legible at the size a marketing section allows.
+    async function exportRecord(name) {
+      await page.goto(`${base}/workspace/activity?q=${encodeURIComponent('action:export.completed')}`);
+      await settle();
+      await page.locator('[data-index]').first().click();
+      await settle();
+      const sheet = page.getByRole('dialog');
+      await sheet.getByText(/raw payload/i).click();
+      await page.waitForTimeout(400);
+      const start = sheet.getByText('"attributes"', { exact: false }).last();
+      const end = sheet.getByText('metadata.export.receivedBefore', { exact: false }).last();
+      // The raw payload has its own scroll area inside the sheet: bring its attributes block to the top of that area.
+      await start.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      await page.waitForTimeout(300);
+      const box = await sheet.boundingBox();
+      const last = await end.boundingBox();
+      const height = Math.min(Math.round(last.y + last.height + 16 - box.y), Math.round(box.height));
+      await sharp(await sheet.screenshot())
+        .extract({ left: 0, top: 0, width: Math.round(box.width), height })
+        .webp({ quality: 88 })
+        .toFile(resolve(output, `${name}.webp`));
+    }
+    for (const theme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: theme });
+      await exportRecord(`export-record-${theme}`);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await exportRecord(`phone-export-record-${theme}`);
+      await page.setViewportSize(view);
+    }
   }
   assert.deepEqual(
     problems.filter((problem) => !problem.startsWith('[warning]')),

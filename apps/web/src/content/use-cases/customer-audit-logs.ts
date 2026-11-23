@@ -137,7 +137,7 @@ export function customerAuditLogsContent(site: SiteState): UseCase {
           },
         ],
         visual: {
-          id: 'tenant-account',
+          id: 'tenant-summary',
           label: 'Customer account',
           caption:
             "Your team's view of one customer account in Logbird's console: its events in the last 24 hours and in all, and which support agents acted while signed in as the customer. Your customers see their own history in your product, rendered by your components. Select the image to open it full size.",

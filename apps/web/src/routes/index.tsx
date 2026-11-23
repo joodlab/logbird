@@ -5,11 +5,11 @@ import { SiteCode, SiteCodeTabs } from '../components/marketing/code';
 import { CtaBand } from '../components/marketing/cta-band';
 import { ScreenshotFrame } from '../components/marketing/frame';
 import { Guarantees } from '../components/marketing/guarantees';
-import { LogStack } from '../components/marketing/log-stack';
 import { Rich } from '../components/marketing/rich';
 import { Eyebrow, Feature, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { home } from '../content/home';
+import { shared } from '../content/shared';
 import type { Cta, Item } from '../content/site';
 import { pageHead } from '../lib/seo';
 import { isReady } from '../lib/site-map';
@@ -50,17 +50,12 @@ function Points({ items }: { items: Item[] }) {
 }
 
 function HomePage() {
-  const { explorer, customers, evidence, operators, developers, hosting, guarantees, closing } = home;
+  const { customers, evidence, operators, developers, hosting, guarantees, closing } = home;
+  const zoom = (label: string) => `${shared.openFullSize}: ${label}`;
   const { access } = customers;
   return (
     <>
       <Hero />
-
-      <section aria-label={explorer.label} className="pb-8">
-        <div className="container-site">
-          <ScreenshotFrame caption={explorer.caption} id="explorer" label={explorer.frameLabel} />
-        </div>
-      </section>
 
       <Section id="customers" labelledBy="customers-title">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-start">
@@ -92,21 +87,33 @@ function HomePage() {
           </div>
           <ScreenshotFrame
             caption={customers.screenshot.caption}
-            id="tenant"
+            id={customers.screenshot.id}
             label={customers.screenshot.label}
             sizes="(min-width: 1024px) 620px, calc(100vw - 2rem)"
+            zoomLabel={zoom(customers.screenshot.label)}
           />
         </div>
       </Section>
 
       <Section id="evidence" labelledBy="evidence-title" tone="sunken">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-center">
-          <SectionHeader eyebrow={evidence.eyebrow} id="evidence-title" lead={evidence.lead} title={evidence.title} />
+          <div className="flex flex-col gap-8">
+            <SectionHeader eyebrow={evidence.eyebrow} id="evidence-title" lead={evidence.lead} title={evidence.title} />
+            <p className="panel border-s-2 border-s-brand p-4 text-sm leading-relaxed">
+              <strong className="font-medium">{evidence.screenshotLimit.label}</strong>
+              <span className="text-muted-foreground">
+                {': '}
+                <Rich text={evidence.screenshotLimit.text} />
+              </span>
+            </p>
+          </div>
           <ScreenshotFrame
             caption={evidence.screenshot.caption}
-            id="retention"
+            className="w-full lg:max-w-[480px] lg:justify-self-center"
+            id={evidence.screenshot.id}
             label={evidence.screenshot.label}
-            sizes="(min-width: 1024px) 620px, calc(100vw - 2rem)"
+            sizes="(min-width: 1024px) 480px, calc(100vw - 2rem)"
+            zoomLabel={zoom(evidence.screenshot.label)}
           />
         </div>
         <div className="mt-12">
@@ -122,9 +129,10 @@ function HomePage() {
         <div className="mt-12 grid gap-10 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:items-start">
           <ScreenshotFrame
             caption={operators.screenshot.caption}
-            id="event-sheet"
+            id={operators.screenshot.id}
             label={operators.screenshot.label}
             sizes="(min-width: 1024px) 680px, calc(100vw - 2rem)"
+            zoomLabel={zoom(operators.screenshot.label)}
           />
           <div className="grid gap-6">
             {(
@@ -228,7 +236,7 @@ function HomePage() {
 }
 
 function Hero() {
-  const { hero } = home;
+  const { hero, explorer } = home;
   return (
     <section aria-labelledby="hero-title" className="relative overflow-hidden">
       <div aria-hidden="true" className="ledger-bg pointer-events-none absolute inset-0" />
@@ -267,9 +275,16 @@ function Hero() {
             ) : null}
           </p>
         </div>
-        <div className="flex min-w-0 flex-col gap-4">
-          <LogStack className="hidden sm:flex" />
-          <LogStack className="sm:hidden" limit={3} />
+        <div className="flex min-w-0 flex-col gap-6">
+          {/* The real product, with nothing layered over it (maintainer, design pass 2). */}
+          <ScreenshotFrame
+            caption={explorer.caption}
+            id={explorer.id}
+            label={explorer.frameLabel}
+            priority
+            sizes="(min-width: 1024px) 560px, calc(100vw - 2rem)"
+            zoomLabel={`${shared.openFullSize}: ${explorer.frameLabel}`}
+          />
           <div className="flex min-w-0 flex-col gap-2">
             <SiteCode code={hero.sample.code} language="bash" title={hero.sample.title} wrap />
             <p className="text-muted-foreground text-sm">
