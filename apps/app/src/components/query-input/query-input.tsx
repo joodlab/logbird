@@ -89,7 +89,7 @@ const TEXT = 'px-2.5 py-[calc((var(--query-bar-height)-2px-1.25rem)/2)] font-mon
 const FIRST_LINE_ICON = 'mt-[calc((var(--query-bar-height)-2px-1rem)/2)]';
 
 /** Preserve the meaning of saved queries with literal CRs before passing them to a textarea. */
-function editorQuery(value: string, lang: QueryLang): string {
+export function editorQuery(value: string, lang: QueryLang): string {
   if (!value.includes('\r')) return value;
   let literals: { start: number; end: number }[];
   const regexKeys = new Map<number, string>();
@@ -119,7 +119,12 @@ function editorQuery(value: string, lang: QueryLang): string {
   let text = '';
   for (const literal of literals) {
     text += value.slice(start, literal.start).replace(/\r\n?/g, '\n');
-    text += value.slice(literal.start, literal.end).replace(/\\([\s\S])|\r/g, (raw, escaped) => (raw === '\r' || escaped === '\r' ? '\\r' : raw));
+    // A slash-delimited field name keeps `\r` as two characters (regex bodies do not decode it), so escaping its CR
+    // would rename the field: it becomes the same name quoted, where `\r` does decode back to a CR.
+    const quotedKey = regexKeys.get(literal.start);
+    text +=
+      quotedKey ??
+      value.slice(literal.start, literal.end).replace(/\\([\s\S])|\r/g, (raw, escaped) => (raw === '\r' || escaped === '\r' ? '\\r' : raw));
     start = literal.end;
   }
   return text + value.slice(start).replace(/\r\n?/g, '\n');
