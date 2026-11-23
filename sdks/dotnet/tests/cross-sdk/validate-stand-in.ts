@@ -135,7 +135,7 @@ for (const [number, x] of exchanges.entries()) {
   // Is this answer legal for the fault, and does it prove the fault happened? An ordinary 202 is a legal answer to the
   // partial and reject faults (the stand-in picks events at random), but only a visible effect earns coverage.
   const details = (x.response as { error?: { details?: { indices?: unknown[] } } } | null)?.error?.details;
-  const rejected = (x.response as { rejected?: { code?: unknown }[] } | null)?.rejected ?? [];
+  const rejected = (x.response as { rejected?: { code?: unknown; reason?: unknown }[] } | null)?.rejected ?? [];
   const legal: Record<string, boolean> = {
     RateLimited: x.status === 429 && code === 'rate_limited',
     Unavailable: x.status === 503 && code === 'ingest_unavailable',
@@ -152,7 +152,11 @@ for (const [number, x] of exchanges.entries()) {
   const covers: Record<string, boolean> = {
     ...legal,
     PartialUnavailable: x.status === 503 && code === 'ingest_pending' && Array.isArray(details?.indices) && details.indices.length > 0,
-    Reject: x.status === 202 && Array.isArray(rejected) && rejected.some((r) => r?.code === 'invalid_event'),
+    // Only the stand-in's injected rejections carry this marker; a validation rejection shares the code, not the reason.
+    Reject:
+      x.status === 202 &&
+      Array.isArray(rejected) &&
+      rejected.some((r) => r?.code === 'invalid_event' && typeof r.reason === 'string' && r.reason.endsWith('(fault injection)')),
     Latency: typeof x.delayMs === 'number' && x.delayMs > 0,
   };
   if (covers[x.fault] === true) seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);

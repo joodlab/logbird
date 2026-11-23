@@ -382,9 +382,10 @@ internal sealed class StandIn : IDisposable
                 await WriteAsync(stream, exchange, 413, Error("payload_too_large", "Request exceeds 5 MB."), null).ConfigureAwait(false);
                 return true;
             case Fault.Latency:
-                // 1 to 2,000 ms, recorded in the sample so the contract check can see the delay happened.
-                exchange.DelayMs = NextInt(2000) + 1;
-                await Task.Delay(exchange.DelayMs.Value).ConfigureAwait(false);
+                // 1 to 2,000 ms. The sample records the measured wait, not the request, so a skipped wait shows as 0.
+                var waited = System.Diagnostics.Stopwatch.StartNew();
+                await Task.Delay(NextInt(2000) + 1).ConfigureAwait(false);
+                exchange.DelayMs = (int)waited.ElapsedMilliseconds;
                 break;
         }
 
