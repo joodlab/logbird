@@ -1,7 +1,8 @@
 import type { AuditEvent, QueryLang } from '@logbird/contracts';
+import { parseQueryExpression, type QueryAtom, QueryError, type QueryExpression } from '@logbird/contracts';
 import { personLabel } from '@/lib/events';
 import { presenceTerms, setPresence } from '@/lib/presence-filter';
-import { formatTerm, hasTopLevelOr } from '@/lib/query-language';
+import { canonicalField, formatTerm } from '@/lib/query-language';
 
 /**
  * Support impersonation, in plain words. When `impersonator` is set, the actor is the customer it was done *as*
@@ -28,13 +29,52 @@ export const SUPPORT_TERM = 'impersonator:*';
  * is "self"; works in both query languages.
  */
 export function whoFilter(q: string, lang: QueryLang = 'query'): WhoFilter {
-  // Only a restriction on the whole query is a split: a term in one OR branch (`NOT (impersonator:*) OR outcome:failure`)
-  // limits that branch alone. (SQL conjuncts are already top-level ANDs only.)
-  if (lang === 'query' && hasTopLevelOr(q)) return 'all';
+  if (lang === 'query') return queryWhoFilter(q);
+  // SQL conjuncts are top-level ANDs only, so each one restricts the whole query.
   const terms = presenceTerms(q, 'impersonator', lang);
   if (terms.some((t) => !t.negated)) return 'support';
   if (terms.some((t) => t.negated && t.value === null)) return 'self';
   return 'all';
+}
+
+/**
+ * The split a query-language query is in, read from the server's parse: a restriction counts only when every top-level
+ * OR branch has it (`impersonator:amy OR impersonator:bea` is support; `NOT (impersonator:*) OR outcome:failure` is
+ * not self). Within a branch only terms that constrain it count: its own terms, groups of one branch, and terms negated
+ * through `NOT (a OR b)`; a term in an ORed group or inside `NOT (a b)` restricts nothing on its own. Redundant
+ * brackets around the whole query change nothing.
+ */
+function queryWhoFilter(q: string): WhoFilter {
+  let expression: QueryExpression;
+  try {
+    expression = parseQueryExpression(q);
+  } catch (error) {
+    if (error instanceof QueryError) return 'all';
+    throw error;
+  }
+  if (!expression.length) return 'all';
+  const branchSplit = (branch: QueryExpression[number]): WhoFilter => {
+    let support = false;
+    let self = false;
+    const visit = (node: QueryAtom, negated: boolean) => {
+      if (node.kind === 'not') visit(node.operand, !negated);
+      else if (node.kind === 'group') {
+        const e = node.expression;
+        // One branch: its terms constrain like the branch's own. NOT over single terms ORed: each is negated (De Morgan).
+        // A NOT over terms ANDed (`NOT (a b)`) restricts none of them on its own.
+        if (e.length === 1 && (!negated || e[0]?.length === 1)) for (const part of e[0] ?? []) visit(part.atom, negated);
+        else if (negated && e.every((b) => b.length === 1)) for (const b of e) visit((b[0] as { atom: QueryAtom }).atom, true);
+      } else if (node.kind === 'field' && canonicalField(node.field) === 'impersonator') {
+        const presence = node.value.kind === 'value' && node.value.token.wildcard && node.value.token.value === '*';
+        if (!negated) support = true;
+        else if (presence) self = true;
+      }
+    };
+    for (const part of branch) visit(part.atom, false);
+    return support ? 'support' : self ? 'self' : 'all';
+  };
+  const splits = expression.map(branchSplit);
+  return splits.every((s) => s === splits[0]) ? (splits[0] as WhoFilter) : 'all';
 }
 
 /**
