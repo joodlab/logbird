@@ -7,7 +7,8 @@ import { CommandPalette } from './command-palette';
 import { TopBar } from './top-bar';
 
 /** Signed-in chrome: collapsible sidebar, breadcrumb top bar with the shared range, ⌘K palette. */
-export function AppShell({ projectId, children }: { projectId?: string; children: ReactNode }) {
+/** `projectMissing`: the URL names a project that is not found, so the top bar shows none of its controls. */
+export function AppShell({ projectId, projectMissing, children }: { projectId?: string; projectMissing?: boolean; children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export function AppShell({ projectId, children }: { projectId?: string; children
         </button>
         <AppSidebar projectId={projectId} />
         <SidebarInset className="min-w-0 overflow-hidden md:peer-data-[variant=inset]:border md:peer-data-[variant=inset]:border-border/80">
-          <TopBar onOpenPalette={() => setPaletteOpen(true)} />
+          <TopBar onOpenPalette={() => setPaletteOpen(true)} projectMissing={projectMissing} />
           <BusyNotice />
           <div
             // Stable gutter: a page that grows past the viewport (data arriving, a section opening) does not narrow and
