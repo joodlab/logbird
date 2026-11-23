@@ -17,4 +17,16 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
     <InternalsVisibleTo Include="Logbird.AspNetCore.Tests" />
   </ItemGroup>
+
+  <!--
+    This package calls internal members of Logbird (Logbird grants InternalsVisibleTo), so it must depend on exactly the
+    Logbird it was built with: [x.y.z], never the default ">= x.y.z" range a project reference packs as. A range could
+    bind to another Logbird build without those members and fail at run time (issue #208). Only the Logbird reference is
+    pinned. CI and the release job check the packed manifests (sdks/dotnet/check-packages.py).
+  -->
+  <Target Name="DependOnExactlyThisLogbird" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)" Condition="'%(Filename)' == 'Logbird'" ProjectVersion="[%(ProjectVersion)]" />
+    </ItemGroup>
+  </Target>
 </Project>
