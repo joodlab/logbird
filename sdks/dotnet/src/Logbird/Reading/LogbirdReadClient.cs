@@ -57,11 +57,16 @@ public sealed class LogbirdReadOptions
 /// </para>
 /// <para>
 /// Each HTTP request ends within <see cref="LogbirdReadOptions.Timeout"/> (<c>unreachable</c> past it; for an export, the
-/// limit covers only the wait for its headers, not the download), and every call
-/// ends when your token is cancelled (<see cref="OperationCanceledException"/>), except that an export also waits for
-/// a write to your destination stream that ignores the token; a call whose token is already cancelled sends nothing. A search, detail or facet answer is checked against the server's contract before it is read: a
-/// required member that is missing, or <c>null</c> where the contract allows none, throws <c>invalid_response</c> instead
-/// of reading as an empty page (optional members may be absent). A viewer-token answer has its own checks
+/// limit covers only the wait for its headers, not the download), and every call ends when your token is cancelled
+/// (<see cref="OperationCanceledException"/>). An export's download ends on cancellation when the response body fails or
+/// ends a pending read once disposed, as <c>HttpClient</c>'s own streams do; a body from a custom handler that does
+/// neither, or a write to your destination stream that ignores the token, holds the export until that read or write
+/// returns. A call whose token is already cancelled sends nothing.
+/// </para>
+/// <para>
+/// A search, detail or facet answer is checked against the server's contract before it is read: a required member that
+/// is missing, or <c>null</c> where the contract allows none, throws <c>invalid_response</c> instead of reading as an
+/// empty page (optional members may be absent). A viewer-token answer has its own checks
 /// (<c>invalid_response</c> or <c>scope_mismatch</c>). A search, detail, facet or viewer-token answer over 64 MiB throws
 /// <c>response_too_large</c>; an export is streamed and has no size limit.
 /// </para>
@@ -509,7 +514,8 @@ public sealed class LogbirdReadClient : IDisposable
             }
 
             // Cancelling disposes the response, which ends a body read the stream itself would not cancel (as on
-            // .NET Framework), so the caller's token always ends a stalled download.
+            // .NET Framework): HttpClient's streams fail or end a pending read once disposed, so the caller's token ends
+            // a stalled download. A custom handler's body that does neither holds the read until it returns.
             using var abort = cancellationToken.Register(static state => ((HttpResponseMessage)state!).Dispose(), response);
             try
             {
