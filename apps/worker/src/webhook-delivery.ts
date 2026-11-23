@@ -134,11 +134,20 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
     ORDER BY turn, "nextAttemptAt", id LIMIT ${limit}`);
   const claims: Claim[] = [];
   const skippedIds: string[] = [];
-  const failedProjects: string[] = [];
+  const skippedProjects: string[] = [];
   // A chosen row can be locked elsewhere or change before its claim, and a project's claim can fail. Refill the
-  // unused capacity past those rows and projects within this pass, a bounded number of times.
+  // unused capacity past those rows within this pass, a bounded number of times. A project that yields no claimable
+  // row or fails is left out of the remaining rounds, so its other locked rows cannot take every round.
   for (let round = 0; round < CLAIM_ROUNDS && claims.length < capacity; round++) {
-    const due = await choose(capacity - claims.length, skippedIds, failedProjects);
+    let due: DueRow[];
+    try {
+      due = await choose(capacity - claims.length, skippedIds, skippedProjects);
+    } catch (error) {
+      // Claims committed in earlier rounds hold leases: return them for dispatch instead of stranding them.
+      if (!round) throw error;
+      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_refill_failed', round, claimed: claims.length }));
+      break;
+    }
     if (!due.length) break;
     const byProject = new Map<string, string[]>();
     for (const row of due) {
@@ -148,9 +157,11 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
     }
     for (const [project, ids] of byProject) {
       try {
-        claims.push(...(await claimRows(ids, now, leaseDeadline)));
+        const claimed = await claimRows(ids, now, leaseDeadline);
+        if (!claimed.length) skippedProjects.push(project);
+        claims.push(...claimed);
       } catch {
-        failedProjects.push(project);
+        skippedProjects.push(project);
         console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, deliveries: ids.length }));
       }
     }
