@@ -76,7 +76,7 @@ const SOURCES = [
   'apps/app/src/lib/activity-search.test.ts',
   'apps/app/src/lib/query-lint.test.ts',
 ];
-const unescape = (s: string) => s.replace(/\\(.)/g, (_, c: string) => ({ n: '\n', r: '\r', t: '\t' })[c] ?? c);
+const unescapeLiteral = (s: string) => s.replace(/\\(.)/g, (_, c: string) => ({ n: '\n', r: '\r', t: '\t' })[c] ?? c);
 const parses = (q: string) => {
   try {
     parseQueryExpression(q);
@@ -89,12 +89,12 @@ const corpus = [
   ...new Set(
     SOURCES.flatMap((file) => {
       const text = readFileSync(resolve(ROOT, file), 'utf8');
-      return [...text.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"/g)].map((m) => unescape(m[1] ?? m[2] ?? ''));
+      return [...text.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"/g)].map((m) => unescapeLiteral(m[1] ?? m[2] ?? ''));
     }),
   ),
 ]
   // Queries only: a field or a group, no control characters (a textarea has its own rules for those), as the server accepts them.
-  .filter((q) => q.length > 2 && q.length <= 160 && q === q.trim() && /[:(]/.test(q) && !/[\0-\x1f]/.test(q) && parses(q))
+  .filter((q) => q.length > 2 && q.length <= 160 && q === q.trim() && /[:(]/.test(q) && ![...q].some((c) => c.charCodeAt(0) < 0x20) && parses(q))
   .sort();
 
 /** As the bar decides it: a core field, an explicit attribute, or a key the fixture lists. */
