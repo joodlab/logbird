@@ -1,7 +1,9 @@
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
-import { clips, imageWidths, screenshots, type Variant } from '../src/lib/media-manifest';
+import { clips, imageWidths, MEDIA_ENCODING, screenshots, type Variant } from '../src/lib/media-manifest';
+import { MEDIA_VERSIONS } from '../src/lib/media-versions';
+import { computeMediaVersions } from './media-versions-lib';
 
 const root = resolve('../..');
 const output = resolve('public/media');
@@ -17,6 +19,13 @@ async function source(path: string) {
     throw new Error(`Git LFS pointer: ${path}. Run git lfs pull, then retry pnpm media.`);
   }
   return { file, bytes };
+}
+// Every URL the site writes carries the content version of its source (src/lib/media-url.ts). A build whose versions
+// do not match the sources would serve new bytes under old URLs, which the long media cache keeps for a day: stop.
+const current = await computeMediaVersions();
+const stale = Object.keys({ ...current, ...MEDIA_VERSIONS }).filter((key) => current[key] !== MEDIA_VERSIONS[key]);
+if (stale.length) {
+  throw new Error(`Media versions are stale for ${stale.join(', ')}. Run pnpm media:versions and commit src/lib/media-versions.ts.`);
 }
 // Sequential encoding keeps the build's memory use bounded.
 sharp.concurrency(1);
@@ -35,7 +44,7 @@ async function encode(id: string, variant: Variant, widths: number[]) {
       for (const format of ['avif', 'webp'] as const) {
         await sharp(bytes)
           .resize({ width, withoutEnlargement: true })
-          [format]({ quality: format === 'avif' ? 55 : 82 })
+          [format]({ quality: MEDIA_ENCODING[format] })
           .toFile(resolve(output, `${id}-${theme}-${width}.${format}`));
       }
     }
@@ -53,7 +62,7 @@ for (const clip of clips) {
   const poster = await source(clip.poster);
   await copyFile(video.file, resolve(output, `${clip.id}.webm`));
   await sharp(poster.bytes)
-    .webp({ quality: 82 })
+    .webp({ quality: MEDIA_ENCODING.poster })
     .toFile(resolve(output, `${clip.id}-poster.webp`));
 }
 console.log(`Prepared ${screenshots.length} screenshots and ${clips.length} clips.`);

@@ -27,6 +27,7 @@ node --env-file=.env --import tsx apps/app/scripts/prepare-media.ts
 node apps/app/scripts/capture-media.mjs
 CAPTURE_VIDEO=1 node apps/app/scripts/capture-media.mjs
 VIDEO_START=1.0 node apps/app/scripts/encode-media.mjs
+pnpm --filter @logbird/web media:versions
 pnpm --filter @logbird/web test
 pnpm --filter @logbird/web build
 ```
@@ -36,6 +37,15 @@ On PowerShell, set `$env:CAPTURE_VIDEO='1'` before the video command, then remov
 The walkthrough (`walkthrough.gif`, `walkthrough.webm`) was re-recorded in UTC on 2026-11-23 and encoded with
 `VIDEO_START=1.0`: sign-in is faster than in 2026-11-09, and the old 5.8 s start cut the sign-in and the overview.
 Review the raw recording before choosing the start, and keep the GIF under the 6,000,000-byte budget.
+
+## Media URLs carry a content version
+
+`/media/*` is cached for a day (plus a week of stale-while-revalidate) by the CDN and by browsers, so a file replaced
+under the same name would keep being served old. Every URL the site writes carries the content version of its source
+(`?v=`, `apps/web/src/lib/media-url.ts`), from `apps/web/src/lib/media-versions.ts`. After replacing a capture or the
+video, run `pnpm --filter @logbird/web media:versions` and commit the result: the media build and a test refuse stale
+versions. After a deploy, `check:live` fetches every media URL as written and with a random query, and fails if the bytes
+differ.
 
 ## Capture rules
 

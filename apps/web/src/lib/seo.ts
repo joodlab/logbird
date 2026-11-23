@@ -3,6 +3,18 @@ import { type Post, postPath } from './publications';
 import { pageIndexable, siteIndexable } from './release';
 import { getPage, isReady } from './site-map';
 export const canonicalHref = (path: string) => new URL(path, `${SITE_URL}/`).href;
+/**
+ * An OG card's URL with a version of what scripts/og.ts draws on it (its words and OG_CARD_VERSION), so a changed card
+ * gets a new URL instead of a cached old image. Bump OG_CARD_VERSION when the card's design changes.
+ */
+export const OG_CARD_VERSION = '1';
+export function ogImageHref(ogSlug: string, words: string) {
+  let hash = 0x81_1c_9d_c5;
+  for (const char of `${OG_CARD_VERSION}|${ogSlug}|${words}`) {
+    hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 0x01_00_01_93) >>> 0;
+  }
+  return canonicalHref(`/og/${ogSlug}.png?v=${hash.toString(16).padStart(8, '0')}`);
+}
 export function pageMeta({
   title,
   description,
@@ -20,7 +32,7 @@ export function pageMeta({
   fullTitle?: string;
 }) {
   const fullTitle = givenTitle ?? `${title} · Logbird`;
-  const image = canonicalHref(`/og/${ogSlug}.png`);
+  const image = ogImageHref(ogSlug, `${title}|${description}`);
   return [
     { title: fullTitle },
     { name: 'description', content: description },
@@ -101,7 +113,7 @@ export const articleLd = (article: {
     dateModified: article.modified ?? article.published,
     author: { '@type': 'Person', name: article.author },
     ...(ORG_NAME ? { publisher: { '@id': `${SITE_URL}/#organization` } } : {}),
-    image: canonicalHref(`/og/${article.ogSlug}.png`),
+    image: ogImageHref(article.ogSlug, `${article.title}|${article.description}`),
   });
 export const faqLd = (items: { q: string; a: string }[]) =>
   ld({

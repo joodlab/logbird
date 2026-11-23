@@ -27,6 +27,11 @@ import { prerenderPaths } from '../src/lib/site-map';
  * console-owned paths (sign-in, API, unknown paths) must answer from the console, never with a site page.
  *
  *   SHARED_ORIGIN=1 BASE_URL=https://<console origin> tsx scripts/check-live.ts
+ *
+ * Media served stale: every /media/ and /og/ URL a page references is fetched twice, as written and with a random
+ * extra query that no cache has seen, and the bytes must be identical. A difference means a cache (the CDN or a
+ * browser) is serving an old file under a URL whose page now describes a new one; the run fails and lists the files.
+ * Run it after each deploy.
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
 const shared = process.env.SHARED_ORIGIN === '1';
@@ -63,6 +68,24 @@ const SITE_MARKER = 'logbird.site.theme';
 const api = process.env.NO_API === '1' ? [] : ['/site-api/no-such-endpoint', '/site-api/waitlist/x'];
 const problems: string[] = [];
 const rows: Record<string, string | number>[] = [];
+/** Media and card URLs the pages reference, as path + query on the checked origin. */
+const mediaUrls = new Set<string>();
+
+function collectMedia(body: string) {
+  for (const [, value] of body.matchAll(/(?:src|srcSet|srcset|poster|content|href)="([^"]+)"/g)) {
+    for (const candidate of (value ?? '').split(',')) {
+      const url = candidate.trim().split(/\s+/)[0] ?? '';
+      if (!/\/(media|og)\//.test(url)) continue;
+      const parsed = new URL(url.replaceAll('&amp;', '&'), base);
+      mediaUrls.add(`${parsed.pathname}${parsed.search}`);
+    }
+  }
+}
+
+async function bytesAt(path: string) {
+  const response = await fetch(new URL(path, base));
+  return { status: response.status, bytes: Buffer.from(await response.arrayBuffer()) };
+}
 
 async function checkHtml(path: string, expected: number) {
   let expectedStatus = expected;
@@ -107,6 +130,7 @@ async function checkHtml(path: string, expected: number) {
     }
   }
   rows.push({ path, status: response.status, inline: scripts.length, uncovered: missing, url: response.url.replace(base, '') });
+  if (expectedStatus === 200) collectMedia(body);
 }
 
 for (const path of prerenderPaths) {
@@ -151,6 +175,24 @@ for (const path of consoleOwned) {
   }
   rows.push({ path: `console ${path}`, status: response.status, inline: '-', uncovered: '-', url: response.headers.get('content-type') ?? '-' });
 }
+let staleMedia = 0;
+for (const path of [...mediaUrls].sort()) {
+  const plain = await bytesAt(path);
+  const fresh = await bytesAt(`${path}${path.includes('?') ? '&' : '?'}cb=${crypto.randomUUID()}`);
+  if (plain.status !== 200 || fresh.status !== 200) {
+    problems.push(`${path}: media answered ${plain.status} (as written) and ${fresh.status} (uncached)`);
+  } else if (!plain.bytes.equals(fresh.bytes)) {
+    staleMedia++;
+    problems.push(`${path}: stale media, ${plain.bytes.length} bytes as written vs ${fresh.bytes.length} bytes uncached`);
+  }
+}
+rows.push({
+  path: `media ${mediaUrls.size} URLs`,
+  status: staleMedia ? 'stale' : 'same',
+  inline: '-',
+  uncovered: staleMedia,
+  url: 'as written vs uncached',
+});
 console.table(rows);
 if (problems.length) {
   console.error(`check-live: ${problems.length} problems at ${base}:\n${problems.join('\n')}`);
