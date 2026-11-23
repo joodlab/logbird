@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { actorLabel, causedCount, directChildren, distinctParties, eventSentence, humanizeNoun, unlinkedPartyLabel } from './events';
+import { actorLabel, causedCount, directChildren, distinctParties, eventSentence, humanizeNoun, partyKey, unlinkedPartyLabel } from './events';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -273,5 +273,19 @@ describe('unlinkedPartyLabel', () => {
     expect(unlinkedPartyLabel({ name: ' Billing worker ' })).toBe('Billing worker');
     expect(unlinkedPartyLabel({ name: '', email: 'lina@example.test' })).toBe('lina@example.test');
     expect(unlinkedPartyLabel({ name: '' })).toBe('');
+  });
+});
+
+describe('distinctParties, round 2', () => {
+  const p = (id: string, type = 'user', name = '', email = '') => ({ id, type, name, email });
+  it('tells ID-less actors apart by email', () => {
+    expect(distinctParties([p('', 'user', '', 'a@example.test'), p('', 'user', '', 'b@example.test')])).toHaveLength(2);
+  });
+  it('reads a repeated id by its latest record, in its first place', () => {
+    expect(distinctParties([p('u1'), p('u2', 'user', 'Omar'), p('u1', 'user', 'Lina')])).toEqual([p('u1', 'user', 'Lina'), p('u2', 'user', 'Omar')]);
+  });
+  it('gives no two different parties the same key, whatever their type and name contain', () => {
+    expect(partyKey(p('', 'service:billing', 'west'))).not.toBe(partyKey(p('', 'service', 'billing:west')));
+    expect(distinctParties([p('', 'service:billing', 'west'), p('', 'service', 'billing:west')])).toHaveLength(2);
   });
 });

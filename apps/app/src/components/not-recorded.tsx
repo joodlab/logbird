@@ -18,10 +18,17 @@ export function UnlinkedParty({ party, className }: { party: { name?: string; em
   const label = unlinkedPartyLabel(party);
   if (label) {
     return (
-      <bdi className={cn('truncate text-sm', className)} title="Recorded without an ID">
+      <bdi className={cn('min-w-0 max-w-full truncate text-sm', className)} title="Recorded without an ID">
         {label}
       </bdi>
     );
   }
-  return <TypePill className={className}>{party.type}</TypePill>;
+  // A type can be long (up to 64 characters): the pill shrinks and truncates; the full type stays in its text and title.
+  return (
+    <TypePill className={cn('min-w-0 max-w-full', className)}>
+      <span className="min-w-0 truncate" title={party.type}>
+        {party.type}
+      </span>
+    </TypePill>
+  );
 }

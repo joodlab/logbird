@@ -22,6 +22,13 @@ function revealTab(nav: HTMLElement, tab: HTMLElement) {
   if (target !== null) nav.scrollLeft = physicalScroll(target, rtl);
 }
 
+/** The tab a geometry change should keep in view: the one keyboard focus is on, else the current section's. */
+export function tabToReveal(nav: HTMLElement): HTMLElement | null {
+  const focused = document.activeElement;
+  if (focused instanceof HTMLElement && focused !== nav && nav.contains(focused)) return focused;
+  return nav.querySelector<HTMLElement>('[aria-current="page"]');
+}
+
 /**
  * Keeps the active section — and the tab keyboard focus is on — visible in a horizontally scrolling tab strip (phones), and fades the edge that has more
  * tabs behind it. Works in logical coordinates, so an RTL strip scrolls and fades from its right-hand start.
@@ -49,8 +56,7 @@ export function useTabStrip(activeKey: string) {
     // Scrolling by hand only refreshes the fades, so the strip still pans freely.
     const observer = new ResizeObserver(() => {
       update();
-      const focused = nav.contains(document.activeElement) && document.activeElement !== nav ? document.activeElement : null;
-      const target = (focused as HTMLElement | null) ?? nav.querySelector<HTMLElement>('[aria-current="page"]');
+      const target = tabToReveal(nav);
       if (target) revealTab(nav, target);
     });
     observer.observe(nav);

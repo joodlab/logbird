@@ -247,19 +247,29 @@ export function causedCount(detail: { childCount: number }, e: Pick<AuditEvent, 
   return Math.max(0, detail.childCount - (e.context.parentEventId === e.id ? 1 : 0));
 }
 
-type Party = { id: string; type: string; name: string };
+type Party = { id: string; type: string; name: string; email?: string };
 
 /**
- * Who an operation's events name as a party (actors, or executors), each once and in first-seen order. A party with an
- * id is the same party wherever it appears; one recorded without an id (a type, a name, or both) is told apart by those,
- * so two different id-less parties never collapse into one. Events that recorded nothing for the party add nothing.
+ * One party's identity, as a collision-free string (a JSON tuple, so no separator inside a type or name can make two
+ * parties alike): its id when it has one, else everything it was recorded with. Used both to group parties and as their
+ * React key.
+ */
+export function partyKey(p: Party): string {
+  return p.id ? JSON.stringify(['id', p.id]) : JSON.stringify(['anon', p.type, p.name, p.email ?? '']);
+}
+
+/**
+ * Who an operation's events name as a party (actors, or executors), each once, in the order first seen. A party with an
+ * id is the same party wherever it appears and reads as its latest record (events come oldest first, so a name added
+ * later wins); one recorded without an id is told apart by its type, name and email, so two different id-less parties
+ * never collapse into one. Events that recorded nothing for the party add nothing.
  */
 export function distinctParties<P extends Party>(parties: readonly (P | null | undefined)[]): P[] {
   const byKey = new Map<string, P>();
   for (const p of parties) {
-    if (!p || !(p.id || p.type || p.name)) continue;
-    const key = p.id ? `id\u0000${p.id}` : `anon\u0000${p.type}\u0000${p.name}`;
-    if (!byKey.has(key)) byKey.set(key, p);
+    if (!p || !(p.id || p.type || p.name || p.email)) continue;
+    // Map.set on an existing key keeps its position: the party stays where it first appeared.
+    byKey.set(partyKey(p), p);
   }
   return [...byKey.values()];
 }

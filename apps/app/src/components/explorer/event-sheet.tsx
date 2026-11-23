@@ -634,7 +634,10 @@ function EventDetailBody({
                     <TypePill>{e.actor.type || 'unknown'}</TypePill>
                     {e.actor.id ? <span className="truncate font-mono">{e.actor.id}</span> : null}
                   </span>
-                  {e.actor.email ? <span className="truncate text-muted-foreground text-xs">{e.actor.email}</span> : null}
+                  {/* Without an id or a name, the email is already the first line: say it once. */}
+                  {e.actor.email && (e.actor.id || e.actor.name.trim()) ? (
+                    <span className="truncate text-muted-foreground text-xs">{e.actor.email}</span>
+                  ) : null}
                 </div>
               ) : (
                 <MissingActor detail={detail} event={e} projectId={projectId} />

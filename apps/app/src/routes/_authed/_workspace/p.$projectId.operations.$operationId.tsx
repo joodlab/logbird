@@ -11,9 +11,8 @@ import { GitBranchIcon, Rows3Icon, SearchXIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { z } from 'zod';
 import { ActionName } from '@/components/action-name';
-import { EntityLink } from '@/components/entity-link';
 import { EventSheet } from '@/components/explorer/event-sheet';
-import { NotRecorded, UnlinkedParty } from '@/components/not-recorded';
+import { OperationParties } from '@/components/operation-parties';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { operationQuery } from '@/lib/api/queries';
@@ -107,7 +106,6 @@ function OperationPage() {
   const titleEvent = nodes[0]?.event ?? unplaced[0];
   const failures = events.filter((e) => e.outcome === 'failure' || e.outcome === 'denied').length;
   const executors = distinctParties(events.map((e) => e.executor));
-  const actors = distinctParties(events.map((e) => e.actor));
   const selectedId = search.ev;
   // The drawer steps through the tree, then any events the tree could not place.
   const ordered = [...nodes.map((n) => n.event), ...unplaced];
@@ -217,35 +215,7 @@ function OperationPage() {
       </dl>
 
       {/* Both parties, always once the events are in: one the events did not name says so, as in the event drawer. */}
-      {events.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm" data-testid="operation-parties">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground text-xs">Caused by</span>
-            {actors.length === 0 ? <NotRecorded /> : null}
-            {actors
-              .slice(0, 4)
-              .map((a) =>
-                a.id ? (
-                  <EntityLink id={a.id} key={`id:${a.id}`} kind="actor" name={a.name} projectId={projectId} type={a.type} />
-                ) : (
-                  <UnlinkedParty key={`anon:${a.type}:${a.name}`} party={a} />
-                ),
-              )}
-            {actors.length > 4 ? <span className="text-muted-foreground text-xs">and {formatNumber(actors.length - 4)} more</span> : null}
-          </span>
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground text-xs">Performed by</span>
-            {executors.length === 0 ? <NotRecorded /> : null}
-            {executors.map((x) =>
-              x.id ? (
-                <EntityLink id={x.id} key={`id:${x.id}`} kind="executor" meta={x.type} name={x.name} projectId={projectId} type={x.type} />
-              ) : (
-                <UnlinkedParty key={`anon:${x.type}:${x.name}`} party={x} />
-              ),
-            )}
-          </span>
-        </div>
-      ) : null}
+      {events.length > 0 ? <OperationParties events={events} projectId={projectId} /> : null}
 
       <section aria-label="Causation tree" className="overflow-hidden rounded-xl border bg-card shadow-xs">
         <div className="grid grid-cols-[minmax(0,1fr)] border-b bg-muted/30 text-[11px] text-muted-foreground uppercase tracking-wider md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
