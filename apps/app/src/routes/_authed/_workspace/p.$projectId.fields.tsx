@@ -54,8 +54,9 @@ function checkCoverage(key: string, coverage: Map<string, number>): number | und
       return 1;
     case 'tenant.id':
       return coverage.get('tenant');
+    // The server's `target` row: events with at least one non-empty target id, the ones `target:*` finds.
     case 'targets':
-      return coverage.get('target') ?? coverage.get('target.type');
+      return coverage.get('target');
     case 'context.operationId':
       return Math.max(coverage.get('operation') ?? 0, coverage.get('request') ?? 0) || undefined;
     default:
@@ -77,6 +78,7 @@ function presenceQuery(key: string): string | null {
     'context.requestId': 'request:*',
     'context.traceId': 'trace:*',
     'impersonator.id': 'impersonator:*',
+    target: 'target:*',
   };
   return map[key] ?? null;
 }

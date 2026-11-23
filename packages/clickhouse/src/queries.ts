@@ -817,14 +817,17 @@ export async function listFields(ch: ClickHouseClient, p: string, q: RangeQuery)
     lastSeen: iso(r.last),
   }));
   for (const [key, col] of Object.entries(columns)) {
-    if (QUERY_FIELDS.find((f) => f.column === col)?.type === 'array' || key === 'env') continue;
+    // Of the array columns only `target` (target_ids) is reported: "At least one record it touched" is a recommended
+    // envelope field. An event carries it when it has a non-empty target id, exactly what the `target:*` filter matches.
+    const array = QUERY_FIELDS.find((f) => f.column === col)?.type === 'array';
+    if ((array && key !== 'target') || key === 'env') continue;
     const value = `toString(${col})`;
+    const ids = `arrayFilter(x -> x!='', ${col})`;
+    const select = array
+      ? `countIf(notEmpty(${ids})) n,uniqArray(${ids}) distinct,groupUniqArrayArray(5)(${ids}) samples,maxOrNullIf(timestamp,notEmpty(${ids})) last`
+      : `countIf(${value}!='') n,uniqIf(${col},${value}!='') distinct,groupUniqArrayIf(5)(${value},${value}!='') samples,maxOrNullIf(timestamp,${value}!='') last`;
     const r = (
-      await read<{ n: number; distinct: number; samples: string[]; last: string | null }>(
-        ch,
-        `SELECT countIf(${value}!='') n,uniqIf(${col},${value}!='') distinct,groupUniqArrayIf(5)(${value},${value}!='') samples,maxOrNullIf(timestamp,${value}!='') last FROM events WHERE ${w.sql}`,
-        w.params,
-      )
+      await read<{ n: number; distinct: number; samples: string[]; last: string | null }>(ch, `SELECT ${select} FROM events WHERE ${w.sql}`, w.params)
     )[0];
     if (r)
       data.push({
