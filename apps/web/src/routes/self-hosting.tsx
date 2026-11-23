@@ -3,30 +3,20 @@ import { ButtonLink } from '../components/marketing/button-link';
 import { SiteCode } from '../components/marketing/code';
 import { CtaBand } from '../components/marketing/cta-band';
 import { FeatureRow } from '../components/marketing/feature-row';
+import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { Architecture, Steps } from '../components/marketing/steps';
 import { architecture } from '../content/architecture';
-import { GITHUB_PUBLIC } from '../env';
-import { CLOUD_OPEN } from '../lib/cloud';
-import { repoFile, SELF_HOST_VERSION, selfHostQuickstart } from '../lib/selfhost';
+import { selfHosting } from '../content/self-hosting';
+import { SITE } from '../content/site';
+import { selfHostQuickstart } from '../lib/selfhost';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/self-hosting')({ head: () => pageHead('/self-hosting'), component: SelfHostingPage });
 
-// Copy: marketing/copy/self-hosting.md. Commands are checked against docs/self-hosting.md and docs/coolify.md.
-
-const firstEvent = `curl http://localhost:4600/v1/events \\
-  -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \\
-  -H 'Content-Type: application/json' \\
-  -d '{"action":"document.updated"}'`;
-
-const tls = `# .env
-APP_URL=https://audit.example.com
-LOGBIRD_DOMAIN=audit.example.com
-TRUST_PROXY=2
-
-docker compose --profile tls up -d`;
+// Words and samples: content/self-hosting.ts. This file is layout only (content-modules.test.ts).
+const bundledServices = ['console', 'api', 'worker', 'postgres', 'clickhouse', 'redis'];
 
 /** One container stack as a small diagram: the shaded boxes run inside Compose, dashed ones are yours. */
 function Stack({ title, file, inside, outside, proxy }: { title: string; file: string; inside: string[]; outside?: string[]; proxy?: string }) {
@@ -62,116 +52,90 @@ function Stack({ title, file, inside, outside, proxy }: { title: string; file: s
 }
 
 function SelfHostingPage() {
+  const { samples, hero, quickstart, requirements, options, tls, ops, notYet, cta } = selfHosting;
+  const { guide } = quickstart.notes;
   return (
     <>
       <PageHero
         actions={
           <>
-            {GITHUB_PUBLIC ? (
+            {SITE.repoPublic ? (
               <ButtonLink href="#quickstart" size="lg">
-                Quickstart
+                {hero.quickstartAction}
               </ButtonLink>
             ) : (
               <ButtonLink search={{ interest: 'self-host' }} size="lg" to="/contact">
-                Tell me when the source opens
+                {hero.notifyAction}
               </ButtonLink>
             )}
             <ButtonLink size="lg" to="/contact" variant="outline">
-              {CLOUD_OPEN ? 'Request Cloud access' : 'Join the Cloud waitlist'}
+              {hero.cloudAction}
             </ButtonLink>
           </>
         }
         aside={
           <div className="flex flex-col gap-3">
-            <Stack
-              file="docker-compose.yml"
-              inside={['console', 'api', 'worker', 'postgres', 'clickhouse', 'redis']}
-              title="One Compose project runs the console, API, worker, Postgres, ClickHouse and Redis."
-            />
-            <p className="text-muted-foreground text-sm">
-              {GITHUB_PUBLIC
-                ? SELF_HOST_VERSION
-                  ? `Compose pulls the published ${SELF_HOST_VERSION} images for amd64 and arm64 from GHCR.`
-                  : 'Nothing has been released yet.'
-                : 'Source on GitHub — coming soon.'}
-            </p>
+            <Stack file="docker-compose.yml" inside={bundledServices} title={hero.stackTitle} />
+            <p className="text-muted-foreground text-sm">{hero.status}</p>
           </div>
         }
-        eyebrow="Self-hosting"
-        lead={`Logbird is MIT-licensed and self-hosts with Docker Compose. Run it on one VM and your events stay on your own servers. It's the same codebase Logbird Cloud ${CLOUD_OPEN ? 'runs' : 'will run'}.`}
-        title="Your audit log, on your servers."
+        eyebrow={hero.eyebrow}
+        lead={hero.lead}
+        title={hero.title}
       />
 
-      {GITHUB_PUBLIC && SELF_HOST_VERSION ? (
+      {SITE.repoPublic && SITE.selfHostVersion ? (
         <Section id="quickstart" labelledBy="quickstart-title">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
             <div className="flex flex-col gap-8">
-              <SectionHeader
-                eyebrow="Quickstart"
-                id="quickstart-title"
-                lead="You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls the four published Logbird role images; nothing is compiled on your server."
-                title="From clone to your first event."
-              />
+              <SectionHeader eyebrow={quickstart.eyebrow} id="quickstart-title" lead={quickstart.lead} title={quickstart.title} />
               <ol className="flex flex-col gap-4 text-sm leading-relaxed">
-                {[
-                  <>
-                    Open <code>http://localhost:4600</code> and sign in with the code sent to your email, or printed in the server log if you set{' '}
-                    <code>AUTH_LOG_SIGN_IN_CODES=true</code>.
-                  </>,
-                  "Create a workspace and a project. Copy the ingest key; it's shown once.",
-                  'Set LOGBIRD_INGEST_KEY to the key you just copied, and send an event with the request on the right.',
-                  <>
-                    Expect <code>202</code>, and the event in the explorer.
-                  </>,
-                ].map((step, index) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: static steps
-                  <li className="flex gap-4" key={index}>
+                {quickstart.steps.map((step, index) => (
+                  <li className="flex gap-4" key={step}>
                     <span
                       aria-hidden="true"
                       className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border bg-background font-mono text-xs"
                     >
                       {index + 1}
                     </span>
-                    <span className="pt-1 text-muted-foreground">{step}</span>
+                    <span className="pt-1 text-muted-foreground">
+                      <Rich text={step} />
+                    </span>
                   </li>
                 ))}
               </ol>
               <ul className="flex flex-col gap-2 border-t pt-6 text-muted-foreground text-sm leading-relaxed">
-                <li>The init script generates the secrets it needs and never overwrites values you've set.</li>
+                <li>{quickstart.notes.init}</li>
                 <li>
-                  Need unreleased code or a custom build? The{' '}
-                  <a className="text-link" href={`${repoFile('docs/self-hosting.md')}#build-from-source`}>
-                    self-hosting guide
-                  </a>{' '}
-                  covers building from source, every setting, TLS, backups and restores.
+                  {guide.before}
+                  <a className="text-link" href={guide.href}>
+                    {guide.label}
+                  </a>
+                  {guide.after}
                 </li>
                 <li>
-                  <code>/livez</code> checks the API process; <code>/readyz</code> checks Postgres, ClickHouse and Redis.
+                  <Rich text={quickstart.notes.health} />
                 </li>
               </ul>
             </div>
             <div className="flex min-w-0 flex-col gap-3">
-              <SiteCode code={selfHostQuickstart} language="bash" title="On your server" />
-              <SiteCode code={firstEvent} language="bash" title="Your first event" />
+              <SiteCode code={selfHostQuickstart} language="bash" title={quickstart.serverTitle} />
+              <SiteCode code={samples.firstEvent} language="bash" title={quickstart.eventTitle} />
             </div>
           </div>
         </Section>
       ) : (
         <Section id="quickstart" labelledBy="quickstart-title">
           <div className="panel flex flex-col gap-4 p-8 md:p-10">
-            <p className="eyebrow">Quickstart</p>
+            <p className="eyebrow">{quickstart.eyebrow}</p>
             <h2 className="h2" id="quickstart-title">
-              {GITHUB_PUBLIC ? 'Nothing has been released yet.' : 'The quickstart is published when the repository opens.'}
+              {quickstart.pending.title}
             </h2>
-            <p className="lead max-w-3xl">
-              {GITHUB_PUBLIC
-                ? 'There are no published images yet. Build the four roles from source, start them, then sign in and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.'
-                : 'On one VM: clone the repository, generate secrets, configure SMTP, start Logbird with Docker Compose and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.'}
-            </p>
+            <p className="lead max-w-3xl">{quickstart.pending.lead}</p>
             <div>
-              {GITHUB_PUBLIC ? (
-                <a className="text-link" href={`${repoFile('docs/self-hosting.md')}#build-from-source`}>
-                  Build from source (self-hosting guide)
+              {SITE.repoPublic ? (
+                <a className="text-link" href={quickstart.pending.buildLink.href}>
+                  {quickstart.pending.buildLink.label}
                 </a>
               ) : (
                 <SelfHostCta size="default" variant="outline" />
@@ -182,21 +146,9 @@ function SelfHostingPage() {
       )}
 
       <Section compact id="requirements" labelledBy="requirements-title" tone="sunken">
-        <SectionHeader eyebrow="Requirements" id="requirements-title" title="What you need." />
+        <SectionHeader eyebrow={requirements.eyebrow} id="requirements-title" title={requirements.title} />
         <dl className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {[
-            ['Host', 'A Linux host, or any machine that runs Linux containers, with Docker Engine and Compose 2.24.4 or newer.'],
-            ['Email', 'An SMTP provider for sign-in codes and invitations, for example Amazon SES, Postmark or Brevo.'],
-            ['HTTPS', 'A domain and ports 80 and 443 if you want automatic HTTPS.'],
-            [
-              'Starting size',
-              '4 vCPU, 8 GB RAM and SSD storage. That is an initial allocation, not measured capacity. Leave disk for images as well as your data, ClickHouse merges and backups; building from source needs more headroom still.',
-            ],
-            [
-              'Access',
-              'Sign-up is open by default: anyone who can reach the console can create an account. On an internet-facing instance, set AUTH_SIGNUP=restricted with your email domains; invitations keep working.',
-            ],
-          ].map(([term, detail]) => (
+          {requirements.items.map(([term, detail]) => (
             <div className="panel flex flex-col gap-2 p-5" key={term}>
               <dt className="font-semibold">{term}</dt>
               <dd className="text-muted-foreground text-sm leading-relaxed">{detail}</dd>
@@ -209,59 +161,27 @@ function SelfHostingPage() {
       </Section>
 
       <Section compact id="options" labelledBy="options-title">
-        <SectionHeader eyebrow="Ways to run it" id="options-title" title="Pick the setup that fits what you already run." />
+        <SectionHeader eyebrow={options.eyebrow} id="options-title" title={options.title} />
         <div className="mt-10 grid gap-6 lg:grid-cols-3">
           {[
             {
-              title: 'Bundled Compose',
-              body: (
-                <>
-                  One Compose project runs Postgres, ClickHouse, Redis, the API, the worker and the console. Only the console port is published, on{' '}
-                  <code>127.0.0.1</code> by default. A one-off migration step runs before the API and worker start.
-                </>
-              ),
+              ...options.bundled,
+              stack: <Stack file="docker-compose.yml" inside={bundledServices} title={options.bundled.stackTitle} />,
+            },
+            {
+              ...options.coolify,
               stack: (
-                <Stack
-                  file="docker-compose.yml"
-                  inside={['console', 'api', 'worker', 'postgres', 'clickhouse', 'redis']}
-                  title="Bundled Compose stack"
-                />
+                <Stack file="docker-compose.coolify.yml" inside={bundledServices} proxy={options.coolify.proxy} title={options.coolify.stackTitle} />
               ),
             },
             {
-              title: 'Coolify',
-              body: (
-                <>
-                  Point Coolify's Docker Compose build pack at <code>docker-compose.coolify.yml</code>. Coolify generates the secrets,{' '}
-                  {SELF_HOST_VERSION
-                    ? 'pulls the published images'
-                    : 'builds the images once you add docker-compose.build.yml (see the Coolify guide)'}{' '}
-                  and routes your domain to the console.
-                </>
-              ),
-              stack: (
-                <Stack
-                  file="docker-compose.coolify.yml"
-                  inside={['console', 'api', 'worker', 'postgres', 'clickhouse', 'redis']}
-                  proxy="Coolify proxy → your domain"
-                  title="The same stack behind Coolify's proxy"
-                />
-              ),
-            },
-            {
-              title: 'Bring your own databases',
-              body: (
-                <>
-                  Use your own Postgres, ClickHouse and Redis (or Dragonfly) with <code>docker-compose.external.yml</code>. Use ClickHouse 26.9.
-                  Logbird creates its own restricted query user and row policies.
-                </>
-              ),
+              ...options.external,
               stack: (
                 <Stack
                   file="docker-compose.external.yml"
                   inside={['console', 'api', 'worker', 'migrate']}
                   outside={['postgres', 'clickhouse', 'redis']}
-                  title="Logbird services in Compose, databases you run"
+                  title={options.external.stackTitle}
                 />
               ),
             },
@@ -269,97 +189,69 @@ function SelfHostingPage() {
             <section aria-label={option.title} className="panel flex flex-col gap-5 p-6" key={option.title}>
               {option.stack}
               <h3 className="h3">{option.title}</h3>
-              <p className="body-copy text-muted-foreground text-sm leading-relaxed">{option.body}</p>
+              <p className="body-copy text-muted-foreground text-sm leading-relaxed">
+                <Rich text={option.body} />
+              </p>
             </section>
           ))}
         </div>
         <p className="mt-6 border-s-2 ps-3 text-muted-foreground text-sm">
-          {GITHUB_PUBLIC ? (
+          {options.guide ? (
             <>
-              Step by step in the{' '}
-              <a className="text-link" href={repoFile('docs/coolify.md')}>
-                Coolify guide
+              {options.guide.before}
+              <a className="text-link" href={options.guide.href}>
+                {options.guide.label}
               </a>
-              .{' '}
+              {options.guide.after}
             </>
           ) : null}
-          Upgrades and restores through Coolify are documented but not yet verified end to end.
+          {options.note}
         </p>
       </Section>
 
       <FeatureRow
-        eyebrow="HTTPS"
+        eyebrow={tls.eyebrow}
         id="tls"
-        limit="Never expose the API server's own port. Everything goes through the console origin."
-        title="Automatic HTTPS, or the proxy you already run."
-        visual={<SiteCode code={tls} language="bash" title="Caddy, built in" />}
+        limit={tls.limit}
+        title={tls.title}
+        visual={<SiteCode code={samples.tls} language="bash" title={tls.codeTitle} />}
       >
-        Set your domain in <code>.env</code> and run <code>docker compose --profile tls up -d</code>. Caddy gets and renews the certificate. Already
-        run Nginx, Traefik or another proxy? Forward the whole origin to port 4600 and tell Logbird how many proxies sit in front, so rate limits and
-        audit context see the real client address.
+        <Rich text={tls.body} />
       </FeatureRow>
 
       <Section compact labelledBy="ops-title" tone="sunken">
         <h2 className="sr-only" id="ops-title">
-          Operating Logbird
+          {ops.title}
         </h2>
         <div className="grid gap-12 lg:grid-cols-2">
           <section aria-labelledby="smtp-title" className="flex flex-col gap-4" id="smtp">
-            <p className="eyebrow">Email</p>
+            <p className="eyebrow">{ops.smtp.eyebrow}</p>
             <h3 className="h2" id="smtp-title">
-              Sign-in is by emailed code.
+              {ops.smtp.title}
             </h3>
-            <p className="body-copy text-muted-foreground leading-relaxed">
-              Logbird has no passwords. People sign in with a one-time code sent by email, so configure an SMTP provider. For a first local test you
-              can log sign-in codes to the server log instead. Turn that off once SMTP works: anyone who can read the logs can sign in.
-            </p>
+            <p className="body-copy text-muted-foreground leading-relaxed">{ops.smtp.body}</p>
           </section>
           <section aria-labelledby="upgrades-title" className="flex flex-col gap-6" id="upgrades">
-            <p className="eyebrow">Upgrades and backups</p>
+            <p className="eyebrow">{ops.upgrades.eyebrow}</p>
             <h3 className="h2" id="upgrades-title">
-              Upgrade to a pinned release, after a backup.
+              {ops.upgrades.title}
             </h3>
-            <Steps
-              items={[
-                {
-                  title: 'Stop writes',
-                  body: "Run every command in these steps with the installation's own Compose project, env file, -f files and profile (after a restore cutover, the restored project's). Block ingress and stop the console, server and worker. The worker gets five minutes to finish its current job: wait for the stop to complete, and check its logs if it had to be killed.",
-                },
-                {
-                  title: 'Back up',
-                  body: 'With writers stopped: matched Postgres (pg_dump) and ClickHouse (BACKUP DATABASE) backups and a SHA-256 checksum file. Keep the original env file; record the Git revision (git rev-parse HEAD) and the images (docker compose images).',
-                },
-                {
-                  title: 'Pin the new version',
-                  body: "Check out the release tag vX.Y.Z, then set LOGBIRD_VERSION=X.Y.Z, without the v, in the env file the installation runs with (.env, or the one you cut over to after a restore): its value overrides the Compose default, and a LOGBIRD_VERSION or LOGBIRD_IMAGE_REGISTRY exported in your shell overrides the env file (unset it). Run docker compose config --images and check the full names: all four must be <registry>/logbird-<role>:X.Y.Z, with the registry you expect (the project's GHCR namespace by default). Built from source (docker-compose.build.yml)? Keep that override and build the four roles from the new revision instead; the image check doesn't apply.",
-                },
-                {
-                  title: 'Pull, then start',
-                  body: "docker compose pull (skip it for a source build), then docker compose up -d --no-build. Migrations run first; if one fails, the new version doesn't start.",
-                },
-                { title: 'Verify', body: 'Readiness, sign-in, your events, settings and keys, and the retention runs, before you reopen ingress.' },
-              ]}
-              vertical
-            />
+            <Steps items={[...ops.upgrades.steps]} vertical />
             <ul className="flex flex-col gap-2 border-t pt-5 text-muted-foreground text-sm leading-relaxed">
-              <li>
-                <code>docker compose down</code> keeps your data. <code>docker compose down -v</code> permanently deletes the Compose-managed volumes,
-                which hold the bundled Postgres, ClickHouse and Redis data.
-              </li>
-              <li>Restore into empty, separate storage first, and check counts before you switch over.</li>
+              {ops.upgrades.notes.map((note) => (
+                <li key={note}>
+                  <Rich text={note} />
+                </li>
+              ))}
             </ul>
           </section>
         </div>
       </Section>
 
       <Section compact id="not-yet" labelledBy="not-yet-title">
-        <SectionHeader eyebrow="Not there yet" id="not-yet-title" title="What self-hosting doesn't include today." />
+        <SectionHeader eyebrow={notYet.eyebrow} id="not-yet-title" title={notYet.title} />
         <dl className="mt-10 grid gap-x-10 gap-y-2 md:grid-cols-2">
-          {[
-            ['High availability', 'The Compose setup is a single VM. It has no failover.'],
-            ['Production sizing guarantee', "There's no published sizing guarantee yet. Size from your own measurements."],
-            ['SSO', 'Sign-in is by emailed code only. SSO is on the roadmap.'],
-          ].map(([term, detail]) => (
+          {notYet.items.map(([term, detail]) => (
             <div className="flex flex-col gap-1 border-b py-4" key={term}>
               <dt className="font-medium">{term}</dt>
               <dd className="text-muted-foreground text-sm leading-relaxed">{detail}</dd>
@@ -368,14 +260,7 @@ function SelfHostingPage() {
         </dl>
       </Section>
 
-      <CtaBand
-        body={
-          CLOUD_OPEN
-            ? "Logbird Cloud runs the same codebase for you. It's in early access, with sign-ups limited to invited teams."
-            : "Logbird Cloud will run the same codebase for you. It isn't open yet."
-        }
-        title="Rather not run it yourself?"
-      />
+      <CtaBand body={cta.body} title={cta.title} />
     </>
   );
 }
