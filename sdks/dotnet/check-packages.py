@@ -51,6 +51,7 @@ def manifest(package):
 
 ICON = Path(__file__).resolve().parent / "logbird-icon.png"
 CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+DEPTHS = {0: {1, 2, 4, 8, 16}, 2: {8, 16}, 3: {1, 2, 4, 8}, 4: {8, 16}, 6: {8, 16}}
 
 
 def check_png(data, label):
@@ -79,6 +80,13 @@ def check_png(data, label):
         raise SystemExit(f"{label}: {width}x{height}, not 128x128")
     if color not in CHANNELS or interlace != 0:
         raise SystemExit(f"{label}: unsupported PNG colour type {color} or interlaced")
+    if depth not in DEPTHS[color]:
+        raise SystemExit(f"{label}: bit depth {depth} is not allowed for colour type {color}")
+    kinds = [kind for kind, _ in chunks]
+    if b"IDAT" not in kinds:
+        raise SystemExit(f"{label}: no image data")
+    if color == 3 and (b"PLTE" not in kinds or kinds.index(b"PLTE") > kinds.index(b"IDAT")):
+        raise SystemExit(f"{label}: an indexed-colour PNG needs a PLTE chunk before its image data")
     try:
         pixels = zlib.decompress(b"".join(body for kind, body in chunks if kind == b"IDAT"))
     except zlib.error as error:
