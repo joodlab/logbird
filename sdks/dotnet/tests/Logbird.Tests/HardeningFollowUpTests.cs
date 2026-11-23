@@ -264,6 +264,27 @@ public class HardeningFollowUpTests
     }
 
     [Fact]
+    public async Task A_caller_that_already_cancelled_sends_nothing()
+    {
+        var sent = 0;
+        using var reader = Reader(Server020((_, _) =>
+        {
+            Interlocked.Increment(ref sent);
+            return Task.FromResult(Json("{}"));
+        }));
+
+        // The version is read first, so the calls below reach the request itself.
+        await reader.FacetsAsync(new FacetQuery("outcome")).ContinueWith(_ => { });
+        sent = 0;
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.SearchAsync(new EventSearch(), cancelled.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.MintViewerTokenAsync(new ViewerScope("biz_1"), cancellationToken: cancelled.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Jsonl), new MemoryStream(), cancelled.Token));
+        Assert.Equal(0, Volatile.Read(ref sent));
+    }
+
+    [Fact]
     public async Task An_export_waits_for_its_headers_no_longer_than_the_read_timeout()
     {
         var never = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);

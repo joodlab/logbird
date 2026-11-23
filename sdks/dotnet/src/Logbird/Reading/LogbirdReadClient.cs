@@ -612,6 +612,8 @@ public sealed class LogbirdReadClient : IDisposable
     /// </remarks>
     private async Task<TResult> BoundedAsync<TResult>(Func<CancellationToken, Task<TResult>> send, Action<TResult> discard, CancellationToken cancellationToken)
     {
+        // A caller that already cancelled sends nothing (a viewer token must not be minted for a caller that never gets it).
+        cancellationToken.ThrowIfCancellationRequested();
         var transport = new CancellationTokenSource();
 
         // On the thread pool: a handler that blocks before returning its task cannot hold the limit below.
