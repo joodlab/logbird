@@ -81,9 +81,12 @@ Load the root environment for every package, for example
 The purge-heavy server suites (`immutable-ingest*`, `destructive-maintenance`, `exports`
 and `own-audit`) wait on ClickHouse lightweight DELETEs, and those take longer as the
 shared tables gain active parts. On a long-lived development store one purge can take
-30–40 s. Set `LOGBIRD_TEST_SLOW_STORE=1` for such a run: it multiplies those suites'
-purge-related hook, wait and test limits by six. It is off by default, and CI uses the
-committed limits. A test that still times out with it set is a finding, not noise.
+30–40 s. Set `LOGBIRD_TEST_SLOW_STORE=1` for such a run: it multiplies by six only the
+limits of work that waits for a purge (cleanup hooks, waits on a background DELETE, and
+test bodies that run retention, sample removal, project deletion or a rollup rebuild).
+Other test bodies keep their committed limits. Leave it unset (or `0`) otherwise; any
+other value is refused. CI uses the committed limits. A test that still times out with
+it set is a finding, not noise.
 
 ## Issues, commits and pull requests
 

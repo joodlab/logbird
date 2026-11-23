@@ -3,18 +3,20 @@ import { type TestFunction, afterEach as vitestAfterEach, it as vitestIt } from 
 /**
  * Limits for the purge-heavy real-service suites (immutable-ingest*, destructive-maintenance, exports, own-audit).
  *
- * Their hooks, waits and bodies wait on ClickHouse lightweight DELETEs. Each DELETE is applied to every active part of
- * the shared table, so on a long-lived development store with about 100 parts one purge takes 30-40 s (#268). The
- * committed limits fit a small store and stay what CI runs. `LOGBIRD_TEST_SLOW_STORE=1` multiplies the purge-related
- * limits for a run against a large store; it is off by default and changes nothing else.
+ * Some of their hooks, waits and bodies wait on ClickHouse lightweight DELETEs. Each DELETE is applied to every active
+ * part of the shared table, so on a long-lived development store with about 100 parts one purge takes 30-40 s (#268).
+ * The committed limits fit a small store and stay what CI runs. `LOGBIRD_TEST_SLOW_STORE=1` multiplies only the limits
+ * of work that waits for a purge: cleanup hooks, waits on a background DELETE, and the bodies that run retention,
+ * sample removal, project deletion or a rollup rebuild. A file-wide body limit scales only where every body purges;
+ * any other body keeps its committed limit, so a stall unrelated to purging still fails on time. Off by default.
  */
 export const SLOW_STORE_FACTOR = slowStoreFactor(process.env.LOGBIRD_TEST_SLOW_STORE);
 
 export function slowStoreFactor(raw: string | undefined) {
-  const value = raw?.trim() ?? '';
-  if (value === '' || value === '0') return 1;
+  // Exactly unset, `0` or `1`: an empty value (a shell variable that expanded to nothing) is refused too.
+  if (raw === undefined || raw === '0') return 1;
   // Six times the committed limits: every immutable-ingest* hook passed at 180 s where 30 s timed out.
-  if (value === '1') return 6;
+  if (raw === '1') return 6;
   // A typo must not silently run with the committed limits and report "timeout" as a product failure.
   throw new Error('LOGBIRD_TEST_SLOW_STORE must be 1 (slow store) or unset/0 (committed limits)');
 }

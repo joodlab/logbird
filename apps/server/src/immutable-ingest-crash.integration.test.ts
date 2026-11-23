@@ -75,5 +75,5 @@ it.each(['before-send', 'after-ack'] as const)(
       await exited;
     }
   },
-  90_000,
+  slowStore(90_000),
 );

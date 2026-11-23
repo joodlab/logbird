@@ -18,7 +18,7 @@ import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 import { it, slowStore } from './slow-store';
 
-vi.setConfig({ testTimeout: slowStore(30_000), hookTimeout: slowStore(30_000) });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: slowStore(30_000) });
 let f: ImmutableFixture;
 let clock = Date.now();
 beforeEach(async () => {

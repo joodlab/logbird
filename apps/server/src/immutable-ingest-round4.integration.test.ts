@@ -5,16 +5,16 @@ import { read } from '@logbird/clickhouse';
 import { ProjectBusyError, prisma } from '@logbird/database';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 import { ingest } from './ingest';
-import { slowStore } from './slow-store';
+import { it, slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
 const wallClock = Date.now;
-vi.setConfig({ testTimeout: slowStore(90_000), hookTimeout: slowStore(60_000) });
+vi.setConfig({ testTimeout: 90_000, hookTimeout: slowStore(60_000) });
 beforeEach(async () => {
   f = await immutableFixture();
   await f.authorize();
@@ -131,7 +131,7 @@ it('keeps failed repairs read-fenced while healthy siblings commit, then retenti
   await enforceProjectRetention(f.project);
   await consistent(4);
   expect(await prisma.retentionRun.count({ where: { projectId: f.project, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } })).toBe(0);
-});
+}, 90_000);
 it('repairs a process killed after destructive deletes without exposing an empty model after lease expiry', async () => {
   vi.useRealTimers();
   await populated();
@@ -149,7 +149,7 @@ it('repairs a process killed after destructive deletes without exposing an empty
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const deleted = new Promise<{ stage: string }>((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error('Repair child IPC timeout')), 20_000);
+      timer = setTimeout(() => reject(new Error('Repair child IPC timeout')), slowStore(20_000));
       child.once('message', (m) => resolve(m as { stage: string }));
       child.once('exit', () => reject(new Error('Repair child exited early')));
     });
@@ -171,7 +171,7 @@ it('repairs a process killed after destructive deletes without exposing an empty
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     await exited;
   }
-});
+}, 90_000);
 it('ready-only and grace-only recovery perform no rollup DELETE and expose the remaining ready grace', async () => {
   await f.pending(pending, { expired: true });
   await recoverProjectIngest(maintenanceClickhouse, f.project);

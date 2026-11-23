@@ -9,7 +9,7 @@ import { slowStore } from './slow-store';
 const qa = process.env.CLICKHOUSE_DATABASE === 'logbird_qa_062';
 let f: ImmutableFixture,
   clock = Date.now();
-vi.setConfig({ testTimeout: slowStore(90_000), hookTimeout: slowStore(30_000) });
+vi.setConfig({ testTimeout: 90_000, hookTimeout: slowStore(30_000) });
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   clock = Math.max(clock, Date.now()) + 61_000;

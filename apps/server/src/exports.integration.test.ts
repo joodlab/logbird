@@ -52,7 +52,8 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
   }
   // Keeps a download active while slow maintenance runs, so only the membership fence can end it. A reader paused for a
   // whole purge trips the 30 s idle timer on a store where one purge takes longer than that, which tests the timer.
-  // The download must not complete meanwhile; if maintenance ends it early, the caller's receipt check says why.
+  // If the download ends meanwhile (completed or failed), polling stops and the maintenance is still awaited, so fixture
+  // cleanup stays ordered: the caller's drain then fails on a completed download, and its receipt check says why.
   async function whileReading<T>(reader: ReadableStreamDefaultReader<Uint8Array>, started: T | Promise<T>) {
     const work = Promise.resolve(started);
     let open = true;
@@ -61,10 +62,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       if (settled) return work;
       if (open)
         open = await reader.read().then(
-          ({ done }) => {
-            expect(done).toBe(false);
-            return true;
-          },
+          ({ done }) => !done,
           () => false,
         );
     }

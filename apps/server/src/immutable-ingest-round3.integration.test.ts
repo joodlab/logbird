@@ -10,7 +10,7 @@ import { slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
-vi.setConfig({ testTimeout: slowStore(60_000), hookTimeout: slowStore(30_000) });
+vi.setConfig({ testTimeout: 60_000, hookTimeout: slowStore(30_000) });
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   clock = Math.max(clock, Date.now()) + 61_000;
