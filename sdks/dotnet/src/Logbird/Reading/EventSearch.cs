@@ -17,6 +17,10 @@ public enum SortOrder
 }
 
 /// <summary>A search over stored events. Every property is optional.</summary>
+/// <remarks>
+/// Its <c>ToString()</c> lists no values, so writing it as text cannot leak them. A structured logger that serializes its
+/// properties still sees them.
+/// </remarks>
 public sealed record EventSearch
 {
     /// <summary>

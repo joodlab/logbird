@@ -92,6 +92,10 @@ public sealed class StoredEvent
 /// <param name="Field">The field name.</param>
 /// <param name="Before">The previous value.</param>
 /// <param name="After">The new value.</param>
+/// <remarks>
+/// Its <c>ToString()</c> lists no values, so writing it as text cannot leak them. A structured logger that serializes its
+/// properties still sees them.
+/// </remarks>
 public sealed record StoredChange(string Field, string Before, string After)
 {
     /// <summary>
