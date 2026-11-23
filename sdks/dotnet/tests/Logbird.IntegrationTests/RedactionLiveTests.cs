@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Xunit.Abstractions;
 
 namespace Logbird.IntegrationTests;
 
@@ -11,9 +10,9 @@ namespace Logbird.IntegrationTests;
 /// Redaction parity against a real Logbird: a pattern matching every party key keeps the parties' identifier fields
 /// (an executor's attempt stays a number, so the server accepts the event) and redacts the rest, in what the server
 /// stores, from either SDK. The TypeScript event comes from tests/cross-sdk/send-redacted-event.ts
-/// (LOGBIRD_IT_TS_REDACTED_ID); without it only the .NET side is checked.
+/// (LOGBIRD_IT_TS_REDACTED_ID, with LOGBIRD_IT_TS_EVENT=1).
 /// </summary>
-public class RedactionLiveTests(ITestOutputHelper output)
+public class RedactionLiveTests
 {
     private static readonly string[] Parties = ["actor", "impersonator", "executor", "tenant", "targets"];
 
@@ -28,8 +27,9 @@ public class RedactionLiveTests(ITestOutputHelper output)
         """)!.AsObject();
 
     [LiveFact]
-    public async Task Both_sdks_store_the_same_parties_when_a_pattern_matches_every_party_key()
+    public async Task A_dotnet_event_whose_every_party_key_matches_keeps_identities_and_is_stored()
     {
+        // The same parties as tests/cross-sdk/send-redacted-event.ts sends from TypeScript (fictional values only).
         var sent = new AuditEvent("redaction.parity_checked")
         {
             Id = LogbirdClient.NewEventId(),
@@ -54,16 +54,15 @@ public class RedactionLiveTests(ITestOutputHelper output)
         Assert.Empty(errors);
         using var reader = LiveServer.Reader();
         AssertParties("dotnet", await LiveServer.WaitForEventAsync(reader, sent.Id!));
+    }
 
-        var typescriptId = Environment.GetEnvironmentVariable("LOGBIRD_IT_TS_REDACTED_ID");
-        if (string.IsNullOrEmpty(typescriptId))
-        {
-            output.WriteLine("LOGBIRD_IT_TS_REDACTED_ID not set: the TypeScript event was not checked");
-            return;
-        }
-
-        AssertParties("typescript", await LiveServer.WaitForEventAsync(reader, typescriptId));
-        output.WriteLine("both SDKs' events stored the same parties: identifier fields kept, every other party field redacted, attempt a number");
+    [LiveFact(requires: "LOGBIRD_IT_TS_EVENT")]
+    public async Task A_typescript_event_with_the_same_pattern_stores_the_same_parties()
+    {
+        var id = Environment.GetEnvironmentVariable("LOGBIRD_IT_TS_REDACTED_ID");
+        Assert.False(string.IsNullOrEmpty(id), "Run tests/cross-sdk/send-redacted-event.ts and set LOGBIRD_IT_TS_REDACTED_ID to the id it prints.");
+        using var reader = LiveServer.Reader();
+        AssertParties("typescript", await LiveServer.WaitForEventAsync(reader, id!));
     }
 
     private static void AssertParties(string sdk, EventDetail detail)
