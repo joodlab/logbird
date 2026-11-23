@@ -44,6 +44,8 @@ type DeliveryOptions = {
   claimScanDelay?: { endpointIds: string[]; seconds: number; listing?: boolean };
   /** Tests only, ignored outside Vitest: the clock the claim budget reads (default `performance.now`). */
   claimBudgetClock?: () => number;
+  /** Tests only, ignored outside Vitest: called once the fair statement's claims are collected. */
+  claimAfterFair?: () => void;
 };
 
 /** The most a pass spends claiming. Normal passes take milliseconds; this bounds a pass whose statements keep timing out. */
@@ -309,12 +311,15 @@ async function invalidScopedEndpoints(now: Date, projects?: string[]) {
  * 10 endpoints, oldest due row first), so one endpoint's scan cannot block a sibling. The fallback's endpoint listing has
  * the same statement timeout. A pass starts no claim statement after its claim budget (10 s; normal passes take
  * milliseconds), so statements that keep timing out cannot use up the dispatch budget of rows already claimed; the budget
- * binds only when claim statements fail, outside the conditions of the bound above. Only a failure before any claim
+ * typically binds only when claim statements fail or time out, outside the conditions of the bound above. Only a failure before any claim
  * (holding scopes, ranking) fails the pass. These bounds hold for row locks Logbird itself creates; see the self-hosting
  * guide for transactions held by other clients.
  */
 export async function claimWebhookDeliveries(
-  options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimBudgetMs' | 'claimScanDelay' | 'claimBudgetClock'>,
+  options: Pick<
+    DeliveryOptions,
+    'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimBudgetMs' | 'claimScanDelay' | 'claimBudgetClock' | 'claimAfterFair'
+  >,
   projectId?: string | readonly string[],
 ) {
   const projects = projectId === undefined ? undefined : typeof projectId === 'string' ? [projectId] : [...projectId];
@@ -400,6 +405,7 @@ export async function claimWebhookDeliveries(
       const fair = await claimFair(scope, ranked, capacity);
       claims.push(...fair.claims);
       for (const project of fair.projects) claimable.add(project);
+      if (testing) options.claimAfterFair?.();
     } catch {
       // The statement rolled back as a whole. Retry the fair phase one project at a time, so a failing project cannot
       // hold up the others in this pass.

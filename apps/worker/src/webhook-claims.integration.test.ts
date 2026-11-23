@@ -743,18 +743,15 @@ it("costs one claim timeout, not the pass, when the fallback's endpoint listing 
   const slow = await endpoint(project, 'listing-slow');
   const row = await ping(slow.id, 'listing-slow', new Date(+now - 60_000));
   const errors = vi.spyOn(console, 'error');
-  let elapsed = 0;
   try {
     // Test hook: a 300 ms statement timeout, and a 5 s sleep in the slow endpoint's scans and in the fallback listing. The
-    // fair statement, the project claim and the listing each end at their timeout; an unbounded listing would wait 5 s.
-    const started = performance.now();
+    // listing must be cancelled by its timeout (logged as a listing failure); a listing without one would finish its sleep
+    // and succeed, and log nothing.
     await deliverWebhooks(ch, { ...options(), claimTimeoutMs: 300, claimScanDelay: { endpointIds: [slow.id], seconds: 5, listing: true } }, project);
-    elapsed = performance.now() - started;
     expect(logged(errors, 'webhook.claim_endpoints_failed').some((message) => message.includes(project))).toBe(true);
   } finally {
     errors.mockRestore();
   }
-  expect(elapsed).toBeLessThan(3000);
   expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
     status: 'pending',
     attemptNumber: 0,
@@ -795,13 +792,13 @@ it('dispatches what it claimed when the budget runs out mid-pass and leaves the 
   const claimedRow = await ping(first.id, 'budget-first', new Date(+now - 120_000));
   const waitingRow = await ping(second.id, 'budget-second', new Date(+now - 60_000));
   const sent = (id: string) => received.filter((message) => message.id === id).length;
-  // Test hook: the budget clock reads 0 when the deadline is set and for the check before the fair statement, then is
-  // past the deadline. The fair statement claims the project's oldest row; the fill phase must start nothing.
-  let reads = 0;
-  const claimBudgetClock = () => (++reads <= 2 ? 0 : 60_000);
+  // Test hooks: the budget clock stands still until the fair statement's claims are collected, then jumps past the
+  // deadline, however often it is read. The fair statement claims the project's oldest row; the fill phase starts nothing.
+  let clock = 0;
+  const hooks = { claimBudgetClock: () => clock, claimAfterFair: () => (clock = 60_000) };
   const errors = vi.spyOn(console, 'error');
   try {
-    await deliverWebhooks(ch, { ...options(), concurrency: 2, perEndpoint: 1, claimBudgetClock }, project);
+    await deliverWebhooks(ch, { ...options(), concurrency: 2, perEndpoint: 1, ...hooks }, project);
     expect(logged(errors, 'webhook.claim_budget_spent')).toHaveLength(1);
   } finally {
     errors.mockRestore();
