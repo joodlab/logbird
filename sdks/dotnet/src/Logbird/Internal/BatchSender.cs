@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -160,20 +161,50 @@ internal sealed class BatchSender
 
             var progressed = false;
             var unacknowledged = false;
-
-            // From here the server may store these events, whatever happens to its answer.
-            foreach (var index in attempt)
+            HttpResponseMessage? response;
+            byte[]? responseBody;
+            Exception? error;
+            var headersStatus = new StrongBox<int>();
+            var dispatched = false;
+            if (Volatile.Read(ref _abandonedAttempts) >= MaxAbandonedAttempts)
             {
-                batch[index].OnRequestStart();
+                // Earlier requests are still stuck in the handler: do not pile up more, and do not dispatch these events,
+                // so they keep whatever the wire already knows about them. Treated like a network error.
+                (response, responseBody, error) = (null, null, new TimeoutException("Earlier Logbird requests have not returned; waiting before sending again."));
+            }
+            else
+            {
+                // From here the server may store these events, whatever happens to its answer. An event shutdown already
+                // took is left out of the request, so its report stays true.
+                var dispatchable = attempt.Where(index => batch[index].TryStartDispatch()).ToArray();
+                if (dispatchable.Length == 0)
+                {
+                    return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
+                }
+
+                if (dispatchable.Length < attempt.Length)
+                {
+                    attempt = dispatchable;
+                    body = EventJson.BuildBatchBody(batch, attempt);
+                }
+
+                dispatched = true;
+                (response, responseBody, error) = await AttemptAsync(body, remaining < _requestTimeout ? remaining : _requestTimeout, headersStatus, stop).ConfigureAwait(false);
             }
 
-            var (response, responseBody, error) = await AttemptAsync(body, remaining < _requestTimeout ? remaining : _requestTimeout, stop).ConfigureAwait(false);
-            var answeredStatus = response is null ? 0 : (int)response.StatusCode;
+            // The status counts as soon as the headers arrived, even when the body could not be read afterwards.
+            var answeredStatus = response is null ? headersStatus.Value : (int)response.StatusCode;
 
             using (response)
             {
                 if (stop.IsCancellationRequested)
                 {
+                    // Nothing below runs; record what this answer said about the events it carried.
+                    if (dispatched)
+                    {
+                        RecordAnswer(state, attempt, answeredStatus);
+                    }
+
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
                 }
 
@@ -294,23 +325,9 @@ internal sealed class BatchSender
                     }
                 }
 
-                // Events this answer did not settle: a 4xx (429 included) says the batch was not stored; anything else (no
-                // answer, a 5xx, a 2xx that did not acknowledge them) leaves the outcome unknown for good.
-                foreach (var index in attempt)
+                if (dispatched)
                 {
-                    if (state.IsSettled(index))
-                    {
-                        continue;
-                    }
-
-                    if (answeredStatus is >= 400 and < 500)
-                    {
-                        batch[index].OnNotStored();
-                    }
-                    else
-                    {
-                        batch[index].OnAnswerLost();
-                    }
+                    RecordAnswer(state, attempt, answeredStatus);
                 }
 
                 var retryable = response is null || status == 429 || status >= 500 || unacknowledged;
@@ -381,18 +398,37 @@ internal sealed class BatchSender
     /// the attempt is abandoned and treated like a network error. A late response is then disposed unread, which is
     /// safe because the retry resends identical bytes.
     /// </summary>
-    private async Task<(HttpResponseMessage? Response, byte[]? Body, Exception? Error)> AttemptAsync(byte[] body, TimeSpan limit, CancellationToken stop)
+    /// <summary>
+    /// Records what an answer said about the dispatched events it did not settle: a 4xx (429 included) says they were not
+    /// stored; anything else (no answer, a 5xx, a redirect, a 2xx that did not acknowledge them) leaves the outcome unknown
+    /// for good.
+    /// </summary>
+    private static void RecordAnswer(State state, int[] attempt, int status)
     {
-        if (Volatile.Read(ref _abandonedAttempts) >= MaxAbandonedAttempts)
+        foreach (var index in attempt)
         {
-            // Earlier requests are still stuck in the handler: do not pile up more, treat this like a network error.
-            return (null, null, new TimeoutException("Earlier Logbird requests have not returned; waiting before sending again."));
-        }
+            if (state.IsSettled(index))
+            {
+                continue;
+            }
 
+            if (status is >= 400 and < 500)
+            {
+                state.Batch[index].OnNotStored();
+            }
+            else
+            {
+                state.Batch[index].OnAnswerLost();
+            }
+        }
+    }
+
+    private async Task<(HttpResponseMessage? Response, byte[]? Body, Exception? Error)> AttemptAsync(byte[] body, TimeSpan limit, StrongBox<int> headersStatus, CancellationToken stop)
+    {
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop);
 
         // Dispatch on the thread pool: a handler that blocks before returning its task cannot hold the deadline below.
-        var send = Task.Run(() => SendOnceAsync(body, cancellation.Token), CancellationToken.None);
+        var send = Task.Run(() => SendOnceAsync(body, headersStatus, cancellation.Token), CancellationToken.None);
         var first = await Task.WhenAny(send, Task.Delay(limit, stop)).ConfigureAwait(false);
         if (first != send)
         {
@@ -446,10 +482,11 @@ internal sealed class BatchSender
         }
     }
 
-    private async Task<(HttpResponseMessage Response, byte[] Body)> SendOnceAsync(byte[] body, CancellationToken cancellationToken)
+    private async Task<(HttpResponseMessage Response, byte[] Body)> SendOnceAsync(byte[] body, StrongBox<int> headersStatus, CancellationToken cancellationToken)
     {
         using var request = CreateRequest(body);
         var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        Volatile.Write(ref headersStatus.Value, (int)response.StatusCode);
         try
         {
             return (response, await ReadBodyAsync(response, MaxResponseBytes, cancellationToken).ConfigureAwait(false));

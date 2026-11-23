@@ -21,7 +21,11 @@ public enum DropReason
     /// <summary>The serialized event is larger than 256 KB.</summary>
     TooLarge = 3,
 
-    /// <summary>The client was disposed and its shutdown timeout ran out before the event was sent.</summary>
+    /// <summary>
+    /// The client shut down before delivery was confirmed: its shutdown timeout (or the host's budget) ran out with the
+    /// event queued or in flight, or the event was tracked after shutdown began. An event in flight may have been stored;
+    /// see <see cref="DroppedEvent.MayBeStored"/>.
+    /// </summary>
     Shutdown = 4,
 
     /// <summary>The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw.</summary>

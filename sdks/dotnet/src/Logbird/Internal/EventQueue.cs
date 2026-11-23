@@ -33,32 +33,106 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
 
     public bool TrySettle() => Interlocked.CompareExchange(ref _state, Settled, Pending) == Pending;
 
-    public bool TryAbandon() => Interlocked.CompareExchange(ref _state, Abandoned, Pending) == Pending;
+    /// <summary>
+    /// Shutdown takes the event. Decided under the same lock as <see cref="TryStartDispatch"/>, so either the event is
+    /// dispatched and then abandoned (it may be stored) or abandoned and never dispatched; <see cref="MayBeStoredWhenAbandoned"/>
+    /// keeps the value at that moment, whatever a later answer says.
+    /// </summary>
+    public bool TryAbandon()
+    {
+        lock (_wire)
+        {
+            if (Interlocked.CompareExchange(ref _state, Abandoned, Pending) != Pending)
+            {
+                return false;
+            }
 
-    // Whether the server may already hold this event: set when a request carrying it starts, cleared by an answer that
-    // says it was not stored, unless an earlier request carrying it ended without an answer (then it stays set for good).
-    private volatile bool _mayBeStored;
-    private volatile bool _answerLost;
+            _mayBeStoredWhenAbandoned = _mayBeStored;
+            return true;
+        }
+    }
+
+    // Whether the server may already hold this event: set when a request carrying it is dispatched, cleared by an answer
+    // that says it was not stored, unless an earlier request carrying it ended without an answer (then it stays set).
+    private readonly object _wire = new();
+    private bool _mayBeStored;
+    private bool _answerLost;
+    private bool _mayBeStoredWhenAbandoned;
+
+    /// <summary>True when the event was put on the wire at least once and no answer settled it, so the server may have stored it.</summary>
+    public bool MayBeStored
+    {
+        get
+        {
+            lock (_wire)
+            {
+                return _mayBeStored;
+            }
+        }
+    }
+
+    /// <summary>True when an earlier request carrying this event ended without an answer.</summary>
+    public bool AnswerLost
+    {
+        get
+        {
+            lock (_wire)
+            {
+                return _answerLost;
+            }
+        }
+    }
+
+    /// <summary>The value of <see cref="MayBeStored"/> when shutdown took the event.</summary>
+    public bool MayBeStoredWhenAbandoned
+    {
+        get
+        {
+            lock (_wire)
+            {
+                return _mayBeStoredWhenAbandoned;
+            }
+        }
+    }
 
     /// <summary>
-    /// True when the event was put on the wire at least once and no answer settled it, so the server may have stored it.
+    /// A request carrying this event is about to be dispatched. Returns false, and changes nothing, when shutdown took the
+    /// event: it must then be left out of the request. An event already settled may stay in a resent body unchanged.
     /// </summary>
-    public bool MayBeStored => _mayBeStored;
+    public bool TryStartDispatch()
+    {
+        lock (_wire)
+        {
+            if (Volatile.Read(ref _state) == Abandoned)
+            {
+                return false;
+            }
 
-    /// <summary>A request carrying this event is about to start.</summary>
-    public void OnRequestStart() => _mayBeStored = true;
+            _mayBeStored = true;
+            return true;
+        }
+    }
 
     /// <summary>The server answered that request without storing this event (a 4xx such as 429 or 401).</summary>
     public void OnNotStored()
     {
-        if (!_answerLost)
+        lock (_wire)
         {
-            _mayBeStored = false;
+            if (!_answerLost)
+            {
+                _mayBeStored = false;
+            }
         }
     }
 
-    /// <summary>That request ended without an answer that settles this event (a network error, a 5xx, an unacknowledged 2xx).</summary>
-    public void OnAnswerLost() => _answerLost = true;
+    /// <summary>That request ended without an answer that settles this event (a network error, a 5xx, a redirect, an unacknowledged 2xx).</summary>
+    public void OnAnswerLost()
+    {
+        lock (_wire)
+        {
+            _answerLost = true;
+        }
+    }
 }
 
 /// <summary>One flush target, shared by every caller waiting for the same events.</summary>
