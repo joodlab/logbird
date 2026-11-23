@@ -149,7 +149,7 @@ it('repairs a process killed after destructive deletes without exposing an empty
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const deleted = new Promise<{ stage: string }>((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error('Repair child IPC timeout')), 20_000);
+      timer = setTimeout(() => reject(new Error('Repair child IPC timeout')), slowStore(20_000));
       child.once('message', (m) => resolve(m as { stage: string }));
       child.once('exit', () => reject(new Error('Repair child exited early')));
     });

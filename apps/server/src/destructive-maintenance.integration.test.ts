@@ -9,7 +9,7 @@ import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './
 import { stageExport, validateExportMembership } from './export-outcomes';
 import { ingest } from './ingest';
 import { removeSampleData } from './sample-data';
-import { purgeLimit } from './slow-store';
+import { purgeLimit, slowStore } from './slow-store';
 
 afterAll(async () => {
   await closeProjectLocks();
@@ -196,7 +196,7 @@ it('keeps newly admitted exports refused across an orphaned tagged query and que
       async () => {
         expect(await withProjectLock(id, () => reconcileDestructiveMaintenance(id))).toBe(true);
       },
-      { timeout: 30_000, interval: 100 },
+      { timeout: slowStore(30_000), interval: 100 },
     );
     expect(Number((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: id }))[0]?.n)).toBe(0);
     expect((await prisma.project.findUniqueOrThrow({ where: { id } })).exportDeleteStartedAt).toBeNull();
@@ -241,7 +241,7 @@ it('persists the sample-removal fence before its raw delete even if the caller d
       async () => {
         expect(await withProjectLock(id, () => reconcileDestructiveMaintenance(id))).toBe(true);
       },
-      { timeout: 30_000, interval: 100 },
+      { timeout: slowStore(30_000), interval: 100 },
     );
     await prisma.organization.delete({ where: { id } });
   }
