@@ -144,7 +144,13 @@ export function TimeRangePicker({
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger
         render={
-          <Button className={cn('justify-between gap-2 font-normal tabular-nums', className)} size={size} variant="outline">
+          <Button
+            className={cn('justify-between gap-2 font-normal tabular-nums', className)}
+            size={size}
+            // The label can be truncated on a narrow screen: the whole range stays one hover away.
+            title={typeof label === 'string' ? label : undefined}
+            variant="outline"
+          >
             <span className="flex min-w-0 items-center gap-1.5">
               {isPreset ? <ClockIcon className="text-muted-foreground" /> : <CalendarIcon className="text-muted-foreground" />}
               <span className="truncate">{label}</span>

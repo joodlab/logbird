@@ -91,7 +91,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <div className="flex shrink-0 items-center gap-2">
         {showRange ? (
           <TimeRangePicker
-            className="w-auto max-w-[min(60vw,15rem)]"
+            className="w-auto max-w-[min(60vw,15rem)] md:max-w-[min(45vw,28rem)]"
             // An entity page with no range chosen shows its whole History; the range scopes only the summary (stats,
             // support split, activity chart). The picker says so; picking a range narrows the History too.
             label={rangeButtonLabel(range, wholeHistory, typeof window !== 'undefined' && window.innerWidth < 640)}

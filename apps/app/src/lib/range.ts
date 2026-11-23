@@ -142,13 +142,17 @@ export function rangeLabel(range: string): string {
   // Inside a repeated hour the clock alone is ambiguous too.
   const withOffsets = zoneOffsetMs(r.fromMs) !== zoneOffsetMs(r.toMs) || isRepeatedWallTime(r.fromMs) || isRepeatedWallTime(r.toMs);
   // A span shorter than a minute (a one-event operation opens a 1 ms window) gets seconds, or milliseconds when the
-  // seconds still match, so its two ends never read the same (#197).
-  const precise =
-    formatClock(r.fromMs) !== formatClock(r.toMs)
-      ? formatClock
-      : formatClockPrecise(r.fromMs, 'second') !== formatClockPrecise(r.toMs, 'second')
-        ? (ms: number) => formatClockPrecise(ms, 'second')
-        : (ms: number) => formatClockPrecise(ms, 'millisecond');
+  // seconds still match, so its two ends never read the same (#197). Only when everything else shown is the same too:
+  // a different day, or a different offset across a clock change, already tells the ends apart at the minute.
+  const sameMinute =
+    localDayKey(r.fromMs) === localDayKey(r.toMs) &&
+    formatClock(r.fromMs) === formatClock(r.toMs) &&
+    (!withOffsets || formatOffset(r.fromMs) === formatOffset(r.toMs));
+  const precise = !sameMinute
+    ? formatClock
+    : formatClockPrecise(r.fromMs, 'second') !== formatClockPrecise(r.toMs, 'second')
+      ? (ms: number) => formatClockPrecise(ms, 'second')
+      : (ms: number) => formatClockPrecise(ms, 'millisecond');
   const clock = (ms: number) => (withOffsets ? `${precise(ms)} (${formatOffset(ms)})` : precise(ms));
   return localDayKey(r.fromMs) === localDayKey(r.toMs)
     ? `${day(r.fromMs)}, ${clock(r.fromMs)} – ${clock(r.toMs)}${inZone}`
