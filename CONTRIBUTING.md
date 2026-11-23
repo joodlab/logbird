@@ -61,8 +61,8 @@ The Docker workflow builds the images on PRs that touch Dockerfiles or Compose f
 The query bar's corpus test (`apps/app/src/components/query-input/query-corpus.test.tsx`, about ten minutes) runs in
 its own `Query corpus` workflow, in four parallel shards. It runs on PRs that touch the query bar, the console's query
 language files, the contracts' query files or `packages/clickhouse/src/query*`, and on every push to `master`. Quality
-leaves it out with `LOGBIRD_QUERY_CORPUS=skip`. A local `pnpm test` still runs it; `LOGBIRD_QUERY_CORPUS=only` runs just
-the corpus, and `LOGBIRD_QUERY_CORPUS_SHARD=i/n` one share of it.
+leaves it out with `LOGBIRD_QUERY_CORPUS=skip`. A local `pnpm test` still runs it. To run just the corpus, use
+`LOGBIRD_QUERY_CORPUS=only pnpm --filter @logbird/app test`; add `LOGBIRD_QUERY_CORPUS_SHARD=i/n` for one share of it.
 
 `pnpm test:unit` runs every test outside the server except `*.integration.test.ts`,
 the server's three pure export regression suites, and the self-hosting/Kubernetes
