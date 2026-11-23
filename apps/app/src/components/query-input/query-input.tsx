@@ -7,6 +7,7 @@ import {
   quoteQueryValue,
   SQL_MAX_QUERY_BYTES,
 } from '@logbird/contracts';
+import { Button } from '@logbird/ui/components/ui/button';
 import { Kbd } from '@logbird/ui/components/ui/kbd';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
@@ -15,12 +16,13 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { SearchIcon, XIcon } from 'lucide-react';
-import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { suggestQuery, viewsQuery } from '@/lib/api/queries';
 import { coreField, sqlColumn } from '@/lib/query-catalog';
 import type { QueryProblem } from '@/lib/query-error';
-import { applyFixes, autoFixes } from '@/lib/query-lint';
+import { neighbourSafeInsert } from '@/lib/query-language';
+import { applyFixes, fixesOnSubmit, suggestedConversion } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { useRecentQueries } from '@/lib/recent-queries';
 import { tokenizeSql } from '@/lib/sql-language';
@@ -162,7 +164,7 @@ export function QueryInput({
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  /** The user moved through the list (arrows / hover), so Enter means "pick this". */
+  /** The reader moved to the highlighted row with the arrows, so Enter means "pick this" (hovering does not count). */
   const [navigated, setNavigated] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
@@ -186,14 +188,28 @@ export function QueryInput({
     recent: recent.items,
     views: showViews ? views.data : undefined,
   });
+  // A filter offered for the text search that just ran (`action=booked` → `action:booked`), shown until the text changes.
+  // Worked out live, so it appears once the project's field names arrive even when they arrive after the run.
+  const [offerFor, setOfferFor] = useState<string | null>(editorValue);
+  // A search that ran from outside the bar (a link, Undo) gets its offer too.
+  useEffect(() => setOfferFor(editorValue), [editorValue]);
+  const offer = useMemo(() => {
+    if (offerFor === null || lang !== 'query' || draft !== offerFor) return null;
+    const text = suggestedConversion(draft, completions.fixes);
+    return text ? { q: draft, text } : null;
+  }, [offerFor, lang, draft, completions.fixes]);
+  const offerShown = offer !== null;
   const { suggestions, hint } = completions;
   const showPanel = open && (suggestions.length > 0 || Boolean(hint?.parts.length));
   const showList = showPanel && suggestions.length > 0;
   const activeIndex = Math.min(active, Math.max(0, suggestions.length - 1));
   const activeSuggestion = showList ? suggestions[activeIndex] : undefined;
 
-  // Reset the highlight whenever the list changes shape (new context, group or length).
-  const shape = `${completions.context.kind}|${suggestions.length}|${suggestions[0]?.id ?? ''}`;
+  // Reset the highlight, and any row chosen with the arrows, whenever the rows change: a row that moved into the chosen
+  // place (field names arriving, values loading) was never chosen.
+  // The completed span is part of it: the same rows for another term (`action:` here, `outcome:` there) are new rows.
+  const span = 'from' in completions.context ? `${completions.context.from}-${completions.context.to}` : '';
+  const shape = `${completions.context.kind}:${span}|${suggestions.map((s) => s.id).join(' ')}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the list's shape on purpose
   useEffect(() => {
     setActive(0);
@@ -234,13 +250,17 @@ export function QueryInput({
 
   const submit = (q = draft, nextLang = lang) => {
     setOpen(false);
-    let text = q.trim();
-    // Familiar Lucene / KQL spellings with one clear meaning are converted when the query runs.
+    // Exactly what was typed, spaces included.
+    let text = q;
+    let ran: string | null = null;
+    // Familiar Lucene / KQL spellings are converted when the query runs only when the server would reject them as
+    // typed. A query it accepts runs exactly as typed; a KQL-looking one gets the filter offered beside the bar instead.
     if (nextLang === 'query' && q === draft) {
-      const fixes = autoFixes(completions.fixes);
+      const fixes = fixesOnSubmit(draft, completions.fixes);
+      ran = fixes.length ? null : draft;
       if (fixes.length) {
         const original = text;
-        text = applyFixes(draft, fixes).trim();
+        text = applyFixes(draft, fixes);
         setText(text, text.length);
         toast('Converted to Logbird syntax', {
           description: text,
@@ -248,8 +268,20 @@ export function QueryInput({
         });
       }
     }
-    if (text) recent.add(text, nextLang);
+    setOfferFor(ran);
+    if (text.trim()) recent.add(text, nextLang);
     onSubmit(text, nextLang);
+  };
+
+  /** The reader chose the offered filter: run it, with Undo back to the text search. */
+  const applyOffer = () => {
+    if (!offer) return;
+    const original = offer.q;
+    setText(offer.text, offer.text.length);
+    setOfferFor(null);
+    recent.add(offer.text, 'query');
+    onSubmit(offer.text, 'query');
+    toast('Converted to Logbird syntax', { description: offer.text, action: { label: 'Undo', onClick: () => onSubmit(original, 'query') } });
   };
 
   const accept = (s: Suggestion) => {
@@ -270,8 +302,15 @@ export function QueryInput({
       });
       return;
     }
-    const text = draft.slice(0, s.from) + s.insert + draft.slice(s.to);
-    setText(text, s.caret);
+    // Accepting changes only the term at the caret: never a separator or quote that changes how a neighbour parses.
+    const whole = s.from === 0 && s.to >= draft.length;
+    const insert =
+      lang === 'query' && !whole
+        ? neighbourSafeInsert(draft, s.from, s.to, s.insert, s.caret - s.from, s.kind === 'value', s.kind !== 'keyword' && s.kind !== 'snippet')
+        : s.insert;
+    if (insert === null) return;
+    const text = draft.slice(0, s.from) + insert + draft.slice(s.to);
+    setText(text, Math.max(s.from, s.caret - (s.insert.length - insert.length)));
     setAnnouncement((prev) => `Inserted ${s.insert.trim() || s.label}${prev.endsWith('​') ? '' : '​'}`);
     if (s.run) {
       submit(text);
@@ -288,7 +327,7 @@ export function QueryInput({
     if (!text) {
       submit('', next);
     } else if (next === 'sql') {
-      const sql = translateQueryToSql(applyFixes(draft, autoFixes(completions.fixes)));
+      const sql = translateQueryToSql(applyFixes(draft, fixesOnSubmit(draft, completions.fixes)));
       if (!sql) {
         toast.error('Could not switch to SQL', { description: 'This filter has no exact SQL translation. Your query is still active.' });
       } else if (new TextEncoder().encode(sql).byteLength > SQL_MAX_QUERY_BYTES) {
@@ -307,6 +346,13 @@ export function QueryInput({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Confirming an IME candidate is never a command: not running, not choosing a row, not applying the offer.
+    if (e.key === 'Enter' && (e.nativeEvent.isComposing || e.keyCode === 229)) return;
+    if (e.key === 'Enter' && e.altKey && offerShown) {
+      e.preventDefault();
+      applyOffer();
+      return;
+    }
     if (e.key === ' ' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       setOpen(true);
@@ -325,24 +371,14 @@ export function QueryInput({
       return;
     }
     // Tab is left alone: a keyboard user leaving the bar must never rewrite the query (WCAG 3.2.2). Blur closes the panel.
-    const prefix = completions.prefix.toLowerCase();
-    const partial =
-      Boolean(prefix) &&
-      activeSuggestion !== undefined &&
-      activeSuggestion.kind !== 'recent' &&
-      activeSuggestion.kind !== 'fix' &&
-      // A fully typed name (`impersonator` for `impersonator:*`) is not partial: Enter runs.
-      activeSuggestion.label.toLowerCase().replace(/:\*?$/, '') !== prefix &&
-      activeSuggestion.insert.trim().toLowerCase().replace(/:\*?$/, '') !== prefix;
     if (e.key === 'ArrowRight' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && activeSuggestion && activeSuggestion.id !== 'loading') {
-      // → completes like a shell or an address bar: only from the end of the text (or right after a fix), so moving the
+      // → completes like a shell or an address bar: the highlighted row, only from the end of the text, so moving the
       // caret through the query still works.
       const el = e.currentTarget;
       const at = el.selectionStart;
       const collapsed = at === el.selectionEnd;
       const atEnd = at === draft.length;
-      const afterFix = activeSuggestion.kind === 'fix' && at === activeSuggestion.to;
-      if (collapsed && ((atEnd && (navigated || partial || activeSuggestion.kind === 'fix')) || afterFix)) {
+      if (collapsed && atEnd) {
         e.preventDefault();
         accept(activeSuggestion);
         return;
@@ -351,7 +387,9 @@ export function QueryInput({
     if (e.key === 'Enter') {
       if (e.shiftKey && lang === 'sql' && !(showList && navigated)) return; // newline
       e.preventDefault();
-      if (activeSuggestion && activeSuggestion.id !== 'loading' && !e.metaKey && !e.ctrlKey && (navigated || partial)) {
+      // Plain Enter runs what the reader typed. Only a suggestion the reader moved to with the arrows is accepted: the
+      // first row, highlighted by default, is never taken as chosen (→ at the end of the text is the accept key).
+      if (activeSuggestion && activeSuggestion.id !== 'loading' && !e.metaKey && !e.ctrlKey && navigated) {
         accept(activeSuggestion);
         return;
       }
@@ -495,8 +533,20 @@ export function QueryInput({
           <Kbd className="me-1 hidden md:inline-flex">/</Kbd>
         </div>
       </div>
+      {offerShown && offer ? (
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs" data-testid="query-conversion">
+          <span>
+            Searched for the text as typed. Did you mean the filter <code className="font-mono text-foreground">{offer.text}</code>?
+          </span>
+          <Button onClick={applyOffer} size="xs" variant="outline">
+            Use the filter
+          </Button>
+          <Kbd className="hidden md:inline-flex">Alt+Enter</Kbd>
+        </p>
+      ) : null}
       <span className="sr-only" id={`${listId}-keys`}>
-        Arrows choose a suggestion, Enter or Right arrow inserts it, Escape closes. Enter runs the query.
+        Arrows choose a suggestion and Enter inserts the one chosen; Right arrow at the end of the text inserts the one shown. Otherwise Enter runs
+        the query exactly as typed. Escape closes.
       </span>
       <span aria-live="polite" className="sr-only">
         {announcement}
@@ -511,9 +561,11 @@ export function QueryInput({
           stale={completions.stale}
           onAccept={accept}
           onHover={(i) => {
+            // Hovering only highlights a row: Enter never takes it as chosen (a click or the arrows do), so a row the reader
+            // moved to with the arrows stops being chosen once the pointer highlights another.
             if (i !== activeIndex) {
               setActive(i);
-              setNavigated(true);
+              setNavigated(false);
             }
           }}
           onRemoveRecent={(r) => recent.remove(r.q, r.lang)}

@@ -42,6 +42,17 @@ describe('who did it', () => {
     expect(whoFilter("outcome = 'failure'", 'sql')).toBe('all');
   });
 
+  it('reads a group of agents or presence as support, and one with a regex member as everything', () => {
+    expect(whoFilter('impersonator:(amy OR bea)')).toBe('support');
+    expect(whoFilter('impersonator:(*)')).toBe('support');
+    // `/.*/` also matches the empty impersonator of self activity, so the union is everything.
+    expect(whoFilter('impersonator:(* OR /.*/)')).toBe('all');
+    expect(whoFilter('impersonator:(amy OR /.*/)')).toBe('all');
+    // So does an exact empty id.
+    expect(whoFilter('impersonator:(* OR "")')).toBe('all');
+    expect(whoFilter('impersonator:(amy OR "")')).toBe('all');
+  });
+
   it('drops specific agents with the split, so the timeline never contradicts itself (M1)', () => {
     expect(withWhoFilter('actor:cust_1 impersonator:support_1', 'self')).toBe('actor:cust_1 -impersonator:*');
     expect(withWhoFilter('impersonator:support_1', 'support')).toBe('impersonator:*');
