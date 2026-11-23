@@ -9,17 +9,24 @@ import { shortZoneLabel } from '@/lib/time-zone';
  * which background job ran it, and when. Screen readers announce it when the roving focus lands on the row, so it
  * must stand on its own without the visual columns (the in-cell support marker and job hint are not tab stops).
  */
+/** Whether `text` names `name` as a whole word or phrase: "Jo" is not in "Job finished" (#333). */
+export function namesWhole(text: string, name: string): boolean {
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu').test(text);
+}
+
 export function eventRowLabel(e: AuditEvent, now = Date.now()): string {
   const sentence = eventSentence(e);
   const actor = personLabel(e.actor);
   const parts = [sentence];
   // "done by support agent X while acting as Y" names the actor itself, so it replaces "by Y" — unless the sentence
   // already says who (generated sentences start with the actor), then only the agent is added.
-  const named = Boolean(actor) && sentence.toLowerCase().includes(actor.toLowerCase());
+  const named = namesWhole(sentence, actor);
   const support = e.impersonator ? (named ? `done by support agent ${e.impersonator.name || e.impersonator.id}` : supportPhrase(e)) : null;
   if (support) parts.push(support);
   // Producer descriptions do not always name who acted ("Booking cancelled"): add the actor when it is missing.
-  else if (actor && !sentence.toLowerCase().includes(actor.toLowerCase())) parts.push(`by ${actor}`);
+  else if (actor && !named) parts.push(`by ${actor}`);
   parts.push(e.outcome);
   if (sentence !== e.action) parts.push(e.action);
   const job = jobHint(e);

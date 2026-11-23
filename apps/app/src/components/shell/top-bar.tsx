@@ -4,11 +4,11 @@ import { Kbd } from '@logbird/ui/components/ui/kbd';
 import { Separator } from '@logbird/ui/components/ui/separator';
 import { SidebarTrigger } from '@logbird/ui/components/ui/sidebar';
 import { cn } from '@logbird/ui/lib/utils';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useMatches, useParams } from '@tanstack/react-router';
 import { ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { useMemo } from 'react';
-import { projectsQuery } from '@/lib/api/queries';
+import { projectQuery, projectsQuery } from '@/lib/api/queries';
 import { useCrumb } from '@/lib/crumbs';
 import { zoneOffsetMs } from '@/lib/format';
 import { modKeyLabel, useIsMac } from '@/lib/platform';
@@ -26,6 +26,10 @@ export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalett
   // stale link sends no request answering 404. A project the route found missing gets no crumb, sections or range.
   const projects = useQuery(projectsQuery());
   const listed = projects.data?.find((p) => p.id === params.projectId);
+  // While the list is unreadable or loading, the project the route loader already read names the crumb: read from the
+  // cache only, never fetched, so a stale id still sends nothing (#339).
+  const queryClient = useQueryClient();
+  const cachedName = params.projectId ? queryClient.getQueryData(projectQuery(params.projectId).queryKey)?.name : undefined;
   const projectId = projectMissing ? undefined : params.projectId;
   const dynamicCrumb = useCrumb();
   const { range, setRange, wholeHistory } = useRange();
@@ -58,7 +62,7 @@ export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalett
             params={{ projectId }}
             to="/p/$projectId"
           >
-            {listed?.name ?? '…'}
+            {listed?.name ?? cachedName ?? '…'}
           </Link>
         ) : null}
         {sections.map((s, i) => {

@@ -65,7 +65,10 @@ export function eventSentence(e: AuditEvent): string {
   const verbText = VERB_PAST[verb] ?? verb.replaceAll('_', ' ');
   // "joined via link" with the joiner as the target: the object would only repeat the subject.
   // Only by id: an actor and a target both recorded without one are not the same party.
-  if (target && e.actor?.id && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
+  // Only when the actor is also the sentence's subject: a worker updating the actor's own record keeps its object
+  // ("Billing worker updated Lina's profile", not "Billing worker updated") (#333).
+  const actorIsSubject = Boolean(who) && who === personLabel(e.actor);
+  if (actorIsSubject && target && e.actor?.id && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
   const special = specialSentence(e, who, noun, verb);
   if (special) return special;
   // A named target of the action's own kind reads "API key ‘Production’" (also when the kind is the noun's last part:

@@ -68,6 +68,21 @@ describe('eventSentence', () => {
     expect(eventSentence(e)).toContain('Omar');
   });
 
+  it("keeps the object when a worker updates the actor's own record (#333)", () => {
+    const lina = { type: 'user', id: 'usr_42', name: 'Lina', email: '' };
+    const e = event({
+      action: 'user.updated',
+      description: '',
+      actor: lina,
+      executor: { type: 'worker', id: 'wrk_1', name: 'Billing worker', jobId: '', attempt: 0 },
+      targets: [{ type: 'user', id: 'usr_42', name: 'Lina' }],
+    });
+    expect(eventSentence(e)).not.toBe('Billing worker updated');
+    expect(eventSentence(e)).toContain('Lina');
+    // The actor as the subject still reads without repeating themself.
+    expect(eventSentence({ ...e, executor: null, action: 'member.joined_via_link' })).toBe('Lina joined via link');
+  });
+
   it('never says "Something" for an action-only event', () => {
     const sentence = eventSentence(event({ action: 'validator.key.check' }));
     expect(sentence).toBe('validator.key.check');

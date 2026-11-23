@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { anchorShift, eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
+import { anchorShift, eventRowLabel, isReplaced, namesWhole, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -177,5 +177,19 @@ describe('isReplaced', () => {
     expect(isReplaced('b', rows)).toBe(false);
     expect(isReplaced(undefined, rows)).toBe(false);
     expect(isReplaced('x', [])).toBe(false);
+  });
+});
+
+describe('row label attribution (#333)', () => {
+  it('matches a whole name only: "Jo" is not named by "Job finished"', () => {
+    expect(namesWhole('Job finished', 'Jo')).toBe(false);
+    expect(namesWhole('Jo cancelled booking 42', 'Jo')).toBe(true);
+    expect(namesWhole('Booking 42 cancelled by jo', 'Jo')).toBe(true);
+    expect(namesWhole('Sent to lina@example.invalid', 'lina@example.invalid')).toBe(true);
+    expect(namesWhole('Anything', '')).toBe(false);
+  });
+  it('adds "by Jo" to a producer description that only contains the name inside a word', () => {
+    const label = eventRowLabel(event({ description: 'Job finished', actor: { type: 'user', id: 'u1', name: 'Jo', email: '' } }));
+    expect(label).toContain('by Jo');
   });
 });

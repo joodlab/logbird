@@ -98,6 +98,8 @@ function OverviewPage() {
         />
         <StatCard
           delta={k && compare ? delta(k.actors, k.actorsPrev) : undefined}
+          // A count of distinct actor ids: an actor recorded by a name or email alone is in the events, not here (#333).
+          hint="Distinct actor IDs"
           label="Active actors"
           loading={loading}
           onClick={() => navigate({ to: '/p/$projectId/actors', params: { projectId } })}
