@@ -388,7 +388,8 @@ const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'imperson
  * your own pattern (`/^name$/`) to match whole keys. A matching key keeps its name and its value becomes the replacement,
  * at any depth. Identity is never redacted: the top-level `id` and `action`, and {@link IDENTIFIER_FIELDS}. A pattern
  * that matches a party's own key (`actor`, `impersonator`, `executor`, `tenant` or `targets`), or a target's index, redacts
- * every other field of that party and keeps its identifier fields; the party is never replaced as a whole. A change's
+ * every other field of that party and keeps its identifier fields; a party object is never replaced as a whole (one that
+ * is not an object is replaced like any other value). A change's
  * values are replaced when its `field` is a string the change pattern matches.
  *
  * The .NET SDK's `Redactor` follows the same rules, checked against one shared fixture: with the default pattern (and

@@ -140,8 +140,9 @@ top-level `id` and `action`, and `IDENTIFIER_FIELDS` (the actor's type and id, t
 impersonator's and tenant's id, the executor's type, id, jobId and attempt, and each
 target's type and id). A pattern matching a party's own key (`actor`, `impersonator`,
 `executor`, `tenant` or `targets`), or a target's index, redacts that party's other
-fields, such as its name and email, and keeps its identifier fields; a party is never
-replaced as a whole. A change's values are replaced when its `field` is a string the
+fields, such as its name and email, and keeps its identifier fields; a party object is
+never replaced as a whole (a party that is not an object, such as a string `actor`, is
+replaced like any other value). A change's values are replaced when its `field` is a string the
 change pattern matches. The .NET SDK redacts by the same rules, checked against one shared
 fixture: with `DEFAULT_SECRET_KEYS` both redact exactly the same keys. A pattern of your
 own runs on each platform's engine, which differ at the edges (in .NET `$` also matches

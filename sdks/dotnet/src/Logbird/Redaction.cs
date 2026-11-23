@@ -25,7 +25,8 @@ namespace Logbird;
 /// Identity is never redacted: the top-level <c>id</c> and <c>action</c>, and <see cref="Redactor.IdentifierFields"/>.
 /// A pattern that matches a party's own key (<c>actor</c>, <c>impersonator</c>, <c>executor</c>, <c>tenant</c> or
 /// <c>targets</c>) redacts every other field of that party (its name, email and any extra field) and keeps its
-/// identifier fields; the party is never replaced as a whole; so does a pattern matching a target's index. A change's
+/// identifier fields; a party object is never replaced as a whole (one that is not an object is replaced like any other
+/// value); so does a pattern matching a target's index. A change's
 /// values are replaced when its <c>field</c> is a string <see cref="ChangeFields"/> matches.
 /// </para>
 /// <para>

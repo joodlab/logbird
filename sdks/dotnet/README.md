@@ -326,7 +326,8 @@ pseudonymise an id, transform it before recording, for example with a keyed hash
 
 **A pattern that matches a party's own key** (`actor`, `impersonator`, `executor`, `tenant` or `targets`, for example
 `AddKeys("actor")`) redacts every other field of that party, such as its name and email, and keeps its identifier
-fields; so does a pattern matching a target's index (`^0$`). A party is never replaced as a whole. A change's before and
+fields; so does a pattern matching a target's index (`^0$`). A party object is never replaced as a whole (a party
+that is not an object, such as a string `actor`, is replaced like any other value). A change's before and
 after values are replaced when its `field` is a string that `ChangeFields` matches.
 
 Redaction follows the same rules as the TypeScript SDK's `redact()`: both run one shared fixture of cases
