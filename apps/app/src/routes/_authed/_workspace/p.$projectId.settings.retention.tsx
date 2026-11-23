@@ -19,11 +19,12 @@ import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { Loader2Icon, TriangleAlertIcon } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { AdminNote } from '@/components/admin-gate';
 import { PendingHint } from '@/components/pending-hint';
 import { RetentionPicker } from '@/components/retention-picker';
+import { NextPurge, StatusItem } from '@/components/retention-status';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
@@ -32,7 +33,6 @@ import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery, retentionQuery } from '@/lib/api/queries';
 import { formatNumber, formatRetention, pluralize } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
-import { nextPurgeState } from '@/lib/retention';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/retention')({
   head: () => ({ meta: [{ title: 'Retention · Project settings · Logbird' }] }),
@@ -131,7 +131,10 @@ function RetentionForm({ project }: { project: Project }) {
         ) : null}
       </SettingsSection>
 
-      <SettingsSection description="A purge job runs every hour, and immediately after retention is lowered." title="Status">
+      <SettingsSection
+        description="Expired events are deleted every hour, and when you lower retention the deletion starts right away. Each purge runs in the background, so on a large project it can take a while."
+        title="Status"
+      >
         {status.isPending ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Skeleton className="h-12" />
@@ -182,16 +185,6 @@ function DoomedCount({ count, loading, error }: { count: number | undefined; loa
   return null;
 }
 
-function StatusItem({ label, children, detail }: { label: string; children: ReactNode; detail?: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className="flex min-w-0 items-center gap-1.5 font-medium text-sm">{children}</dd>
-      {detail ? <dd className="text-muted-foreground text-xs">{detail}</dd> : null}
-    </div>
-  );
-}
-
 const RUN_OUTCOME: Record<string, string> = { completed: 'success', succeeded: 'success', failed: 'failure', running: 'unknown' };
 
 function RetentionStatusGrid({ status }: { status: RetentionStatus }) {
@@ -211,6 +204,11 @@ function RetentionStatusGrid({ status }: { status: RetentionStatus }) {
           run ? (
             run.error ? (
               <span className="text-destructive">{run.error}</span>
+            ) : run.status === 'running' ? (
+              <span data-testid="purge-running">
+                Still removing events from before <Timestamp format="date" iso={run.cutoff} />, in the background. Started{' '}
+                <Timestamp format="full" iso={run.startedAt} />.
+              </span>
             ) : (
               <>
                 {run.deletedEvents === null ? 'Removed' : `Removed ${pluralize(run.deletedEvents, 'event')}`} before{' '}
@@ -221,7 +219,16 @@ function RetentionStatusGrid({ status }: { status: RetentionStatus }) {
         }
         label="Last purge"
       >
-        {run ? (
+        {run?.status === 'running' ? (
+          // Still deleting: say when it started, never imply it is done.
+          <>
+            <Loader2Icon aria-hidden className="size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none" />
+            <span>Running</span>
+            <span className="font-normal text-muted-foreground">
+              started <Timestamp format="relative" iso={run.startedAt} />
+            </span>
+          </>
+        ) : run ? (
           <>
             <OutcomeDot outcome={RUN_OUTCOME[run.status] ?? 'unknown'} />
             <span className="capitalize">{run.status}</span>
@@ -231,53 +238,8 @@ function RetentionStatusGrid({ status }: { status: RetentionStatus }) {
           <span className="font-normal text-muted-foreground">No purge has run yet</span>
         )}
       </StatusItem>
-      <NextPurge at={status.nextPurgeAt} />
+      <NextPurge at={status.nextPurgeAt} running={run?.status === 'running'} />
     </dl>
-  );
-}
-
-/**
- * The next purge, never as a past time: a purge past its time is due now (the worker is about to run it) or, beyond a
- * few minutes, overdue, which usually means the retention worker is down or behind (#318).
- */
-function NextPurge({ at }: { at: string | null }) {
-  const state = nextPurgeState(at);
-  if (state === 'none')
-    return (
-      <StatusItem detail="The worker schedules it hourly" label="Next purge">
-        <span className="font-normal text-muted-foreground">Not scheduled</span>
-      </StatusItem>
-    );
-  if (state === 'scheduled')
-    return (
-      <StatusItem detail={<Timestamp format="full" iso={at} />} label="Next purge">
-        <Timestamp format="relative" iso={at} />
-      </StatusItem>
-    );
-  if (state === 'due')
-    return (
-      <StatusItem detail={<Timestamp format="full" iso={at} />} label="Next purge">
-        Due now
-      </StatusItem>
-    );
-  return (
-    <StatusItem
-      detail={
-        <span data-testid="purge-overdue">
-          Due since <Timestamp format="full" iso={at} />. The retention worker may not be running, so old events are not being removed. Ask whoever
-          runs Logbird to check it.
-        </span>
-      }
-      label="Next purge"
-    >
-      <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
-        <TriangleAlertIcon aria-hidden className="size-3.5" />
-        Overdue
-      </span>
-      <span className="font-normal text-muted-foreground">
-        due <Timestamp format="relative" iso={at} />
-      </span>
-    </StatusItem>
   );
 }
 
