@@ -240,7 +240,8 @@ In the release that publishes a version to nuget.org, also:
 
 1. Move every line of each package's `PublicAPI.Unshipped.txt` into its `PublicAPI.Shipped.txt`
    (`sdks/dotnet/src/Logbird/` and `sdks/dotnet/src/Logbird.AspNetCore/`), leaving only `#nullable enable` in
-   `Unshipped`, so the published surface is the shipped record.
+   `Unshipped`, so the published surface is the shipped record. A `*REMOVED*` line is not moved: delete it together
+   with the Shipped line it names.
 2. In the next release after it, set `PackageValidationBaselineVersion` to the version just published.
 
 Before the first publication, an owner:

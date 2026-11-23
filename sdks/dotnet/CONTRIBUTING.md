@@ -14,6 +14,8 @@ removes or alters anything public, and read by hand what no layer catches.
      ref kinds and defaults; constants and enum values; nullability annotations (`?` and `!`); extension receivers
      (`this`); and accessors (`get`, `set`, `init`).
    - **To change the API on purpose:** add or remove the lines the build error names, in `PublicAPI.Unshipped.txt`.
+     To remove a member that is already in `PublicAPI.Shipped.txt`, leave the Shipped line and add the same line to
+     `PublicAPI.Unshipped.txt` with the `*REMOVED*` prefix; at publication both lines are dropped.
 2. **The defaults record** (`src/<package>/PublicAPI.Defaults.txt`, checked by `OptionDefaultsTests`).
    - **What it records:** the default value of every public property of the audited option types (`LogbirdOptions`,
      `RedactionOptions`, `LogbirdReadOptions`, `EventSearch`, `LogbirdRequestOptions`), with nested options, regex
