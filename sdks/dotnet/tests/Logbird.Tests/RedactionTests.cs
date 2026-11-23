@@ -73,10 +73,11 @@ public class RedactionTests
     public void AddKeys_keeps_the_default_secret_pattern_and_escapes_names()
     {
         var options = new RedactionOptions().AddKeys("email", "a.b");
-        Assert.Matches(options.Keys, "password");
-        Assert.Matches(options.Keys, "Email");
-        Assert.Matches(options.Keys, "a.b");
-        Assert.DoesNotMatch(options.Keys, "axb");
+        var redactor = options.CreateRedactor()!;
+        Assert.True(redactor.IsKey("password"));
+        Assert.True(redactor.IsKey("Email"));
+        Assert.True(redactor.IsKey("a.b"));
+        Assert.False(redactor.IsKey("axb"));
         Assert.Matches(Redactor.DefaultSecretKeys, "token");
         Assert.DoesNotMatch(Redactor.DefaultSecretKeys, "email");
     }

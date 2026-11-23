@@ -42,45 +42,60 @@ public sealed class RedactionOptions
     /// <summary>Whether redaction runs. Defaults to <see langword="true"/>.</summary>
     public bool Enabled { get; set; } = true;
 
+    private readonly List<string> _added = [];
+
     /// <summary>
     /// Object keys whose values are replaced, matched as substrings (see the remarks). Defaults to
     /// <see cref="Redactor.DefaultSecretKeys"/>. A pattern of your own is matched with the options you give it; the default
-    /// and the names <see cref="AddKeys"/> adds ignore only ASCII letter case, as JavaScript's <c>/i</c> does here.
+    /// ignores only ASCII letter case, as JavaScript's <c>/i</c> does here. Names added with <see cref="AddKeys"/> are
+    /// matched in addition to this pattern, separately from it, so replacing it keeps them.
     /// </summary>
     public Regex Keys { get; set; } = Redactor.DefaultSecretKeys;
 
-    /// <summary>Change fields whose before and after values are replaced. Defaults to <see cref="Keys"/>.</summary>
+    /// <summary>
+    /// The names <see cref="AddKeys"/> added, in order. A key is redacted when <see cref="Keys"/> or any of these names
+    /// matches it.
+    /// </summary>
+    public IReadOnlyList<string> AddedKeys => Internal.ReadOnly.List(_added);
+
+    /// <summary>
+    /// Change fields whose before and after values are replaced. Defaults to <see cref="Keys"/> together with
+    /// <see cref="AddedKeys"/>.
+    /// </summary>
     public Regex? ChangeFields { get; set; }
 
     /// <summary>The replacement value. Defaults to <c>[redacted]</c>.</summary>
     public string Replacement { get; set; } = Redactor.DefaultReplacement;
 
     /// <summary>
-    /// Adds key names to <see cref="Keys"/> while keeping the current pattern, for example <c>AddKeys("email", "phone")</c>.
-    /// Names are matched as substrings, ignoring ASCII letter case only, like the default pattern (<c>Email</c> matches;
-    /// a key spelled with a look-alike such as U+212A KELVIN SIGN does not, as in the TypeScript SDK).
+    /// Adds key names to redact as well as <see cref="Keys"/>, for example <c>AddKeys("email", "phone")</c>. Names are
+    /// matched as substrings, ignoring ASCII letter case only, like the default pattern (<c>Email</c> matches; a key
+    /// spelled with a look-alike such as U+212A KELVIN SIGN does not, as in the TypeScript SDK). They are matched apart
+    /// from <see cref="Keys"/>, which is left as it is, so nothing in that pattern (its options, an inline option or a
+    /// trailing comment) changes how they match, and they do not change how it matches.
     /// </summary>
     /// <param name="names">Plain key names; they are escaped, not treated as patterns.</param>
     /// <returns>These options.</returns>
     public RedactionOptions AddKeys(params string[] names)
     {
         Guard.NotNull(names, nameof(names));
-        if (names.Length == 0)
+        foreach (var name in names)
         {
-            return this;
+            Guard.NotNull(name, nameof(names));
         }
 
-        // The names are isolated from the current pattern: an inline group turns its options off (a case-insensitive or
-        // whitespace-ignoring pattern does not change how they match), and a line break first ends a trailing comment
-        // that a whitespace-ignoring pattern may hold, which would otherwise swallow them.
-        var added = string.Join("|", names.Select(Redactor.AsciiCaseless));
-        var separator = (Keys.Options & RegexOptions.IgnorePatternWhitespace) != 0 ? "\n|" : "|";
-        Keys = new Regex($"{Keys}{separator}(?-imnsx:{added})", Keys.Options | RegexOptions.CultureInvariant, Keys.MatchTimeout);
+        _added.AddRange(names);
         return this;
     }
 
     internal Redactor? CreateRedactor()
-        => Enabled ? new Redactor(Keys, ChangeFields, Replacement) : null;
+        => Enabled ? new Redactor(Keys, ChangeFields, Replacement, AddedPattern()) : null;
+
+    /// <summary>The added names as one pattern of their own, with the timeout of <see cref="Keys"/>; null when there are none.</summary>
+    private Regex? AddedPattern()
+        => _added.Count == 0
+            ? null
+            : new Regex(string.Join("|", _added.Select(Redactor.AsciiCaseless)), RegexOptions.CultureInvariant, Keys.MatchTimeout);
 }
 
 /// <summary>
@@ -132,7 +147,8 @@ public sealed class Redactor
     private static string Letter(char c) => "[" + char.ToLowerInvariant(c) + char.ToUpperInvariant(c) + "]";
 
     private readonly Regex _keys;
-    private readonly Regex _changeFields;
+    private readonly Regex? _added;
+    private readonly Regex? _changeFields;
     private readonly string _replacement;
 
     /// <summary>Creates a redactor.</summary>
@@ -142,9 +158,20 @@ public sealed class Redactor
     public Redactor(Regex? keys = null, Regex? changeFields = null, string? replacement = null)
     {
         _keys = keys ?? DefaultSecretKeys;
-        _changeFields = changeFields ?? _keys;
+        _changeFields = changeFields;
         _replacement = replacement ?? DefaultReplacement;
     }
+
+    /// <summary>A redactor that also matches the names <see cref="RedactionOptions.AddKeys"/> added, as their own pattern.</summary>
+    internal Redactor(Regex? keys, Regex? changeFields, string? replacement, Regex? added)
+        : this(keys, changeFields, replacement)
+    {
+        _added = added;
+    }
+
+    internal bool IsKey(string key) => _keys.IsMatch(key) || (_added?.IsMatch(key) ?? false);
+
+    private bool IsChangeField(string field) => _changeFields?.IsMatch(field) ?? IsKey(field);
 
     /// <summary>Returns a redacted deep copy of an event JSON object. The input is not changed.</summary>
     /// <param name="eventJson">The event as JSON.</param>
@@ -181,7 +208,7 @@ public sealed class Redactor
         {
             try
             {
-                if (_keys.IsMatch(key))
+                if (IsKey(key))
                 {
                     matched.Add(key);
                 }
@@ -203,7 +230,7 @@ public sealed class Redactor
             foreach (var item in changes)
             {
                 // Only an object entry whose field is a string is matched; any other shape is left to the walk.
-                if (item is not JsonObject change || !IsText(change["field"], out var field) || !_changeFields.IsMatch(field))
+                if (item is not JsonObject change || !IsText(change["field"], out var field) || !IsChangeField(field))
                 {
                     continue;
                 }
@@ -287,7 +314,7 @@ public sealed class Redactor
                         }
 
                         var party = level == Level.Top ? PartyLevel(key) : Level.Nested;
-                        var matched = _keys.IsMatch(key);
+                        var matched = IsKey(key);
                         var value = obj[key];
                         if (party != Level.Nested && (party == Level.Targets ? value is JsonArray : value is JsonObject))
                         {
@@ -313,7 +340,7 @@ public sealed class Redactor
                     {
                         if (level == Level.Targets)
                         {
-                            var entryMatched = whole || _keys.IsMatch(i.ToString(CultureInfo.InvariantCulture));
+                            var entryMatched = whole || IsKey(i.ToString(CultureInfo.InvariantCulture));
                             if (array[i] is JsonObject)
                             {
                                 pending.Push((array[i], Level.Target, entryMatched));
@@ -327,7 +354,7 @@ public sealed class Redactor
                                 pending.Push((array[i], Level.Nested, false));
                             }
                         }
-                        else if (_keys.IsMatch(i.ToString(CultureInfo.InvariantCulture)))
+                        else if (IsKey(i.ToString(CultureInfo.InvariantCulture)))
                         {
                             array[i] = _replacement;
                         }

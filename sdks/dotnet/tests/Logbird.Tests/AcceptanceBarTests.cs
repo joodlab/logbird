@@ -320,6 +320,6 @@ public class AcceptanceBarTests
         var options = new RedactionOptions { Keys = new Regex("secret", RegexOptions.None, TimeSpan.FromMilliseconds(50)) };
         options.AddKeys("email");
         Assert.Equal(TimeSpan.FromMilliseconds(50), options.Keys.MatchTimeout);
-        Assert.Matches(options.Keys, "Email");
+        Assert.True(options.CreateRedactor()!.IsKey("Email"));
     }
 }

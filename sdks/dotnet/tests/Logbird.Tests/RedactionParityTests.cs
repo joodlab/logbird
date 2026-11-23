@@ -45,35 +45,66 @@ public class RedactionParityTests
             ["actor.type", "actor.id", "impersonator.id", "executor.type", "executor.id", "executor.jobId", "executor.attempt", "tenant.id", "targets[].type", "targets[].id"],
             Redactor.IdentifierFields);
 
+    private static bool Redacts(RedactionOptions options, string key) => options.CreateRedactor()!.IsKey(key);
+
     [Fact]
     public void AddKeys_ignores_ascii_case_only_and_escapes_every_character()
     {
         var options = new RedactionOptions().AddKeys("email", "a.b", "tab\there");
-        Assert.Matches(options.Keys, "EMAIL");
-        Assert.Matches(options.Keys, "workEmail");
-        Assert.DoesNotMatch(options.Keys, "еmail");
-        Assert.Matches(options.Keys, "A.B");
-        Assert.DoesNotMatch(options.Keys, "axb");
-        Assert.Matches(options.Keys, "TAB\tHERE");
-        Assert.DoesNotMatch(options.Keys, "tabthere");
-
-        // The added names keep their own rules whatever the current pattern's options: not case-insensitive, and not
-        // swallowed by a trailing comment of a whitespace-ignoring pattern.
-        var caseless = new RedactionOptions { Keys = new Regex("secret", RegexOptions.IgnoreCase) }.AddKeys("état");
-        Assert.Matches(caseless.Keys, "SECRET");
-        Assert.Matches(caseless.Keys, "ÉTAT".ToLowerInvariant());
-        Assert.DoesNotMatch(caseless.Keys, "État");
-        var commented = new RedactionOptions { Keys = new Regex("token # the default would be broader", RegexOptions.IgnorePatternWhitespace) }.AddKeys("email", "two words");
-        Assert.Matches(commented.Keys, "token");
-        Assert.Matches(commented.Keys, "workEmail");
-        Assert.Matches(commented.Keys, "two words");
-        Assert.DoesNotMatch(commented.Keys, "twowords");
-        var ecma = new RedactionOptions { Keys = new Regex("secret", RegexOptions.ECMAScript) }.AddKeys("email");
-        Assert.Matches(ecma.Keys, "Email");
+        Assert.True(Redacts(options, "EMAIL"));
+        Assert.True(Redacts(options, "workEmail"));
+        Assert.False(Redacts(options, "\u0435mail"));
+        Assert.True(Redacts(options, "A.B"));
+        Assert.False(Redacts(options, "axb"));
+        Assert.True(Redacts(options, "TAB\tHERE"));
+        Assert.False(Redacts(options, "tabthere"));
+        Assert.True(Redacts(options, "password"));
+        Assert.Equal(["email", "a.b", "tab\there"], options.AddedKeys);
 
         // A name with a letter that has a look-alike: the look-alike is not taken for it.
         var kelvin = new RedactionOptions { Keys = new Regex("^$") }.AddKeys("key");
-        Assert.Matches(kelvin.Keys, "KEY");
-        Assert.DoesNotMatch(kelvin.Keys, "Key");
+        Assert.True(Redacts(kelvin, "KEY"));
+        Assert.False(Redacts(kelvin, "\u212Aey"));
+    }
+
+    [Theory]
+    [InlineData("secret", RegexOptions.IgnoreCase, "SECRET")]
+    [InlineData("(?-x)^token$", RegexOptions.IgnorePatternWhitespace, "token")]
+    [InlineData("(?x)token # a trailing comment", RegexOptions.None, "token")]
+    [InlineData("token # a trailing comment", RegexOptions.IgnorePatternWhitespace, "token")]
+    [InlineData("secret", RegexOptions.ECMAScript, "secret")]
+    public void Added_names_and_the_current_pattern_never_change_each_other(string pattern, RegexOptions regexOptions, string protectedKey)
+    {
+        // The names are matched apart from Keys, which is left as it is: neither its options, an inline option nor a
+        // trailing comment changes them, and they do not change what it matches.
+        var keys = new Regex(pattern, regexOptions);
+        var options = new RedactionOptions { Keys = keys }.AddKeys("\u00E9tat", "email", "two words");
+
+        Assert.Same(keys, options.Keys);
+        Assert.True(Redacts(options, protectedKey));
+        Assert.True(Redacts(options, "\u00E9tat"));
+        Assert.False(Redacts(options, "\u00C9tat"));
+        Assert.True(Redacts(options, "workEmail"));
+        Assert.True(Redacts(options, "two words"));
+        Assert.False(Redacts(options, "twowords"));
+    }
+
+    [Fact]
+    public void Added_names_survive_replacing_the_pattern_and_count_for_change_fields_by_default()
+    {
+        var options = new RedactionOptions().AddKeys("iban");
+        options.Keys = new Regex("^never$");
+        Assert.True(Redacts(options, "iban"));
+
+        var result = options.CreateRedactor()!.Redact(JsonNode.Parse("""
+            { "id": "e", "action": "a", "changes": [{ "field": "iban", "before": "x", "after": "y" }] }
+            """)!.AsObject());
+        Assert.Equal("[redacted]", (string?)result["changes"]![0]!["after"]);
+
+        options.ChangeFields = new Regex("^phone$");
+        var own = options.CreateRedactor()!.Redact(JsonNode.Parse("""
+            { "id": "e", "action": "a", "changes": [{ "field": "iban", "before": "x", "after": "y" }] }
+            """)!.AsObject());
+        Assert.Equal("y", (string?)own["changes"]![0]!["after"]);
     }
 }
