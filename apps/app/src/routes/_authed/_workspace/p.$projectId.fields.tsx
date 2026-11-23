@@ -30,13 +30,20 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/fields')(
   component: FieldsPage,
 });
 
-/** The envelope checks behind the conformance score (docs/SPEC.md §3). */
+/**
+ * The envelope checks behind the conformance score (docs/SPEC.md §3), with the hint shown beside each. A check whose
+ * share is measured differently from the score says how in `measured` (shown on hover, and to screen readers).
+ */
+const MEASURED: Partial<Record<string, string>> = {
+  // The score credits any target entry; the share counts targets with an id, the events `target:*` finds.
+  targets: 'The score counts any target. This share counts events whose targets carry an id, the ones target:* finds.',
+};
 const CONFORMANCE_CHECKS = [
   ['occurredAt', 'When it happened, not when we received it'],
   ['actor.id', 'Who caused it'],
   ['actor.type', 'user · service · system · api_key'],
   ['outcome', 'success · failure · denied · partial'],
-  ['targets', 'At least one record it touched'],
+  ['targets', 'At least one record it touched, by id'],
   ['tenant.id', 'Which customer account'],
   ['executor.type', 'api · worker · scheduler · webhook'],
   ['context.operationId', 'or requestId — to group a request with its jobs'],
@@ -155,7 +162,7 @@ function FieldsPage() {
               const c = checkCoverage(key, coverage);
               const good = (c ?? 0) >= 0.9;
               return (
-                <li className="flex items-center gap-2 rounded-md px-2 py-1 text-[13px]" key={key} title={hint}>
+                <li className="flex items-center gap-2 rounded-md px-2 py-1 text-[13px]" key={key} title={MEASURED[key] ?? hint}>
                   {c === undefined ? (
                     <MinusIcon className="size-3.5 shrink-0 text-muted-foreground" />
                   ) : good ? (
@@ -165,6 +172,7 @@ function FieldsPage() {
                   )}
                   <span className="font-mono text-[12px]">{key}</span>
                   <span className="hidden min-w-0 flex-1 truncate text-muted-foreground text-xs sm:inline">{hint}</span>
+                  {MEASURED[key] ? <span className="sr-only">{MEASURED[key]}</span> : null}
                   <span className="ms-auto shrink-0 text-muted-foreground text-xs tabular-nums">
                     {fieldsLoading || c === undefined ? '—' : formatPercent(c)}
                   </span>
