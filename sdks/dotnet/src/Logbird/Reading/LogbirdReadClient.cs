@@ -648,15 +648,24 @@ public sealed class LogbirdReadClient : IDisposable
                 }
             },
             CancellationToken.None);
+        // A late result is disposed as soon as it exists, even while a cancellation callback still blocks; the token
+        // source is disposed only once both the attempt and its cancellation are done.
+        _ = work.ContinueWith(
+            late =>
+            {
+                _ = late.Exception;
+                if (late.Status == TaskStatus.RanToCompletion)
+                {
+                    discard(late.Result);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
         _ = Task.WhenAll(cancelled, work).ContinueWith(
             all =>
             {
                 _ = all.Exception;
-                if (work.Status == TaskStatus.RanToCompletion)
-                {
-                    discard(work.Result);
-                }
-
                 transport.Dispose();
             },
             CancellationToken.None,
