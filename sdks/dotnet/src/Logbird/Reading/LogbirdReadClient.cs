@@ -34,7 +34,7 @@ public sealed class LogbirdReadOptions
     /// The time limit for each HTTP request: the version read, each search page, a detail, facet or mint request, and the
     /// wait for an export's headers. It is not a limit for a whole call (a first call that also reads the server's version,
     /// or a <c>SearchAllAsync</c> iteration, makes several requests, each with its own limit), and an export's download is
-    /// bounded only by your cancellation token. It holds even when a custom HTTP handler ignores cancellation; past it the
+    /// bounded only by your cancellation token (which also needs your destination stream to honour it). It holds even when a custom HTTP handler ignores cancellation; past it the
     /// request throws <see cref="LogbirdApiException"/> with code <c>unreachable</c>. Defaults to 30 seconds.
     /// </summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
@@ -57,8 +57,8 @@ public sealed class LogbirdReadOptions
 /// </para>
 /// <para>
 /// Each HTTP request ends within <see cref="LogbirdReadOptions.Timeout"/> (<c>unreachable</c> past it), and every call
-/// ends when your token is cancelled (<see cref="OperationCanceledException"/>); a call whose token is already cancelled
-/// sends nothing. A search, detail or facet answer is checked against the server's contract before it is read: a
+/// ends when your token is cancelled (<see cref="OperationCanceledException"/>), except that an export also waits for
+/// a write to your destination stream that ignores the token; a call whose token is already cancelled sends nothing. A search, detail or facet answer is checked against the server's contract before it is read: a
 /// required member that is missing, or <c>null</c> where the contract allows none, throws <c>invalid_response</c> instead
 /// of reading as an empty page (optional members may be absent). A viewer-token answer has its own checks
 /// (<c>invalid_response</c> or <c>scope_mismatch</c>). A search, detail, facet or viewer-token answer over 64 MiB throws
@@ -414,7 +414,9 @@ public sealed class LogbirdReadClient : IDisposable
     /// Streams every matching event in the range into <paramref name="destination"/> in one format, and returns the number
     /// of bytes written. With a viewer token or scoped key, only events in its scope are exported. The client's
     /// <see cref="LogbirdReadOptions.Timeout"/> applies until the server starts answering; the download itself runs until
-    /// it ends or <paramref name="cancellationToken"/> is cancelled, so pass a token to bound a large export.
+    /// it ends or <paramref name="cancellationToken"/> is cancelled, so pass a token to bound a large export. The token is
+    /// passed to <paramref name="destination"/>'s writes too: a destination whose write ignores it holds the export until
+    /// that write returns.
     /// Logbird 0.2.0 and later.
     /// </summary>
     /// <param name="query">The format, query and range.</param>

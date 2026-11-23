@@ -377,7 +377,8 @@ await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
   (`attr.<path>`), optionally split by a second. Virtual selectors such as `record` work in `Query` but cannot be
   counted. `ExportAsync` streams CSV, JSONL or JSONL with payloads (`JsonlEvidence`, refused for a masked scope) into
   your stream. Queries are at most 4,096 characters. The read `Timeout` covers the wait for the export's headers; pass a
-  cancellation token to bound the download.
+  cancellation token to bound the download. The token is passed to your stream's writes too, so a stream whose write
+  ignores it holds the export until that write returns.
 - Only the requested export is written. A success status other than 200 (such as a `206` partial answer), or a 200
   without the requested content type (`text/csv` for CSV, `application/x-ndjson` for JSONL; such as a proxy's HTML
   page), throws `invalid_response`; an HTTP error keeps the server's code (such as `masked_export`). Either way nothing
