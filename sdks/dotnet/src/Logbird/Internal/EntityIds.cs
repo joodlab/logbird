@@ -16,7 +16,9 @@ namespace Logbird.Internal;
 /// <item>only the first 64 targets indexed.</item>
 /// </list>
 /// A server with the exact-identifier rule (issue #269) may instead reject an event it cannot index as given; that
-/// rejection is reported as the drop, with the server's code.
+/// rejection is reported as the drop, with the server's code. One field gets at most one warning, naming every property
+/// it has. Warnings are kept as compact records until delivery and only then formatted, so a backlog of notifications
+/// holds a few bytes per warning, not its text.
 /// </summary>
 internal static class EntityIds
 {
@@ -33,16 +35,40 @@ internal static class EntityIds
 
     private const string LaterServerTargets = "; a server that rejects more targets than it indexes rejects the event, and the SDK reports that rejection as the drop with the server's code";
 
-    /// <summary>
-    /// Adds a warning for every identifier property a server may index differently from what is sent. The warnings name
-    /// fields and limits only, never a value.
-    /// </summary>
-    public static void Inspect(AuditEvent e, List<string> warnings)
+    /// <summary>Which field a warning is about.</summary>
+    public enum Field : byte
     {
-        Check("actor.id", e.Actor?.Id, IndexedIdLength, warnings);
-        Check("impersonator.id", e.Impersonator?.Id, IndexedIdLength, warnings);
-        Check("executor.id", e.Executor?.Id, IndexedIdLength, warnings);
-        Check("tenant.id", e.Tenant?.Id, IndexedIdLength, warnings);
+        ActorId,
+        ImpersonatorId,
+        ExecutorId,
+        TenantId,
+        TargetType,
+        TargetId,
+
+        /// <summary>The whole event has more targets than Logbird up to 0.2.x indexes; the position is the count.</summary>
+        TargetCount,
+    }
+
+    /// <summary>The properties a field has.</summary>
+    [System.Flags]
+    public enum Property : byte
+    {
+        None = 0,
+        Whitespace = 1,
+        TooLong = 2,
+        LoneSurrogate = 4,
+    }
+
+    /// <summary>One warning, kept compact until it is delivered: a field, its target position (or the target count) and its properties.</summary>
+    public readonly record struct Warning(Field Field, int Position, Property Properties);
+
+    /// <summary>Adds at most one warning per field, and one for the target count, for what a server may index differently.</summary>
+    public static void Inspect(AuditEvent e, List<Warning> warnings)
+    {
+        Check(Field.ActorId, -1, e.Actor?.Id, warnings);
+        Check(Field.ImpersonatorId, -1, e.Impersonator?.Id, warnings);
+        Check(Field.ExecutorId, -1, e.Executor?.Id, warnings);
+        Check(Field.TenantId, -1, e.Tenant?.Id, warnings);
         if (!e.EmitTargets)
         {
             return;
@@ -57,24 +83,103 @@ internal static class EntityIds
                 continue;
             }
 
-            Check($"targets[{index}].type", target.Type, IndexedTargetTypeLength, warnings, index);
-            Check($"targets[{index}].id", target.Id, IndexedIdLength, warnings, index);
+            Check(Field.TargetType, index, target.Type, warnings);
+            Check(Field.TargetId, index, target.Id, warnings);
             index++;
         }
 
         if (index > IndexedTargets)
         {
-            warnings.Add($"the event has {index} targets: all are sent; Logbird up to 0.2.x stores them all but indexes only the first {IndexedTargets}, so the others are in the stored payload only" + LaterServerTargets);
+            warnings.Add(new Warning(Field.TargetCount, index, Property.None));
         }
     }
 
-    /// <summary>The warning for surrounding whitespace in <paramref name="field"/> (a field name only, never a value).</summary>
-    public static string WhitespaceReason(string field, int targetIndex = -1)
-        => targetIndex >= IndexedTargets
-            ? $"surrounding whitespace in {field}: sent exactly as given; Logbird up to 0.2.x indexes only the first {IndexedTargets} targets, so this one is kept in the stored payload only"
-            : $"surrounding whitespace in {field}: sent exactly as given; Logbird up to 0.2.x indexes it trimmed, so a search for the value with its whitespace does not find it";
+    /// <summary>The warning's text: field names, positions and limits only, never a value.</summary>
+    public static string Describe(Warning w)
+    {
+        if (w.Field == Field.TargetCount)
+        {
+            return $"the event has {w.Position} targets: all are sent; Logbird up to 0.2.x stores them all but indexes only the first {IndexedTargets}, so the others are in the stored payload only" + LaterServerTargets;
+        }
 
-    private static void Check(string field, string? value, int indexedLength, List<string> warnings, int targetIndex = -1)
+        var field = FieldName(w);
+        var limit = w.Field == Field.TargetType ? IndexedTargetTypeLength : IndexedIdLength;
+        var p = w.Properties;
+        var later = (p & (Property.TooLong | Property.LoneSurrogate)) != 0 ? LaterServer : string.Empty;
+        if (w.Position >= IndexedTargets)
+        {
+            return $"{Subject(field, p, limit)}: sent exactly as given; Logbird up to 0.2.x indexes only the first {IndexedTargets} targets, so this one is kept in the stored payload only" + later;
+        }
+
+        // The texts for one property alone are the ones callers already see (#272 for whitespace).
+        switch (p)
+        {
+            case Property.Whitespace:
+                return $"surrounding whitespace in {field}: sent exactly as given; Logbird up to 0.2.x indexes it trimmed, so a search for the value with its whitespace does not find it";
+            case Property.TooLong:
+                return $"{field} is longer than {limit} UTF-16 code units once trimmed: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it cut to at most {limit} (never splitting a surrogate pair), so search and entity pages show the shortened value" + later;
+            case Property.LoneSurrogate:
+                return $"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it with U+FFFD in place of each lone surrogate (before the length cut)" + later;
+        }
+
+        // Several properties: one warning, with the server's repairs in its own order.
+        var repairs = new List<string>(3);
+        if ((p & Property.Whitespace) != 0)
+        {
+            repairs.Add("trimmed");
+        }
+
+        if ((p & Property.LoneSurrogate) != 0)
+        {
+            repairs.Add("with U+FFFD in place of each lone surrogate");
+        }
+
+        if ((p & Property.TooLong) != 0)
+        {
+            repairs.Add($"cut to at most {limit} (never splitting a surrogate pair)");
+        }
+
+        return $"{Subject(field, p, limit)}: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it {string.Join(", then ", repairs)}, so search and entity pages show a different value" + later;
+    }
+
+    private static string Subject(string field, Property p, int limit)
+    {
+        var parts = new List<string>(3);
+        if ((p & Property.Whitespace) != 0)
+        {
+            parts.Add("has surrounding whitespace");
+        }
+
+        if ((p & Property.TooLong) != 0)
+        {
+            parts.Add($"is longer than {limit} UTF-16 code units once trimmed");
+        }
+
+        if ((p & Property.LoneSurrogate) != 0)
+        {
+            parts.Add("contains a lone surrogate");
+        }
+
+        return parts.Count switch
+        {
+            1 when p == Property.Whitespace => "surrounding whitespace in " + field,
+            1 => field + " " + parts[0],
+            2 => field + " " + parts[0] + " and " + parts[1],
+            _ => field + " " + parts[0] + ", " + parts[1] + " and " + parts[2],
+        };
+    }
+
+    private static string FieldName(Warning w) => w.Field switch
+    {
+        Field.ActorId => "actor.id",
+        Field.ImpersonatorId => "impersonator.id",
+        Field.ExecutorId => "executor.id",
+        Field.TenantId => "tenant.id",
+        Field.TargetType => $"targets[{w.Position}].type",
+        _ => $"targets[{w.Position}].id",
+    };
+
+    private static void Check(Field field, int position, string? value, List<Warning> warnings)
     {
         // Null or empty means the field is absent.
         if (string.IsNullOrEmpty(value))
@@ -84,24 +189,26 @@ internal static class EntityIds
 
         // The server trims before it measures, so the length that matters is the trimmed one.
         var trimmed = EventJson.JsTrim(value!);
-        var indexed = targetIndex < IndexedTargets;
-        if (trimmed.Length > indexedLength)
-        {
-            warnings.Add(indexed
-                ? $"{field} is longer than {indexedLength} UTF-16 code units once trimmed: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it cut to at most {indexedLength} (never splitting a surrogate pair), so search and entity pages show the shortened value" + LaterServer
-                : $"{field} is longer than {indexedLength} UTF-16 code units once trimmed: sent exactly as given; Logbird up to 0.2.x indexes only the first {IndexedTargets} targets, so this one is kept in the stored payload only" + LaterServer);
-        }
-
-        if (HasLoneSurrogate(value!))
-        {
-            warnings.Add(indexed
-                ? $"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it with U+FFFD in place of each lone surrogate (before the length cut)" + LaterServer
-                : $"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x indexes only the first {IndexedTargets} targets, so this one is kept in the stored payload only" + LaterServer);
-        }
-
+        var limit = field == Field.TargetType ? IndexedTargetTypeLength : IndexedIdLength;
+        var properties = Property.None;
         if (trimmed.Length != value!.Length)
         {
-            warnings.Add(WhitespaceReason(field, targetIndex));
+            properties |= Property.Whitespace;
+        }
+
+        if (trimmed.Length > limit)
+        {
+            properties |= Property.TooLong;
+        }
+
+        if (HasLoneSurrogate(value))
+        {
+            properties |= Property.LoneSurrogate;
+        }
+
+        if (properties != Property.None)
+        {
+            warnings.Add(new Warning(field, position, properties));
         }
     }
 

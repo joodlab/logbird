@@ -107,7 +107,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private readonly long[] _droppedByReason = new long[DropReasonCount];
 
     [ThreadStatic]
-    private static List<string>? _identifierWarnings;
+    private static List<EntityIds.Warning>? _identifierWarnings;
 
     /// <summary>Creates a client.</summary>
     /// <param name="options">Settings. They are read once; later changes have no effect.</param>
@@ -310,9 +310,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 if (identifierWarnings.Count > 0)
                 {
                     // Field names, limits and fixed text only: the message never carries event data. One notification per
-                    // event, so an event with many fields cannot crowd other notifications out of the bounded queue.
-                    var reasons = identifierWarnings.ToArray();
-                    WarnAll(eventId, eventAction, reasons, "Logbird warning about an event it is sending: ");
+                    // event, so an event with many fields cannot crowd other notifications out of the bounded queue; the
+                    // warnings wait in it as compact records and are formatted only when delivered.
+                    WarnAll(eventId, eventAction, identifierWarnings.ToArray());
                 }
 
                 Interlocked.Increment(ref _tracked);
@@ -891,15 +891,19 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         Report(new LogbirdEventWarning(id, action, reason, message));
     }
 
-    /// <summary>Several warnings about one event, counted each and delivered in order as a single notification.</summary>
-    private void WarnAll(string id, string action, string[] reasons, string messagePrefix)
+    /// <summary>
+    /// The SDK's identifier warnings about one event: counted each now, delivered in inspection order as a single
+    /// notification, and formatted only then.
+    /// </summary>
+    private void WarnAll(string id, string action, EntityIds.Warning[] warnings)
     {
-        Interlocked.Add(ref _warnings, reasons.Length);
+        Interlocked.Add(ref _warnings, warnings.Length);
         Notify(() =>
         {
-            foreach (var reason in reasons)
+            foreach (var warning in warnings)
             {
-                ReportCore(new LogbirdEventWarning(id, action, reason, messagePrefix + reason), log: true);
+                var reason = EntityIds.Describe(warning);
+                ReportCore(new LogbirdEventWarning(id, action, reason, "Logbird warning about an event it is sending: " + reason), log: true);
             }
         });
     }

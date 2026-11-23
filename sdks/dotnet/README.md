@@ -106,9 +106,12 @@ differently:
 
 - Each case is reported as a `LogbirdEventWarning` through `OnError` and the logger, and counted in
   `Stats.Warnings`. The warning names the field and the limit, never the value.
+- One field gets at most one warning, naming every property it has.
 - The client inspects the event before queueing it, but the warnings are raised afterwards on the notification thread,
-  so the event may already be on its way when your callback runs. All warnings about one event arrive together, in
-  order.
+  so the event may already be on its way when your callback runs. The client's identifier warnings about one event are
+  one notification: when the notification queue accepts it, they are delivered together, in field order; when the
+  queue is full, it is skipped and counted on `logbird.notifications.lost` like any other notification. A server
+  warning about the same event arrives separately, after the server answered.
 - A server that applies the exact-identifier rule may reject such an event instead (code `invalid_entity_id`). That
   rejection is the drop: `DropReason.Rejected`, with the server's code in `DroppedEvent.Code` and its reason in
   `DroppedEvent.Detail`, like any other per-event rejection.

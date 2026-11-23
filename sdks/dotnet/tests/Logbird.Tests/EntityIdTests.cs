@@ -116,6 +116,29 @@ public class EntityIdTests
     }
 
     [Fact]
+    public async Task A_field_with_several_properties_gets_one_warning_naming_them_all()
+    {
+        await using var h = new Harness();
+        var e = new AuditEvent("x") { Actor = AuditActor.User(" " + new string('a', 300) + Lone(0xD800) + " ") };
+        for (var i = 0; i < 64; i++)
+        {
+            e.Target("record", "r" + i);
+        }
+
+        e.Target("record", " " + new string('r', 300) + Lone(0xDC00));
+        h.Client.Track(e);
+        Assert.True(await h.Client.FlushAsync());
+        Assert.Equal(
+            [
+                "actor.id has surrounding whitespace, is longer than 256 UTF-16 code units once trimmed and contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it trimmed, then with U+FFFD in place of each lone surrogate, then cut to at most 256 (never splitting a surrogate pair), so search and entity pages show a different value" + LaterServer,
+                "targets[64].id has surrounding whitespace, is longer than 256 UTF-16 code units once trimmed and contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x indexes only the first 64 targets, so this one is kept in the stored payload only" + LaterServer,
+                "the event has 65 targets: all are sent; Logbird up to 0.2.x stores them all but indexes only the first 64, so the others are in the stored payload only" + LaterServerTargets,
+            ],
+            h.Errors.OfType<LogbirdEventWarning>().Select(w => w.Reason));
+        Assert.Equal(3, h.Client.Stats.Warnings);
+    }
+
+    [Fact]
     public async Task The_length_that_counts_is_the_trimmed_one()
     {
         // 256 code units plus surrounding whitespace: the server trims first, so it indexes all 256 and only the whitespace
