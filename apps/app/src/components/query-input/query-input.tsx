@@ -168,7 +168,7 @@ export function QueryInput({
   const [navigated, setNavigated] = useState(false);
   /** A filter offered for the text search that just ran (`action=booked` → `action:booked`), shown until the text changes. */
   const [offer, setOffer] = useState<{ q: string; text: string } | null>(null);
-  const offerShown = Boolean(offer) && lang === 'query' && draft.trim() === offer?.q;
+  const offerShown = Boolean(offer) && lang === 'query' && draft === offer?.q;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const listId = `qi-list-${lang}`;
@@ -239,7 +239,8 @@ export function QueryInput({
 
   const submit = (q = draft, nextLang = lang) => {
     setOpen(false);
-    let text = q.trim();
+    // Exactly what was typed: only a blank draft submits as empty.
+    let text = q.trim() ? q : '';
     let offered: string | null = null;
     // Familiar Lucene / KQL spellings are converted when the query runs only when the server would reject them as
     // typed. A query it accepts runs exactly as typed; a KQL-looking one gets the filter offered beside the bar instead.
@@ -248,7 +249,7 @@ export function QueryInput({
       offered = fixes.length ? null : suggestedConversion(draft, completions.fixes);
       if (fixes.length) {
         const original = text;
-        text = applyFixes(draft, fixes).trim();
+        text = applyFixes(draft, fixes);
         setText(text, text.length);
         toast('Converted to Logbird syntax', {
           description: text,
@@ -291,7 +292,11 @@ export function QueryInput({
       return;
     }
     // Accepting changes only the term at the caret: never a separator or quote that changes how a neighbour parses.
-    const insert = lang === 'query' ? neighbourSafeInsert(draft, s.from, s.to, s.insert, s.caret - s.from) : s.insert;
+    const whole = s.from === 0 && s.to >= draft.length;
+    const insert =
+      lang === 'query' && !whole
+        ? neighbourSafeInsert(draft, s.from, s.to, s.insert, s.caret - s.from, s.kind === 'value', s.kind !== 'keyword' && s.kind !== 'snippet')
+        : s.insert;
     if (insert === null) return;
     const text = draft.slice(0, s.from) + insert + draft.slice(s.to);
     setText(text, Math.max(s.from, s.caret - (s.insert.length - insert.length)));
@@ -369,14 +374,15 @@ export function QueryInput({
       const at = el.selectionStart;
       const collapsed = at === el.selectionEnd;
       const atEnd = at === draft.length;
-      const afterFix = activeSuggestion.kind === 'fix' && at === activeSuggestion.to;
-      if (collapsed && ((atEnd && (navigated || partial || activeSuggestion.kind === 'fix')) || afterFix)) {
+      if (collapsed && atEnd && (navigated || partial || activeSuggestion.kind === 'fix')) {
         e.preventDefault();
         accept(activeSuggestion);
         return;
       }
     }
     if (e.key === 'Enter') {
+      // Confirming an IME candidate is not running the query.
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       if (e.shiftKey && lang === 'sql' && !(showList && navigated)) return; // newline
       e.preventDefault();
       // Plain Enter runs what the reader typed. Only a suggestion the reader moved to with the arrows is accepted: the
@@ -553,10 +559,8 @@ export function QueryInput({
           stale={completions.stale}
           onAccept={accept}
           onHover={(i) => {
-            if (i !== activeIndex) {
-              setActive(i);
-              setNavigated(true);
-            }
+            // Hovering only highlights a row: Enter never takes it as chosen (a click or the arrows do).
+            if (i !== activeIndex) setActive(i);
           }}
           onRemoveRecent={(r) => recent.remove(r.q, r.lang)}
           suggestions={suggestions}

@@ -103,7 +103,10 @@ export function SuggestionPanel({
                 <div
                   aria-disabled={s.id === 'loading' || undefined}
                   aria-selected={i === active}
+                  data-from={s.from}
+                  data-insert={s.insert}
                   data-kind={s.kind}
+                  data-to={s.to}
                   className={cn(
                     'group/opt flex cursor-pointer items-center gap-2 rounded-md px-2 py-[5px] text-sm',
                     i === active && 'bg-muted',

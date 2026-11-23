@@ -81,7 +81,9 @@ function queryWhoFilter(q: string): WhoFilter {
         const v = node.value;
         const star = (t: { kind: string; wildcard?: boolean; value: string }) => t.kind !== 'regex' && Boolean(t.wildcard) && t.value === '*';
         // `_exists_:impersonator`, `impersonator:*` and `impersonator:(*)` are the same presence test to the server.
-        const presence = v.kind === 'presence' || (v.kind === 'value' && star(v.token)) || (v.kind === 'group' && v.members.some(star));
+        // A regex member (`/.*/`) also matches the empty id of self activity, so a group holding one says nothing.
+        const regexFree = v.kind !== 'group' || v.members.every((m) => m.kind !== 'regex');
+        const presence = v.kind === 'presence' || (v.kind === 'value' && star(v.token)) || (v.kind === 'group' && regexFree && v.members.some(star));
         // Only exact agents or presence say who: a regex (`/.*/`) also matches the empty id of self activity, and ranges
         // or comparisons say nothing about support.
         const agents =

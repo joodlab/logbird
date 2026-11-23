@@ -210,7 +210,10 @@ export function fixesOnSubmit(q: string, fixes: QueryFix[]): QueryFix[] {
 export function suggestedConversion(q: string, fixes: QueryFix[]): string | null {
   if (!q.trim() || !serverAccepts(q)) return null;
   const comparisons = autoFixes(fixes).filter((f) => f.message.startsWith('KQL-style'));
-  return comparisons.length ? applyFixes(q, comparisons).trim() : null;
+  if (!comparisons.length) return null;
+  // Offered only when the filter is itself a query the parser accepts (`action=OR` has no plain filter form).
+  const converted = applyFixes(q, comparisons).trim();
+  return serverAccepts(converted) ? converted : null;
 }
 
 /** Fields a KQL comparison may name without the attribute list at hand: core fields and explicit attributes. */

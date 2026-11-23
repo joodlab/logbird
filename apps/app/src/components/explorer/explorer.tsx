@@ -6,7 +6,7 @@ import { Sheet, SheetContent, SheetTitle } from '@logbird/ui/components/ui/sheet
 import { Switch } from '@logbird/ui/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { cn } from '@logbird/ui/lib/utils';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpIcon, ChevronDownIcon, CircleAlertIcon, FilterIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchXIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -16,7 +16,7 @@ import { QueryInput, type QueryInputHandle } from '@/components/query-input/quer
 import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
-import { entitySearchQuery, eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
+import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histogramQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
@@ -120,6 +120,7 @@ function ProjectExplorer({
   const rangeName = rangeLabelOverride ?? rangeLabel(range);
   const complete = rangeComplete || range === ALL_RANGE;
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
+  const queryClient = useQueryClient();
   // The base filter (an entity or support agent) must constrain all of `q`: `scopedQuery` combines it only when `q`
   // parses, as one group. A `q` that does not parse is never sent (`blocked`); the bar shows its parse error.
   const scoped = scopedQuery(baseQuery ?? '', q);
@@ -364,7 +365,20 @@ function ProjectExplorer({
       ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
       : 'Remove a filter or change the query.';
 
-  const conversion = lang === 'query' && q ? suggestedConversion(q, lintQuery(q, isKnownFieldName)) : null;
+  // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys.
+  const knownKeys = new Set((queryClient.getQueryData(fieldsQuery(projectId, range).queryKey)?.data ?? []).map((f) => f.key));
+  const conversion =
+    lang === 'query' && q
+      ? suggestedConversion(
+          q,
+          lintQuery(q, (name) => isKnownFieldName(name) || knownKeys.has(`attr.${name}`)),
+        )
+      : null;
+  const applyConversion = (filter: string) => {
+    const original = q;
+    onChange({ q: filter });
+    toast('Converted to Logbird syntax', { description: filter, action: { label: 'Undo', onClick: () => onChange({ q: original }) } });
+  };
   const empty = problem ? (
     <EmptyState description="Fix the query above to see results." icon={SearchXIcon} title="Query not run" />
   ) : events.isError ? (
@@ -401,7 +415,7 @@ function ProjectExplorer({
       ))}
       {conversion ? (
         // The text search found nothing; the filter its KQL spelling suggests is one click away (never applied unasked).
-        <Button data-testid="empty-conversion" onClick={() => onChange({ q: conversion })} size="sm">
+        <Button data-testid="empty-conversion" onClick={() => applyConversion(conversion)} size="sm">
           Search <span className="font-mono">{conversion}</span> instead
         </Button>
       ) : null}
