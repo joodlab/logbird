@@ -9,8 +9,10 @@ h2 Be kind and constructive.
 h2 Found a vulnerability? Tell us privately.
 h2 Where the project is today.
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Open source
 The product is MIT-licensed.
 The product is MIT-licensed: the API, the console, the retention worker, the SDK and the integrations, all in one repository. You can read the code, run it, change it and ship it in your own product. Experimental folders may carry their own licence; each one says so.
@@ -124,13 +126,17 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Self-host when the source opens → /contact?interest=self-host
 security@example.test → mailto:security@example.test
 Security and data handling → /security
 Read the changelog → /changelog
 Join the waitlist → /contact
 Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

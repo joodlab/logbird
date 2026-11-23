@@ -9,8 +9,10 @@ h2 When to choose Logbird
 h2 Sources
 h3 What we couldn't verify
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Compare
 Logbird and Bemi
 Bemi is a different kind of tool. It connects to your Postgres write-ahead log and records every row change automatically: the table, the primary key, the operation, and the row before and after. Its ORM packages attach application context, such as the user or the endpoint, to each change. You don't instrument call sites, and nothing is missed because someone forgot an audit() call. Logbird works the other way round: your code reports actions, including ones that never touch your database. [B1, B2, B3, B4]
@@ -198,8 +200,10 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 B1 [aria-label: Source B1] → #source-B1
 B2 [aria-label: Source B2] → #source-B2
 B3 [aria-label: Source B3] → #source-B3
@@ -260,5 +264,7 @@ Rails integration [sr-only: (opens in a new tab)] → https://docs.bemi.io/orms/
 Pricing [sr-only: (opens in a new tab)] → https://bemi.io/pricing
 Join the waitlist → /contact
 Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

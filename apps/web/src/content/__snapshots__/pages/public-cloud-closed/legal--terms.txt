@@ -15,8 +15,10 @@ h2 8. Ending the agreement
 h2 9. Warranties and liability
 h2 10. Changes to these terms
 h2 11. Governing law
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Legal
 Terms of service
 The terms for using this website and Logbird Cloud during early access. The open-source Logbird software stays under the MIT licence.
@@ -67,8 +69,10 @@ Nothing in these terms limits liability that the law doesn't allow to be limited
 We may update these terms. We'll change the effective date above and tell account holders about material changes before they apply.
 11. Governing law
 These terms are governed by the laws of the country where the operator is established. If any part of them can't be enforced, the rest still applies. Questions go to hello@example.test.
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 1. These terms → #agreement
 2. Early access → #early-access
 3. Your account → #account
@@ -85,5 +89,7 @@ privacy policy → /legal/privacy
 hello@example.test → mailto:hello@example.test
 contact form → /contact?interest=privacy
 hello@example.test → mailto:hello@example.test
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

@@ -3,8 +3,10 @@ description: (none)
 
 headings:
 h1 No event at this address.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 404
 No event at this address.
 We searched and found nothing. The page may have moved, or the link may be wrong.
@@ -24,10 +26,14 @@ Developers
 [aria-hidden] room.rate.updated
 [aria-hidden] Omar Saleh via support → Room 12
 [aria-hidden] 14:18:47
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Go to the home page → /
 Product tour → /product
 Developers → /developers
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

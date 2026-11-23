@@ -15,8 +15,10 @@ h2 The numbers to design around.
 h2 Read your own history back.
 h2 Your server documents itself.
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Developers
 Add an audit log in an afternoon. Keep it for years.
 Send events over HTTP or with the TypeScript SDK. Only action is required, so you can start with one line and fill in the envelope as you go. This page covers the SDK, the envelope, workers, delivery guarantees and limits.
@@ -272,8 +274,10 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Quickstart → #quickstart
 Self-host a server → /self-hosting
 Quickstart → #quickstart
@@ -288,8 +292,10 @@ API reference → #reference
 Self-host a server → /self-hosting
 Request access → /contact
 Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"

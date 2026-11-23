@@ -16,8 +16,10 @@ h2 9. Your rights
 h2 10. Security
 h2 11. Children
 h2 12. Changes to this policy
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Legal
 Privacy policy
 What the operator of Logbird Cloud collects through this website and Logbird Cloud, why, who processes it for us, how long we keep it, and how to exercise your rights.
@@ -86,8 +88,10 @@ Connections to this website and to Logbird Cloud are encrypted with HTTPS. Sessi
 The website and Logbird Cloud are for businesses and developers, not for children under 16. We don't knowingly collect their data.
 12. Changes to this policy
 When we change this policy we update the effective date above. If a change matters to how we use account data, we'll email account holders before it takes effect. Questions about this policy go to the contact form (choose "A privacy request").
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 1. Who we are and what this covers → #who
 2. Visiting the website → #website
 3. The contact and early-access form → #form
@@ -105,5 +109,7 @@ contact form → /contact?interest=privacy
 contact form → /contact?interest=privacy
 security page → /security
 contact form → /contact?interest=privacy
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

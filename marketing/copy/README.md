@@ -73,11 +73,11 @@ The interim drift check that compared these files with the rendered pages (#249)
 from its module (#250). Two checks replace it:
 
 - `apps/web/src/content/page-snapshots.test.ts` pins every rendered page in each repository and Cloud state as a text
-  snapshot (title, headings, visible text, links and form controls of the page's own content) under
-  `apps/web/src/content/__snapshots__/pages/`, and the shared header and footer once per state (`_shell.txt`). Any
-  change to what a page shows is a snapshot diff: update the snapshots on purpose (`CONTRIBUTING.md`, "Page
-  snapshots"), review the diff, commit it with the module change, and say in the PR body which sentences changed and
-  why.
+  snapshot (title, description, headings, visible text, links and form controls) under
+  `apps/web/src/content/__snapshots__/pages/`, with the shared skip link, header and footer cut out in place and
+  snapshotted once per state (`_shell.txt`). A wording change is a snapshot diff: update the snapshots on purpose
+  (`CONTRIBUTING.md`, "Page snapshots", says how and what is covered), review the diff, commit it with the module
+  change, and say in the PR body which sentences changed and why.
 - `apps/web/src/content/copy-briefs.test.ts` checks this folder: every brief is in the table above, every link in the
   table resolves, every page brief starts with the line naming its module, and that module exists.
 

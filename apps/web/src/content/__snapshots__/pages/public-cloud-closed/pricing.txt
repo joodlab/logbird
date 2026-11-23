@@ -14,8 +14,10 @@ h3 Does self-hosting include every feature?
 h3 How much will Logbird Cloud cost?
 h3 How do I get early access?
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Pricing
 Self-hosting is free. Cloud pricing isn’t set yet.
 Logbird is MIT-licensed, and every feature in the repository is yours to run. Logbird Cloud will run the same codebase for you; its pricing will be published before billing starts.
@@ -83,12 +85,16 @@ Self-host it
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Self-host it → /self-hosting
 Join the waitlist → /contact
 Contact us → /contact
 Join the waitlist → /contact
 Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

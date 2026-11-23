@@ -1,6 +1,5 @@
-regions: a, header, footer
-
 headings:
+[region: footer]
 h2 Product
 h2 Developers
 h2 Compare
@@ -8,7 +7,9 @@ h2 Resources
 h2 Company
 
 text:
+[region: skip link]
 Skip to content
+[region: header]
 Product
 Developers
 Self-host
@@ -28,6 +29,7 @@ Compare
 Join the waitlist
 Theme
 [sr-only] Color theme
+[region: footer]
 [sr-only: Logbird]
 Retrace every step.
 The audit log for your product. The source opens soon.
@@ -60,7 +62,9 @@ Terms
 Source on GitHub — coming soon.
 
 links:
+[region: skip link]
 Skip to content → #main
+[region: header]
 (no text) [aria-label: Logbird home] → /
 Product → /product
 Developers → /developers
@@ -78,6 +82,7 @@ Pricing → /pricing
 Open source → /open-source
 Compare → /compare
 Join the waitlist → /contact
+[region: footer]
 Product tour → /product
 Cloud → /cloud
 Pricing → /pricing
@@ -100,6 +105,7 @@ Privacy → /legal/privacy
 Terms → /legal/terms
 
 controls:
+[region: header]
 button type="button" aria-label="Light theme"
 button type="button" aria-label="Dark theme"
 button type="button" aria-label="System theme"

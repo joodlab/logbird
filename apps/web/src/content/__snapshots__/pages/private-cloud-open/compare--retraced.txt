@@ -9,8 +9,10 @@ h2 When to choose Logbird
 h2 Sources
 h3 What we couldn't verify
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Compare
 Logbird and Retraced
 Retraced is an open-source audit log service. Replicated created it, and BoxyHQ later co-maintained it. It has an API to send events, an embeddable viewer so your customers can browse their own events, and an Enterprise API so their IT teams can pull events out programmatically. It runs on Postgres with optional Elasticsearch, and you deploy it yourself. Its embeddable, customer-facing viewer is a real strength: Logbird doesn't have one today. [S1, S2, S3, S4]
@@ -202,8 +204,10 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 S1 [aria-label: Source S1] → #source-S1
 S2 [aria-label: Source S2] → #source-S2
 S3 [aria-label: Source S3] → #source-S3
@@ -267,5 +271,7 @@ Commits: latest on main 2025-08-26; archived: false [sr-only: (opens in a new ta
 api.github.com/repos/retracedhq/retraced [sr-only: (opens in a new tab)] → https://api.github.com/repos/retracedhq/retraced
 Request access → /contact
 Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

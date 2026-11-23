@@ -15,8 +15,10 @@ h3 Self-host
 h3 Logbird Cloud
 h2 What Logbird promises, and where the promise ends.
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Retrace every step.
 The audit log your customers ask for, and the evidence your auditors ask for.
 Send one event per action over HTTP or the TypeScript SDK. Show each customer account its own history in your product, search your events in the console, and export them complete when an auditor asks. MIT-licensed: run it on your own servers, or join the waitlist for Logbird Cloud.
@@ -144,8 +146,10 @@ Logbird is being integrated with a hotel-booking SaaS, our first design partner.
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Join the waitlist → /contact
 Self-host it → /self-hosting
 Source on GitHub → https://github.com/example-org/logbird
@@ -170,8 +174,10 @@ About Logbird Cloud → /cloud
 Read how Logbird handles data → /security
 Join the waitlist → /contact
 Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
 button type="button" aria-label="Copy code"
 button type="button" text="Route"
 button type="button" text="Worker"

@@ -20,8 +20,10 @@ h4 Pull, then start
 h4 Verify
 h2 What self-hosting doesn't include today.
 h2 Rather not run it yourself?
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Self-hosting
 Your audit log, on your servers.
 Logbird is MIT-licensed and self-hosts with Docker Compose. Run it on one VM and your events stay on your own servers. It's the same codebase Logbird Cloud runs.
@@ -179,16 +181,20 @@ Self-host it
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Quickstart → #quickstart
 Request Cloud access → /contact
 self-hosting guide → https://github.com/example-org/logbird/blob/master/docs/self-hosting.md#build-from-source
 Coolify guide → https://github.com/example-org/logbird/blob/master/docs/coolify.md
 Request access → /contact
 Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"

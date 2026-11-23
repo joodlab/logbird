@@ -9,8 +9,10 @@ h2 When to choose Logbird
 h2 Sources
 h3 What we couldn't verify
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Compare
 Logbird and WorkOS Audit Logs
 WorkOS Audit Logs is a hosted service for recording what users do in your product and handing that record to your enterprise customers. You define a schema for each action, send events to the WorkOS API, and your customers' IT admins can view and export them through the WorkOS Admin Portal. Events can also stream to Datadog, Splunk, S3, Google Cloud Storage, Microsoft Sentinel, Snowflake or any HTTPS endpoint. If your customers' IT teams expect to browse and export audit logs themselves, it covers that out of the box. [W1, W2, W3, W4, W5]
@@ -189,8 +191,10 @@ Self-host it
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 W1 [aria-label: Source W1] → #source-W1
 W2 [aria-label: Source W2] → #source-W2
 W3 [aria-label: Source W3] → #source-W3
@@ -254,5 +258,7 @@ Widgets API, audit events (GraphQL) [sr-only: (opens in a new tab)] → https://
 Pricing page, Audit Logs section [sr-only: (opens in a new tab)] → https://workos.com/pricing
 Join the waitlist → /contact
 Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

@@ -16,8 +16,10 @@ h3 How much will it cost?
 h3 Will there be an SLA?
 h3 What do you do with the email I give you?
 h2 Want early access?
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Logbird Cloud
 The same Logbird, run by us.
 Logbird Cloud runs the same codebase you'll be able to self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are limited to invited teams for now. Request access, or sign in if you've been invited.
@@ -79,8 +81,10 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Request access → /contact
 Sign in → https://app.example.test/login
 Self-host when the source opens → /contact?interest=self-host
@@ -90,5 +94,7 @@ See pricing → /pricing
 privacy policy → /legal/privacy
 Request access → /contact
 Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

@@ -14,8 +14,10 @@ h2 Render it with your own components.
 h3 Vue: useAuditTrail
 h2 Scoped keys and viewer tokens.
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Use case · Customer-facing audit logs
 Show each customer their own history.
 Your customers' admins want to see who did what in their account. With Logbird, they see it inside your product, through your own backend, which decides what each user may read.
@@ -122,14 +124,18 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 [img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.] [aria-label: Open the image full size: Customer account] → /media/tenant-summary-light-1160.webp?v=*
 [img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.] [aria-label: Open the image full size: Customer account] → /media/tenant-summary-dark-1160.webp?v=*
 Request access → /contact
 Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"

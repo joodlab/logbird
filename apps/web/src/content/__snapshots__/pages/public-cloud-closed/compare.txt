@@ -10,8 +10,10 @@ h3 Pangea Secure Audit Log
 h3 Bemi
 h2 Our rules for these pages.
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Compare
 How Logbird compares.
 There's more than one good way to keep an audit trail. These pages compare Logbird with other tools, using only facts we could check in their official docs, pricing pages and repositories. Each page says where the other tool is the better fit. We checked every fact about the other tools on 7 November 2026 and list every source. If something has changed, tell us and we'll fix it.
@@ -57,13 +59,17 @@ Self-host it
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Logbird and Retraced compared → /compare/retraced
 Logbird and WorkOS Audit Logs compared → /compare/workos-audit-logs
 Logbird and Pangea Secure Audit Log compared → /compare/pangea
 Logbird and Bemi compared → /compare/bemi
 Join the waitlist → /contact
 Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

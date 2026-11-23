@@ -29,8 +29,10 @@ h2 Bounded by design.
 h2 Report a vulnerability privately.
 h2 No certifications yet.
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Security
 How Logbird handles your data.
 An audit log holds sensitive history, so this page says what Logbird does with it and where each protection stops.
@@ -163,8 +165,10 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Where data lives → #self-host
 Retention → #retention
 Projects and keys → #isolation
@@ -179,6 +183,8 @@ security@example.test → mailto:security@example.test
 Email security@example.test → mailto:security@example.test
 Join the waitlist → /contact
 Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
 button type="button" aria-label="Copy code"

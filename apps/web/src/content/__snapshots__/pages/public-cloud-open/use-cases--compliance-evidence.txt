@@ -15,8 +15,10 @@ h3 Compute the SHA-256 and size
 h2 Logbird's own record of what your team does.
 h2 Say these out loud before an auditor asks.
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Use case · Compliance evidence
 Answer the auditor with evidence.
 When an auditor or a customer's security team asks what happened, show them the events, and hand them an export they can match to Logbird's record of it.
@@ -118,14 +120,18 @@ Self-host it
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 [img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.] [aria-label: Open the image full size: Event detail] → /media/event-detail-light-639.webp?v=*
 [img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.] [aria-label: Open the image full size: Event detail] → /media/event-detail-dark-639.webp?v=*
 Read how Logbird handles data → /security
 Request access → /contact
 Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"

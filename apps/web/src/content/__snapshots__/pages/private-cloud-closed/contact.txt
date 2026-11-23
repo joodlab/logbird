@@ -5,8 +5,10 @@ headings:
 h1 Join the waitlist, or ask us anything.
 h2 Join the waitlist
 h2 Other ways to reach us.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Contact
 Join the waitlist, or ask us anything.
 Logbird Cloud isn't open yet. Leave your email and we'll write when it is. If you have a question about self-hosting, support or something else, choose it below.
@@ -51,14 +53,18 @@ Security issues
 Email security@example.test.
 Source and issues
 Source on GitHub — coming soon.
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 [noscript] hello@example.test → mailto:hello@example.test
 [noscript] hello@example.test → mailto:hello@example.test
 privacy policy → /legal/privacy
 security@example.test → mailto:security@example.test
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
 form action="/site-api/waitlist" method="post"
 input type="email" name="email" placeholder="you@example.test" required label="Email"
 input name="name" label="Name"

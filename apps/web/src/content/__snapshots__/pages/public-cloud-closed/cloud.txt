@@ -16,8 +16,10 @@ h3 How much will it cost?
 h3 Will there be an SLA?
 h3 What do you do with my waitlist email?
 h2 Be first to hear when it opens.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Logbird Cloud
 The same Logbird, run by us.
 Logbird Cloud will run the same open-source codebase you can self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.
@@ -79,8 +81,10 @@ Self-host it
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 Join the waitlist → /contact
 Self-host it → /self-hosting
 Self-host it → /self-hosting
@@ -90,5 +94,7 @@ See pricing → /pricing
 privacy policy → /legal/privacy
 Join the waitlist → /contact
 Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

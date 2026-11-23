@@ -9,8 +9,10 @@ h2 When to choose Logbird
 h2 Sources
 h3 What we couldn't verify
 h2 Start with one event.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Compare
 Logbird and Pangea Secure Audit Log
 Pangea Secure Audit Log is a managed service built around tamper evidence. Every event goes into a Merkle tree. Pangea publishes the tree's root hashes to Arweave, a public, append-only ledger, and every search result can come with a proof that it hasn't been altered. Events can also be signed. Logs move through hot, warm and cold storage, and an embeddable React viewer lets your customers search and verify their logs. If you need to prove that logs weren't changed, that's what it was built for, and Logbird doesn't do it. [P1, P2, P3, P4]
@@ -177,8 +179,10 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 P1 [aria-label: Source P1] → #source-P1
 P2 [aria-label: Source P2] → #source-P2
 P3 [aria-label: Source P3] → #source-P3
@@ -236,5 +240,7 @@ Retention tiers (same page as P4); cold export [sr-only: (opens in a new tab)] �
 Billing page: renders no price list ("Loading billing information…") [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/admin-guide/organizations/billing/
 Request access → /contact
 Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]

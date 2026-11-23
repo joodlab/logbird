@@ -5,8 +5,10 @@ headings:
 h1 Request access, or ask us anything.
 h2 Request access
 h2 Other ways to reach us.
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Contact
 Request access, or ask us anything.
 Logbird Cloud is in early access, with sign-ups limited to invited teams. Leave your email to request access. If you have a question about self-hosting, support or something else, choose it below.
@@ -53,8 +55,10 @@ Source and issues
 On GitHub: report bugs and ask questions in issues.
 Already invited?
 Sign in to Logbird Cloud.
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header — see _shell.txt]
 [noscript] hello@example.test → mailto:hello@example.test
 [noscript] hello@example.test → mailto:hello@example.test
 privacy policy → /legal/privacy
@@ -62,8 +66,10 @@ security@example.test → mailto:security@example.test
 On GitHub → https://github.com/example-org/logbird
 issues → https://github.com/example-org/logbird/issues
 Sign in to Logbird Cloud → https://app.example.test/login
+[shell: footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
 form action="/site-api/waitlist" method="post"
 input type="email" name="email" placeholder="you@example.test" required label="Email"
 input name="name" label="Name"

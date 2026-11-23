@@ -10,8 +10,10 @@ h3 [sr-only: Version ] 0.1.3
 h3 [sr-only: Version ] 0.1.1
 h3 [sr-only: Version ] 0.1.0
 h2 Build log
+[shell: footer — see _shell.txt]
 
 text:
+[shell: skip link, header — see _shell.txt]
 Changelog
 What changed, and when.
 Two lists live here. Releases are the versions published on GitHub, with the highlights from the repository's CHANGELOG.md. The build log holds short updates on what we shipped, with a capture from the product when there is one.
@@ -44,7 +46,10 @@ Self-host with Compose or Coolify using versioned images, SMTP sign-in and restr
 Build log
 Day by day, in public.
 No entries yet. Each day's post appears here once it's published.
+[shell: footer — see _shell.txt]
 
 links:
+[shell: skip link, header, footer — see _shell.txt]
 
 controls:
+[shell: header — see _shell.txt]
