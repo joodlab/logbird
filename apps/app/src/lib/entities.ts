@@ -1,4 +1,4 @@
-import { type EntityKind, formatRecordTerm } from '@logbird/contracts';
+import { type EntityKind, formatRecordTerm, parseQueryExpression } from '@logbird/contracts';
 import { Bot, Building2, Cog, type LucideIcon, Package, User } from 'lucide-react';
 import { formatTerm } from './query-language';
 
@@ -113,8 +113,13 @@ export function entityBaseQuery(kind: EntityKind, id: string, linkedType: string
  * as typed, 1 the id in another case, 2 id prefix, 3 name prefix, 4 id or name contains it, 5 a fuzzy match only. A record's bare id (`article_27_2` for
  * `article:article_27_2`) counts as its id.
  */
-export function entityMatchRank(entity: { kind?: EntityKind; id: string; name: string; type?: string }, text: string): EntityMatchRank {
-  const typed = text.trim();
+export function entityMatchRank(
+  entity: { kind?: EntityKind; id: string; name: string; type?: string },
+  text: string,
+  { literal = false }: { literal?: boolean } = {},
+): EntityMatchRank {
+  // A literal (a quoted term's decoded text) is the id exactly as written, spaces included: `"ACME 27 "` is not `ACME 27`.
+  const typed = literal ? text : text.trim();
   const t = typed.toLowerCase();
   // Only a record loses a prefix, and only its own known type (which may contain colons, or be empty for `:7`):
   // `a:biz_27` is not `biz_27`.
@@ -138,13 +143,14 @@ export const isExactId = (rank: EntityMatchRank) => rank <= 1;
 
 /**
  * The id that free text could be, or '' when it cannot be one: a single bare word (no field, operator, group or
- * wildcard), or one quoted term (`"acme:27"`, which the query language reads as the literal text).
+ * wildcard), or one quoted term (`"acme:27"`, `"acme\"27"`), read as the server's parser reads it: the literal text,
+ * escapes resolved.
  */
 export function idFromFreeText(text: string): string {
   const t = text.trim();
-  const quoted = /^"([^"\\]+)"$/.exec(t);
-  if (quoted) return quoted[1]?.trim() ?? '';
-  return /^[^\s:()"'*-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
+  if (t.startsWith('"')) return quotedTerm(t);
+  // A leading `/` starts a regex to the server (`/x/`), never a bare id.
+  return /^[^\s:()"'*/-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
 }
 
 /**
@@ -152,6 +158,19 @@ export function idFromFreeText(text: string): string {
  * tenant, not an operation, whatever its prefix. Otherwise the id's shape decides (`op_…` an operation, `evt_…` or a
  * ULID an event), and anything else is searched.
  */
+/** The literal text of `t` when the server reads it as exactly one quoted term, else ''. */
+function quotedTerm(t: string): string {
+  try {
+    const expression = parseQueryExpression(t);
+    const atom = expression.length === 1 && expression[0]?.length === 1 ? expression[0][0]?.atom : undefined;
+    if (atom?.kind !== 'text' || atom.start !== 0 || atom.end !== t.length || atom.token.kind !== 'value') return '';
+    // Exactly as the server reads it: `" a\"b "` is ` a"b ` (an id is sent exactly), never trimmed into another id.
+    return atom.token.value.trim() ? atom.token.value : '';
+  } catch {
+    return '';
+  }
+}
+
 export function resolveJump<E extends { kind?: EntityKind; id: string; name: string; type?: string }>(
   text: string,
   shape: 'operation' | 'event' | null,
@@ -169,13 +188,26 @@ export function resolveJump<E extends { kind?: EntityKind; id: string; name: str
 export function exactPerKind<E extends { kind: EntityKind; id: string; name: string; type?: string }>(
   entities: readonly E[] | undefined,
   text: string,
+  options: { literal?: boolean } = {},
 ): E[] {
   return (entities ?? [])
-    .map((entity, i) => ({ entity, i, rank: entityMatchRank(entity, text) }))
+    .map((entity, i) => ({ entity, i, rank: entityMatchRank(entity, text, options) }))
     .filter((x) => isExactId(x.rank))
     .sort((a, b) => a.rank - b.rank || a.i - b.i)
     .filter((x, i, all) => all.findIndex((y) => y.entity.kind === x.entity.kind) === i)
     .map((x) => x.entity);
+}
+
+/**
+ * The explorer's "this text is an id" matches for a bare word or quoted literal: none until the lookup has settled (a
+ * cached hit being refreshed may be taken back, #239), then one per kind, the literal as written (spaces kept).
+ */
+export function settledIdMatches<E extends { kind: EntityKind; id: string; name: string; type?: string }>(
+  word: string,
+  settled: boolean,
+  entities: readonly E[] | undefined,
+): E[] {
+  return word && settled ? exactPerKind(entities, word, { literal: true }) : [];
 }
 
 export function targetEntityId(type: string, id: string): string {
