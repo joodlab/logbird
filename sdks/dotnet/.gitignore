@@ -1,2 +1,8 @@
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+.vs/
 # Python caches from the package check scripts
 __pycache__/
