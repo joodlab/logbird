@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectAssetUrls, compareAssets, manifestIconUrls } from './live-assets';
+import { bodyText, collectAssetUrls, compareAssets, manifestIconUrls, reasonText } from './live-assets';
 
 const base = 'http://127.0.0.1:4750';
 const publicOrigin = 'https://site.example.test';
@@ -201,5 +201,27 @@ describe('live asset check', () => {
     ]);
     // The card on the public origin was fetched there, not on the checked origin.
     expect(requested).toContain(publicOrigin);
+  });
+
+  it('never throws formatting a rejection, keeps a first body when the second request fails, and decodes a BOM', async () => {
+    const unprintable = Object.create(null) as object;
+    expect(() => String(unprintable)).toThrow();
+    expect(reasonText(unprintable)).toBe('a reason that cannot be shown as text');
+    expect(reasonText(null)).toBe('null');
+    const at = `${base}/site.webmanifest?v=bbbbbbbbbb`;
+    const json = { 'content-type': 'application/manifest+json' };
+    const icon = '{"icons":[{"src":"/brand/new.png"}]}';
+    expect(await compareAssets([at], (async () => Promise.reject(unprintable)) as typeof fetch)).toEqual([
+      { path: at, problem: 'fetch failed: a reason that cannot be shown as text' },
+    ]);
+    // The as-written copy answers; the uncached request rejects. The first body is still handed back for its icons.
+    const bodies = new Map<string, Buffer[]>();
+    const halfway = (async (input: URL | RequestInfo) =>
+      new URL(String(input)).searchParams.has('cb') ? Promise.reject(null) : new Response(icon, { headers: json })) as typeof fetch;
+    expect(await compareAssets([at], halfway, bodies)).toEqual([{ path: at, problem: 'fetch failed: null' }]);
+    expect((bodies.get(at) ?? []).map((body) => manifestIconUrls(bodyText(body), at, [base]).urls)).toEqual([[`${base}/brand/new.png`]]);
+    // A manifest saved with a UTF-8 byte order mark parses, as Response.text() would decode it.
+    const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(icon)]);
+    expect(manifestIconUrls(bodyText(withBom), at, [base])).toEqual({ urls: [`${base}/brand/new.png`], problems: [] });
   });
 });

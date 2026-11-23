@@ -2,7 +2,7 @@ import { siteDecision } from '../../app/server/site-paths';
 import { siteConfigFrom } from '../src/env';
 import { inlineScripts, scriptHash, scriptSources } from '../src/lib/csp';
 import { OBFUSCATED_EMAIL } from '../src/lib/email-off';
-import { collectAssetUrls, compareAssets, manifestIconUrls } from '../src/lib/live-assets';
+import { bodyText, collectAssetUrls, compareAssets, manifestIconUrls } from '../src/lib/live-assets';
 import { securityHeaders } from '../src/lib/security-headers';
 import { prerenderPaths } from '../src/lib/site-map';
 import { loadPublicEnv } from './public-env';
@@ -189,13 +189,14 @@ const assetProblems = await compareAssets(manifests, fetch, manifestBodies);
 const manifestProblems = new Set<string>();
 for (const manifest of manifests) {
   for (const body of manifestBodies.get(manifest) ?? []) {
-    const icons = manifestIconUrls(body.toString('utf8'), manifest, [base, publicOrigin]);
+    const icons = manifestIconUrls(bodyText(body), manifest, [base, publicOrigin]);
     for (const icon of icons.urls) assetUrls.add(icon);
     for (const { path, problem } of icons.problems) manifestProblems.add(`${path}: ${problem}`);
   }
 }
-problems.push(...manifestProblems);
-assetProblems.push(...(await compareAssets([...assetUrls].filter((url) => !manifests.includes(url)))));
+// Appended one by one: spreading a long list into push() could exceed the argument limit and lose the report.
+for (const problem of manifestProblems) problems.push(problem);
+for (const problem of await compareAssets([...assetUrls].filter((url) => !manifests.includes(url)))) assetProblems.push(problem);
 for (const { path, problem } of assetProblems) problems.push(`${path}: ${problem}`);
 rows.push({
   path: `assets ${assetUrls.size} URLs`,

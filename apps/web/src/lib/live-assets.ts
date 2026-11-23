@@ -10,8 +10,20 @@ const ASSET = /^\/(?:media|og|brand)\/|^\/site\.webmanifest$/;
 /** A reference that names a fixed-name file kind; it must resolve to the site's own directory for that kind. */
 const ASSET_LIKE = /\/(?:media|og|brand)\/|site\.webmanifest/;
 
-/** A rejection reason as text: a fetch or a body stream can reject with anything, `null` included. */
-export const reasonText = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
+/**
+ * A rejection reason as text: a fetch or a body stream can reject with anything, `null` included, even a value that
+ * cannot be converted to a string; this never throws.
+ */
+export function reasonText(reason: unknown): string {
+  try {
+    return reason instanceof Error ? String(reason.message) : String(reason);
+  } catch {
+    return 'a reason that cannot be shown as text';
+  }
+}
+
+/** A body as text the way `Response.text()` decodes it: UTF-8, a byte order mark dropped. */
+export const bodyText = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
 export interface AssetProblem {
   path: string;
@@ -114,19 +126,22 @@ const TYPES: [RegExp, RegExp][] = [
  * serving an old file under a URL whose page now describes a new one. Redirects are not followed: a fixed-name file must
  * answer itself, since a redirect could drop both queries and compare two cached copies. An unversioned URL, a file
  * with the wrong content type (such as an HTML fallback under an image URL) and a failed fetch are reported too.
- * `bodies`, when given, receives every 200 body each URL answered with (as written and uncached), so a caller reads a
- * manifest's icons from exactly the bytes that were compared, never from a separate request.
+ * `bodies`, when given, receives every 200 body each URL answered with (as written and uncached), each as soon as it is
+ * read, so a caller reads a manifest's icons from exactly the bytes that were compared, never from a separate request,
+ * and keeps the first body even when the second request fails.
  */
 export async function compareAssets(urls: Iterable<string>, fetcher: typeof fetch = fetch, bodies?: Map<string, Buffer[]>) {
   const problems: AssetProblem[] = [];
-  const fetchOnce = async (url: string) => {
+  const fetchOnce = async (url: string, key: string) => {
     const response = await fetcher(url, { redirect: 'manual' });
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bodies && response.status === 200) bodies.set(key, [...(bodies.get(key) ?? []), bytes]);
     // Media types are case-insensitive (RFC 9110): compare them in lower case.
     return {
       status: response.status,
       location: response.headers.get('location'),
       type: (response.headers.get('content-type') ?? '').toLowerCase(),
-      bytes: Buffer.from(await response.arrayBuffer()),
+      bytes,
     };
   };
   for (const url of [...urls].sort()) {
@@ -135,8 +150,8 @@ export async function compareAssets(urls: Iterable<string>, fetcher: typeof fetc
       if (!/^[0-9a-f]{8,}$/.test(parsed.searchParams.get('v') ?? '')) problems.push({ path: url, problem: 'unversioned URL to a fixed-name file' });
       const uncached = new URL(url);
       uncached.searchParams.set('cb', crypto.randomUUID());
-      const plain = await fetchOnce(url);
-      const fresh = await fetchOnce(uncached.href);
+      const plain = await fetchOnce(url, url);
+      const fresh = await fetchOnce(uncached.href, url);
       for (const [label, response] of [
         ['as written', plain],
         ['uncached', fresh],
@@ -161,10 +176,6 @@ export async function compareAssets(urls: Iterable<string>, fetcher: typeof fetc
       } else if (!plain.bytes.equals(fresh.bytes)) {
         problems.push({ path: url, problem: `stale: ${plain.bytes.length} bytes as written vs ${fresh.bytes.length} bytes uncached` });
       }
-      bodies?.set(
-        url,
-        [plain, fresh].filter((response) => response.status === 200).map((response) => response.bytes),
-      );
     } catch (error) {
       problems.push({ path: url, problem: `fetch failed: ${reasonText(error)}` });
     }
