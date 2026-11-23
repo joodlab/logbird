@@ -927,9 +927,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         LogQueueFull();
     }
 
-    private static string? Bounded(string? value, int max = 256)
-        => value is null || value.Length <= max ? value : value.Substring(0, max);
-
     // The sender counted the drop when it settled the event (under the queue lock); this only notifies.
     // A rejection is the server's answer about this event's content, which an earlier request would have met too: it was
     // not stored. Two codes say nothing about content: stored_event_unreadable (something with this id is stored and cannot
@@ -1063,9 +1060,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             return null;
         }
 
-        // Display fields are bounded (an oversized action or id must not be kept whole in the backlog); the JSON, when
-        // kept, carries the event for replay.
-        var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024), code, mayBeStored);
+        // Fields are bounded (DroppedEvent: an oversized action or id must not be kept whole in the backlog), far above any
+        // storable value, so the id still correlates; the JSON, when kept, carries the event for replay.
+        var dropped = new DroppedEvent(reason, id, action, json, detail, code, mayBeStored);
         return () => Notify(() => onDrop(dropped));
     }
 

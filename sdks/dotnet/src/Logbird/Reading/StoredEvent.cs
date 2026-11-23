@@ -57,17 +57,23 @@ public sealed class StoredEvent
     /// <summary>The upstream source, or <see langword="null"/>.</summary>
     public string? Source { get; init; }
 
-    /// <summary>The affected records.</summary>
-    public IReadOnlyList<AuditTarget> Targets { get; init; } = [];
+    /// <summary>The affected records. Read-only: a copy, which a cast cannot change.</summary>
+    public IReadOnlyList<AuditTarget> Targets { get => _targets; init => _targets = Internal.ReadOnly.List(value); }
 
-    /// <summary>The recorded changes. Non-string values are stored as JSON text.</summary>
-    public IReadOnlyList<StoredChange> Changes { get; init; } = [];
+    private readonly IReadOnlyList<AuditTarget> _targets = Internal.ReadOnly.List<AuditTarget>(null);
+
+    /// <summary>The recorded changes. Non-string values are stored as JSON text. Read-only, like <see cref="Targets"/>.</summary>
+    public IReadOnlyList<StoredChange> Changes { get => _changes; init => _changes = Internal.ReadOnly.List(value); }
+
+    private readonly IReadOnlyList<StoredChange> _changes = Internal.ReadOnly.List<StoredChange>(null);
 
     /// <summary>Correlation and request details.</summary>
     public AuditContext Context { get; init; } = new();
 
-    /// <summary>Flattened extra fields, for example <c>metadata.plan</c>.</summary>
-    public IReadOnlyDictionary<string, string> Attributes { get; init; } = new Dictionary<string, string>();
+    /// <summary>Flattened extra fields, for example <c>metadata.plan</c>. Read-only, like <see cref="Targets"/>.</summary>
+    public IReadOnlyDictionary<string, string> Attributes { get => _attributes; init => _attributes = Internal.ReadOnly.Dictionary(value); }
+
+    private readonly IReadOnlyDictionary<string, string> _attributes = Internal.ReadOnly.Dictionary(null);
 
     /// <summary>The share (0 to 100) of recommended envelope fields present.</summary>
     public double Conformance { get; init; }
@@ -98,10 +104,12 @@ public sealed record StoredChange(string Field, string Before, string After)
 /// <summary>One page of search results.</summary>
 public sealed class EventPage
 {
-    /// <summary>The events on this page.</summary>
+    /// <summary>The events on this page. Read-only: a copy, which a cast cannot change.</summary>
     [JsonPropertyName("data")]
     [JsonRequired]
-    public IReadOnlyList<StoredEvent> Events { get; init; } = [];
+    public IReadOnlyList<StoredEvent> Events { get => _events; init => _events = Internal.ReadOnly.List(value); }
+
+    private readonly IReadOnlyList<StoredEvent> _events = Internal.ReadOnly.List<StoredEvent>(null);
 
     /// <summary>The cursor for the next page, or <see langword="null"/> on the last page.</summary>
     public string? NextCursor { get; init; }
@@ -130,8 +138,10 @@ public sealed class EventDetail
     [JsonRequired]
     public JsonElement Payload { get; init; }
 
-    /// <summary>The causation chain, from the root to the direct parent.</summary>
-    public IReadOnlyList<StoredEvent> Parents { get; init; } = [];
+    /// <summary>The causation chain, from the root to the direct parent. Read-only: a copy, which a cast cannot change.</summary>
+    public IReadOnlyList<StoredEvent> Parents { get => _parents; init => _parents = Internal.ReadOnly.List(value); }
+
+    private readonly IReadOnlyList<StoredEvent> _parents = Internal.ReadOnly.List<StoredEvent>(null);
 
     /// <summary>How many events name this one as their parent.</summary>
     public long ChildCount { get; init; }

@@ -212,7 +212,7 @@ internal static class EntityIds
         }
     }
 
-    private static bool HasLoneSurrogate(string value)
+    internal static bool HasLoneSurrogate(string value)
     {
         for (var i = 0; i < value.Length; i++)
         {

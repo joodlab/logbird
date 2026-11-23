@@ -69,28 +69,65 @@ public sealed class DroppedEvent
 {
     private readonly byte[]? _json;
 
+    /// <summary>
+    /// The longest <see cref="Id"/> and <see cref="Action"/> reported whole, in UTF-16 code units: far more than any
+    /// event Logbird stores can have (the server takes ids of at most 256 code units, trimmed, and actions of at most 200).
+    /// </summary>
+    public const int MaxIdLength = 65_536;
+
+    /// <summary>The longest <see cref="Detail"/> reported whole, in UTF-16 code units.</summary>
+    public const int MaxDetailLength = 1_024;
+
     internal DroppedEvent(DropReason reason, string? id, string action, byte[]? json, string? detail, string? code = null, bool mayBeStored = false)
     {
         Reason = reason;
-        Id = id;
-        Action = action;
+        var truncated = false;
+        Id = Bounded(id, MaxIdLength, ref truncated);
+        Action = Bounded(action, MaxIdLength, ref truncated)!;
         _json = json;
-        Detail = detail;
+        Detail = Bounded(detail, MaxDetailLength, ref truncated);
         Code = code;
         MayBeStored = mayBeStored;
+        Truncated = truncated;
     }
 
     /// <summary>Why the event was dropped.</summary>
     public DropReason Reason { get; }
 
-    /// <summary>The event id, when one was assigned.</summary>
+    /// <summary>
+    /// The event id exactly as the event carried it, the one to correlate the drop with your own records (an outbox row,
+    /// for one), or <see langword="null"/> when it had none yet. It is never cut unless it is longer than
+    /// <see cref="MaxIdLength"/>, which no storable event's id is; <see cref="Truncated"/> then says so.
+    /// </summary>
     public string? Id { get; }
 
-    /// <summary>The event action.</summary>
+    /// <summary>The event action, never cut unless it is longer than <see cref="MaxIdLength"/> (see <see cref="Truncated"/>).</summary>
     public string Action { get; }
 
-    /// <summary>The server's reason for a <see cref="DropReason.Rejected"/> event, or another short explanation.</summary>
+    /// <summary>
+    /// The server's reason for a <see cref="DropReason.Rejected"/> event, or another short explanation. At most
+    /// <see cref="MaxDetailLength"/> code units: a longer one is cut there, and <see cref="Truncated"/> says so.
+    /// </summary>
     public string? Detail { get; }
+
+    /// <summary>
+    /// Whether <see cref="Id"/>, <see cref="Action"/> or <see cref="Detail"/> was cut to its limit (never inside a surrogate
+    /// pair). An id is cut only past <see cref="MaxIdLength"/>, so a <see langword="false"/> here means every field is
+    /// exactly as given, and a cut <see cref="Id"/> is never mistaken for another event's.
+    /// </summary>
+    public bool Truncated { get; }
+
+    private static string? Bounded(string? value, int max, ref bool truncated)
+    {
+        if (value is null || value.Length <= max)
+        {
+            return value;
+        }
+
+        truncated = true;
+        var length = char.IsHighSurrogate(value[max - 1]) ? max - 1 : max;
+        return value.Substring(0, length);
+    }
 
     /// <summary>
     /// The server's code for a <see cref="DropReason.Rejected"/> event, for example <c>invalid_event</c> or
@@ -110,8 +147,10 @@ public sealed class DroppedEvent
     public bool MayBeStored { get; }
 
     /// <summary>
-    /// The exact JSON that was (or would have been) sent, as UTF-8, after redaction. Empty when the event was dropped
-    /// before it was serialized. Persist it to replay the event later with the same id.
+    /// The exact JSON that was (or would have been) sent, as UTF-8, after redaction. Persist it to replay the event later
+    /// with the same id. Empty when the event was dropped before it was serialized: <see cref="DropReason.TooLarge"/> and
+    /// <see cref="DropReason.Invalid"/> (and <see cref="DropReason.Shutdown"/> for an event tracked after shutdown) can be;
+    /// <see cref="Id"/> then still identifies it.
     /// </summary>
     public ReadOnlyMemory<byte> Json => _json ?? ReadOnlyMemory<byte>.Empty;
 

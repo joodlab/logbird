@@ -110,7 +110,12 @@ public class AspNetCoreTests
                 audit.Record("invoice.updated", e => e.Target("invoice", id).Change("status", "draft", "sent"));
                 return Results.NoContent();
             }),
-            requests: r => r.ServiceName = "billing-api",
+            requests: r =>
+            {
+                r.ServiceName = "billing-api";
+                r.UseRequestIdHeader = true;
+                r.UseOperationHeader = true;
+            },
             user: User(("sub", "user_42"), ("name", "Fictional User"), ("email", "fictional@example.invalid"), ("tenant_id", "acct_7")));
         using var request = new HttpRequestMessage(HttpMethod.Put, "/invoices/inv_1");
         request.Headers.Add("X-Request-Id", "req_1");
@@ -587,6 +592,7 @@ public class AspNetCoreTests
                 context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpConnectionFeature>(new ThrowingConnection());
                 return next(context);
             }),
+            requests: r => r.UseRequestIdHeader = true,
             user: User(("sub", "user_1")));
         using var request = new HttpRequestMessage(HttpMethod.Post, "/");
         request.Headers.Add("X-Request-Id", "req_partial");
@@ -627,7 +633,9 @@ public class AspNetCoreTests
     public async Task A9_a_shared_context_template_is_never_written_to()
     {
         var template = new AuditContext { ParentEventId = "evt_parent" };
-        await using var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("templated", e => e.Context = template))));
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("templated", e => e.Context = template))),
+            requests: r => r.UseRequestIdHeader = true);
         foreach (var id in new[] { "req_a", "req_b" })
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, "/");
@@ -695,9 +703,70 @@ public class AspNetCoreTests
     }
 
     [Fact]
+    public async Task A_requests_carrier_leaves_out_what_it_could_not_carry_unchanged_and_reports_it()
+    {
+        // Custom resolvers return a party without its id and parties holding a lone surrogate; a request's carrier is
+        // still always writable: those parties are left out and reported, never changed.
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        AuditCarrier? carrier = null;
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                carrier = audit.Carrier("evt_" + (char)0xD800);
+                return Results.Ok();
+            }),
+            requests: r =>
+            {
+                r.ResolveActor = _ => new AuditActor("user", null!);
+                r.ResolveTenant = _ => new AuditTenant("acct_7") { Name = "Fictional " + (char)0xDC00 };
+                r.ResolveImpersonator = _ => new AuditImpersonator("support_" + (char)0xD800);
+            },
+            options: o => o.OnError = errors.Enqueue);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+
+        Assert.NotNull(carrier);
+        Assert.Null(carrier!.Actor);
+        Assert.Null(carrier.Tenant);
+        Assert.Null(carrier.Impersonator);
+        Assert.Null(carrier.ParentEventId);
+        Assert.Matches("^[0-9a-f]{8}-", carrier.OperationId);
+        Assert.Equal(carrier, AuditCarrier.FromJson(carrier.ToJson()));
+
+        Assert.True(await app.Client.FlushAsync());
+        var reported = errors.Select(e => e.Message).Where(m => m.Contains("out of an audit carrier", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(4, reported.Length);
+        Assert.All(reported, m => Assert.DoesNotContain("acct_7", m, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Correlation_headers_are_ignored_unless_turned_on()
+    {
+        // Any caller can send them: by default neither the request id nor the operation id comes from the request.
+        await using var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("client.headers"))));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/");
+        request.Headers.Add("X-Request-Id", "req_from_client");
+        request.Headers.Add("X-Logbird-Operation", "op_from_client");
+        (await app.Http.SendAsync(request)).EnsureSuccessStatusCode();
+        var context = Assert.Single(await app.FlushedEventsAsync()).GetProperty("context");
+        Assert.NotEqual("req_from_client", context.GetProperty("requestId").GetString());
+        Assert.NotEqual("op_from_client", context.GetProperty("operationId").GetString());
+        Assert.Matches("^[0-9a-f]{8}-", context.GetProperty("operationId").GetString());
+
+        var defaults = new LogbirdRequestOptions();
+        Assert.False(defaults.UseRequestIdHeader);
+        Assert.False(defaults.UseOperationHeader);
+    }
+
+    [Fact]
     public async Task A12_an_overlength_correlation_header_is_ignored_never_cut()
     {
-        await using var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("long.headers"))));
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("long.headers"))),
+            requests: r =>
+            {
+                r.UseRequestIdHeader = true;
+                r.UseOperationHeader = true;
+            });
         using var request = new HttpRequestMessage(HttpMethod.Post, "/");
         request.Headers.Add("X-Request-Id", new string('r', 257));
         request.Headers.Add("X-Logbird-Operation", new string('o', 257));
