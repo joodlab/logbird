@@ -1,4 +1,4 @@
-import { WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
+import { parseQueryExpression, type QueryAtom, QueryError, WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
 import { andQuery, canonicalField, fieldTerms, hasTopLevelOr, type QueryToken, tokenize } from './query-language';
 
 /**
@@ -30,9 +30,34 @@ function chipToken(q: string): QueryToken | undefined {
     // `NOT category:x` and `- category:x` (a standalone minus, which the server reads as NOT) negate the term.
     if ((before?.kind === 'operator' && before.raw === 'NOT') || before?.raw === '-') continue;
     if (t.value === undefined || !CATALOGUE.has(t.value)) continue;
-    if (server.some((x) => x.start === t.start && x.end === t.end && !x.negated && x.value === t.value && x.field === t.field)) return t;
+    if (!server.some((x) => x.start === t.start && x.end === t.end && !x.negated && x.value === t.value && x.field === t.field)) continue;
+    // Moving the chip out must not change what any other term means (`"category":"auth"-action:booked` would turn the
+    // attribute `-action` into NOT action once its neighbour is gone): otherwise there is no chip.
+    if (meaning(activityQuery(t.value, freeTextWithout(q, t))) === meaning(q)) return t;
   }
   return undefined;
+}
+
+/**
+ * What a query means to the server, order aside: each term's field, value and polarity, and each free-text word. Two
+ * queries with the same meaning here filter the same events when they ANDed the same terms at the top level.
+ */
+function meaning(q: string): string | null {
+  const parts: string[] = [];
+  const visit = (node: QueryAtom, negated: boolean) => {
+    if (node.kind === 'not') visit(node.operand, !negated);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom, negated);
+    else if (node.kind === 'text') parts.push(JSON.stringify(['t', node.token.kind, node.token.value, negated]));
+    else parts.push(JSON.stringify(['f', node.field, node.value, negated], (key, v) => (key === 'start' || key === 'end' ? undefined : v)));
+  };
+  try {
+    const expression = parseQueryExpression(q);
+    for (const branch of expression) for (const part of branch) visit(part.atom, false);
+    return `${expression.length}|${parts.sort().join('|')}`;
+  } catch (error) {
+    if (error instanceof QueryError) return null;
+    throw error;
+  }
 }
 
 /** The area chip a query selects, if any. */

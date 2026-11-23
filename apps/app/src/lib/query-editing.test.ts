@@ -9,6 +9,7 @@ import { keyItem } from '@/components/query-input/use-completions';
 import { activityChip, activityFreeText } from './activity-search';
 import { whoFilter } from './impersonation';
 import { presenceTerms } from './presence-filter';
+import { attributeQueryKey } from './query-catalog';
 import { fieldTerms, formatTerm, highlightQuery, queryCompletionAt, removeTerm, tokenize } from './query-language';
 import { lintQuery } from './query-lint';
 import { translateQueryToSql } from './query-translate';
@@ -120,8 +121,12 @@ describe('#283 round 1: every reader agrees with the server', () => {
   });
 
   it('completes a whole group member as the server lexes it', () => {
+    // Inside a regex member nothing is offered that could replace the pattern (a quote inside it opens nothing either).
     const regex = 'action:(/booking updated/ OR cancel)';
-    expect(queryCompletionAt(regex, regex.indexOf('updated') + 2)).toMatchObject({ from: regex.indexOf('/'), to: regex.indexOf(' OR') });
+    expect(queryCompletionAt(regex, regex.indexOf('updated') + 2)).toMatchObject({ kind: 'regex' });
+    const quoteInRegex = 'action:(/foo "bar/ OR baz)';
+    expect(queryCompletionAt(quoteInRegex, quoteInRegex.indexOf('"') + 1)).toMatchObject({ kind: 'regex' });
+    expect(queryCompletionAt(quoteInRegex, quoteInRegex.indexOf('baz') + 2)).toMatchObject({ kind: 'value', from: quoteInRegex.indexOf('baz') });
     const joined = 'action:(tag:"two words" OR ok)';
     expect(queryCompletionAt(joined, joined.indexOf('words') + 2)).toMatchObject({ from: joined.indexOf('tag'), to: joined.indexOf(' OR') });
   });
@@ -130,5 +135,42 @@ describe('#283 round 1: every reader agrees with the server', () => {
     const spec = { id: 'k', kind: 'attr', badge: 'attr', group: 'Attributes' } as const;
     expect(keyItem('ticket status', spec, { from: 0, to: 0 }).insert).toBe('"ticket status":');
     expect(keyItem('plan', spec, { from: 0, to: 0 }).insert).toBe('plan:');
+  });
+});
+
+describe('#283 round 2', () => {
+  it('never stalls on a stray bracket inside a value group', () => {
+    for (const q of ['action:([', 'action:(<', 'action:(a [ b)', 'action:({']) expect(queryCompletionAt(q, q.length).kind).toBeDefined();
+  });
+
+  it('takes no chip whose removal would change another term', () => {
+    const q = '"category":"auth"-action:booked';
+    expect(activityChip(q)).toBeUndefined();
+    expect(activityFreeText(q)).toBe(q);
+    expect(compileQuery(q).params).toMatchObject({ q1: '-action' });
+  });
+
+  it('counts the negation a group inherits, however many brackets wrap it', () => {
+    expect(whoFilter('NOT ((impersonator:* outcome:failure))')).toBe('all');
+    expect(removeTerm('NOT ((impersonator:* outcome:failure))', 'impersonator', '*', true)).toBe('NOT ((impersonator:* outcome:failure))');
+    expect(whoFilter('NOT ((impersonator:*))')).toBe('self');
+  });
+
+  it('reads a quoted value joined with a colon part as one value, as the server does', () => {
+    const q = '"category":"auth":other';
+    const [token] = tokenize(q);
+    expect(token).toMatchObject({ kind: 'field', field: 'category', value: 'auth:other', end: q.length });
+    expect(compileQuery(q).params).toMatchObject({ q0: 'auth:other' });
+    expect(queryCompletionAt(q, q.indexOf('auth') + 2)).toMatchObject({ kind: 'value', from: q.indexOf('"auth"'), to: q.length });
+    const group = 'action:("book":"two words" OR cancel)';
+    expect(queryCompletionAt(group, group.indexOf('book') + 2)).toMatchObject({ from: group.indexOf('"book"'), to: group.indexOf(' OR') });
+  });
+
+  it('completes stored keys that look like syntax with the explicit attr. prefix', () => {
+    const spec = { id: 'k', kind: 'attr', badge: 'attr', group: 'Attributes' } as const;
+    expect(keyItem(attributeQueryKey('attr.ticket status'), spec, { from: 0, to: 0 }).insert).toBe('"attr.attr.ticket status":');
+    expect(attributeQueryKey('_exists_')).toBe('attr._exists_');
+    expect(compileQuery('"attr.attr.ticket status":open').params).toMatchObject({ q0: 'attr.ticket status' });
+    expect(compileQuery('attr._exists_:*').params).toMatchObject({ q0: '_exists_' });
   });
 });

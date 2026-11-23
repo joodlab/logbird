@@ -105,18 +105,45 @@ function scanPlain(input: string, i: number): number {
 }
 
 /** End of a bare group member starting at `i` (stops at whitespace or a bracket), never past `limit`. */
-function scanPlainMember(input: string, i: number, limit: number, record = false): number {
-  if (input[i] === '"' || (input[i] === '/' && !record)) return Math.min(limit, scanDelimited(input, i, input[i] as string));
-  if (record) return Math.min(limit, scanBareRecordValue(input, i));
-  let j = i;
-  while (j < limit && !/[\s():[\]{}<>]/.test(input[j] ?? '')) j += 1;
-  // As the server does, an adjacent `:` joins the value right after it (`tag:"two words"` is one member).
+/** As the server does: an adjacent `:` after a value joins the value right after it, quoted or bare (never a regex). */
+function joinColons(input: string, from: number, limit: number): number {
+  let j = from;
   while (j < limit && input[j] === ':') {
     j += 1;
     if (input[j] === '"') j = Math.min(limit, scanDelimited(input, j, '"'));
     else while (j < limit && !/[\s():[\]{}<>"/]/.test(input[j] ?? '')) j += 1;
   }
   return j;
+}
+
+/** The decoded value of a quoted value joined with colon parts (`"auth":other` is `auth:other` to the server). */
+function readJoinedValue(raw: string): { value: string; wildcard: boolean } {
+  let value = '';
+  let wildcard = false;
+  for (let i = 0; i < raw.length; ) {
+    const end = raw[i] === '"' ? scanDelimited(raw, i, '"') : i + (/^[^:"]*/.exec(raw.slice(i))?.[0].length ?? 0);
+    const part = readQueryValue(raw.slice(i, end));
+    value += part.value;
+    wildcard = part.wildcard;
+    if (raw[end] === ':') value += ':';
+    i = end === i ? i + 1 : end + (raw[end] === ':' ? 1 : 0);
+  }
+  return { value, wildcard };
+}
+
+function scanPlainMember(input: string, i: number, limit: number, record = false): number {
+  let j: number;
+  if (input[i] === '/' && !record) j = Math.min(limit, scanDelimited(input, i, '/'));
+  else if (input[i] === '"') j = Math.min(limit, scanDelimited(input, i, '"'));
+  else if (record) j = Math.min(limit, scanBareRecordValue(input, i));
+  else {
+    j = i;
+    while (j < limit && !/[\s():[\]{}<>]/.test(input[j] ?? '')) j += 1;
+  }
+  // A record member never joins; a regex member never does either.
+  if (!record && input[i] !== '/') j = joinColons(input, j, limit);
+  // Always at least one character, so a stray `[` or `<` can never stall the caller's loop.
+  return Math.max(i + 1, j);
 }
 
 function skipWhitespace(input: string, start: number): number {
@@ -170,11 +197,18 @@ export function tokenize(input: string): QueryToken[] {
       const name = key === quotedKey ? readQueryValue(key[2] ?? '').value : (key[2] ?? '');
       const field = negated || key[1] !== '-' ? name : `-${name}`;
       const valueStart = skipWhitespace(input, i + key[0].length);
-      const v = scanValue(input, valueStart, field === 'record');
+      const scanned = scanValue(input, valueStart, field === 'record');
+      // A quoted value joins adjacent colon parts, as the server reads it: `"auth":other` is one value, `auth:other`.
+      const joinedEnd = scanned.kind === 'quoted' && field !== 'record' ? joinColons(input, scanned.end, input.length) : scanned.end;
+      const v = { ...scanned, end: joinedEnd };
       const raw = input.slice(i, v.end);
       const valueRaw = input.slice(skipWhitespace(input, valueStart + (v.op?.length ?? 0)), v.end);
       const decoded =
-        v.kind === 'plain' || v.kind === 'quoted' || v.kind === 'compare' ? readQueryValue(valueRaw) : { value: valueRaw, wildcard: false };
+        joinedEnd > scanned.end
+          ? readJoinedValue(valueRaw)
+          : v.kind === 'plain' || v.kind === 'quoted' || v.kind === 'compare'
+            ? readQueryValue(valueRaw)
+            : { value: valueRaw, wildcard: false };
       tokens.push({
         kind: 'field',
         raw,
@@ -372,7 +406,8 @@ export function removeTokens(q: string, test: (t: QueryToken) => boolean): strin
     const { node, negated } = unwrapNot(atom);
     const prefix = q.slice(atom.start, node.start);
     if (node.kind === 'group') {
-      const inner = rewrite(node.expression, outer !== negated, unpolarized || (negated && !singleTerm(node.expression)));
+      // The negation a group inherits counts too: `NOT ((a b))` ANDs a and b under one NOT just as `NOT (a b)` does.
+      const inner = rewrite(node.expression, outer !== negated, unpolarized || (outer !== negated && !singleTerm(node.expression)));
       return inner ? `${prefix}(${inner})` : '';
     }
     if (node.kind === 'field' && test({ ...fieldToken(q, node, atom.start, outer !== negated), ...(unpolarized ? { unpolarized } : {}) })) {
@@ -428,7 +463,8 @@ export function fieldTerms(q: string, topLevelOnly = false): QueryToken[] {
       for (const { atom } of branch) {
         const { node, negated } = unwrapNot(atom);
         if (node.kind === 'field') fields.push(fieldToken(q, node, atom.start, outer !== negated));
-        else if (node.kind === 'group' && !topLevelOnly && (!negated || singleTerm(node.expression))) visit(node.expression, outer !== negated);
+        else if (node.kind === 'group' && !topLevelOnly && (outer === negated || singleTerm(node.expression)))
+          visit(node.expression, outer !== negated);
       }
     }
   }
@@ -766,6 +802,8 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
       }
       const word = q.slice(s, caret);
       if (q.slice(s, e) === 'OR') return { kind: 'none' };
+      // Inside a regex member, as in a regex value: no value suggestion may replace the pattern.
+      if (q[s] === '/' && field !== 'record' && caret > s) return { kind: 'regex', field };
       // A member before the caret (not `(` or `OR`) means the next thing is `OR`.
       const before = q.slice(valueStart + 1, s).trimEnd();
       const afterMember = before.length > 0 && !/(^|\s)OR$/.test(before);
