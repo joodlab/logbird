@@ -6,13 +6,15 @@ It requires, reading each package's manifest as XML:
 - exactly one Logbird and one Logbird.AspNetCore package in the folder, each with a non-empty version that matches its
   file name, both with the same version (and the expected version, when given);
 - dependency groups for exactly the target frameworks Logbird.AspNetCore ships (its lib/<tfm>/ folders, matched by exact
-  name), each with exactly one Logbird dependency, at exactly that version ([x.y.z]) and with exclude="Build,Analyzers".
+  name), each with exactly one Logbird dependency, at exactly that version ([x.y.z]) and with exclude="Build,Analyzers";
+- in both packages, an <icon> naming a file the package carries, which is a 128x128 PNG.
 
 NuGet package ids are case-insensitive, so ids are compared case-insensitively everywhere.
 
 Logbird.AspNetCore calls Logbird's internal members, so a version range could bind to a Logbird build without them.
 """
 
+import struct
 import sys
 import xml.etree.ElementTree as ElementTree
 import zipfile
@@ -42,6 +44,22 @@ def manifest(package):
     return metadata[0], frameworks
 
 
+def check_icon(package, metadata):
+    """The <icon> names a file inside the package, and that file is a 128x128 PNG (nuget.org's recommended size)."""
+    icon = text(metadata, "icon", package).replace("\\", "/").lstrip("/")
+    with zipfile.ZipFile(package) as archive:
+        names = {name.lower(): name for name in archive.namelist()}
+        if icon.lower() not in names:
+            raise SystemExit(f"{package.name}: <icon> names {icon}, which the package does not carry")
+        data = archive.read(names[icon.lower()])
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        raise SystemExit(f"{package.name}: the icon {icon} is not a PNG")
+    width, height = struct.unpack(">II", data[16:24])
+    if (width, height) != (128, 128):
+        raise SystemExit(f"{package.name}: the icon {icon} is {width}x{height}, not 128x128")
+    return icon
+
+
 def text(metadata, name, package):
     found = children(metadata, name)
     value = (found[0].text or "").strip() if len(found) == 1 else ""
@@ -66,6 +84,8 @@ def main():
         found = packages.get(package_id.lower(), [])
         if len(found) != 1:
             raise SystemExit(f"expected exactly one {package_id} package (any casing) in {folder}, found {len(found)}: {[p.name for p, *_ in found]}")
+
+    icons = [check_icon(package, metadata) for package, metadata, _, _ in (packages["logbird"][0], packages["logbird.aspnetcore"][0])]
 
     _, _, _, logbird_version = packages["logbird"][0]
     aspnet, metadata, frameworks, aspnet_version = packages["logbird.aspnetcore"][0]
@@ -104,7 +124,7 @@ def main():
         if exclude != EXCLUDE:
             raise SystemExit(f"{aspnet.name}: the {framework} Logbird dependency excludes {sorted(exclude)}, expected {sorted(EXCLUDE)}")
 
-    print(f"Logbird {logbird_version} and Logbird.AspNetCore {aspnet_version}: Logbird.AspNetCore depends on exactly Logbird {pinned} for {', '.join(frameworks)}")
+    print(f"Logbird {logbird_version} and Logbird.AspNetCore {aspnet_version}: Logbird.AspNetCore depends on exactly Logbird {pinned} for {', '.join(frameworks)}; both carry their 128x128 PNG icon ({', '.join(icons)})")
 
 
 if __name__ == "__main__":

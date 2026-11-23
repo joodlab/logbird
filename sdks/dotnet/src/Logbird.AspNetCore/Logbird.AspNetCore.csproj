@@ -7,6 +7,7 @@
     <PackageTags>$(PackageTags);aspnetcore</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbird-icon.png</PackageIcon>
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
@@ -15,6 +16,8 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\Logbird\Logbird.csproj" />
     <None Include="README.md" Pack="true" PackagePath="\" />
+    <!-- The Logbird mark (apps/app/public/brand/logbird-mark.svg) at 128x128, nuget.org's recommended size. -->
+    <None Include="..\..\logbird-icon.png" Pack="true" PackagePath="\" Visible="false" />
     <InternalsVisibleTo Include="Logbird.AspNetCore.Tests" />
   </ItemGroup>
 
