@@ -299,6 +299,34 @@ public class ScopedFollowUpTests
         Assert.Contains(nameof(SentinelDestination), error.StackTrace, StringComparison.Ordinal);
     }
 
+    /// <summary>A response that throws every time it is disposed.</summary>
+    private sealed class BrokenResponse : HttpResponseMessage
+    {
+        public BrokenResponse(HttpContent content)
+            : base(HttpStatusCode.OK)
+        {
+            Content = content;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            throw new IOException("fictional response cleanup failure");
+        }
+    }
+
+    [Fact]
+    public async Task A_destination_failure_survives_a_response_that_throws_whenever_it_is_disposed()
+    {
+        var failure = new SentinelException("fictional disk full");
+        var content = new ByteArrayContent(Encoding.UTF8.GetBytes("evt_1\n"));
+        content.Headers.TryAddWithoutValidation("Content-Type", "text/csv");
+        using var reader = Reader(Server(_ => new BrokenResponse(content)));
+        using var file = new SentinelDestination(failure);
+        var error = await Assert.ThrowsAsync<SentinelException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Csv), file));
+        Assert.Same(failure, error);
+    }
+
     /// <summary>A response body that fails like a dropped connection on its first read.</summary>
     private sealed class FailingSource(Exception failure) : Stream
     {

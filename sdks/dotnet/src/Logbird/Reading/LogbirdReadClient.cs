@@ -471,7 +471,10 @@ public sealed class LogbirdReadClient : IDisposable
             throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached: " + e.GetType().Name);
         }
 
-        using (response)
+        // Disposed exactly once: after a destination failure it is disposed quietly, and never again (a response that
+        // throws from Dispose would otherwise replace that failure).
+        var responseDisposed = false;
+        try
         {
             if (!response.IsSuccessStatusCode)
             {
@@ -537,6 +540,7 @@ public sealed class LogbirdReadClient : IDisposable
                     // The destination's failure is the one to report: a failure while cleaning up the download (the body
                     // stream or the response throwing from Dispose) must not replace it.
                     cleanedUp = true;
+                    responseDisposed = true;
                     DisposeQuietly(source);
                     DisposeQuietly(response);
                     throw;
@@ -567,6 +571,13 @@ public sealed class LogbirdReadClient : IDisposable
             catch (Exception e) when (IsDownloadFailure(e))
             {
                 throw new LogbirdApiException(response.StatusCode, "unreachable", "The export download failed part way: " + e.GetType().Name);
+            }
+        }
+        finally
+        {
+            if (!responseDisposed)
+            {
+                response.Dispose();
             }
         }
     }
