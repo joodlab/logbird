@@ -6,10 +6,11 @@ import { Panel } from '@logbird/ui/components/page-header';
 import { StatTile, StatTileGrid } from '@logbird/ui/components/stat-card';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@logbird/ui/components/ui/popover';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeftIcon, BookmarkIcon, Rows3Icon, SearchXIcon, VenetianMaskIcon } from 'lucide-react';
+import { ArrowLeftIcon, BookmarkIcon, InfoIcon, Rows3Icon, SearchXIcon, VenetianMaskIcon } from 'lucide-react';
 import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { SupportSplitPanel, useSupportCounts, WhoSegmentedControl } from '@/components/entities/support-split';
@@ -20,9 +21,18 @@ import { Timestamp } from '@/components/timestamp';
 import { SaveEntityViewButton } from '@/components/views/save-entity-view-button';
 import { current } from '@/lib/api/current';
 import { ApiRequestError } from '@/lib/api/errors';
-import { entityProfileQuery } from '@/lib/api/queries';
+import { entityProfileQuery, entitySeenQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
-import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIcon } from '@/lib/entities';
+import {
+  countsMentions,
+  ENTITY_SECTIONS,
+  type EntitySection,
+  entityBaseQuery,
+  historyBounds,
+  lookupType,
+  splitTargetId,
+  typeIcon,
+} from '@/lib/entities';
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
@@ -56,16 +66,26 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
   const displayId = kind === 'target' ? splitTargetId(entityId, targetType ?? p?.entity.type).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
-  const baseQuery = kind === 'target' && !p ? '' : entityQuery(kind, entityId, p?.entity.type);
+  const baseQuery = entityBaseQuery(kind, entityId, targetType, p?.entity.type);
   const support = useSupportCounts(projectId, kind, entityId, baseQuery, timeline.range);
   const lang = timeline.lang ?? 'query';
   const who = whoFilter(timeline.q, lang);
   const onWho = (next: WhoFilter) => onTimelineChange({ q: withWhoFilter(timeline.q, next, lang), ev: undefined });
   // The history shows everything this entity did unless the reader picked a range; the charts follow the picker.
   const { explicit: rangeChosen, clearRange } = useRange();
-  // Only this entity's own profile may define its history (a placeholder can still hold the previous entity's).
+  // Only this entity's own data may define its history (a placeholder can still hold the previous entity's). The window is
+  // the union of the directory's quick first/last seen and the profile's: whichever answers first starts the history, and
+  // the other can only widen it (historyBounds), so the history never waits for the whole profile nor leaves an event out.
   const own = p;
-  const timelineRange = rangeChosen ? timeline.range : own ? historyRange(own.entity.firstSeen, Date.now(), own.entity.lastSeen) : undefined;
+  // A record id with more colons can share its rollup key with another record, whose events would widen the window; the
+  // profile reads such a record's own events, so only it bounds the window then.
+  const directoryBounds = kind !== 'target' || countsMentions(kind, entityId);
+  const seen = useQuery({
+    ...entitySeenQuery(projectId, kind, entityId, lookupType(kind, entityId, targetType)),
+    enabled: !rangeChosen && directoryBounds,
+  });
+  const bounds = historyBounds(seen.data, own?.entity);
+  const timelineRange = rangeChosen ? timeline.range : bounds ? historyRange(bounds.firstSeen, Date.now(), bounds.lastSeen) : undefined;
   // Out of a full history, links say "all" rather than this entity's computed window, so the next page is not narrowed.
   const linkRange = rangeChosen ? timeline.range : ALL_RANGE;
   // What History shows (the entity plus any filters typed or picked there): the explorer links and Save as view use it.
@@ -189,7 +209,38 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
 
         <StatTileGrid className="grid-cols-2 sm:grid-cols-4">
           <StatTile label={`Events · ${rangeInSentence(rangeLabel(timeline.range))}`} loading={!p} value={p ? formatNumber(outcomeTotal) : ''} />
-          <StatTile label="Events · all time" loading={!p} value={p ? formatNumber(p.entity.events) : ''} />
+          <StatTile
+            label={
+              countsMentions(kind, entityId) ? (
+                // For a record whose id has one colon the server reads the rollup, which counts each time an event names
+                // the record (twice if it lists it twice). With more colons it counts the events themselves.
+                <span className="inline-flex items-center gap-1">
+                  Mentions · all time
+                  {/* A popover, not a tooltip: it opens by click, tap or keyboard, so every reader can get the explanation. */}
+                  <Popover>
+                    <PopoverTrigger
+                      render={
+                        <button
+                          aria-label="About this count"
+                          className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                          type="button"
+                        />
+                      }
+                    >
+                      <InfoIcon className="size-3" />
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64 p-3 text-sm">
+                      How many times events named this record. An event that lists it twice counts twice.
+                    </PopoverContent>
+                  </Popover>
+                </span>
+              ) : (
+                'Events · all time'
+              )
+            }
+            loading={!p}
+            value={p ? formatNumber(p.entity.events) : ''}
+          />
           <StatTile label="First seen" loading={!p} value={p ? <Timestamp format="date" iso={p.entity.firstSeen} /> : ''} />
           <StatTile label="Last seen" loading={!p} value={p ? <Timestamp format="relative" iso={p.entity.lastSeen} /> : ''} />
         </StatTileGrid>

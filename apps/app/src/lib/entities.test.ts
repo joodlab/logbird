@@ -1,5 +1,16 @@
+import { formatRecordTerm } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { entityMatchRank, entityQuery, exactPerKind, idFromFreeText, resolveJump } from './entities';
+import {
+  countsMentions,
+  entityBaseQuery,
+  entityMatchRank,
+  entityQuery,
+  exactPerKind,
+  historyBounds,
+  idFromFreeText,
+  lookupType,
+  resolveJump,
+} from './entities';
 
 describe('entity match rank (the order Jump to lists entities in)', () => {
   const tenant = (id: string, name = '') => ({ kind: 'tenant' as const, id, name, type: '' });
@@ -77,5 +88,43 @@ describe('exact ids, one per kind', () => {
       e('target', 'doc:ACME', 'doc'),
     ];
     expect(exactPerKind(found, 'acme').map((x) => `${x.kind}:${x.id}`)).toEqual(['actor:acme', 'tenant:acme', 'executor:ACME', 'target:doc:ACME']);
+  });
+});
+
+describe('a record page history starts from the link when it carries the exact pair (#220 item 5)', () => {
+  it('uses the linked type at once, falls back to the profile, and never guesses', () => {
+    expect(entityBaseQuery('target', 'order:archived:A1', 'order:archived', undefined)).toBe(formatRecordTerm('order:archived', 'A1'));
+    // Before the profile arrives and without a linked type: no history yet, rather than a guessed split.
+    expect(entityBaseQuery('target', 'order:archived:A1', undefined, undefined)).toBe('');
+    expect(entityBaseQuery('target', 'order:archived:A1', undefined, 'order:archived')).toBe(formatRecordTerm('order:archived', 'A1'));
+    // A linked type that does not belong to the id is ignored.
+    expect(entityBaseQuery('target', 'order:archived:A1', 'invoice', undefined)).toBe('');
+    expect(entityBaseQuery('actor', 'qa-user-1', undefined, undefined)).toBe('actor:qa-user-1');
+  });
+
+  it('calls the all-time count mentions only where the server reads it from the rollup', () => {
+    expect(countsMentions('target', 'page:7')).toBe(true);
+    // More colons: the server counts the events themselves.
+    expect(countsMentions('target', 'order:archived:A1')).toBe(false);
+    expect(countsMentions('actor', 'qa-user-1')).toBe(false);
+  });
+
+  it('starts the history window from whichever source answers first and only ever widens it', () => {
+    const directory = { firstSeen: '2026-11-22T00:00:00.000Z', lastSeen: '2026-11-23T00:00:00.000Z' };
+    const profile = { firstSeen: '2026-11-13T00:00:00.000Z', lastSeen: '2026-11-22T12:00:00.000Z' };
+    expect(historyBounds(undefined, undefined)).toBeNull();
+    expect(historyBounds(directory, undefined)).toEqual(directory);
+    expect(historyBounds(null, profile)).toEqual(profile);
+    // A late-arriving older event the profile reports is never left out of the history.
+    expect(historyBounds(directory, profile)).toEqual({ firstSeen: profile.firstSeen, lastSeen: directory.lastSeen });
+  });
+
+  it('looks a record up by a type that belongs to it', () => {
+    expect(lookupType('target', 'page:7', 'page')).toBe('page');
+    expect(lookupType('target', 'page:7', undefined)).toBe('page');
+    expect(lookupType('target', 'page:7', 'invoice')).toBe('page');
+    expect(lookupType('target', 'order:archived:A1', 'order:archived')).toBe('order:archived');
+    expect(lookupType('target', 'order:archived:A1', undefined)).toBeUndefined();
+    expect(lookupType('actor', 'qa-user-1', undefined)).toBeUndefined();
   });
 });
