@@ -48,3 +48,13 @@ it('a purge in progress is "Running now", never overdue, with no stale time besi
   expect(host.textContent).not.toContain('Overdue');
   expect(host.textContent).toContain('The purge in progress, under Last purge.');
 });
+
+it('while a purge runs, the next one ahead says the run is in progress, and no schedule still says "Running now"', () => {
+  show('2026-11-23T12:30:00.000Z', true);
+  expect(host.querySelector('[data-testid="purge-running-next"]')?.textContent).toContain('After the purge in progress');
+  show(null, true);
+  expect(host.textContent).toContain('Running now');
+  expect(host.textContent).not.toContain('Not scheduled');
+  show(null, false);
+  expect(host.textContent).toContain('Not scheduled');
+});

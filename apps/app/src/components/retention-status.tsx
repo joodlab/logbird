@@ -27,14 +27,30 @@ export function NextPurge({ at, running }: { at: string | null; running: boolean
   }, []);
   const state = nextPurgeState(at, now, running);
   if (state === 'none')
-    return (
+    return running ? (
+      <StatusItem detail="The purge in progress, under Last purge. The worker schedules the next one hourly." label="Next purge">
+        Running now
+      </StatusItem>
+    ) : (
       <StatusItem detail="The worker schedules it hourly" label="Next purge">
         <span className="font-normal text-muted-foreground">Not scheduled</span>
       </StatusItem>
     );
   if (state === 'scheduled')
     return (
-      <StatusItem detail={<Timestamp format="full" iso={at} />} label="Next purge">
+      <StatusItem
+        detail={
+          running ? (
+            // The next hourly run is still ahead, but one is in progress now: say both.
+            <span data-testid="purge-running-next">
+              After the purge in progress (under Last purge). <Timestamp format="full" iso={at} />
+            </span>
+          ) : (
+            <Timestamp format="full" iso={at} />
+          )
+        }
+        label="Next purge"
+      >
         <Timestamp format="relative" iso={at} />
       </StatusItem>
     );
