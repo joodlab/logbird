@@ -129,19 +129,22 @@ is refused. Keys and the ClickHouse login come only from the environment:
 
 ```bash
 # From the repository root, with the root .env (local services) and a server from master on 127.0.0.1:4741.
-# dotenv -o makes the local .env override inherited values; local-only.mjs then refuses unless DATABASE_URL,
-# CLICKHOUSE_URL and REDIS_URL all point at this machine, before the fixture script writes anything.
+# dotenv fills in only what your shell has not set, so pass explicitly whatever differs from .env for the server under
+# test, for example DATABASE_URL=<its scratch database> before each command (and its own endpoint below).
+# local-only.mjs then refuses unless DATABASE_URL, CLICKHOUSE_URL and REDIS_URL all point at this machine, before the
+# fixture script writes anything. The fixture file, by contrast, is loaded with -o: its fresh keys and project id must win
+# over any LOGBIRD_IT_* left in your shell, so the soak writes to the project that delete removes.
 F=/path/outside/the/repo/soak.env
-pnpm exec dotenv -o -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
-  pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
-pnpm exec dotenv -o -e .env -e "$F" -- sh -c '
+pnpm exec dotenv -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
+  pnpm exec dotenv -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
+pnpm exec dotenv -e .env -- pnpm exec dotenv -o -e "$F" -- sh -c '
   export LOGBIRD_SOAK_INGEST_KEY="$LOGBIRD_IT_INGEST_KEY" LOGBIRD_SOAK_READ_KEY="$LOGBIRD_IT_READ_KEY"
   export LOGBIRD_SOAK_PROJECT_ID="$LOGBIRD_IT_PROJECT_ID" LOGBIRD_SOAK_CLICKHOUSE_URL="$CLICKHOUSE_URL"
   export LOGBIRD_SOAK_CLICKHOUSE_USER="$CLICKHOUSE_USER" LOGBIRD_SOAK_CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD"
   export LOGBIRD_SOAK_CLICKHOUSE_DATABASE="$CLICKHOUSE_DATABASE"
   cd sdks/dotnet && dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --upstream http://127.0.0.1:4741 --duration 2h --rate 50'
-pnpm exec dotenv -o -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
-  pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts delete "$F"
+pnpm exec dotenv -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
+  pnpm exec dotenv -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts delete "$F"
 ```
 
 The fixture file holds fresh keys with owner-only permissions; keep it outside the repository. `delete` purges the
@@ -165,8 +168,7 @@ master, with its report attached to the gate brief.
 - **The client's own counters, in both layers:**
   - the summed `Stats.Delivered` equals the ids acknowledged to the client and not reported dropped;
   - `Rejected + Dropped` equals the drop reports.
-- **Only documented drop reasons.** `TooLarge`, `Invalid` and `InvalidEntityId` also fail, because the harness never
-  sends such events.
+- **Only documented drop reasons.** `TooLarge` and `Invalid` also fail, because the harness never sends such events.
 - **Never throws into the caller**: no `Track` call throws.
 - **No failed or hung flush or shutdown:**
   - a periodic `FlushAsync` must return true within 6 minutes (a batch's 5-minute retry budget plus slack);

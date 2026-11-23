@@ -22,7 +22,7 @@ internal static class Program
     internal static readonly HashSet<DropReason> Documented =
     [
         DropReason.QueueFull, DropReason.Rejected, DropReason.HttpError, DropReason.TooLarge, DropReason.Shutdown,
-        DropReason.Invalid, DropReason.InvalidEntityId, DropReason.Unacknowledged,
+        DropReason.Invalid, DropReason.Unacknowledged,
     ];
 
     /// <summary>Drops the documentation calls "not confirmed": the server may already have stored the event.</summary>
@@ -767,7 +767,7 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         var acknowledgedNotDropped = standIn.Acknowledged.Entries().Count(e => trackedSet.Contains(e.Key) && !dropped.ContainsKey(e.Key));
         var totals = Totals();
         var undocumented = _dropReasons.Keys.Where(r => !Program.Documented.Contains(r)).ToArray();
-        var unexpected = _dropReasons.Keys.Where(r => r is DropReason.TooLarge or DropReason.Invalid or DropReason.InvalidEntityId).ToArray();
+        var unexpected = _dropReasons.Keys.Where(r => r is DropReason.TooLarge or DropReason.Invalid).ToArray();
         var achieved = _loadSeconds > 0 ? tracked.Length / _loadSeconds : 0;
 
         ResourceSample[] samples;

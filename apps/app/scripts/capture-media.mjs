@@ -65,6 +65,8 @@ try {
     await page.waitForTimeout(1600);
     await page.keyboard.press('Escape');
     await query.fill('');
+    // Close the suggestions first: Enter on an empty bar with the panel open would run a suggested query.
+    await query.press('Escape');
     await query.press('Enter');
     await page.getByRole('switch', { name: 'Live', exact: true }).click();
     for (let i = 0; i < 3; i++) {
@@ -191,28 +193,90 @@ try {
     const download = await page.request.get(`${base}/api/projects/${fixture.projectId}/export?${exportParams}`);
     assert.equal(download.status(), 200, 'The evidence export downloads');
     assert.ok((await download.body()).length > 0, 'The evidence export has rows');
+    // This run's export id, from the download's filename: both themes open this export's own record, which can land in
+    // Workspace activity a moment after the download ends.
+    const exportId = /events-([0-9a-f-]{36})-evidence/.exec(download.headers()['content-disposition'] ?? '')?.[1];
+    assert.ok(exportId, 'The download names its export id');
+    const recordQuery = `action:export.completed ${exportId.slice(0, 8)}`;
     // The record's evidence (period, query, clock, SHA-256, size, rows) is its attributes. The attribute table truncates
     // long keys and the digest, so open the raw payload, scroll its attributes block to just under the sheet's sticky
     // header (the record's title and action), and keep the sheet from its top to the end of that block: one real,
     // contiguous region of the screen, legible at the size a marketing section allows.
     async function exportRecord(name) {
-      await page.goto(`${base}/workspace/activity?q=${encodeURIComponent('action:export.completed')}`);
+      let row;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await page.goto(`${base}/workspace/activity?q=${encodeURIComponent(recordQuery)}`);
+        await settle();
+        row = page
+          .locator('[data-index]')
+          .filter({ hasText: exportId.slice(0, 8) })
+          .first();
+        if (await row.count()) break;
+        await page.waitForTimeout(1000);
+      }
+      await row.click();
       await settle();
-      await page.locator('[data-index]').first().click();
-      await settle();
+      assert.ok(
+        await page
+          .getByRole('dialog')
+          .getByText(`Export ${exportId.slice(0, 8)}`)
+          .count(),
+        "This run's export record is open",
+      );
       const sheet = page.getByRole('dialog');
       await sheet.getByText(/raw payload/i).click();
       await page.waitForTimeout(400);
+      // The full id, not only its first eight characters: the raw payload's exportId must be this run's export.
+      const rawText = (await sheet.innerText()).replace(/\s+/g, '');
+      assert.ok(rawText.includes(`"metadata.export.exportId":"${exportId}"`), "The open record's exportId is this run's export");
       const start = sheet.getByText('"attributes"', { exact: false }).last();
-      const end = sheet.getByText('metadata.export.receivedBefore', { exact: false }).last();
       // The raw payload has its own scroll area inside the sheet: bring its attributes block to the top of that area.
       await start.evaluate((el) => el.scrollIntoView({ block: 'start' }));
       await page.waitForTimeout(300);
-      const box = await sheet.boundingBox();
-      const last = await end.boundingBox();
-      const height = Math.min(Math.round(last.y + last.height + 16 - box.y), Math.round(box.height));
-      await sharp(await sheet.screenshot())
-        .extract({ left: 0, top: 0, width: Math.round(box.width), height })
+      // Two real regions of the same screen, each cut on whole lines (maintainer on #289): the sheet's sticky header
+      // (title, action, time), then the raw payload box from its "attributes" line to the last line fully inside it,
+      // stopping at receivedBefore. The attribute table between them is left out.
+      const regions = await start.evaluate((el) => {
+        const sheetEl = el.closest('[role=dialog]');
+        const curl = [...sheetEl.querySelectorAll('button')].find((b) => /copy as curl/i.test(b.textContent ?? ''));
+        const boxEl = el.closest('[class*="max-h-"]');
+        const top = sheetEl.getBoundingClientRect().top;
+        const left = sheetEl.getBoundingClientRect().left;
+        const boxRect = boxEl.getBoundingClientRect();
+        // JSON lines are the innermost .ps-4 rows; keep those fully inside the box, up to receivedBefore.
+        const lines = [...boxEl.querySelectorAll('div.ps-4')].filter((row) => !row.querySelector('div.ps-4'));
+        let end = boxRect.top;
+        for (const row of lines) {
+          const r = row.getBoundingClientRect();
+          if (r.top < boxRect.top - 1 || r.bottom > boxRect.bottom - 1) continue;
+          end = Math.max(end, r.bottom);
+          if (/receivedBefore/.test(row.textContent ?? '')) break;
+        }
+        return {
+          header: { top: 0, height: Math.round(curl.getBoundingClientRect().bottom + 12 - top) },
+          box: {
+            left: Math.round(boxRect.left - left),
+            top: Math.round(boxRect.top - top),
+            width: Math.round(boxRect.width),
+            height: Math.round(end + 2 - boxRect.top),
+          },
+          width: Math.round(sheetEl.getBoundingClientRect().width),
+        };
+      });
+      const full = await sheet.screenshot();
+      const header = await sharp(full).extract({ left: 0, top: 0, width: regions.width, height: regions.header.height }).toBuffer();
+      const box = await sharp(full)
+        .extract({ left: regions.box.left, top: regions.box.top, width: regions.box.width, height: regions.box.height })
+        .toBuffer();
+      // The gap between the two regions takes the sheet's own background, sampled beside the header.
+      const { data } = await sharp(full)
+        .extract({ left: 2, top: regions.header.height - 2, width: 1, height: 1 })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const background = { r: data[0], g: data[1], b: data[2], alpha: 1 };
+      await sharp(header)
+        .extend({ bottom: regions.box.height + 16, background })
+        .composite([{ input: box, top: regions.header.height + 8, left: regions.box.left }])
         .webp({ quality: 88 })
         .toFile(resolve(output, `${name}.webp`));
     }
