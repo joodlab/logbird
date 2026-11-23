@@ -125,6 +125,24 @@ export const formFrom = (e: WebhookEndpoint | null): Form => ({
 });
 export type FormErrors = Partial<Record<keyof Form | 'form', string>>;
 
+/**
+ * The PATCH body for an edited endpoint: only what changed (a changed URL is checked again, an unchanged one is not).
+ * A held scope always sends the chosen scope, even when it reads the same or is empty: that is how it is repaired. A
+ * filter that cannot run always sends the filter, so saving it unchanged shows the server's reason beside it instead of
+ * closing with nothing saved.
+ */
+export function endpointPatch(target: WebhookEndpoint, f: Form, scope: ReturnType<typeof scopeOf>): Record<string, unknown> {
+  const before = formFrom(target);
+  const body: Record<string, unknown> = {};
+  if (f.url.trim() !== before.url) body.url = f.url.trim();
+  if (f.description.trim() !== before.description) body.description = f.description.trim() || null;
+  if (f.filter.trim() !== before.filter || target.filterWarning === 'webhook_filter_invalid') body.filterQuery = f.filter.trim();
+  // Compared with the scope as stored (not trimmed).
+  if (target.scopeWarning || JSON.stringify(scope) !== JSON.stringify(storedScope(target))) body.scope = scope;
+  if (f.enabled !== before.enabled) body.enabled = f.enabled;
+  return body;
+}
+
 /** The contract's limits, checked before sending, on the field that breaks them. */
 export function validateWebhookForm(f: Form): FormErrors {
   const e: FormErrors = {};

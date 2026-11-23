@@ -18,8 +18,10 @@ const REASON_TITLES: Record<QueryErrorDetails['reason'], string> = {
   limit: 'Query hit a resource limit',
 };
 
-export function reasonTitle(details: QueryErrorDetails | null, code: QueryProblem['code']): string {
+export function reasonTitle(details: QueryErrorDetails | null, code: QueryProblem['code'], message = ''): string {
   if (code === 'sql_mode_unavailable') return 'SQL mode is unavailable';
+  // The server reports a /pattern/ RE2 cannot run as a type error; the reader needs to know it is the pattern.
+  if (details?.reason === 'type' && /\bRE2\b/.test(`${message} ${details.hint ?? ''}`)) return 'Regex not supported';
   return details ? REASON_TITLES[details.reason] : 'Invalid query';
 }
 

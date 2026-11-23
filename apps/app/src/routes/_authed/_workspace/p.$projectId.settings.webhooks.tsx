@@ -33,6 +33,7 @@ import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import {
   disabledCopy,
   displayUrl,
+  endpointPatch,
   endpointStates,
   type Form,
   type FormErrors,
@@ -44,7 +45,6 @@ import {
   scopeOf,
   scopeSummary,
   sendBlockedCopy,
-  storedScope,
   validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
@@ -237,7 +237,7 @@ function EndpointCard({
       if (problem)
         setRejected({
           query: endpoint.filterQuery,
-          message: `${reasonTitle(problem.details, problem.code)}: ${queryProblemText(problem, endpoint.filterQuery)}`,
+          message: `${reasonTitle(problem.details, problem.code, problem.message)}: ${queryProblemText(problem, endpoint.filterQuery)}`,
         });
       else toast.error('Could not confirm the filter', { description: webhookErrorCopy(error) });
     },
@@ -426,16 +426,7 @@ function EndpointDialog({
         onSecretRef.current({ endpoint: result.endpoint, secret: result.secret, overlapSeconds: null });
         return { created: result.endpoint };
       }
-      const before = formFrom(target);
-      const body: Record<string, unknown> = {};
-      // Only what changed: a changed URL is checked again (DNS); an unchanged one is not.
-      if (f.url.trim() !== before.url) body.url = f.url.trim();
-      if (f.description.trim() !== before.description) body.description = f.description.trim() || null;
-      if (f.filter.trim() !== before.filter) body.filterQuery = f.filter.trim();
-      // Compared with the scope as stored (not trimmed), and always sent while the stored scope is invalid: repairing
-      // a held scope must send the chosen scope, even when it reads the same or is empty.
-      if (target.scopeWarning || JSON.stringify(scope) !== JSON.stringify(storedScope(target))) body.scope = scope;
-      if (f.enabled !== before.enabled) body.enabled = f.enabled;
+      const body = endpointPatch(target, f, scope);
       if (!Object.keys(body).length) return null;
       return api.webhooks.update(projectId, target.id, body);
     },
@@ -450,7 +441,7 @@ function EndpointDialog({
     onError: (error, { f, at }) => {
       if (error instanceof SaveAbandoned || at !== session.current) return;
       const problem = queryProblem(error, 'query');
-      if (problem) setErrors({ filter: `${reasonTitle(problem.details, problem.code)}: ${queryProblemText(problem, f.filter)}` });
+      if (problem) setErrors({ filter: `${reasonTitle(problem.details, problem.code, problem.message)}: ${queryProblemText(problem, f.filter)}` });
       else if (error instanceof ApiRequestError && error.code === 'webhook_url_not_allowed') setErrors({ url: webhookErrorCopy(error) });
       else {
         // A body the contract rejects names its field: put the message there.

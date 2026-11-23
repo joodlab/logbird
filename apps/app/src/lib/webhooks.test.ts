@@ -8,6 +8,7 @@ import {
   attemptWhy,
   disabledCopy,
   displayUrl,
+  endpointPatch,
   endpointStates,
   type Form,
   fieldErrorsFromValidation,
@@ -151,6 +152,15 @@ describe('webhooks after delivery (#179)', () => {
     for (const s of states) for (const text of [s.title, s.what, s.lost, s.todo]) expect(text.length).toBeGreaterThan(10);
     expect(states.find((s) => s.key === 'cursor')?.todo).toMatch(/nothing to do here/);
     expect(endpointStates(endpoint({}))).toEqual([]);
+  });
+  it('saving an endpoint whose filter cannot run always sends the filter, so the server can say why it still cannot', () => {
+    const invalid = endpoint({ filterQuery: 'action:/(?=x)/', filterWarning: 'webhook_filter_invalid' });
+    expect(endpointPatch(invalid, formFrom(invalid), scopeOf(formFrom(invalid)))).toEqual({ filterQuery: 'action:/(?=x)/' });
+    // Nothing else held: an unchanged form sends nothing; the review hold is confirmed from its panel.
+    const fine = endpoint({ filterQuery: 'action:x' });
+    expect(endpointPatch(fine, formFrom(fine), scopeOf(formFrom(fine)))).toEqual({});
+    const review = endpoint({ filterQuery: 'action:x', filterWarning: 'webhook_filter_review_required' });
+    expect(endpointPatch(review, formFrom(review), scopeOf(formFrom(review)))).toEqual({});
   });
   it('explains a filter that cannot run as its own hold: what is wrong, that nothing is sent, and that editing clears it', () => {
     const held = endpoint({ filterWarning: 'webhook_filter_invalid' });
