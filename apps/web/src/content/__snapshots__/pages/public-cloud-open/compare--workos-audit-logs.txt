@@ -1,0 +1,264 @@
+title: WorkOS Audit Logs · Logbird
+description: WorkOS Audit Logs is a hosted audit log API with an Admin Portal viewer and SIEM log streams. How it compares with Logbird, sourced.
+
+headings:
+h1 Logbird and WorkOS Audit Logs
+h2 At a glance
+h2 When to choose WorkOS Audit Logs
+h2 When to choose Logbird
+h2 Sources
+h3 What we couldn't verify
+h2 Start with one event.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Compare
+Logbird and WorkOS Audit Logs
+WorkOS Audit Logs is a hosted service for recording what users do in your product and handing that record to your enterprise customers. You define a schema for each action, send events to the WorkOS API, and your customers' IT admins can view and export them through the WorkOS Admin Portal. Events can also stream to Datadog, Splunk, S3, Google Cloud Storage, Microsoft Sentinel, Snowflake or any HTTPS endpoint. If your customers' IT teams expect to browse and export audit logs themselves, it covers that out of the box. [W1, W2, W3, W4, W5]
+Checked 7 November 2026
+At a glance
+Each claim about another product links to its source below. Anything we couldn't verify is left out.
+[sr-only] Logbird and WorkOS Audit Logs compared, with a source for each claim about WorkOS Audit Logs
+[sr-only: Topic]
+Logbird
+WorkOS Audit Logs
+Licence and source
+MIT; source on GitHub
+No source code or licence published [W1, W2]
+Self-host
+Yes: Docker Compose or Coolify, with published images
+No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud. [W6]
+Hosting model
+Self-hosted, MIT; Logbird Cloud early access (invited teams)
+Hosted by WorkOS [W2]
+Schema
+Only an action string is required; nothing to register
+Event schemas must be configured per action before you emit; metadata JSON Schema validation is optional [W2, W7, W8]
+Required event fields
+action
+organization_id, action, occurred_at, actor, targets, context [W9]
+Search
+Query language and guarded SQL WHERE mode in the console
+Filter by actors, events, targets and dates in the Dashboard and Admin Portal [W1, W2]
+Export
+CSV or JSONL from the explorer
+CSV export through the Dashboard and the API, one organization and date range at a time, covering the past three months [W10]
+Streaming to SIEM
+No
+Log Streams to seven destination types [W5]
+Retention
+Per project, 7 days to 10 years; can be lowered, with a preview and permanent deletion
+Per organization; 30 days by default; can be raised up to 10 years; lowering isn't supported [W2, W11]
+Customer-facing viewer
+None yet; read API plus headless Vue helpers
+Admin Portal: view and export events [W3]
+Programmatic read
+GET /v1/events with a project read key
+Export API; Widgets GraphQL API to search one organization's events [W10, W12]
+Pricing
+Self-host free (MIT); Cloud pricing not set
+$0/month listed on the product page; $125/month per SIEM connection; $99/month per million events stored (as of 2026-11-07) [W1, W13]
+Licence and source
+Logbird
+MIT; source on GitHub
+WorkOS Audit Logs
+No source code or licence published [W1, W2]
+Self-host
+Logbird
+Yes: Docker Compose or Coolify, with published images
+WorkOS Audit Logs
+No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud. [W6]
+Hosting model
+Logbird
+Self-hosted, MIT; Logbird Cloud early access (invited teams)
+WorkOS Audit Logs
+Hosted by WorkOS [W2]
+Schema
+Logbird
+Only an action string is required; nothing to register
+WorkOS Audit Logs
+Event schemas must be configured per action before you emit; metadata JSON Schema validation is optional [W2, W7, W8]
+Required event fields
+Logbird
+action
+WorkOS Audit Logs
+organization_id, action, occurred_at, actor, targets, context [W9]
+Search
+Logbird
+Query language and guarded SQL WHERE mode in the console
+WorkOS Audit Logs
+Filter by actors, events, targets and dates in the Dashboard and Admin Portal [W1, W2]
+Export
+Logbird
+CSV or JSONL from the explorer
+WorkOS Audit Logs
+CSV export through the Dashboard and the API, one organization and date range at a time, covering the past three months [W10]
+Streaming to SIEM
+Logbird
+No
+WorkOS Audit Logs
+Log Streams to seven destination types [W5]
+Retention
+Logbird
+Per project, 7 days to 10 years; can be lowered, with a preview and permanent deletion
+WorkOS Audit Logs
+Per organization; 30 days by default; can be raised up to 10 years; lowering isn't supported [W2, W11]
+Customer-facing viewer
+Logbird
+None yet; read API plus headless Vue helpers
+WorkOS Audit Logs
+Admin Portal: view and export events [W3]
+Programmatic read
+Logbird
+GET /v1/events with a project read key
+WorkOS Audit Logs
+Export API; Widgets GraphQL API to search one organization's events [W10, W12]
+Pricing
+Logbird
+Self-host free (MIT); Cloud pricing not set
+WorkOS Audit Logs
+$0/month listed on the product page; $125/month per SIEM connection; $99/month per million events stored (as of 2026-11-07) [W1, W13]
+When to choose WorkOS Audit Logs
+Your enterprise customers' IT admins need to view and export their own audit logs today, through a ready-made portal.
+You need log streams to a SIEM (Datadog, Splunk, Sentinel, S3 and others) now.
+You want strongly typed events, validated against a schema for each action.
+You'd rather not run any infrastructure, and you already use WorkOS for other features.
+When to choose Logbird
+Your audit data must stay on your own servers, or you want to read and change the code.
+You want to start sending without defining schemas first, and add fields over time.
+Your team needs an operator console: search with a query language or SQL, entity pages, operation trees, workers and retries.
+You need to lower retention, not only raise it, and see what will be deleted before it happens.
+Self-host it
+Request access
+Sources
+All accessed 7 November 2026. If something has changed, tell us and we'll fix it.
+Report an outdated fact
+All comparisons
+W1
+Product page: "Advanced event logging, auditing, and exporting for IT admins"; filtering; pricing lines [sr-only: (opens in a new tab)]
+workos.com/audit-logs
+W2
+Docs overview: event structure, schemas required before emitting, Dashboard viewing, retention defaults [sr-only: (opens in a new tab)]
+workos.com/docs/audit-logs
+W3
+Admin Portal: "Users will be able to view and export Audit Log events…" [sr-only: (opens in a new tab)]
+workos.com/docs/audit-logs/admin-portal
+W4
+Platform Audit Logs (optional WorkOS-emitted events) [sr-only: (opens in a new tab)]
+workos.com/docs/audit-logs/platform-audit-logs
+W5
+Log Streams: Datadog, Splunk, AWS S3, Google Cloud Storage, Microsoft Sentinel, Snowflake, Generic HTTPS [sr-only: (opens in a new tab)]
+workos.com/docs/audit-logs/log-streams
+W6
+On-prem deployment guide [sr-only: (opens in a new tab)]
+workos.com/docs/on-prem-deployment
+W7
+Create schema API [sr-only: (opens in a new tab)]
+workos.com/docs/reference/audit-logs/schema/create
+W8
+Metadata schema: optional validation [sr-only: (opens in a new tab)]
+workos.com/docs/audit-logs/metadata-schema
+W9
+Create event API: required fields [sr-only: (opens in a new tab)]
+workos.com/docs/reference/audit-logs/event/create
+W10
+Exporting events: single organization, date range, past three months [sr-only: (opens in a new tab)]
+workos.com/docs/audit-logs/exporting-events
+Also: workos.com/docs/reference/audit-logs/export [sr-only: (opens in a new tab)]
+W11
+Set retention API: 1_MONTH to 11_MONTHS, 1_YEAR to 10_YEARS [sr-only: (opens in a new tab)]
+workos.com/docs/reference/audit-logs/retention/set
+W12
+Widgets API, audit events (GraphQL) [sr-only: (opens in a new tab)]
+workos.com/docs/widgets-api/audit-logs/audit-events.md
+W13
+Pricing page, Audit Logs section [sr-only: (opens in a new tab)]
+workos.com/pricing
+What we couldn't verify
+Left out of the table: Which storage engine holds the events; whether context.location, context.user_agent and actor or target sub-fields are each required; how the per-million-events charge relates to the 30-day default; event size and rate limits; Admin Portal link expiry and filter options; whether the Widgets GraphQL API is generally available; storage engine and data-residency options.
+All product names are trademarks of their respective owners. Logbird isn't affiliated with or endorsed by any of them.
+Start with one event.
+Self-host Logbird today, or request access to Logbird Cloud, where sign-ups are limited to invited teams for now.
+Request access
+Self-host it
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+W1 [aria-label: Source W1] → #source-W1
+W2 [aria-label: Source W2] → #source-W2
+W3 [aria-label: Source W3] → #source-W3
+W4 [aria-label: Source W4] → #source-W4
+W5 [aria-label: Source W5] → #source-W5
+W1 [aria-label: Source W1] → #source-W1
+W2 [aria-label: Source W2] → #source-W2
+W6 [aria-label: Source W6] → #source-W6
+W2 [aria-label: Source W2] → #source-W2
+W2 [aria-label: Source W2] → #source-W2
+W7 [aria-label: Source W7] → #source-W7
+W8 [aria-label: Source W8] → #source-W8
+W9 [aria-label: Source W9] → #source-W9
+W1 [aria-label: Source W1] → #source-W1
+W2 [aria-label: Source W2] → #source-W2
+W10 [aria-label: Source W10] → #source-W10
+W5 [aria-label: Source W5] → #source-W5
+W2 [aria-label: Source W2] → #source-W2
+W11 [aria-label: Source W11] → #source-W11
+W3 [aria-label: Source W3] → #source-W3
+W10 [aria-label: Source W10] → #source-W10
+W12 [aria-label: Source W12] → #source-W12
+W1 [aria-label: Source W1] → #source-W1
+W13 [aria-label: Source W13] → #source-W13
+W1 [aria-label: Source W1] → #source-W1
+W2 [aria-label: Source W2] → #source-W2
+W6 [aria-label: Source W6] → #source-W6
+W2 [aria-label: Source W2] → #source-W2
+W2 [aria-label: Source W2] → #source-W2
+W7 [aria-label: Source W7] → #source-W7
+W8 [aria-label: Source W8] → #source-W8
+W9 [aria-label: Source W9] → #source-W9
+W1 [aria-label: Source W1] → #source-W1
+W2 [aria-label: Source W2] → #source-W2
+W10 [aria-label: Source W10] → #source-W10
+W5 [aria-label: Source W5] → #source-W5
+W2 [aria-label: Source W2] → #source-W2
+W11 [aria-label: Source W11] → #source-W11
+W3 [aria-label: Source W3] → #source-W3
+W10 [aria-label: Source W10] → #source-W10
+W12 [aria-label: Source W12] → #source-W12
+W1 [aria-label: Source W1] → #source-W1
+W13 [aria-label: Source W13] → #source-W13
+Self-host it → /self-hosting
+Request access → /contact
+Report an outdated fact → /contact?interest=correction
+All comparisons → /compare
+Product page: "Advanced event logging, auditing, and exporting for IT admins"; filtering; pricing lines [sr-only: (opens in a new tab)] → https://workos.com/audit-logs
+Docs overview: event structure, schemas required before emitting, Dashboard viewing, retention defaults [sr-only: (opens in a new tab)] → https://workos.com/docs/audit-logs
+Admin Portal: "Users will be able to view and export Audit Log events…" [sr-only: (opens in a new tab)] → https://workos.com/docs/audit-logs/admin-portal
+Platform Audit Logs (optional WorkOS-emitted events) [sr-only: (opens in a new tab)] → https://workos.com/docs/audit-logs/platform-audit-logs
+Log Streams: Datadog, Splunk, AWS S3, Google Cloud Storage, Microsoft Sentinel, Snowflake, Generic HTTPS [sr-only: (opens in a new tab)] → https://workos.com/docs/audit-logs/log-streams
+On-prem deployment guide [sr-only: (opens in a new tab)] → https://workos.com/docs/on-prem-deployment
+Create schema API [sr-only: (opens in a new tab)] → https://workos.com/docs/reference/audit-logs/schema/create
+Metadata schema: optional validation [sr-only: (opens in a new tab)] → https://workos.com/docs/audit-logs/metadata-schema
+Create event API: required fields [sr-only: (opens in a new tab)] → https://workos.com/docs/reference/audit-logs/event/create
+Exporting events: single organization, date range, past three months [sr-only: (opens in a new tab)] → https://workos.com/docs/audit-logs/exporting-events
+workos.com/docs/reference/audit-logs/export [sr-only: (opens in a new tab)] → https://workos.com/docs/reference/audit-logs/export
+Set retention API: 1_MONTH to 11_MONTHS, 1_YEAR to 10_YEARS [sr-only: (opens in a new tab)] → https://workos.com/docs/reference/audit-logs/retention/set
+Widgets API, audit events (GraphQL) [sr-only: (opens in a new tab)] → https://workos.com/docs/widgets-api/audit-logs/audit-events.md
+Pricing page, Audit Logs section [sr-only: (opens in a new tab)] → https://workos.com/pricing
+Request access → /contact
+Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

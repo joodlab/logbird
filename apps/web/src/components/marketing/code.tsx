@@ -64,11 +64,26 @@ export function SiteCode({
         <span className="truncate font-mono text-[11px] text-muted-foreground uppercase tracking-wider">{title ?? language}</span>
         <CopyCode label="Copy code" value={code} />
       </div>
-      <pre className={cn(pre, wrap && 'whitespace-pre-wrap break-words')}>
-        <code>
-          <Highlighted code={code} language={language} />
-        </code>
-      </pre>
+      {wrap ? (
+        <pre className={cn(pre, 'whitespace-pre-wrap break-words')}>
+          <code>
+            <Highlighted code={code} language={language} />
+          </code>
+        </pre>
+      ) : (
+        // A block that scrolls sideways is a labelled keyboard stop, so it can be scrolled without a pointer. The copy
+        // button stays in the title bar above, outside the scroll area.
+        <pre
+          className={cn(pre, 'focus-visible:outline-2 focus-visible:outline-brand focus-visible:-outline-offset-2')}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be focusable to scroll by keyboard (WCAG 2.1.1)
+          tabIndex={0}
+          title={`${title ?? language} code`}
+        >
+          <code>
+            <Highlighted code={code} language={language} />
+          </code>
+        </pre>
+      )}
     </div>
   );
 }

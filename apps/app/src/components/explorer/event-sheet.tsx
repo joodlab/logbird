@@ -35,6 +35,7 @@ import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
+import { NotRecorded } from '@/components/not-recorded';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries';
@@ -48,6 +49,7 @@ import {
   parentActor,
   personLabel,
   roundsLargeNumbers,
+  unlinkedPartyLabel,
 } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
 import { andQuery, formatTerm } from '@/lib/query-language';
@@ -455,7 +457,7 @@ function MissingActor({ event, detail, projectId }: { event: AuditEvent; detail?
   const fromParent = detail ? parentActor(detail.parents) : null;
   return (
     <div className="flex min-w-0 flex-col gap-1" data-testid="missing-actor">
-      <span className="text-muted-foreground text-sm">Not recorded</span>
+      <NotRecorded />
       {fromAttribute ? (
         <span className="text-muted-foreground text-xs">
           Its <span className="font-mono">{fromAttribute.key}</span> attribute names{' '}
@@ -621,25 +623,32 @@ function EventDetailBody({
             <PartyCard hint={e.impersonator ? 'whose account' : 'who caused it'} icon={<UserIcon className="size-3" />} label="Actor">
               {e.actor ? (
                 <div className="flex min-w-0 flex-col gap-1">
-                  {projectId ? (
+                  {!e.actor.id ? (
+                    <PartyWithoutId party={e.actor} />
+                  ) : projectId ? (
                     <EntityLink id={e.actor.id} kind="actor" name={e.actor.name} projectId={projectId} type={e.actor.type} />
                   ) : (
                     <span className="truncate text-sm">{personLabel(e.actor)}</span>
                   )}
                   <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-                    <TypePill>{e.actor.type || 'unknown'}</TypePill>
-                    <span className="truncate font-mono">{e.actor.id}</span>
+                    <PartyType type={e.actor.type} />
+                    {e.actor.id ? <span className="truncate font-mono">{e.actor.id}</span> : null}
                   </span>
-                  {e.actor.email ? <span className="truncate text-muted-foreground text-xs">{e.actor.email}</span> : null}
+                  {/* The email once: not again when the first line already shows it (no name, or a name that is the email). */}
+                  {e.actor.email && actorFirstLine(e.actor, Boolean(projectId)) !== e.actor.email.trim() ? (
+                    <span className="truncate text-muted-foreground text-xs">{e.actor.email}</span>
+                  ) : null}
                 </div>
               ) : (
                 <MissingActor detail={detail} event={e} projectId={projectId} />
               )}
             </PartyCard>
             <PartyCard hint="who performed it" icon={<CogIcon className="size-3" />} label="Executor">
-              {e.executor?.id ? (
+              {e.executor ? (
                 <div className="flex min-w-0 flex-col gap-1">
-                  {projectId ? (
+                  {!e.executor.id ? (
+                    <PartyWithoutId party={e.executor} />
+                  ) : projectId ? (
                     <EntityLink
                       id={e.executor.id}
                       kind="executor"
@@ -651,7 +660,7 @@ function EventDetailBody({
                     <span className="truncate text-sm">{e.executor.name || e.executor.id}</span>
                   )}
                   <span className="flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
-                    <TypePill>{e.executor.type || 'unknown'}</TypePill>
+                    <PartyType type={e.executor.type} />
                     {e.executor.jobId ? <span className="font-mono">job {e.executor.jobId}</span> : null}
                     {e.executor.attempt > 0 ? (
                       <TypePill tone={e.executor.attempt > 1 ? 'warning' : 'neutral'}>attempt {e.executor.attempt}</TypePill>
@@ -659,7 +668,7 @@ function EventDetailBody({
                   </span>
                 </div>
               ) : (
-                <span className="text-muted-foreground text-sm">Not recorded</span>
+                <NotRecorded />
               )}
             </PartyCard>
             {e.impersonator ? (
@@ -877,5 +886,35 @@ function EventDetailBody({
         </Collapsible>
       </div>
     </div>
+  );
+}
+
+/** The text the actor card's first line shows: the profile link's name or id, else the plain label. */
+function actorFirstLine(actor: { id: string; name: string; email: string }, linked: boolean): string {
+  if (!actor.id) return unlinkedPartyLabel(actor);
+  return linked ? actor.name.trim() || actor.id : personLabel(actor);
+}
+
+/** A party's type pill: a long type (up to 64 characters) truncates inside the card, with the whole type as its title. */
+function PartyType({ type }: { type: string }) {
+  const label = type || 'unknown';
+  return (
+    <TypePill className="min-w-0 max-w-full">
+      <span className="min-w-0 truncate" title={label}>
+        {label}
+      </span>
+    </TypePill>
+  );
+}
+
+/** The drawer's first line for a party recorded without an id: its name or email as plain text; the type pill below says what it is. */
+function PartyWithoutId({ party }: { party: { name?: string; email?: string } }) {
+  const label = unlinkedPartyLabel(party);
+  return label ? (
+    <bdi className="truncate text-sm" title="Recorded without an ID">
+      {label}
+    </bdi>
+  ) : (
+    <span className="text-muted-foreground text-sm">No ID recorded</span>
   );
 }

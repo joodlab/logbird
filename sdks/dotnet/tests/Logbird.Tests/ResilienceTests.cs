@@ -231,7 +231,7 @@ public class ResilienceTests
         });
         Assert.Equal("pagination_stalled", error.Code);
         Assert.Equal(3, server.Requests.Count);
-        await Assert.ThrowsAsync<ArgumentException>(() => reader.GetAsync(".."));
+        await Assert.ThrowsAsync<ArgumentException>(() => reader.GetEventAsync(".."));
         Assert.Throws<ArgumentException>(() => new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k", Timeout = TimeSpan.FromDays(30) }));
     }
 

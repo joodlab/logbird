@@ -12,6 +12,19 @@ Ingest runs only on servers. Never put an ingest or read key in public runtime c
 components or browser bundles. Vue only calls an application-owned, authenticated backend.
 The backend must authorize the requested tenant/record, including every cursor request.
 A project read key is project-wide; a query filter is not authorization.
+`trailQuery` never widens a read: it throws a `TypeError` for a trail with no target, actor, tenant or query, and for a
+selector key passed without a value (`tenant: session.tenantId` with no tenant id), and the Vue and TanStack integrations
+then report an error instead of fetching. The one exception is the Nuxt composable: it talks only to its own read route,
+whose `authorize` decides the scope on the server, so `useAuditTrail({})` sends an empty trail there; the route refuses
+a trusted query without `q`. Every read helper first copies its input into a frozen snapshot of strings and numbers,
+reading each property once, and refuses a value of the wrong type (`TrailQueryError`, a `TypeError`): selectors and `q`
+are strings, range bounds are a `Date`, whole epoch milliseconds or an ISO 8601 string, and containers are plain objects
+or class instances (an array, `Date` or `Map` is refused, and so is a `range` with neither bound). The server resolves
+an open end (no `to`, or `now` in `q`) for each request, so an ascending trail can gain newer events on later pages.
+Whatever its input, `readAuditTrail` never sends a request without a non-blank `q`; pass `q: 'timestamp:*'` to read a
+whole project on purpose.
+The read helpers require Logbird 0.2.0 or later: against an older server a selector value containing `*` is read as a
+prefix, so it can match more than the named tenant, actor or record.
 
 Actor means who caused the action; executor means the API or worker performing it. Resolve
 actor and tenant from authenticated server state, never directly from untrusted headers.

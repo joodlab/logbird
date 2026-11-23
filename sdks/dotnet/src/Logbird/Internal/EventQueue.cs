@@ -33,7 +33,114 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
 
     public bool TrySettle() => Interlocked.CompareExchange(ref _state, Settled, Pending) == Pending;
 
-    public bool TryAbandon() => Interlocked.CompareExchange(ref _state, Abandoned, Pending) == Pending;
+    /// <summary>
+    /// Shutdown takes the event. Decided under the same lock as <see cref="TryStartDispatch"/>, so either the event is
+    /// dispatched and then abandoned (it may be stored) or abandoned and never dispatched; <see cref="MayBeStoredWhenAbandoned"/>
+    /// keeps the value at that moment, whatever a later answer says.
+    /// </summary>
+    public bool TryAbandon()
+    {
+        lock (_wire)
+        {
+            if (Interlocked.CompareExchange(ref _state, Abandoned, Pending) != Pending)
+            {
+                return false;
+            }
+
+            _mayBeStoredWhenAbandoned = _mayBeStored;
+            return true;
+        }
+    }
+
+    // Whether the server may already hold this event: set when a request carrying it is dispatched, cleared by an answer
+    // that says it was not stored, unless an earlier request carrying it ended without an answer (then it stays set).
+    private readonly object _wire = new();
+    private bool _mayBeStored;
+    private bool _answerLost;
+    private bool _mayBeStoredWhenAbandoned;
+    private int _dispatches;
+
+    /// <summary>True when the event was put on the wire at least once and no answer settled it, so the server may have stored it.</summary>
+    public bool MayBeStored
+    {
+        get
+        {
+            lock (_wire)
+            {
+                return _mayBeStored;
+            }
+        }
+    }
+
+    /// <summary>True when an earlier request carrying this event ended without an answer.</summary>
+    public bool AnswerLost
+    {
+        get
+        {
+            lock (_wire)
+            {
+                return _answerLost;
+            }
+        }
+    }
+
+    /// <summary>The value of <see cref="MayBeStored"/> when shutdown took the event.</summary>
+    public bool MayBeStoredWhenAbandoned
+    {
+        get
+        {
+            lock (_wire)
+            {
+                return _mayBeStoredWhenAbandoned;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A request carrying this event is about to be dispatched. Returns false, and changes nothing, when shutdown took the
+    /// event: it must then be left out of the request. Otherwise returns the dispatch number, which the answer to this
+    /// request must quote. An event already settled may stay in a resent body unchanged.
+    /// </summary>
+    public bool TryStartDispatch(out int dispatch)
+    {
+        lock (_wire)
+        {
+            dispatch = 0;
+            if (Volatile.Read(ref _state) == Abandoned)
+            {
+                return false;
+            }
+
+            _mayBeStored = true;
+            dispatch = ++_dispatches;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// The server answered request number <paramref name="dispatch"/> without storing this event (a 4xx such as 429 or
+    /// 401). An answer to an older request (one that arrives after a retry was dispatched) changes nothing: the newer
+    /// request may still store the event.
+    /// </summary>
+    public void OnNotStored(int dispatch)
+    {
+        lock (_wire)
+        {
+            if (!_answerLost && dispatch == _dispatches)
+            {
+                _mayBeStored = false;
+            }
+        }
+    }
+
+    /// <summary>That request ended without an answer that settles this event (a network error, a 5xx, a redirect, an unacknowledged 2xx).</summary>
+    public void OnAnswerLost()
+    {
+        lock (_wire)
+        {
+            _answerLost = true;
+        }
+    }
 }
 
 /// <summary>One flush target, shared by every caller waiting for the same events.</summary>
@@ -189,8 +296,10 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Actio
 
     /// <summary>
     /// Settles an event and counts it in one step under the queue lock, the lock flush waiters are added and completed
-    /// under, so no flush can see the event settled before it is counted. <paramref name="count"/> must only update
-    /// counters. Returns false when the event was already settled or abandoned.
+    /// under, so no flush can see the event settled before it is counted. <paramref name="count"/> runs under that lock: it
+    /// may update counters and post a prepared notification to the notifier (which only takes the notifier's own lock and
+    /// never runs host code inline), and must do nothing else. Returns false when the event was already settled or
+    /// abandoned.
     /// </summary>
     public bool Settle(QueuedEvent item, Action count)
     {

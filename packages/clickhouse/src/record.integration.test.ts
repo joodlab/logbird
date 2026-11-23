@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { type EntityProfile, encodeRecordPair, formatRecordTerm, quoteQueryValue } from '@logbird/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+// The console's translator (alias-free, so importable here) is what this parity test proves against real ClickHouse.
+import { translateQueryToSql } from '../../../apps/app/src/lib/query-translate';
 import { type ClickHouseClient, createClickHouseClient, createQueryClickHouseClient, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
 import { entityMetadata, entityProfile, exportEvents, facets, listEntities, purgeProject, read, searchEvents } from './queries';
 import { compileQuery } from './query';
+import { validateSql } from './sql-guard';
 import { suggestValues } from './suggest';
 
 function expectSiteProfile(profile: EntityProfile | null) {
@@ -175,21 +178,35 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
   );
 
   it.runIf(process.env.CLICKHOUSE_QUERY_USER && process.env.CLICKHOUSE_QUERY_PASSWORD)(
-    'matches the same events for legacy array presence in query and SQL mode',
+    "matches the same events in query mode and in the console translator's SQL",
     async () => {
       const sqlClient = createQueryClickHouseClient();
-      if (!sqlClient) throw new Error('The restricted ClickHouse query user is required for presence verification');
-      const pairs = "has(target_ids, '12') AND arrayExists((t, i) -> (t = 'page' OR t = 'site') AND i = '12', target_types, target_ids)";
-      const presence = "arrayExists(x -> x != '', target_names)";
+      if (!sqlClient) throw new Error('The restricted ClickHouse query user is required for translation parity');
       try {
-        for (const [term, predicate, id] of [
-          ['target.name:"*"', presence, 'separate'],
-          ['NOT _exists_:"target.name"', `NOT ${presence}`, 'paired'],
+        // The SQL is the console's own Query → SQL translation, so a translator regression fails here, not in a hand copy.
+        for (const [q, ids] of [
+          ['record:(page:12 OR site:12) target.name:"*"', ['separate']],
+          ['record:(page:12 OR site:12) NOT _exists_:"target.name"', ['paired']],
+          ['record:(page:12 OR site:12) occurredAt:[now-1d TO now+1m]', ['paired', 'separate']],
+          ['record:(page:12 OR site:12) occurredAt:>=now-1d/d', ['paired', 'separate']],
+          // The date must really constrain: an upper bound before the fixtures excludes them in both modes.
+          ['record:(page:12 OR site:12) occurredAt:<now-1d', []],
+          ['record:(page:12 OR site:12) occurredAt:["2020-01-01" TO now-1d]', []],
+          ['record:(page:12 OR site:12) occurredAt:["2020-01-01" TO now+1m]', ['paired', 'separate']],
+          // An absolute lower bound after the fixtures excludes them too (both bounds really constrain).
+          ['record:(page:12 OR site:12) occurredAt:["2099-01-01" TO *]', []],
+          ['attr.note:* outcome:[* TO *]', ['no-targets']],
+          // A dash right after `)` belongs to the field name (`-action`), which no event has: not NOT action.
+          ['(outcome:failure)-action:booked', []],
         ] as const) {
-          const query = await searchEvents(ch, projectId, { ...range, limit: 10, order: 'asc', q: `record:(page:12 OR site:12) ${term}` });
-          const sql = await searchEvents(sqlClient, projectId, { ...range, limit: 10, order: 'asc', q: `(${pairs}) AND ${predicate}`, lang: 'sql' });
-          expect(query.data.map((e) => e.id)).toEqual([id]);
-          expect(sql.data.map((e) => e.id)).toEqual([id]);
+          const translated = translateQueryToSql(q);
+          expect(translated, q).not.toBeNull();
+          // What the server would accept from the console: the restricted SQL guard, as the search route runs it.
+          await expect(validateSql(sqlClient, translated ?? '')).resolves.toBe(translated);
+          const query = await searchEvents(ch, projectId, { ...range, limit: 10, order: 'asc', q });
+          const sql = await searchEvents(sqlClient, projectId, { ...range, limit: 10, order: 'asc', q: translated ?? '', lang: 'sql' });
+          expect(query.data.map((e) => e.id).sort(), q).toEqual(ids);
+          expect(sql.data.map((e) => e.id).sort(), translated ?? q).toEqual(ids);
         }
       } finally {
         await sqlClient.close();
@@ -197,6 +214,38 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
     },
     60_000,
   );
+
+  it('suggests a target id as stored after its type, never split at the first colon (#220)', async () => {
+    const suggestProject = `record-suggest-${randomUUID()}`;
+    const targets = [
+      { type: 'order:archived', id: 'A1', name: 'Archived order A1' },
+      { type: '', id: 'A2' },
+      { type: 'commande:é', id: 'B7' },
+      // The same bare id under another type sums into one suggestion.
+      { type: 'invoice', id: 'A1', name: 'Invoice A1' },
+    ];
+    try {
+      await insertEvents(
+        ch,
+        targets.map((target, i) => {
+          const event = normalizeEvent(
+            { id: `suggest-${i}`, action: 'record.suggested', occurredAt: now.toISOString(), targets: [target] },
+            { projectId: suggestProject, receivedAt: now },
+          );
+          if (!event.ok) throw new Error(`Invalid suggest fixture ${JSON.stringify(target)}`);
+          return event.row;
+        }),
+      );
+      const suggested = await suggestValues(ch, suggestProject, { field: 'target', limit: 10 });
+      expect(suggested.values.map((v) => v.value).sort()).toEqual(['A1', 'A2', 'B7']);
+      expect(suggested.values.find((v) => v.value === 'A1')?.count).toBe(2);
+      // Both names of the shared id stay searchable.
+      const byName = await suggestValues(ch, suggestProject, { field: 'target', prefix: 'Invoice', limit: 10 });
+      expect(byName.values.map((v) => v.value)).toEqual(['A1']);
+    } finally {
+      await purgeProject(ch, suggestProject);
+    }
+  }, 120_000);
 
   it('keeps histories and names separate when two pairs share the directory key', async () => {
     const collisionProject = `record-collision-${randomUUID()}`;

@@ -153,6 +153,7 @@ model Project {
   views          SavedView[]
   retentionRuns  RetentionRun[]
   webhookEndpoints WebhookEndpoint[]
+  webhookClaimRotation WebhookClaimRotation?
 
   @@unique([organizationId, slug])
   @@index([exportDeleteStartedAt, id])
@@ -400,6 +401,14 @@ model WebhookEndpoint {
   @@index([projectId])
   @@index([enabled, lastScannedAt, id])
   @@index([enabled, scanAttemptedAt, id])
+}
+
+// When a worker last claimed a webhook delivery for the project. Claims serve the least recently claimed project first,
+// and a project without a row (never claimed, or claimed only before this table existed) before all others.
+model WebhookClaimRotation {
+  projectId String @id
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lastClaimedAt DateTime
 }
 
 model WebhookSecret {

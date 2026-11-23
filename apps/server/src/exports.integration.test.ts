@@ -11,11 +11,12 @@ import { reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { ApiError } from './errors';
 import { drainExportAudits } from './export-stream';
 import * as ingestion from './ingest';
+import { purgeLimit } from './slow-store';
 import { drainTestAudit } from './test-audit';
 
 vi.mock('./clickhouse', async (original) => ({ ...(await original<typeof import('./clickhouse')>()), queryClickhouse: null }));
 
-it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/failed/aborted receipts', async () => {
+it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/failed/aborted receipts', purgeLimit(360_000), async () => {
   const users: string[] = [];
   let organizationId = '';
   let project: { id: string; slug: string } | undefined;
@@ -48,6 +49,23 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
         .map((s) => s.split(';')[0])
         .join('; '),
     };
+  }
+  // Keeps a download active while slow maintenance runs, so only the membership fence can end it. A reader paused for a
+  // whole purge trips the 30 s idle timer on a store where one purge takes longer than that, which tests the timer.
+  // If the download ends meanwhile (completed or failed), polling stops and the maintenance is still awaited, so fixture
+  // cleanup stays ordered: the caller's drain then fails on a completed download, and its receipt check says why.
+  async function whileReading<T>(reader: ReadableStreamDefaultReader<Uint8Array>, started: T | Promise<T>) {
+    const work = Promise.resolve(started);
+    let open = true;
+    for (;;) {
+      const settled = await Promise.race([work.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000))]);
+      if (settled) return work;
+      if (open)
+        open = await reader.read().then(
+          ({ done }) => !done,
+          () => false,
+        );
+    }
   }
   async function receipts(requestId: string) {
     await drainExportAudits();
@@ -268,7 +286,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     if (!retentionExport.body) throw new Error('Export body missing');
     const retentionReader = retentionExport.body.getReader();
     await retentionReader.read();
-    await enforceProjectRetention(projectId);
+    await whileReading(retentionReader, enforceProjectRetention(projectId));
     await expect(
       (async () => {
         while (!(await retentionReader.read()).done) {
@@ -322,7 +340,9 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     if (!deletionExport.body) throw new Error('Export body missing');
     const deletionReader = deletionExport.body.getReader();
     await deletionReader.read();
-    expect((await request(owner.cookie, `/api/projects/${projectId}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
+    expect((await whileReading(deletionReader, request(owner.cookie, `/api/projects/${projectId}?confirm=${project.slug}`, 'DELETE'))).status).toBe(
+      204,
+    );
     project = undefined;
     await expect(
       (async () => {
@@ -347,7 +367,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     }
     await prisma.user.deleteMany({ where: { id: { in: users } } });
   }
-}, 360_000);
+});
 
 it('waits for a requested receipt already claimed by another replica', async () => {
   const { deliverOutboxEvent, waitForAuditDelivery } = await import('./outbox-delivery');

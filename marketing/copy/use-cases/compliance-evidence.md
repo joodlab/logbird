@@ -3,6 +3,8 @@ path: /use-cases/compliance-evidence
 module: apps/web/src/content/use-cases/compliance-evidence.ts
 ---
 
+Page text renders from `apps/web/src/content/use-cases/compliance-evidence.ts`; edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Compliance evidence: brief
 
 **The words live in the module.** The page renders `apps/web/src/content/use-cases/compliance-evidence.ts` through the

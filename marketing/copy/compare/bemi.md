@@ -4,6 +4,8 @@ description: Bemi captures every Postgres row change automatically. Logbird reco
 path: /compare/bemi
 ---
 
+Page text renders from `apps/web/src/content/comparisons.ts` (the facts and sources) and `apps/web/src/content/compare.ts` (the page furniture); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Logbird and Bemi
 
 ## summary
@@ -27,7 +29,7 @@ path: /compare/bemi
 
 - **id:** `table`
 - **heading:** At a glance
-- **data:** the "At a glance" table is rendered from `apps/web/src/lib/comparisons.ts`, its only source.
+- **data:** the "At a glance" table is rendered from `apps/web/src/content/comparisons.ts`, its only source.
 
 - **visual:** none
 
@@ -60,6 +62,6 @@ path: /compare/bemi
 
 - **id:** `sources`
 - **heading:** Sources
-- **data:** the numbered sources are rendered from `apps/web/src/lib/comparisons.ts`, its only source.
-- **data:** what we couldn't verify is rendered from `apps/web/src/lib/comparisons.ts`, its only source.
+- **data:** the numbered sources are rendered from `apps/web/src/content/comparisons.ts`, its only source.
+- **data:** what we couldn't verify is rendered from `apps/web/src/content/comparisons.ts`, its only source.
 - **visual:** none

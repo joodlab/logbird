@@ -3,34 +3,56 @@ using System.Text;
 
 namespace Logbird;
 
-/// <summary>Why an event will not be stored.</summary>
+/// <summary>
+/// Why the SDK stopped trying to deliver an event. A dropped event is not always absent from the audit log: see
+/// <see cref="DroppedEvent.MayBeStored"/>.
+/// </summary>
 public enum DropReason
 {
     /// <summary>The in-memory queue was full (see <see cref="LogbirdOptions.MaxQueueSize"/>).</summary>
     QueueFull = 0,
 
-    /// <summary>The server rejected this event; see <see cref="DroppedEvent.Detail"/> for its reason. Other events in the batch are unaffected.</summary>
+    /// <summary>The server rejected this event; see <see cref="DroppedEvent.Code"/> for its code and <see cref="DroppedEvent.Detail"/> for its reason. Other events in the batch are unaffected.</summary>
     Rejected = 1,
 
     /// <summary>The server answered a permanent HTTP error (a 4xx other than 429), for example an invalid key.</summary>
     HttpError = 2,
 
-    /// <summary>The serialized event is larger than 256 KB.</summary>
+    /// <summary>
+    /// The event as sent (after <see cref="LogbirdOptions.BeforeSend"/> and redaction) is larger than 256 KB of UTF-8 JSON.
+    /// Separately, an event whose data measures more than 1 MiB before redaction is refused without being copied, whatever
+    /// redaction would have removed: copying an unbounded tree to redact it could exhaust the host's memory. That guard
+    /// counts one byte per UTF-16 code unit of every text the event carries (fields, context, targets, change fields,
+    /// metadata keys and values), plus JSON punctuation and the digits of parsed numbers: a lower bound of the JSON's size,
+    /// so it never refuses an event whose JSON would be under 1 MiB. <see cref="DroppedEvent.MayBeStored"/> is false: the
+    /// event was never sent.
+    /// </summary>
     TooLarge = 3,
 
-    /// <summary>The client was disposed and its shutdown timeout ran out before the event was sent.</summary>
+    /// <summary>
+    /// The client shut down before delivery was confirmed: its shutdown timeout (or the host's budget) ran out with the
+    /// event queued or in flight, or the event was tracked after shutdown began. An event in flight may have been stored;
+    /// see <see cref="DroppedEvent.MayBeStored"/>.
+    /// </summary>
     Shutdown = 4,
 
-    /// <summary>The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw.</summary>
+    /// <summary>
+    /// The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw, or its metadata
+    /// or a change value nests JSON deeper than 1,000 levels (a value that is part of a larger tree of yours also counts
+    /// the parents it has there), checked on the event as given (before
+    /// <see cref="LogbirdOptions.BeforeSend"/> and redaction: a deep part they would remove still counts, because walking it
+    /// is the risk). The limit keeps System.Text.Json's internal recursion (a node looks its options up through its parents)
+    /// within the stack, where an overflow would end the host process; it is tested on a 256 KB thread stack. It is the
+    /// number the server uses for exact numbers, but the server applies it differently: to the objects and arrays of the
+    /// whole event, and only when the event holds, anywhere, a number a double cannot keep exactly. So a deeper tree in an
+    /// event without such a number, which the server would store, is refused here; and because a change value sits three
+    /// levels into the event, a change value whose objects or arrays nest more than 997 levels (a leaf at level 999 or
+    /// deeper), in an event holding such a number, is rejected by the server (<see cref="Rejected"/>).
+    /// </summary>
     Invalid = 5,
 
-    /// <summary>
-    /// The SDK refused an entity identifier before sending (<c>invalid_entity_id</c>), and the event is not sent: an
-    /// actor, impersonator, executor or tenant id or a target id longer than 256 UTF-16 code units, a target type longer
-    /// than 64, a lone surrogate, or more than 256 targets. Logbird would not index such an identifier as given: Logbird
-    /// 0.2.x keeps the payload as sent but indexes a shortened or repaired copy, and only the first 64 targets.
-    /// </summary>
-    InvalidEntityId = 6,
+    // 6 is not used: it was an SDK-side identifier refusal, removed before the first release. The SDK sends identifiers
+    // exactly as given and the server decides; a server rejection is Rejected, with the server's code in DroppedEvent.Code.
 
     /// <summary>
     /// The server (or something in front of it) answered with success but without acknowledging the event, and it was
@@ -39,18 +61,23 @@ public enum DropReason
     Unacknowledged = 7,
 }
 
-/// <summary>An event that will not be stored, passed to <see cref="LogbirdOptions.OnDrop"/>.</summary>
+/// <summary>
+/// An event the SDK stopped trying to deliver, passed to <see cref="LogbirdOptions.OnDrop"/>. Whether the server may
+/// still have stored it is <see cref="MayBeStored"/>.
+/// </summary>
 public sealed class DroppedEvent
 {
     private readonly byte[]? _json;
 
-    internal DroppedEvent(DropReason reason, string? id, string action, byte[]? json, string? detail)
+    internal DroppedEvent(DropReason reason, string? id, string action, byte[]? json, string? detail, string? code = null, bool mayBeStored = false)
     {
         Reason = reason;
         Id = id;
         Action = action;
         _json = json;
         Detail = detail;
+        Code = code;
+        MayBeStored = mayBeStored;
     }
 
     /// <summary>Why the event was dropped.</summary>
@@ -66,6 +93,23 @@ public sealed class DroppedEvent
     public string? Detail { get; }
 
     /// <summary>
+    /// The server's code for a <see cref="DropReason.Rejected"/> event, for example <c>invalid_event</c> or
+    /// <c>invalid_entity_id</c>; <c>other</c> for a code this SDK does not know. Null for every other reason.
+    /// </summary>
+    public string? Code { get; }
+
+    /// <summary>
+    /// Whether the server may have stored this event even though the SDK dropped it. True when the event was put on the
+    /// wire at least once and no answer settled it: a request ended without an answer, or with a 5xx, or with a success
+    /// that did not acknowledge it, or it was still in flight at shutdown. False when the event was never sent, or every
+    /// answer for it said it was not stored. <see cref="DropReason.TooLarge"/> and <see cref="DropReason.Invalid"/> are
+    /// always false; <see cref="DropReason.Rejected"/> is false too, except for the codes <c>stored_event_unreadable</c>
+    /// and <c>unverified_after_parse_failure</c>, which keep an earlier unresolved outcome. A "dropped" event is not necessarily absent: when this is true,
+    /// resend <see cref="Json"/> (the server deduplicates by id) or look the id up before treating the event as lost.
+    /// </summary>
+    public bool MayBeStored { get; }
+
+    /// <summary>
     /// The exact JSON that was (or would have been) sent, as UTF-8, after redaction. Empty when the event was dropped
     /// before it was serialized. Persist it to replay the event later with the same id.
     /// </summary>
@@ -76,23 +120,55 @@ public sealed class DroppedEvent
 }
 
 /// <summary>
-/// A snapshot of a client's counters since it was created. Unlike the event records, its <c>ToString()</c> prints its
-/// values on purpose: they are counts only and carry no event, identity or query data.
+/// A snapshot of a client's counters since it was created, read from <see cref="ILogbirdClient.Stats"/>. Only the SDK
+/// fills one; <c>default(LogbirdStats)</c> is a snapshot with every count zero, for a test double that implements
+/// <see cref="ILogbirdClient"/>. Later versions may add counters. Unlike the event records, its <c>ToString()</c> prints
+/// its values on purpose: they are counts only and carry no event, identity or query data.
 /// </summary>
-/// <param name="Tracked">Events accepted into the queue.</param>
-/// <param name="Delivered">Events the server stored (or already had, for a retry).</param>
-/// <param name="Rejected">Events the server rejected individually.</param>
-/// <param name="Dropped">Events dropped for any other reason (queue full, permanent HTTP error, too large, invalid, shutdown).</param>
-/// <param name="Filtered">Events <see cref="LogbirdOptions.BeforeSend"/> chose to skip.</param>
-/// <param name="FailedSends">Batches that failed after all retries and went back to the queue.</param>
-/// <param name="QueueLength">Events currently waiting, including a batch being sent.</param>
-/// <param name="Warnings">Warnings about events: surrounding whitespace in an identifier (found by the SDK before sending), or a server warning about a stored event such as an adjusted timestamp.</param>
-public readonly record struct LogbirdStats(
-    long Tracked,
-    long Delivered,
-    long Rejected,
-    long Dropped,
-    long Filtered,
-    long FailedSends,
-    int QueueLength,
-    long Warnings = 0);
+public readonly struct LogbirdStats
+{
+    internal LogbirdStats(long tracked, long delivered, long rejected, long dropped, long filtered, long failedSends, int queueLength, long warnings = 0)
+    {
+        Tracked = tracked;
+        Delivered = delivered;
+        Rejected = rejected;
+        Dropped = dropped;
+        Filtered = filtered;
+        FailedSends = failedSends;
+        QueueLength = queueLength;
+        Warnings = warnings;
+    }
+
+    /// <summary>Events accepted into the queue.</summary>
+    public long Tracked { get; }
+
+    /// <summary>Events the server stored (or already had, for a retry).</summary>
+    public long Delivered { get; }
+
+    /// <summary>Events the server rejected individually.</summary>
+    public long Rejected { get; }
+
+    /// <summary>Events dropped for any other reason (queue full, permanent HTTP error, too large, invalid, shutdown).</summary>
+    public long Dropped { get; }
+
+    /// <summary>Events <see cref="LogbirdOptions.BeforeSend"/> chose to skip.</summary>
+    public long Filtered { get; }
+
+    /// <summary>Batches that failed after all retries and went back to the queue.</summary>
+    public long FailedSends { get; }
+
+    /// <summary>Events currently waiting, including a batch being sent.</summary>
+    public int QueueLength { get; }
+
+    /// <summary>
+    /// Warnings about events: an identifier a server may index differently from what is sent (surrounding whitespace,
+    /// longer than the indexed length, a lone surrogate, more than 64 targets; found by the SDK before sending), or a
+    /// server warning about a stored event such as an adjusted timestamp.
+    /// </summary>
+    public long Warnings { get; }
+
+    /// <summary>The counts, for example <c>LogbirdStats { Tracked = 5, Delivered = 3, ... }</c>.</summary>
+    public override string ToString()
+        => FormattableString.Invariant(
+            $"LogbirdStats {{ Tracked = {Tracked}, Delivered = {Delivered}, Rejected = {Rejected}, Dropped = {Dropped}, Filtered = {Filtered}, FailedSends = {FailedSends}, QueueLength = {QueueLength}, Warnings = {Warnings} }}");
+}

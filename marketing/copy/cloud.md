@@ -4,6 +4,8 @@ description: Logbird Cloud will run the same open-source codebase for you. It is
 path: /cloud
 ---
 
+Page text renders from `apps/web/src/content/cloud.ts` (the plan cards from `apps/web/src/content/pricing.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Cloud and pricing
 
 > **Cloud open (`WEB_APP_URL` set, see README § Cloud CTA rule).** Hero body: "Logbird Cloud runs the same open-source

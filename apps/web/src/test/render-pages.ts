@@ -23,11 +23,21 @@ export async function renderPages(paths: string[], env: Record<string, string> =
   return pages;
 }
 
+/**
+ * React's warning for an empty `href`, verbatim from react-dom 19's server renderer
+ * (cjs/react-dom-server.node.development.js; an empty `src` gets a longer variant). The attribute name is a format
+ * argument (twice), not part of the string.
+ */
+const EMPTY_ATTRIBUTE_WARNING =
+  'An empty string ("") was passed to the %s attribute. To fix this, either do not render the element at all or pass null to %s instead of an empty string.';
+
 /** Asset URLs (`?url` imports) are empty under vitest, and React warns about the empty stylesheet href. */
 export function quietHrefWarnings() {
   const error = console.error;
   vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
-    if (!String(args[0]).includes('href')) {
+    // Only that exact warning, for an `href`. Every other error, a changed React message included, still prints.
+    const emptyHref = args[0] === EMPTY_ATTRIBUTE_WARNING && args[1] === 'href';
+    if (!emptyHref) {
       error(...args);
     }
   });

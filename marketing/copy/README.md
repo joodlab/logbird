@@ -1,13 +1,16 @@
 ---
 title: Logbird website copy — index and messaging
-description: Source of truth for the Logbird marketing site copy. Messaging hierarchy, proof points, glossary and word list.
+description: Index of the Logbird marketing site's page briefs, plus the messaging hierarchy, proof points, glossary and word list.
 path: (not a page)
 ---
 
 # Logbird website copy
 
-This folder is the copy source of truth for the marketing site (`apps/web`, TanStack Start, prerendered). Engineering
-and design build pages from these files; wording changes happen here first.
+This folder holds the briefs for the marketing site (`apps/web`, TanStack Start, prerendered). **Page text renders from
+the typed modules in `apps/web/src/content/<module>.ts`; edit wording there.** Each file here is the brief for one page:
+the job of each section, the proof for every claim with its source, the visuals and the owner notes. The first line
+after each brief's front matter names its module. This README holds what applies to every page: the messaging, the CTA
+rules, the glossary and the word list.
 
 Facts come from the repository only (each number has a `<!-- source: path -->` comment). Competitor facts come from
 sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/brand.md` §2.
@@ -23,6 +26,8 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 | [`cloud.md`](cloud.md) | Cloud | `/cloud` |
 | [`pricing.md`](pricing.md) | Pricing (brief; the words and data are in `apps/web/src/content/pricing.ts`) | `/pricing` |
 | [`use-cases/compliance-evidence.md`](use-cases/compliance-evidence.md) | Compliance evidence (brief; the words are in `apps/web/src/content/use-cases/compliance-evidence.ts`) | `/use-cases/compliance-evidence` |
+| [`use-cases/customer-audit-logs.md`](use-cases/customer-audit-logs.md) | Customer-facing audit logs (brief; the words are in `apps/web/src/content/use-cases/customer-audit-logs.ts`) | `/use-cases/customer-audit-logs` |
+| [`use-cases/support-investigations.md`](use-cases/support-investigations.md) | Support investigations (brief; the words are in `apps/web/src/content/use-cases/support-investigations.ts`) | `/use-cases/support-investigations` |
 | [`open-source.md`](open-source.md) | Open source | `/open-source` |
 | [`security.md`](security.md) | Security and data handling | `/security` |
 | [`compare/README.md`](compare/README.md) | Compare (index) | `/compare` |
@@ -41,70 +46,40 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 
 ### How each page file is laid out
 
-Front matter: `title` (page `<title>`), `description` (meta description, 155 characters or fewer) and `path`.
-Then one `##` block per section, in page order:
+Front matter: `title` (the page `<title>` when the brief was written), `description` (meta description, 155 characters
+or fewer) and `path`. Then the line naming the module, and one `##` block per section, in page order. Briefs written
+before the move keep these fields as a record of each section's job and sources; the module, not the brief, holds the
+page text:
 
 - `id`: the section anchor.
 - `eyebrow`: optional small label above the heading.
 - `heading`: the section heading. On a page's first section it is the H1.
-- `body`, `bullets`: the copy.
+- `body`, `bullets`: what the section says, as the brief records it.
 - `cta`: label → target.
 - `visual`: an exact path under `marketing/media/`, or "code sample", or "diagram: …".
 
 ### Content modules and briefs (#250)
 
-Pages are moving to typed content modules under `apps/web/src/content/`, one per page, plus `shared.ts` for the calls to
-action and the closing band. A module is a function of the site's state (`content/site.ts`: repository public or
-private, Cloud open or closed, the latest release), and both variants of a state are required, so a missing one fails
-`tsc`. Once a page has moved, its file here becomes a **brief**: the section jobs, the proof for every claim with its
-source, the visuals and the owner notes, but not the page text. Change wording in the module, and check the claim
-against the brief's sources in the same pull request. `apps/web/src/content/content-modules.test.ts` fails if prose
-comes back into a moved route file or component.
+Pages render typed content modules under `apps/web/src/content/`, one per page, plus `shared.ts` for the calls to action
+and the closing band. A module is a function of the site's state (`content/site.ts`: repository public or private, Cloud
+open or closed, the latest release), and both variants of a state are required, so a missing one fails `tsc`. Each file
+here is a **brief**: the section jobs, the proof for every claim with its source, the visuals and the owner notes, but
+not the page text. Change wording in the module, and check the claim against the brief's sources in the same pull
+request. `apps/web/src/content/content-modules.test.ts` fails if prose comes back into a moved route file or component.
 
-Moved so far: home (`home.md` is its brief), pricing (`pricing.md`) and the use-case pages (`use-cases/*.md`).
+Every page has moved (#250, groups #303, #305, #306, #307 and #310): each file here is the brief for the page it names, and the legal briefs (`legal-privacy.md`, `legal-terms.md`) list the code facts behind `apps/web/src/content/legal*.ts`. Where a page renders a data module (the comparison tables, sources, "what we couldn't verify" and the /compare cards come from `apps/web/src/content/comparisons.ts`), the brief doesn't restate it.
 
-### Interim drift check
+The interim drift check that compared these files with the rendered pages (#249) was removed once every page rendered
+from its module (#250). Two checks replace it:
 
-**Interim.** The planned fix is typed content modules (#250): the pages render them, so each claim has one source. This
-check catches common drift between these files and the pages until then, and is deleted when the modules land. It
-doesn't make each claim single-source; its known gaps are listed in the pull request that added it (#249).
-
-`apps/web/src/lib/copy-sync.test.ts` renders every mapped page except the exempt ones listed below, as the public build does, once with Logbird
-Cloud closed and once open (`WEB_APP_URL` set). It looks for the claims the copy file states for that page, bound to
-elements rather than loose text. Change a claim in the copy and on the page in the same pull request.
-
-- **Headings.** A `heading` must be a heading on the page. In the other direction, every `h1`/`h2` section heading in
-  the page's `<main>` must be a heading in the copy. The shared closing band is the exception: its words render from
-  `apps/web/src/content/shared.ts`.
-- **Texts.** A `body`, `eyebrow`, `limit line`, `small print`, note or message must be one element's whole text, or a
-  run of up to three adjacent sibling elements (a title and its body). A prefix or an extended sentence fails.
-- **Lists.** `bullets`, `steps`, `items`, `cards` and the like must be one list on the page: the same items, in the same
-  order and number.
-- **Tables.** Tables are compared row by row and cell by cell.
-- **Calls to action.** A `cta` (`Label → target · …`) must be a link with that label and target.
-- **What counts as a difference.** Case, digits, signs, operators, units and words all count. Only spacing, typographic
-  quotes, and `.` `:` `;` at a sentence or title boundary are ignored. Unicode is compared after NFC.
-- **Citations.** `[S1–S4]` is written out as `[S1, S2, S3, S4]`, the way the page renders it.
-- **Placeholders.** Values from configuration or the release list are written as named placeholders, resolved from the
-  test's configuration and `releases.ts`: `<latest release>`, `<latest release date>`, `<first release>`,
-  `<first release date>`, `<supported line>`, `<security contact>`, `<contact email>`, `<sign-in URL>`, and the pricing
-  words from `apps/web/src/content/pricing.ts`: `<pricing heading>`, `<pricing summary>`, `<pricing status>`. Any other
-  `<…>` is literal text.
-- **Variants.**
-  - Wording shown only while Logbird Cloud is open goes in a field named `… (when Cloud is open)`, which is checked
-    against that render.
-  - Private-repository wording goes in a comment.
-  - A field the public page doesn't show at all, or an engineering note, carries
-    `<!-- copy-sync: skip (reason) -->` on its first line. The reason is required.
-- **Field names.** Every field name is classified in `apps/web/src/lib/copy-claims.ts`. An unknown or misspelt name
-  fails the test.
-- **Data modules.** Where a page renders a part from a data module (the comparison tables, sources, "what we couldn't
-  verify", and the /compare cards come from `apps/web/src/lib/comparisons.ts`), the copy file doesn't restate it. It
-  has a `data` field pointing at the module, its only source.
-- **Inventory.** Every file in this folder is either in the map above or listed in the test with the reason it has no
-  page: this guide, the two legal briefs (the legal pages are their own owner-approved wording source;
-  `legal-pages.test.ts` checks selected facts), `arabic-notes.md`, and the briefs of pages that render a content module
-  (`home.md`).
+- `apps/web/src/content/page-snapshots.test.ts` pins every rendered page in each repository and Cloud state as a text
+  snapshot (title, description, headings, visible text, links and form controls) under
+  `apps/web/src/content/__snapshots__/pages/`, with the shared skip link, header and footer cut out in place and
+  snapshotted once per state (`_shell.txt`). A wording change is a snapshot diff: update the snapshots on purpose
+  (`CONTRIBUTING.md`, "Page snapshots", says how and what is covered), review the diff, commit it with the module
+  change, and say in the PR body which sentences changed and why.
+- `apps/web/src/content/copy-briefs.test.ts` checks this folder: every brief is in the table above, every link in the
+  table resolves, every page brief starts with the line naming its module, and that module exists.
 
 ## Messaging hierarchy
 
@@ -187,9 +162,9 @@ to invited teams and approved domains, so the site never promises an account:
 ## Owner-gated copy
 
 **Marker:** an owner-gated variant is written only inside an HTML comment that starts with `<!-- owner-gated: <topic>`.
-Text inside those comments is never implemented on the site until the owner approves that topic; everything outside
-them is safe to implement verbatim. Topics: `org-name` (the publisher's name, `WEB_ORG_NAME`), `origin-story`,
-`design-partner-name`, `cloud-clause`.
+Text inside those comments is never implemented on the site until the owner approves that topic; everything outside them
+is approved for the site, where it is written in the page's module. Topics: `org-name` (the publisher's name,
+`WEB_ORG_NAME`), `origin-story`, `design-partner-name`, `cloud-clause`.
 
 
 These variants are **not** used anywhere on the site. The owner may approve them later.

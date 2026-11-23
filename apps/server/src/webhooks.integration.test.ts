@@ -1319,7 +1319,8 @@ it('signs identical masked bytes on initial delivery and resend of a target-only
       action: 'qa.webhook',
       targets: [scope.target],
       context: { ip, userAgent },
-      actor: { type: 'user', id: 'qa-actor', email },
+      // The producer also used the address as the display name (other case, padded): the mask must hide it there too.
+      actor: { type: 'user', id: 'qa-actor', email, name: ` ${email.toUpperCase()}` },
       'context.ip': ip,
       'context.userAgent': userAgent,
       'actor.email': email,
@@ -1345,9 +1346,13 @@ it('signs identical masked bytes on initial delivery and resend of a target-only
       expect(received[0]?.headers['webhook-id']).toBe(received[1]?.headers['webhook-id']);
       const emailPseudonym = createHmac('sha256', fieldMaskKey(env.BETTER_AUTH_SECRET)).update(`${projectId}\0${email}`).digest('hex').slice(0, 24);
       for (const wire of received) {
-        for (const privateValue of [ip, userAgent, email]) expect(wire.payload).not.toContain(privateValue);
+        for (const privateValue of [ip, userAgent, email]) expect(wire.payload.toLowerCase()).not.toContain(privateValue.toLowerCase());
         const body = await verifyWebhook({ ...wire, secret });
-        expect(body).toMatchObject({ id: 'qa-masked-wire', context: { ip: '', userAgent: '' }, actor: { email: `masked:${emailPseudonym}` } });
+        expect(body).toMatchObject({
+          id: 'qa-masked-wire',
+          context: { ip: '', userAgent: '' },
+          actor: { email: `masked:${emailPseudonym}`, name: `masked:${emailPseudonym}` },
+        });
         expect(body).toHaveProperty('attributes', { 'qa.keep': 'visible' });
         expect(body).not.toHaveProperty('payload');
       }
@@ -1463,4 +1468,129 @@ it('sets creator to null when deleted and cascades endpoint secrets on project d
   await prisma.project.delete({ where: { id: project.id } });
   expect(await prisma.webhookEndpoint.count({ where: { id: endpoint.id } })).toBe(0);
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(0);
+});
+
+it('holds an invalid stored scope found behind a locked row without spending the slot, and shows the scope warning', async () => {
+  const { endpoint: lockedHook } = await create();
+  const { endpoint: invalidHook } = await create();
+  const { endpoint: healthy } = await create();
+  const [{ now }] = await prisma.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+  const expiresAt = new Date(+now + 86_400_000);
+  const row = (endpointId: string, eventId: string, age: number) =>
+    prisma.webhookDelivery.create({ data: { endpointId, eventId, expiresAt, nextAttemptAt: new Date(+now - age) } });
+  // In one project: a locked valid row first, then an unlocked row whose endpoint has an invalid stored scope, then a
+  // healthy sibling.
+  const lockedRow = await row(lockedHook.id, 'qa-scope-locked', 180_000);
+  const invalidRow = await row(invalidHook.id, 'qa-scope-invalid', 120_000);
+  const healthyRow = await row(healthy.id, 'qa-scope-healthy', 60_000);
+  await prisma.webhookEndpoint.update({ where: { id: invalidHook.id }, data: { scopeTenantId: ' qa-invalid ' } });
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((done) => {
+    release = done;
+  });
+  let ready: () => void = () => undefined;
+  const holding = new Promise<void>((done) => {
+    ready = done;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "WebhookDelivery" WHERE id = ${lockedRow.id} FOR UPDATE`;
+      ready();
+      await released;
+    },
+    { timeout: 50_000, maxWait: 5000 },
+  );
+  try {
+    await holding;
+    await withLocalReceiver(healthy.id, async (received) => {
+      let passes = 0;
+      while (!received.length && passes < 2) {
+        passes++;
+        await send();
+      }
+      expect(passes).toBe(1);
+      expect(received.map(({ payload }) => JSON.parse(payload).id)).toEqual([healthyRow.eventId]);
+    });
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: invalidRow.id }, include: { attempts: true } })).toMatchObject({
+      status: 'pending',
+      attemptNumber: 0,
+      leaseUntil: null,
+      attempts: [],
+    });
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: invalidHook.id } })).toMatchObject({ scopeReviewRequired: true });
+    expect(await (await request(`${base()}/${invalidHook.id}`)).json()).toMatchObject({ scopeWarning: 'webhook_invalid_scope' });
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: lockedRow.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
+  } finally {
+    release();
+    await holder;
+  }
+});
+
+it('delivers other projects while an invalid-scope endpoint row is locked, and records its hold once released', async () => {
+  const { endpoint: healthy } = await create();
+  const [{ now }] = await prisma.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+  const expiresAt = new Date(+now + 86_400_000);
+  const invalid = await prisma.webhookEndpoint.create({
+    data: { projectId: siblingId, url: 'https://8.8.8.8/qa-invalid-locked', scopeTenantId: ' qa-invalid ' },
+  });
+  const healthyRow = await prisma.webhookDelivery.create({
+    data: { endpointId: healthy.id, eventId: 'qa-locked-endpoint-healthy', expiresAt, nextAttemptAt: new Date(+now - 120_000) },
+  });
+  await prisma.webhookDelivery.create({
+    data: { endpointId: invalid.id, eventId: 'qa-locked-endpoint-invalid', expiresAt, nextAttemptAt: new Date(+now - 60_000) },
+  });
+  const pass = () =>
+    deliverWebhooks(
+      clickhouse,
+      {
+        secretKey: webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY),
+        maskKey: fieldMaskKey(env.BETTER_AUTH_SECRET),
+        concurrency: 1,
+        perEndpoint: 1,
+        failureLimit: 50,
+        transport: { allowHttp: true, allowAddress: (address) => address === '127.0.0.1' },
+      },
+      [projectId, siblingId],
+    );
+  // Another transaction, such as an endpoint edit, holds the invalid endpoint's row.
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((done) => {
+    release = done;
+  });
+  let ready: () => void = () => undefined;
+  const holding = new Promise<void>((done) => {
+    ready = done;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${invalid.id} FOR UPDATE`;
+      ready();
+      await released;
+    },
+    { timeout: 60_000, maxWait: 5000 },
+  );
+  try {
+    await holding;
+    await withLocalReceiver(healthy.id, async (received) => {
+      const started = performance.now();
+      const budget = new Promise<never>((_, fail) => setTimeout(() => fail(new Error('The pass waited on the locked endpoint for 10 s')), 10_000));
+      await Promise.race([pass(), budget]);
+      expect(performance.now() - started).toBeLessThan(5000);
+      expect(received.map(({ payload }) => JSON.parse(payload).id)).toEqual([healthyRow.eventId]);
+    });
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: invalid.id } })).toMatchObject({ scopeReviewRequired: false });
+  } finally {
+    release();
+    await holder;
+  }
+  try {
+    // Once nothing holds the row, a later pass records the existing scope hold.
+    await pass();
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: invalid.id } })).toMatchObject({ scopeReviewRequired: true });
+    expect(await (await request(`/api/projects/${siblingId}/webhooks/${invalid.id}`)).json()).toMatchObject({
+      scopeWarning: 'webhook_invalid_scope',
+    });
+  } finally {
+    await prisma.webhookEndpoint.deleteMany({ where: { id: invalid.id } });
+  }
 });

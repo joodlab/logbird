@@ -16,6 +16,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { purgeLimit, slowStore } from './slow-store';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 let f: ImmutableFixture;
@@ -30,7 +31,7 @@ afterEach(async () => {
   clock = Date.now();
   vi.useRealTimers();
   await f.cleanup();
-});
+}, slowStore(30_000));
 const original = { id: 'original', action: 'evidence.original', actor: { id: 'actor' }, metadata: { status: 'pending' } };
 
 it('missing receipt keys neither match nor lock their successors, including another project', async () => {
@@ -185,7 +186,7 @@ it('stores healthy siblings before reporting one unresolved id with indices and 
   expect((await f.post([original, { id: 'healthy', action: 'healthy' }])).status).toBe(503);
   expect(await f.count()).toBe(1);
 });
-it('automatically recovers an ambiguous write whose row never arrives, preserving received_at', async () => {
+it('automatically recovers an ambiguous write whose row never arrives, preserving received_at', purgeLimit(30_000), async () => {
   const receivedAt = new Date(Date.now() - 120_000);
   await f.pending(original, { expired: true, receivedAt });
   expect((await f.post(original)).status).toBe(202);
@@ -194,7 +195,7 @@ it('automatically recovers an ambiguous write whose row never arrives, preservin
   expect(event?.event.timestamp).toBe(receivedAt.toISOString());
   expect(await f.count()).toBe(1);
 });
-it('hourly reconciliation readies an absent claim without losing its identity or receipt clock', async () => {
+it('hourly reconciliation readies an absent claim without losing its identity or receipt clock', purgeLimit(30_000), async () => {
   const row = await f.pending(original, { expired: true });
   await recoverProjectIngest(clickhouse, f.project);
   const receipt = await prisma.ingestReceipt.findUniqueOrThrow({ where: { projectId_eventId: { projectId: f.project, eventId: original.id } } });
@@ -204,13 +205,13 @@ it('hourly reconciliation readies an absent claim without losing its identity or
   expect(conflict.status).toBe(503);
   expect((await f.post(original)).status).toBe(202);
 });
-it('confirms a visible delayed original without reinserting it', async () => {
+it('confirms a visible delayed original without reinserting it', purgeLimit(30_000), async () => {
   const row = await f.pending(original, { expired: true });
   await insertEvents(clickhouse, [row]);
   expect((await f.post(original)).status).toBe(202);
   expect(await f.count()).toBe(1);
 });
-it('recovers old unversioned pending receipts and upgrades their stored-row fingerprints', async () => {
+it('recovers old unversioned pending receipts and upgrades their stored-row fingerprints', purgeLimit(30_000), async () => {
   const old = normalizeEvent3a1541f(original, { projectId: f.project, receivedAt: new Date() });
   if (!old.ok) throw new Error(old.reason);
   const row = old.row;
@@ -232,7 +233,7 @@ it('looks up retained rows after receipt expiry, including cross-partition confl
   });
   expect(await f.count()).toBe(1);
 });
-it('retention cutoff cleanup preserves an unresolved delayed original while a conflicting retry arrives', async () => {
+it('retention cutoff cleanup preserves an unresolved delayed original while a conflicting retry arrives', purgeLimit(90_000), async () => {
   const input = { ...original, occurredAt: new Date(Date.now() - 100 * 86_400_000).toISOString() };
   const delayed = await f.pending(input);
   // Force the actual retention purge path with another expired, acknowledged row.
@@ -248,7 +249,7 @@ it('retention cutoff cleanup preserves an unresolved delayed original while a co
   await enforceProjectRetention(f.project);
   expect(await f.count()).toBe(0);
   expect((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM event_ids WHERE project_id={p:String}', { p: f.project }))[0]?.n).toBe(0);
-}, 90_000);
+});
 it('rejects NUL and split Unicode ids individually, storing healthy siblings', async () => {
   const response = await f.post([
     { id: 'a\0b', action: 'unsafe' },
@@ -364,7 +365,7 @@ it('typed-array claims arbitrate 1000 overlapping ids with lossless strings and 
   expect((await claimIngestReceipts(f.project, f.org, [confirmed]))[0]?.confirmedAt?.toISOString()).toBe(receivedAt.toISOString());
 });
 
-it('upgrades a missing legacy receipt on reinsertion and rejects lossy same-batch variants', async () => {
+it('upgrades a missing legacy receipt on reinsertion and rejects lossy same-batch variants', purgeLimit(30_000), async () => {
   const input = { id: 'legacy-missing', action: 'legacy.original', actor: { id: 42 } };
   const receivedAt = new Date();
   await f.pending(input, {
@@ -386,7 +387,7 @@ it('upgrades a missing legacy receipt on reinsertion and rejects lossy same-batc
   expect(await f.count()).toBe(1);
 });
 
-it('keeps the exclusive project lock through an expired-claim reinsert', async () => {
+it('keeps the exclusive project lock through an expired-claim reinsert', purgeLimit(30_000), async () => {
   await f.pending(original, { expired: true });
   const insert = clickhouse.exec.bind(clickhouse);
   const spy = vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {

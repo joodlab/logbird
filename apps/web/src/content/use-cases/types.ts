@@ -28,7 +28,8 @@ export interface UseCaseSection {
   /** A promise/limit table, or (`questions`) a question/answer table without check and dash icons. */
   limits?: { headers: { promise: string; limit: string }; rows: Limit[]; questions?: boolean };
   /** A real console capture from lib/media-manifest.ts, cropped to what the section proves. */
-  visual?: { id: string; label: string; caption: string };
+  /** `zoom` makes the image open full size: for detailed captures that are too small to read on a phone. */
+  visual?: { id: string; label: string; caption: string; zoom?: boolean };
   cta?: Cta;
 }
 

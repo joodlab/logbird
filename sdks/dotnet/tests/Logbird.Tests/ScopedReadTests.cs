@@ -395,7 +395,12 @@ public class ScopedReadTests
     {
         // Some streams fail their pending read when disposed; others report a clean end, which must not read as complete.
         var stalled = new StalledStream(Encoding.UTF8.GetBytes("""{"id":"evt_1"}""" + (char)10), endsCleanlyWhenDisposed);
-        var server = Server(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stalled) });
+        var server = Server(_ =>
+        {
+            var content = new StreamContent(stalled);
+            content.Headers.TryAddWithoutValidation("Content-Type", "application/x-ndjson");
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        });
         using var reader = Reader(server);
         using var file = new MemoryStream();
         using var cancel = new CancellationTokenSource();

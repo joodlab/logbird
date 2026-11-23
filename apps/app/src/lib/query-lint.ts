@@ -5,6 +5,8 @@
  *
  * Nothing here changes what the server accepts (the server parser is the source of truth).
  */
+import { parseQueryExpression, type QueryAtom, QueryError } from '@logbird/contracts';
+import { coreField } from './query-catalog';
 import { type QueryToken, tokenize } from './query-language';
 
 export interface QueryFix {
@@ -40,6 +42,63 @@ function rewrite(field: string, op: string, value: string, negated: boolean): { 
  * only then is `word = value` read as a comparison rather than free text.
  */
 export function lintQuery(q: string, isField: (name: string) => boolean): QueryFix[] {
+  // Never from inside a value the server reads as one: text in `@meta:"please !tenant:t here"` is data, not syntax to
+  // fix, even when the proposed span runs on past the value's end (`"meta":"please !tenant:t"tail`).
+  const values = serverValueSpans(q);
+  const fixes = lintTokens(q, isField).filter((f) => !values.some((v) => f.start >= v.start && f.start < v.end));
+  const terms = serverTermSpans(q);
+  if (!terms) return fixes;
+  // A query the server accepts: a fix respells whole server terms, one term or the words of a comparison (`tenant =`),
+  // never a span the console's tokenizer read differently (`action: (ab"cd OR next) tenant:west` is two field terms),
+  // and only when the result still parses (`action=OR` has no filter form).
+  return fixes.filter((f) => {
+    const starts = (t: { start: number }) => f.start === t.start || (f.start === t.start - 1 && /[-!]/.test(q[f.start] ?? ''));
+    const covered = terms.filter((t) => t.start < f.end && t.end > f.start);
+    const whole =
+      covered.length > 0 &&
+      covered.every((t) => t.start >= f.start - 1 && t.end <= f.end) &&
+      covered.some(starts) &&
+      covered.some((t) => t.end === f.end) &&
+      (covered.length === 1 || covered.every((t) => t.kind === 'text'));
+    const fixed = q.slice(0, f.start) + f.replacement + q.slice(f.end);
+    return whole && (serverAccepts(fixed) || (f.incomplete === true && serverAccepts(`${fixed}x`)));
+  });
+}
+
+/** The spans of the server's terms (fields and words, at any depth); null when `q` does not parse. */
+function serverTermSpans(q: string): { start: number; end: number; kind: string }[] | null {
+  const spans: { start: number; end: number; kind: string }[] = [];
+  const visit = (node: QueryAtom) => {
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else spans.push({ start: node.start, end: node.end, kind: node.kind });
+  };
+  try {
+    for (const branch of parseQueryExpression(q)) for (const part of branch) visit(part.atom);
+  } catch (error) {
+    if (error instanceof QueryError) return null;
+    throw error;
+  }
+  return spans;
+}
+
+/** Where the server's parse has field values (none when it does not parse: then every fix is a candidate). */
+function serverValueSpans(q: string): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  const visit = (node: QueryAtom) => {
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else if (node.kind === 'field') spans.push({ start: node.valueStart, end: node.end });
+  };
+  try {
+    for (const branch of parseQueryExpression(q)) for (const part of branch) visit(part.atom);
+  } catch (error) {
+    if (!(error instanceof QueryError)) throw error;
+  }
+  return spans;
+}
+
+function lintTokens(q: string, isField: (name: string) => boolean): QueryFix[] {
   const fixes: QueryFix[] = [];
   const solid = tokenize(q).filter((t) => t.kind !== 'space');
   const valueRaw = (t?: QueryToken) => (t && (t.kind === 'text' || t.kind === 'phrase') && !t.negated ? t.raw : null);
@@ -49,7 +108,15 @@ export function lintQuery(q: string, isField: (name: string) => boolean): QueryF
     const next = solid[i + 1];
 
     // Lucene `_exists_:field` / `NOT _exists_:field` → `field:*` / `-field:*`.
-    if (t.kind === 'field' && t.field === '_exists_' && t.valueKind === 'plain' && t.value && /^[A-Za-z_][\w.$@-]*$/.test(t.value)) {
+    // (Not for a field literally named `_exists_`: `_exists_:*` would ask about another field.)
+    if (
+      t.kind === 'field' &&
+      t.field === '_exists_' &&
+      t.valueKind === 'plain' &&
+      t.value &&
+      t.value !== '_exists_' &&
+      /^[A-Za-z_][\w.$@-]*$/.test(t.value)
+    ) {
       fixes.push({
         start: t.start,
         end: t.end,
@@ -61,7 +128,9 @@ export function lintQuery(q: string, isField: (name: string) => boolean): QueryF
 
     // Canonicalize optional spacing without changing the value or how it is lexed.
     if (t.kind === 'field' && t.value && t.valueStart !== undefined) {
-      const prefix = `${t.negated ? '-' : ''}${t.field}:`;
+      // The key as written (a quoted key keeps its quotes), never rebuilt from the decoded name.
+      const keyEnd = t.keyEnd ?? t.start + (t.negated ? 1 : 0) + (t.field?.length ?? 0);
+      const prefix = `${t.raw.slice(0, keyEnd - t.start)}:`;
       const value = t.raw.slice(t.valueStart - t.start);
       if (t.raw !== prefix + value && !/^[-!]|^[\w.]+:/.test(value)) {
         fixes.push({ start: t.start, end: t.end, replacement: prefix + value, message: 'Remove space around the colon' });
@@ -147,3 +216,39 @@ export function applyFixes(q: string, fixes: QueryFix[]): string {
 export function autoFixes(fixes: QueryFix[]): QueryFix[] {
   return fixes.filter((f) => !(f.soft || f.incomplete));
 }
+
+/** Whether the server accepts `q` exactly as written. */
+export function serverAccepts(q: string): boolean {
+  try {
+    parseQueryExpression(q);
+    return true;
+  } catch (error) {
+    if (error instanceof QueryError) return false;
+    throw error;
+  }
+}
+
+/**
+ * The fixes Enter applies: only to a query the server rejects (`tenant = biz_7`, `!env:staging`, `a && b`), as before.
+ * A query the server accepts runs exactly as typed, whatever it looks like (`action=booked` searches that text).
+ */
+export function fixesOnSubmit(q: string, fixes: QueryFix[]): QueryFix[] {
+  return serverAccepts(q) ? [] : autoFixes(fixes);
+}
+
+/**
+ * The filter to offer for a query the server accepts as text but that is spelled like a KQL comparison on a known field
+ * (`action=booked` searches the words; `action:booked` is the filter): the reader chooses, nothing is applied. Null when
+ * there is nothing to offer.
+ */
+export function suggestedConversion(q: string, fixes: QueryFix[]): string | null {
+  if (!q.trim() || !serverAccepts(q)) return null;
+  const comparisons = autoFixes(fixes).filter((f) => f.message.startsWith('KQL-style'));
+  if (!comparisons.length) return null;
+  // Offered only when the filter is itself a query the parser accepts (`action=OR` has no plain filter form).
+  const converted = applyFixes(q, comparisons).trim();
+  return serverAccepts(converted) ? converted : null;
+}
+
+/** Fields a KQL comparison may name without the attribute list at hand: core fields and explicit attributes. */
+export const isKnownFieldName = (name: string) => Boolean(coreField(name)) || /^(attr|attributes)\.\S/.test(name);

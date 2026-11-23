@@ -1,3 +1,4 @@
+import { shared } from '../../content/shared';
 import type { UseCase, UseCaseSection } from '../../content/use-cases/types';
 import { isReady } from '../../lib/site-map';
 import { ButtonLink } from './button-link';
@@ -56,11 +57,13 @@ function UseCaseBlock({ section, sunken }: { section: UseCaseSection; sunken: bo
                 {index + 1}
               </span>
               <div className="flex min-w-0 flex-1 flex-col gap-3 pt-1">
-                <h3 className="font-semibold">{step.title}</h3>
+                <h3 className="font-semibold">
+                  <Rich text={step.title} />
+                </h3>
                 <p className="text-muted-foreground text-sm leading-relaxed">
                   <Rich text={step.body} />
                 </p>
-                {step.code ? <SiteCode code={step.code.code} language={step.code.language} title={step.code.title} wrap /> : null}
+                {step.code ? <SiteCode code={step.code.code} language={step.code.language} title={step.code.title} /> : null}
               </div>
             </li>
           ))}
@@ -87,6 +90,7 @@ function UseCaseBlock({ section, sunken }: { section: UseCaseSection; sunken: bo
             id={section.visual.id}
             label={section.visual.label}
             sizes="(min-width: 1024px) 520px, calc(100vw - 2rem)"
+            zoomLabel={section.visual.zoom ? `${shared.openFullSize}: ${section.visual.label}` : undefined}
           />
         </div>
       ) : (
@@ -99,7 +103,7 @@ function UseCaseBlock({ section, sunken }: { section: UseCaseSection; sunken: bo
       ) : null}
       {section.cta && isReady(section.cta.to) ? (
         <div className="mt-10">
-          <ButtonLink hash={section.cta.hash} to={section.cta.to} variant="outline">
+          <ButtonLink hash={section.cta.hash} search={section.cta.search} to={section.cta.to} variant="outline">
             {section.cta.label}
           </ButtonLink>
         </div>

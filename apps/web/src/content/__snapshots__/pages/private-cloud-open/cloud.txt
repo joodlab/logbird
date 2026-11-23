@@ -1,0 +1,100 @@
+title: Cloud · Logbird
+description: Logbird Cloud runs the same codebase for you. Early access for invited teams: request access or sign in. Pricing isn't set yet.
+
+headings:
+h1 The same Logbird, run by us.
+h2 Pricing isn't set yet.
+h3 Self-host
+h3 Cloud
+h3 Support and enterprise
+h2 Cloud questions, answered as far as we can today.
+h3 When can everyone sign up?
+h3 Where will my data be stored?
+h3 Is the cloud a different product?
+h3 Can I move between self-host and cloud?
+h3 How much will it cost?
+h3 Will there be an SLA?
+h3 What do you do with the email I give you?
+h2 Want early access?
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Logbird Cloud
+The same Logbird, run by us.
+Logbird Cloud runs the same codebase you'll be able to self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are limited to invited teams for now. Request access, or sign in if you've been invited.
+Request access
+Sign in
+Where things stand
+Logbird Cloud
+Early access
+Invited teams
+Pricing
+Isn't set yet
+Published before billing starts
+Self-host
+When the source opens
+Free, MIT
+Pricing
+Pricing isn't set yet.
+Self-hosting is free under the MIT licence. Logbird Cloud is free during early access; its pricing after that will be published before billing starts.
+Self-host
+Free, MIT
+Free and MIT-licensed once the source opens, with every feature in the repository. You'll run it.
+Self-host when the source opens
+Cloud
+Early access
+We run it for you. Free during early access, which is open to invited teams for now.
+Request access
+Support and enterprise
+Talk to us
+For teams that want help running Logbird, or terms we haven't covered here.
+Contact us
+See pricing
+Nothing on this page is an offer.
+Questions
+Cloud questions, answered as far as we can today.
+When can everyone sign up?
+We haven't set a date. Logbird Cloud is in early access: sign-ups are limited to invited teams while we onboard them. Request access and we'll be in touch.
+Where will my data be stored?
+We'll publish the hosting region with the Cloud's launch terms. Ask us before you send production data. If your data must stay in a particular place, self-hosting is an option once the source opens.
+Is the cloud a different product?
+No. It runs the same codebase as the self-hosted version. One difference is already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL WHERE mode in the explorer is in both.
+Can I move between self-host and cloud?
+Not with a tool or a guide today. Both run the same codebase, but there's no migration tool and no documented migration path yet.
+How much will it cost?
+Self-hosting is free under the MIT licence. Logbird Cloud is free during early access; its pricing after that will be published before billing starts.
+Will there be an SLA?
+Not during early access. There are no published service levels or limits yet.
+What do you do with the email I give you?
+We store it to contact you about Logbird. No trackers. See the privacy policy.
+Want early access?
+The source opens soon. Request access to Logbird Cloud, where sign-ups are limited to invited teams for now, and we'll tell you when you can self-host.
+Request access
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+Request access → /contact
+Sign in → https://app.example.test/login
+Self-host when the source opens → /contact?interest=self-host
+Request access → /contact
+Contact us → /contact
+See pricing → /pricing
+privacy policy → /legal/privacy
+Request access → /contact
+Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

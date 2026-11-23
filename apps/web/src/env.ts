@@ -22,24 +22,7 @@
  *   WEB_FORM_RETENTION_MONTHS  months the site keeps a form submission  default 24 (privacy policy and the cleanup)
  *   WEB_CHECKOUT_URL   Cloud checkout; used only once pricing is approved (content/pricing.ts)  default unset
  */
-/** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
-export const PUBLIC_ENV_KEYS = [
-  'WEB_SITE_URL',
-  'WEB_APP_URL',
-  'WEB_GITHUB_URL',
-  'WEB_GITHUB_PUBLIC',
-  'WEB_ORG_NAME',
-  'WEB_SECURITY_EMAIL',
-  'WEB_CONTACT_EMAIL',
-  'WEB_PRIVACY_EMAIL',
-  'WEB_LEGAL_ADDRESS',
-  'WEB_GOVERNING_LAW',
-  'WEB_HOSTING_PROVIDER',
-  'WEB_EMAIL_PROVIDER',
-  'WEB_MAILBOX_PROVIDER',
-  'WEB_FORM_RETENTION_MONTHS',
-  'WEB_CHECKOUT_URL',
-] as const;
+export { PUBLIC_ENV_KEYS } from './env-keys';
 
 declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
 

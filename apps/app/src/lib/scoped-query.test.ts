@@ -41,7 +41,8 @@ describe('scopedQuery: entity filter AND the reader query', () => {
 
   it('leaves an empty side alone', () => {
     expect(scopedQuery(bases[0] ?? '', '  ')).toEqual({ q: bases[0], offset: 0, problem: null });
-    expect(scopedQuery('', '  outcome:failure ')).toMatchObject({ q: 'outcome:failure', problem: null });
+    // The reader's query alone is sent exactly as typed.
+    expect(scopedQuery('', '  outcome:failure ')).toEqual({ q: '  outcome:failure ', offset: 0, problem: null });
   });
 
   it("reports the reader's own parse error, and maps server positions back onto the reader's text", () => {

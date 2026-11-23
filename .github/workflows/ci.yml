@@ -32,3 +32,6 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm check
       - run: pnpm test:unit
+        env:
+          # The query bar's corpus test runs in its own job (query-corpus.yml), only when query code changes.
+          LOGBIRD_QUERY_CORPUS: skip

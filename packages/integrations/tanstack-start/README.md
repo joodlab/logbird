@@ -18,5 +18,6 @@ Options are `CaptureOptions<Request>`: client, required actor/tenant, optional e
 Await `capture.shutdown()` in the host's lifecycle. Never return context.audit to the browser.
 For a history server function, authorize the record then return
 `readAuditTrail({ endpoint, readKey }, trailQuery({ target: { type: 'record', id }, tenant }))`.
+`trailQuery` throws a `TypeError` (and nothing is read) if `id` or `tenant` is passed without a value.
 Read failures reject normally; they are not disguised as empty history.
 See [design](../../../docs/integrations.md) and [example](../../../examples/tanstack-start).

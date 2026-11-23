@@ -19,7 +19,7 @@ public class MeasureTests
 
         var e = new AuditEvent("zeroes") { Metadata = { ["zeroes"] = zeroes } };
         Assert.True(Encoding.UTF8.GetByteCount(zeroes.ToJsonString()) > LogbirdClient.MaxEventBytes);
-        Assert.Equal(JsonDepth.Shape.TooLarge, JsonDepth.Measure(e, LogbirdClient.MaxEventBytes));
+        Assert.Equal(JsonSize.Shape.TooLarge, JsonSize.Measure(e, LogbirdClient.MaxEventBytes));
     }
 
     [Theory]
@@ -48,8 +48,8 @@ public class MeasureTests
         var bytes = Encoding.UTF8.GetByteCount(metadata.ToJsonString());
         var built = new AuditEvent(string.Empty) { Metadata = { ["t"] = tree.DeepClone() } };
         var parsed = new AuditEvent(string.Empty) { Metadata = { ["t"] = JsonNode.Parse(tree.ToJsonString()) } };
-        Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(built, bytes));
-        Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(parsed, bytes));
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(built, bytes));
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(parsed, bytes));
     }
 
     [Fact]
@@ -57,14 +57,14 @@ public class MeasureTests
     {
         // DEL is one byte in Logbird's output; 200,000 of them still fit in 256 KB.
         var e = new AuditEvent("del") { Metadata = { ["text"] = new string((char)0x7F, 200_000) } };
-        Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(e, LogbirdClient.MaxEventBytes));
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(e, LogbirdClient.MaxEventBytes));
         var nested = new AuditEvent("del") { Metadata = { ["obj"] = new JsonObject { ["text"] = new string((char)0x7F, 200_000) } } };
-        Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(nested, LogbirdClient.MaxEventBytes));
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(nested, LogbirdClient.MaxEventBytes));
 
         // A supplementary character is four bytes in Logbird's output.
         var emoji = char.ConvertFromUtf32(0x1F600);
         var text = new System.Text.StringBuilder().Insert(0, emoji, 60_000).ToString();
         var faces = new AuditEvent("emoji") { Metadata = { ["obj"] = new JsonObject { ["text"] = text } } };
-        Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(faces, LogbirdClient.MaxEventBytes));
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(faces, LogbirdClient.MaxEventBytes));
     }
 }

@@ -4,72 +4,41 @@ import { CtaBand } from '../components/marketing/cta-band';
 import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { Wordmark } from '../components/marketing/wordmark';
-import { GITHUB_PUBLIC, ORG_NAME } from '../env';
-import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
+import { about } from '../content/about';
 import { pageHead } from '../lib/seo';
 import { isReady } from '../lib/site-map';
 
 export const Route = createFileRoute('/about')({ head: () => pageHead('/about'), component: AboutPage });
 
-// Copy: marketing/copy/about.md. Change wording there first. WEB_ORG_NAME controls the company label;
-// maintainers keep the published origin story and partner attribution unnamed (see marketing/copy/README.md).
-const principles: { title: string; body: string }[] = [
-  {
-    title: 'Require only an action.',
-    body: 'An `action` string is the only required field, and each event must fit the ingest limits. We recommend a shape; we never reject an event for missing it.',
-  },
-  {
-    title: "Capture is your code's job.",
-    body: 'We give you the SDK, the integrations and the patterns. Our guarantee starts at the `202`.',
-  },
-  {
-    title: 'Your code sends the history.',
-    body: "Logbird doesn't rebuild history from your database. Import past events by sending them with their original `occurredAt`, up to 3650 days back; an older value is stored at receive time with a warning, and project retention still applies.",
-  },
-  { title: 'Retention means deletion.', body: 'Expired events are deleted for good.' },
-  { title: 'We audit ourselves.', body: "Logbird records its own management actions in your workspace's activity stream." },
-];
-
+// Words: content/about.ts. This file is layout only (content-modules.test.ts).
 function AboutPage() {
+  const { hero, partner, principles, name, build } = about;
   return (
     <>
       <PageHero
         actions={
           <>
             <ButtonLink size="lg" to="/product">
-              Take the product tour
+              {hero.tourAction}
             </ButtonLink>
             <ButtonLink size="lg" to="/contact" variant="outline">
-              Contact us
+              {hero.contactAction}
             </ButtonLink>
           </>
         }
-        eyebrow="About"
-        lead={
-          <>
-            {ORG_NAME ? `Logbird is built by ${ORG_NAME}. ` : null}Logbird started as the audit log a product team needed, where every support
-            question begins the same way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves.{' '}
-            {GITHUB_PUBLIC
-              ? 'We released it under the MIT licence so any product team can do the same.'
-              : "It's MIT-licensed, and the source opens publicly soon, so any product team can do the same."}
-          </>
-        }
-        title="We built the audit log we needed."
+        eyebrow={hero.eyebrow}
+        lead={hero.lead}
+        title={hero.title}
       />
 
       <Section labelledBy="partner-title">
-        <SectionHeader
-          eyebrow="First design partner"
-          id="partner-title"
-          lead={`${DESIGN_PARTNER_LINE} Integration feedback helps inform the roadmap.`}
-          title="Shaped by a real product."
-        />
+        <SectionHeader eyebrow={partner.eyebrow} id="partner-title" lead={partner.lead} title={partner.title} />
       </Section>
 
       <Section labelledBy="principles-title" tone="sunken">
-        <SectionHeader eyebrow="What we hold to" id="principles-title" title="Five decisions that don't change." />
+        <SectionHeader eyebrow={principles.eyebrow} id="principles-title" title={principles.title} />
         <ol className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {principles.map((principle, index) => (
+          {principles.items.map((principle, index) => (
             <li className="panel flex flex-col gap-2 p-5 md:p-6" key={principle.title}>
               <span aria-hidden="true" className="font-mono text-brand text-sm tabular-nums">
                 {String(index + 1).padStart(2, '0')}
@@ -85,12 +54,7 @@ function AboutPage() {
 
       <Section labelledBy="name-title">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
-          <SectionHeader
-            eyebrow="The name"
-            id="name-title"
-            lead="The bird that carries every event home. We chose a short name made of two words you already know, so anyone who hears it once can spell it."
-            title="Logbird"
-          />
+          <SectionHeader eyebrow={name.eyebrow} id="name-title" lead={name.lead} title={name.title} />
           <div className="panel flex items-center justify-center px-6 py-12">
             <Wordmark className="h-14 w-auto max-w-full" />
           </div>
@@ -99,16 +63,11 @@ function AboutPage() {
 
       {isReady('/changelog') ? (
         <Section labelledBy="build-title" tone="sunken">
-          <SectionHeader
-            eyebrow="Building in public"
-            id="build-title"
-            lead="We write up what we ship as we go. Every post uses real captures from the product."
-            title="Follow the build."
-          >
+          <SectionHeader eyebrow={build.eyebrow} id="build-title" lead={build.lead} title={build.title}>
             <div className="flex flex-wrap gap-3 pt-2">
-              <ButtonLink to="/changelog">Read the changelog</ButtonLink>
+              <ButtonLink to="/changelog">{build.changelogAction}</ButtonLink>
               <ButtonLink to="/contact" variant="outline">
-                Contact us
+                {build.contactAction}
               </ButtonLink>
             </div>
           </SectionHeader>

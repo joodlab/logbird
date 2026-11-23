@@ -16,11 +16,12 @@ import { QueryInput, type QueryInputHandle } from '@/components/query-input/quer
 import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
-import { entitySearchQuery, eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
+import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histogramQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
 import { andQuery, scopedQuery } from '@/lib/query-language';
+import { isKnownFieldName, lintQuery, suggestedConversion } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { ALL_RANGE, absoluteRange, isValidRange, rangeInSentence, rangeLabel, resolveRange } from '@/lib/range';
 import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
@@ -363,6 +364,22 @@ function ProjectExplorer({
       ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
       : 'Remove a filter or change the query.';
 
+  // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
+  // so a search opened straight from a link still gets its offer once they arrive).
+  const projectFields = useQuery({ ...fieldsQuery(projectId, range), enabled: lang === 'query' && Boolean(q) });
+  const knownKeys = new Set((current(projectFields)?.data ?? []).map((f) => f.key));
+  const conversion =
+    lang === 'query' && q
+      ? suggestedConversion(
+          q,
+          lintQuery(q, (name) => isKnownFieldName(name) || knownKeys.has(`attr.${name}`)),
+        )
+      : null;
+  const applyConversion = (filter: string) => {
+    const original = q;
+    onChange({ q: filter });
+    toast('Converted to Logbird syntax', { description: filter, action: { label: 'Undo', onClick: () => onChange({ q: original }) } });
+  };
   const empty = problem ? (
     <EmptyState description="Fix the query above to see results." icon={SearchXIcon} title="Query not run" />
   ) : events.isError ? (
@@ -397,6 +414,12 @@ function ProjectExplorer({
           Search <span className="font-mono">{entityQuery(e.kind, e.id, e.type)}</span>
         </Button>
       ))}
+      {conversion ? (
+        // The text search found nothing; the filter its KQL spelling suggests is one click away (never applied unasked).
+        <Button data-testid="empty-conversion" onClick={() => applyConversion(conversion)} size="sm">
+          Search <span className="font-mono">{conversion}</span> instead
+        </Button>
+      ) : null}
       {q ? (
         <Button onClick={() => onChange({ q: '' })} size="sm" variant="outline">
           Clear query

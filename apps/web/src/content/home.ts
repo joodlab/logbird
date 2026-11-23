@@ -1,5 +1,6 @@
 import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
 import { evidenceLimits } from './evidence-limits';
+import { scopedReadLimits } from './scoped-read-limits';
 import { sharedContent } from './shared';
 import { byCloud, byRepo, type Cta, type Item, type Marked, SITE, type SiteState } from './site';
 
@@ -102,10 +103,13 @@ export function homeContent(site: SiteState) {
       github: site.githubUrl ? { label: 'Source on GitHub', href: site.githubUrl } : undefined,
       sample: { title: 'Send your first event', code: curl, caption: "That's a valid event. Only `action` is required." },
     },
+    /** The hero's real console capture (docs/media/README.md). `query` is what the capture shows; tests compile it. */
     explorer: {
-      label: 'The Logbird explorer',
+      id: 'explorer-hero',
+      query: '-actor.type:system',
       frameLabel: 'Explorer',
-      caption: 'The explorer: search, facets, a histogram you can zoom, and every event in a dense table.',
+      caption:
+        'The explorer, filtered with -actor.type:system to leave out the scheduler: what people did over seven days, with a histogram and every event.',
     },
     customers: {
       eyebrow: 'Customer-facing audit logs',
@@ -128,6 +132,7 @@ export function homeContent(site: SiteState) {
           },
         ] satisfies Item[],
         limit: 'A read key reads the whole project, so your backend must decide which customer account each user may see.',
+        limitLink: undefined as Cta | undefined,
       },
       /** After the production proof of scoped read access (SiteState.scopedReadLive). */
       scoped: {
@@ -145,8 +150,9 @@ export function homeContent(site: SiteState) {
             body: "A scoped read key reads one customer account's events. It can also be limited to events that name one record, to actions with given prefixes, or both.",
           },
         ] satisfies Item[],
-        limit:
-          "One customer account per scope, matched on the id Logbird stored. Logbird's query builders always apply the scope. ClickHouse checks the customer account as well once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade, and a source installation runs `create-query-user` once. A web page on another origin can read with a token only if that origin is listed on the key.",
+        limit: scopedReadLimits.scope,
+        /** The rest of the limit lives on /security § Scoped reads (content/scoped-read-limits.ts). */
+        limitLink: scopedReadLimits.enforced as Cta | undefined,
       },
       /** What the page shows: scoped access only once its production proof is confirmed. */
       get access() {
@@ -154,11 +160,12 @@ export function homeContent(site: SiteState) {
       },
       limitLabel: 'The limit',
       screenshot: {
+        id: 'tenant-summary',
         label: 'Customer account',
         caption:
-          "A customer account's page in the console: its events, activity, outcomes, top actions and the people, workers and records involved.",
+          "A customer account's page in the console: its event counts, and how many events support did while signed in as the customer, by agent.",
       },
-      cta: { label: 'Read the integration guide', to: '/developers', hash: 'integrations' } satisfies Cta,
+      cta: { label: 'How to show customers their history', to: '/use-cases/customer-audit-logs' } satisfies Cta,
     },
     evidence: {
       eyebrow: 'Compliance evidence',
@@ -186,10 +193,13 @@ export function homeContent(site: SiteState) {
           limit: "It doesn't record who searched or opened events.",
         },
       ] satisfies Limit[],
+      /** A real completed evidence export's record. The caption says only what the image shows; the limit sits beside it. */
       screenshot: {
-        label: 'Retention',
-        caption: "A project's retention settings: the current window and the policies you can choose.",
+        id: 'export-record',
+        label: 'Workspace activity',
+        caption: "The completed export's record in Workspace activity: its period, query, row count, size, fixed query clock and SHA-256.",
       },
+      screenshotLimit: { label: 'What a match shows', text: evidenceLimits.exportMatch },
       cta: { label: 'How to answer an auditor', to: '/use-cases/compliance-evidence' } satisfies Cta,
     },
     operators: {
@@ -197,9 +207,10 @@ export function homeContent(site: SiteState) {
       title: 'Answer "what happened in this account?" in one search.',
       lead: 'Support and operations open a customer account or a single record and see its events in order, with the before and after values you send.',
       screenshot: {
+        id: 'event-sheet',
         label: 'Event detail',
         caption:
-          'An event in detail: who asked, what did the work, whose account, which records, and the before and after values sent for each change (the first 256 per event).',
+          'An event in detail: who acted, what ran it, whose account, which records, and the before and after values sent for each change (the first 256 per event).',
       },
       features: {
         search: { title: 'Search', body: '`actor:usr_42 action:booking.* outcome:failure`, or a guarded SQL `WHERE` expression.' },
@@ -209,7 +220,7 @@ export function homeContent(site: SiteState) {
           body: 'The events that share an operation id, from the request to the jobs it spawned, as one tree.',
         },
       } satisfies Record<string, Item>,
-      cta: { label: 'Take the product tour', to: '/product' } satisfies Cta,
+      cta: { label: 'How support investigates an account', to: '/use-cases/support-investigations' } satisfies Cta,
     },
     developers: {
       eyebrow: 'For developers',

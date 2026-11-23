@@ -1,0 +1,25 @@
+title: Blog · Logbird
+description: Notes on building an audit log: design decisions, guarantees and limits, written by the people building Logbird.
+
+headings:
+h1 Notes from building Logbird.
+h2 Posts
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Blog
+Notes from building Logbird.
+Longer posts on how Logbird works and why: the decisions, the guarantees, and the limits. For day-by-day progress, see the changelog.
+Changelog and build log
+[sr-only] Posts
+No posts yet. The first one is on its way.
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+Changelog and build log → /changelog
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

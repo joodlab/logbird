@@ -4,6 +4,8 @@ description: How Logbird isolates projects, stores keys, guards SQL, deletes exp
 path: /security
 ---
 
+Page text renders from `apps/web/src/content/security.ts` (the scoped-read limits from `apps/web/src/content/scoped-read-limits.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Security and data handling
 
 ## intro
@@ -62,6 +64,22 @@ path: /security
     A request for another workspace's project gets a 404 and reveals nothing about it.
   <!-- source: docs/SPEC.md §5, §6 (ApiKey lastUsedAt, revokedAt), §7.1; SECURITY.md -->
 - **visual:** a new, reviewed capture (required before publication). Check that no full key is visible.
+
+## scoped-reads
+
+Inside the keys section (`isolation`), shown while `SCOPED_READ_LIVE` is on. The landing page's customer section links
+here ("How it is enforced"). The three sentences live in `apps/web/src/content/scoped-read-limits.ts`, which the landing
+page, this section and the customer-facing audit logs page all render; `content-modules.test.ts` checks all three.
+
+- **id:** `scoped-reads`
+- **heading:** Scoped reads: one customer account per key or token.
+- **bullets:**
+  - **One account per scope.** One customer account per scope, matched on the id Logbird stored.
+  - **Two layers.** Logbird's query builders always apply the scope. ClickHouse checks the customer account as well
+    once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade,
+    and a source installation runs `create-query-user` once.
+  - **Browser origins.** A web page on another origin can read with a token only if that origin is listed on the key.
+  <!-- source: docs/scoped-read-access.md § The scope, § Browser use (CORS); docs/security.md § Two enforcement layers; CHANGELOG.md 0.2.0 "Restricted query user" -->
 
 ## sql-guard
 

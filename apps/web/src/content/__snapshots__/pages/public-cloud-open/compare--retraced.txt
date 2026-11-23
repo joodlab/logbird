@@ -1,0 +1,277 @@
+title: Retraced · Logbird
+description: Retraced is an Apache-2.0 audit log service with an embeddable React viewer. How it compares with Logbird, sourced and dated.
+
+headings:
+h1 Logbird and Retraced
+h2 At a glance
+h2 When to choose Retraced
+h2 When to choose Logbird
+h2 Sources
+h3 What we couldn't verify
+h2 Start with one event.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Compare
+Logbird and Retraced
+Retraced is an open-source audit log service. Replicated created it, and BoxyHQ later co-maintained it. It has an API to send events, an embeddable viewer so your customers can browse their own events, and an Enterprise API so their IT teams can pull events out programmatically. It runs on Postgres with optional Elasticsearch, and you deploy it yourself. Its embeddable, customer-facing viewer is a real strength: Logbird doesn't have one today. [S1, S2, S3, S4]
+Checked 7 November 2026
+At a glance
+Each claim about another product links to its source below. Anything we couldn't verify is left out.
+[sr-only] Logbird and Retraced compared, with a source for each claim about Retraced
+[sr-only: Topic]
+Logbird
+Retraced
+Licence
+MIT
+Apache-2.0 [S5]
+Self-host
+Yes: Docker Compose or Coolify, with published images
+Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon" [S6, S7]
+Hosted offering
+Logbird Cloud: early access for invited teams
+None found [S8]
+Required event fields
+An action string only; each event must fit the ingest limits
+action and crud in the API spec; the docs also list actor as mandatory [S9, S10]
+Tenant field
+tenant (optional)
+group (optional in the API spec) [S10]
+Search
+Query language with ranges, regex and groups; guarded SQL WHERE mode in the console
+GraphQL search; free text or key:value filters on action, crud, received and actor [S11, S12]
+Retention
+Per project, 7 days to 10 years; hourly permanent deletion with a preview
+No retention setting in the documented configuration [S13]
+Customer-facing viewer
+None yet; read API plus headless Vue helpers
+Embeddable React viewer (@retracedhq/logs-viewer), with scoped viewer tokens [S14]
+Programmatic read
+GET /v1/events with a project read key
+Enterprise API (GraphQL) for end customers [S15]
+Storage
+ClickHouse for events, Postgres for metadata
+Postgres; optional Elasticsearch; NSQ queue [S4, S13]
+Pricing
+Self-host free (MIT); Cloud pricing not set
+No pricing page found [S8]
+Latest release
+v0.2.1, 22 Nov 2026; first release v0.1.0, 9 Nov 2026
+v1.13.1, 6 Nov 2024; latest commit on main 26 Aug 2025; not archived [S16, S17]
+Licence
+Logbird
+MIT
+Retraced
+Apache-2.0 [S5]
+Self-host
+Logbird
+Yes: Docker Compose or Coolify, with published images
+Retraced
+Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon" [S6, S7]
+Hosted offering
+Logbird
+Logbird Cloud: early access for invited teams
+Retraced
+None found [S8]
+Required event fields
+Logbird
+An action string only; each event must fit the ingest limits
+Retraced
+action and crud in the API spec; the docs also list actor as mandatory [S9, S10]
+Tenant field
+Logbird
+tenant (optional)
+Retraced
+group (optional in the API spec) [S10]
+Search
+Logbird
+Query language with ranges, regex and groups; guarded SQL WHERE mode in the console
+Retraced
+GraphQL search; free text or key:value filters on action, crud, received and actor [S11, S12]
+Retention
+Logbird
+Per project, 7 days to 10 years; hourly permanent deletion with a preview
+Retraced
+No retention setting in the documented configuration [S13]
+Customer-facing viewer
+Logbird
+None yet; read API plus headless Vue helpers
+Retraced
+Embeddable React viewer (@retracedhq/logs-viewer), with scoped viewer tokens [S14]
+Programmatic read
+Logbird
+GET /v1/events with a project read key
+Retraced
+Enterprise API (GraphQL) for end customers [S15]
+Storage
+Logbird
+ClickHouse for events, Postgres for metadata
+Retraced
+Postgres; optional Elasticsearch; NSQ queue [S4, S13]
+Pricing
+Logbird
+Self-host free (MIT); Cloud pricing not set
+Retraced
+No pricing page found [S8]
+Latest release
+Logbird
+v0.2.1, 22 Nov 2026; first release v0.1.0, 9 Nov 2026
+Retraced
+v1.13.1, 6 Nov 2024; latest commit on main 26 Aug 2025; not archived [S16, S17]
+When to choose Retraced
+You want to embed an audit log viewer in your own React app, so customers can browse their own events.
+Your customers' IT teams need a programmatic API of their own to pull their events.
+You prefer Apache-2.0, or you already run Postgres and Elasticsearch and want the audit log there too.
+You want a project with a long release history behind it. Logbird's first release was v0.1.0, on 9 Nov 2026.
+When to choose Logbird
+You want to send any event shape and get a recommended envelope without a fixed schema.
+Your team needs an operator console that can follow actors, tenants, workers and records, and show operation trees with retries.
+You need retention you can explain: a window per project, a preview of what will be deleted, and permanent deletion.
+You want events stored in ClickHouse, with a SQL WHERE mode for hard questions.
+Self-host it
+Request access
+Sources
+All accessed 7 November 2026. If something has changed, tell us and we'll fix it.
+Report an outdated fact
+All comparisons
+S1
+Repository description: "A fully open source audit logs service and embeddable UI…" [sr-only: (opens in a new tab)]
+github.com/retracedhq/retraced
+S2
+README: searchable, exportable record of events; Go and JavaScript clients [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/retraced/main/README.md
+S3
+Basics: Publisher API, embedded Logs Viewer, Enterprise IT Integration API [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/getting-started/retraced-basics.md
+S4
+Docs overview: "Supports Postgres for now"; Elasticsearch optional [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/README.md
+S5
+Licence file: Apache License, Copyright 2019 Replicated, Inc. [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/retraced/main/LICENSE
+S6
+Self-host options: Docker, DigitalOcean, AWS, Kubernetes, Skaffold [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/self-host/index.md
+S7
+Kubernetes page: "Coming soon" [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/self-host/kubernetes.md
+S8
+No hosted service or pricing found. boxyhq.com redirects to ory.sh, and the Ory pricing page doesn't list Retraced. A 2024 Ory changelog post says "Audit logs are currently a self-hosted only feature". [sr-only: (opens in a new tab)]
+www.ory.com/pricing
+Also: www.ory.com/blog/changelog-saml-jackson-2024 [sr-only: (opens in a new tab)]
+S9
+Publisher API docs: mandatory action, crud, actor [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/apis/publisher-api.md
+S10
+API spec CreateEventRequest: required action, crud; optional group, actor, target and more [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/retraced/main/swagger.json
+S11
+GraphQL search endpoints [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/apis/graphql.md
+S12
+Search syntax [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/getting-started/searching-for-events.md
+S13
+Environment variables: Postgres, Elasticsearch, NSQ, PG_SEARCH; no retention settings [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/self-host/env-variables.md
+S14
+Embedded viewer: @retracedhq/logs-viewer, RetracedEventsBrowser, group-scoped viewer token [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/getting-started/embedded-viewer.md
+S15
+Enterprise API [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/retracedhq/docs/main/exposing-retraced-data/enterprise-api.md
+S16
+Releases: v1.13.1, published 2024-11-06 [sr-only: (opens in a new tab)]
+api.github.com/repos/retracedhq/retraced/releases
+S17
+Commits: latest on main 2025-08-26; archived: false [sr-only: (opens in a new tab)]
+api.github.com/repos/retracedhq/retraced/commits
+Also: api.github.com/repos/retracedhq/retraced [sr-only: (opens in a new tab)]
+What we couldn't verify
+Left out of the table: Who maintains Retraced today (boxyhq.com now redirects to Ory, and we found no statement from Ory about Retraced); whether OpenSearch or the repository's Helm files are supported; any retention or deletion job outside the documented configuration; CSV export details.
+All product names are trademarks of their respective owners. Logbird isn't affiliated with or endorsed by any of them.
+Start with one event.
+Self-host Logbird today, or request access to Logbird Cloud, where sign-ups are limited to invited teams for now.
+Request access
+Self-host it
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+S1 [aria-label: Source S1] → #source-S1
+S2 [aria-label: Source S2] → #source-S2
+S3 [aria-label: Source S3] → #source-S3
+S4 [aria-label: Source S4] → #source-S4
+S5 [aria-label: Source S5] → #source-S5
+S6 [aria-label: Source S6] → #source-S6
+S7 [aria-label: Source S7] → #source-S7
+S8 [aria-label: Source S8] → #source-S8
+S9 [aria-label: Source S9] → #source-S9
+S10 [aria-label: Source S10] → #source-S10
+S10 [aria-label: Source S10] → #source-S10
+S11 [aria-label: Source S11] → #source-S11
+S12 [aria-label: Source S12] → #source-S12
+S13 [aria-label: Source S13] → #source-S13
+S14 [aria-label: Source S14] → #source-S14
+S15 [aria-label: Source S15] → #source-S15
+S4 [aria-label: Source S4] → #source-S4
+S13 [aria-label: Source S13] → #source-S13
+S8 [aria-label: Source S8] → #source-S8
+S16 [aria-label: Source S16] → #source-S16
+S17 [aria-label: Source S17] → #source-S17
+S5 [aria-label: Source S5] → #source-S5
+S6 [aria-label: Source S6] → #source-S6
+S7 [aria-label: Source S7] → #source-S7
+S8 [aria-label: Source S8] → #source-S8
+S9 [aria-label: Source S9] → #source-S9
+S10 [aria-label: Source S10] → #source-S10
+S10 [aria-label: Source S10] → #source-S10
+S11 [aria-label: Source S11] → #source-S11
+S12 [aria-label: Source S12] → #source-S12
+S13 [aria-label: Source S13] → #source-S13
+S14 [aria-label: Source S14] → #source-S14
+S15 [aria-label: Source S15] → #source-S15
+S4 [aria-label: Source S4] → #source-S4
+S13 [aria-label: Source S13] → #source-S13
+S8 [aria-label: Source S8] → #source-S8
+S16 [aria-label: Source S16] → #source-S16
+S17 [aria-label: Source S17] → #source-S17
+Self-host it → /self-hosting
+Request access → /contact
+Report an outdated fact → /contact?interest=correction
+All comparisons → /compare
+Repository description: "A fully open source audit logs service and embeddable UI…" [sr-only: (opens in a new tab)] → https://github.com/retracedhq/retraced
+README: searchable, exportable record of events; Go and JavaScript clients [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/retraced/main/README.md
+Basics: Publisher API, embedded Logs Viewer, Enterprise IT Integration API [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/getting-started/retraced-basics.md
+Docs overview: "Supports Postgres for now"; Elasticsearch optional [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/README.md
+Licence file: Apache License, Copyright 2019 Replicated, Inc. [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/retraced/main/LICENSE
+Self-host options: Docker, DigitalOcean, AWS, Kubernetes, Skaffold [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/self-host/index.md
+Kubernetes page: "Coming soon" [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/self-host/kubernetes.md
+No hosted service or pricing found. boxyhq.com redirects to ory.sh, and the Ory pricing page doesn't list Retraced. A 2024 Ory changelog post says "Audit logs are currently a self-hosted only feature". [sr-only: (opens in a new tab)] → https://www.ory.com/pricing
+www.ory.com/blog/changelog-saml-jackson-2024 [sr-only: (opens in a new tab)] → https://www.ory.com/blog/changelog-saml-jackson-2024
+Publisher API docs: mandatory action, crud, actor [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/apis/publisher-api.md
+API spec CreateEventRequest: required action, crud; optional group, actor, target and more [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/retraced/main/swagger.json
+GraphQL search endpoints [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/apis/graphql.md
+Search syntax [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/getting-started/searching-for-events.md
+Environment variables: Postgres, Elasticsearch, NSQ, PG_SEARCH; no retention settings [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/self-host/env-variables.md
+Embedded viewer: @retracedhq/logs-viewer, RetracedEventsBrowser, group-scoped viewer token [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/getting-started/embedded-viewer.md
+Enterprise API [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/retracedhq/docs/main/exposing-retraced-data/enterprise-api.md
+Releases: v1.13.1, published 2024-11-06 [sr-only: (opens in a new tab)] → https://api.github.com/repos/retracedhq/retraced/releases
+Commits: latest on main 2025-08-26; archived: false [sr-only: (opens in a new tab)] → https://api.github.com/repos/retracedhq/retraced/commits
+api.github.com/repos/retracedhq/retraced [sr-only: (opens in a new tab)] → https://api.github.com/repos/retracedhq/retraced
+Request access → /contact
+Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

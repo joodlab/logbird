@@ -4,6 +4,7 @@ import { authClient } from '@/lib/auth-client';
 import { entityMatchRank } from '@/lib/entities';
 import { isBudgetLimit, isOverBudget } from '@/lib/query-budget';
 import { resolveRange } from '@/lib/range';
+import { retentionRefetchDelay } from '@/lib/retention';
 import { api, langParam } from './client';
 import { ApiRequestError, isBusyError, isTimeoutError, withDeadline } from './errors';
 
@@ -124,6 +125,9 @@ export const retentionQuery = (projectId: string, preview?: number) =>
     queryKey: [...keys.project(projectId), 'retention', preview ?? null] as const,
     queryFn: ({ signal }) => api.projects.retention(projectId, preview, signal),
     retry: shouldRetry,
+    // An open page follows the schedule: fetched again right after the next purge is due, and while it is late or
+    // running, so it never keeps saying "in 1 min." or "overdue" after the worker has moved on (#318).
+    refetchInterval: (query) => retentionRefetchDelay(query.state.data),
   });
 
 export const overviewQuery = (projectId: string, range: string, q = '') =>
@@ -224,6 +228,25 @@ export const operationQuery = (projectId: string, operationId: string) =>
     queryKey: [...keys.project(projectId), 'operation', operationId] as const,
     queryFn: ({ signal }) => api.events.operation(projectId, operationId, signal),
     staleTime: 60_000,
+    retry: shouldRetry,
+  });
+
+/**
+ * When an entity was first and last seen, from the directory's rollup: the default history window comes from it without
+ * waiting for the profile's slower parts (#220). For a record whose type and id join into another's key the rollup's
+ * window is the wider of the two, so it still covers every event of this record. Null when the directory does not list
+ * exactly this id. No placeholder: an answer always belongs to this entity.
+ */
+export const entitySeenQuery = (projectId: string, kind: EntityKind, entityId: string, type?: string) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'entity-seen', kind, entityId, type ?? null] as const,
+    queryFn: async ({ signal }) => {
+      // The type filter keeps records whose bare id spells this composite id (`t0` + `page:7`) from crowding it out.
+      const page = await api.entities.list(projectId, { kind, q: entityId, type, limit: 20 }, signal);
+      const entity = page.data.find((e) => e.id === entityId);
+      return entity ? { firstSeen: entity.firstSeen, lastSeen: entity.lastSeen } : null;
+    },
+    staleTime: 30_000,
     retry: shouldRetry,
   });
 

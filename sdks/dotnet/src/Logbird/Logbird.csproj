@@ -6,12 +6,15 @@
     <Description>Audit logging for .NET backends: record who did what to which record without slowing or breaking your application. Batching, retries without duplicates, redaction, a read client and Standard Webhooks verification for Logbird.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbird-icon.png</PackageIcon>
     <IsTrimmable Condition="'$(TargetFramework)' == 'net8.0'">true</IsTrimmable>
     <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <!-- The Logbird mark (apps/app/public/brand/logbird-mark.svg) at 128x128, nuget.org's recommended size. -->
+    <None Include="..\..\logbird-icon.png" Pack="true" PackagePath="\" Visible="false" />
     <InternalsVisibleTo Include="Logbird.Tests" />
     <InternalsVisibleTo Include="Logbird.AspNetCore" />
   </ItemGroup>
@@ -24,5 +27,23 @@
     <PackageReference Include="System.Text.Json" />
     <PackageReference Include="System.Diagnostics.DiagnosticSource" />
     <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+  </ItemGroup>
+
+  <!--
+    The public API is recorded in PublicAPI.Shipped.txt (what a published version contains) and PublicAPI.Unshipped.txt
+    (what is added since). The analyzer fails the build (RS0016, RS0017) when the public surface differs from those
+    files, so any API change is a visible edit to them. Before the first publication everything is unshipped.
+    RS0026 and RS0027 (overloads with optional parameters) are API design rules, not part of this record; the existing
+    cases are listed for the pre-publication review instead of being changed here.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
+    <!-- SDK package validation (ApiCompat) at pack time: the targets inside the package must be compatible. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
