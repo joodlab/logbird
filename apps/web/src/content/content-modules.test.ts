@@ -28,6 +28,13 @@ const MOVED = [
   'routes/use-cases.support-investigations.tsx',
   'components/marketing/self-host-cta.tsx',
   'components/marketing/steps.tsx',
+  'routes/compare.index.tsx',
+  'routes/compare.bemi.tsx',
+  'routes/compare.pangea.tsx',
+  'routes/compare.retraced.tsx',
+  'routes/compare.workos-audit-logs.tsx',
+  'components/marketing/comparison-page.tsx',
+  'components/marketing/capture-lanes.tsx',
 ];
 
 /** Props and keys whose string value is always wording, even one word. */
