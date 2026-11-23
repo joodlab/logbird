@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { AuditEvent } from '@logbird/contracts';
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OperationParties } from './operation-parties';
@@ -12,6 +12,10 @@ vi.mock('@/components/entity-link', () => ({
       {name || id}
     </a>
   ),
+}));
+
+vi.mock('@/components/impersonation', () => ({
+  SupportAgentLink: ({ agentId, children }: { agentId: string; children: ReactNode }) => <a href={`/support/${agentId}`}>{children}</a>,
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -31,8 +35,9 @@ type Actor = NonNullable<AuditEvent['actor']>;
 type Executor = NonNullable<AuditEvent['executor']>;
 const actor = (id: string, name = '', email = '', type = 'user'): Actor => ({ id, type, name, email });
 const executor = (id: string, name = '', type = 'worker'): Executor => ({ id, type, name, jobId: '', attempt: 0 });
-const ev = (n: number, actorValue: Actor | null, executorValue: Executor | null = null) =>
-  ({ id: `evt_${n}`, actor: actorValue, executor: executorValue }) as AuditEvent;
+const ev = (n: number, actorValue: Actor | null, executorValue: Executor | null = null, agent: AuditEvent['impersonator'] = null) =>
+  ({ id: `evt_${n}`, actor: actorValue, executor: executorValue, impersonator: agent }) as AuditEvent;
+const sam = { id: 'agent_sam', name: 'Sam Support' };
 
 function show(events: AuditEvent[]) {
   act(() => root?.render(<OperationParties events={events} projectId="prj_lab" />));
@@ -94,5 +99,18 @@ describe('OperationParties', () => {
     const { actors, executors } = show([ev(1, actor('', '', 'lina@example.test', ''), executor('', 'Billing worker', ''))]);
     expect(actors.textContent).toBe('Caused bylina@example.test');
     expect(executors.textContent).toBe('Performed byBilling worker');
+  });
+
+  it('credits the support agent for an impersonated step, as the drawer does', () => {
+    const { actors } = show([ev(1, actor('', '', 'lina@example.test', ''), null, sam)]);
+    expect(actors.textContent).toBe('Caused bySam Supportacting aslina@example.test');
+    expect(links(actors)).toEqual(['Sam Support']);
+  });
+
+  it('keeps the customer acting alone and the agent acting as them apart, and counts both', () => {
+    const lina = actor('u1', 'Lina Haddad');
+    const { actors } = show([ev(1, lina), ev(2, lina, null, sam), ev(3, null, null, sam)]);
+    expect(links(actors)).toEqual(['Lina Haddad', 'Sam Support', 'Lina Haddad', 'Sam Support']);
+    expect(actors.textContent).toContain('acting asan unknown customer');
   });
 });
