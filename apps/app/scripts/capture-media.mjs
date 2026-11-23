@@ -65,6 +65,8 @@ try {
     await page.waitForTimeout(1600);
     await page.keyboard.press('Escape');
     await query.fill('');
+    // Close the suggestions first: Enter on an empty bar with the panel open would run a suggested query.
+    await query.press('Escape');
     await query.press('Enter');
     await page.getByRole('switch', { name: 'Live', exact: true }).click();
     for (let i = 0; i < 3; i++) {
@@ -204,15 +206,53 @@ try {
       await sheet.getByText(/raw payload/i).click();
       await page.waitForTimeout(400);
       const start = sheet.getByText('"attributes"', { exact: false }).last();
-      const end = sheet.getByText('metadata.export.receivedBefore', { exact: false }).last();
       // The raw payload has its own scroll area inside the sheet: bring its attributes block to the top of that area.
       await start.evaluate((el) => el.scrollIntoView({ block: 'start' }));
       await page.waitForTimeout(300);
-      const box = await sheet.boundingBox();
-      const last = await end.boundingBox();
-      const height = Math.min(Math.round(last.y + last.height + 16 - box.y), Math.round(box.height));
-      await sharp(await sheet.screenshot())
-        .extract({ left: 0, top: 0, width: Math.round(box.width), height })
+      // Two real regions of the same screen, each cut on whole lines (maintainer on #289): the sheet's sticky header
+      // (title, action, time), then the raw payload box from its "attributes" line to the last line fully inside it,
+      // stopping at receivedBefore. The attribute table between them is left out.
+      const regions = await start.evaluate((el) => {
+        const sheetEl = el.closest('[role=dialog]');
+        const curl = [...sheetEl.querySelectorAll('button')].find((b) => /copy as curl/i.test(b.textContent ?? ''));
+        const boxEl = el.closest('[class*="max-h-"]');
+        const top = sheetEl.getBoundingClientRect().top;
+        const left = sheetEl.getBoundingClientRect().left;
+        const boxRect = boxEl.getBoundingClientRect();
+        // JSON lines are the innermost .ps-4 rows; keep those fully inside the box, up to receivedBefore.
+        const lines = [...boxEl.querySelectorAll('div.ps-4')].filter((row) => !row.querySelector('div.ps-4'));
+        let end = boxRect.top;
+        for (const row of lines) {
+          const r = row.getBoundingClientRect();
+          if (r.top < boxRect.top - 1 || r.bottom > boxRect.bottom - 1) continue;
+          end = Math.max(end, r.bottom);
+          if (/receivedBefore/.test(row.textContent ?? '')) break;
+        }
+        return {
+          header: { top: 0, height: Math.round(curl.getBoundingClientRect().bottom + 12 - top) },
+          box: {
+            left: Math.round(boxRect.left - left),
+            top: Math.round(boxRect.top - top),
+            width: Math.round(boxRect.width),
+            height: Math.round(end + 2 - boxRect.top),
+          },
+          width: Math.round(sheetEl.getBoundingClientRect().width),
+        };
+      });
+      const full = await sheet.screenshot();
+      const header = await sharp(full).extract({ left: 0, top: 0, width: regions.width, height: regions.header.height }).toBuffer();
+      const box = await sharp(full)
+        .extract({ left: regions.box.left, top: regions.box.top, width: regions.box.width, height: regions.box.height })
+        .toBuffer();
+      // The gap between the two regions takes the sheet's own background, sampled beside the header.
+      const { data } = await sharp(full)
+        .extract({ left: 2, top: regions.header.height - 2, width: 1, height: 1 })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const background = { r: data[0], g: data[1], b: data[2], alpha: 1 };
+      await sharp(header)
+        .extend({ bottom: regions.box.height + 16, background })
+        .composite([{ input: box, top: regions.header.height + 8, left: regions.box.left }])
         .webp({ quality: 88 })
         .toFile(resolve(output, `${name}.webp`));
     }

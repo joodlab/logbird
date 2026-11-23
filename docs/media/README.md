@@ -7,9 +7,10 @@ Captured on 2026-11-09 from the real local console and API against Postgres, Cli
 Since 2026-11-24 (design pass 2) every shot has a real dark-theme capture as well, and two shots serve the landing page:
 `explorer-hero` (the explorer with the visible query `-actor.type:system`, desktop and phone, the phone one at 2x
 because it sits above the fold; the site's tests compile the query) and `export-record` (a real completed `jsonl-evidence` export's record in Workspace activity). The record's
-attribute table truncates long keys and the digest, so the capture opens its raw payload and keeps the sheet from its
-sticky header (the record's title and `export.completed`) to the end of the raw `attributes` block: one contiguous
-region of the real screen. The export is downloaded through the console's own API during the capture; nothing on the
+attribute table truncates long keys and the digest, so the capture opens its raw payload and keeps two real regions of
+the same screen, each cut on whole lines: the sheet's sticky header (the record's title, `export.completed` and its
+time), then the raw payload box from its `"attributes"` line to `receivedBefore` (on a phone, to the last whole line
+inside the box). The export is downloaded through the console's own API during the capture; nothing on the
 page is edited. `tenant-summary` is a crop of `tenant-{light,dark}` (box 250, 70 to 1410, 495): the account's header,
 counts and "who did it" panel (`tenant-account` keeps its 2026-11-09 crop and size). `event-detail` is the sheet panel of
 `event-sheet-{light,dark}` (box 801, 0 to 1440, 860). A shot that gains a dark variant is replaced in light and dark
@@ -31,6 +32,10 @@ pnpm --filter @logbird/web build
 ```
 
 On PowerShell, set `$env:CAPTURE_VIDEO='1'` before the video command, then remove it with `Remove-Item Env:CAPTURE_VIDEO`. `BASE_URL`, `MAILPIT_API`, `OUT_DIR` and `FFMPEG` may override local endpoints, screenshot output and the encoder executable. Capture state in `.tmp/media-fixture.json` contains a private fixture ingest key: never print or commit it. The capture browser always closes in `finally`. Stop all servers/workers you started; leave shared backing services and other contributors' fixtures intact.
+
+The walkthrough (`walkthrough.gif`, `walkthrough.webm`) was re-recorded in UTC on 2026-11-24 and encoded with
+`VIDEO_START=1.0`: sign-in is faster than in 2026-11-09, and the old 5.8 s start cut the sign-in and the overview.
+Review the raw recording before choosing the start, and keep the GIF under the 6,000,000-byte budget.
 
 ## Capture rules
 

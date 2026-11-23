@@ -146,9 +146,9 @@ export const screenshots: ScreenshotEntry[] = [
     light: `${C}/export-record-light.webp`,
     dark: `${C}/export-record-dark.webp`,
     width: 640,
-    height: 847,
-    phone: { light: `${C}/phone-export-record-light.webp`, dark: `${C}/phone-export-record-dark.webp`, ...phone },
-    alt: "A completed export's record in Workspace activity: 3,157 events from StayDesk as Complete (original payloads), with its period, query action:booking.*, row count, size in bytes, fixed query clock, format and SHA-256.",
+    height: 603,
+    phone: { light: `${C}/phone-export-record-light.webp`, dark: `${C}/phone-export-record-dark.webp`, width: 390, height: 663 },
+    alt: "A completed export's record in Workspace activity: 3,117 events from StayDesk as Complete (original payloads), with its period, query action:booking.*, row count, size in bytes, fixed query clock, format and SHA-256.",
   },
 ];
 
