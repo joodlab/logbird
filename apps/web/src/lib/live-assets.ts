@@ -11,13 +11,15 @@ const ASSET = /^\/(?:media|og|brand)\/|^\/site\.webmanifest(?:\?|$)/;
 const ASSET_LIKE = /\/(?:media|og|brand)\/|site\.webmanifest/;
 
 /**
- * `pageUrl` is the page's own (final) URL, against which relative references resolve as in a browser; `publicOrigin`
+ * `pageUrl` is the page's own (final) URL, against which relative references resolve as in a browser. `allowedOrigins`
+ * are the checked origin and the public one: a page or manifest that redirected elsewhere does not widen them, so an asset
+ * that resolves to another host fails instead of being fetched on the checked host under the same path.
  * is the origin the build names in absolute URLs.
  */
-export function collectAssetUrls(html: string, pageUrl: string, publicOrigin = pageUrl) {
+export function collectAssetUrls(html: string, pageUrl: string, allowedOrigins: string[] = [pageUrl]) {
   const urls = new Set<string>();
   const problems: AssetProblem[] = [];
-  const origins = new Set([new URL(pageUrl).origin, new URL(publicOrigin).origin]);
+  const origins = new Set(allowedOrigins.map((origin) => new URL(origin).origin));
   const add = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
@@ -59,9 +61,9 @@ export function collectAssetUrls(html: string, pageUrl: string, publicOrigin = p
 }
 
 /** The icon URLs a web app manifest names, resolved against the manifest's URL; an icon on another host is a problem. */
-export function manifestIconUrls(manifest: string, manifestUrl: string, publicOrigin = manifestUrl) {
+export function manifestIconUrls(manifest: string, manifestUrl: string, allowedOrigins: string[] = [manifestUrl]) {
   const parsed = JSON.parse(manifest) as { icons?: { src: string }[] };
-  const origins = new Set([new URL(manifestUrl).origin, new URL(publicOrigin).origin]);
+  const origins = new Set(allowedOrigins.map((origin) => new URL(origin).origin));
   const urls: string[] = [];
   const problems: AssetProblem[] = [];
   for (const icon of parsed.icons ?? []) {
@@ -97,7 +99,12 @@ export async function compareAssets(paths: Iterable<string>, base: string, fetch
   const problems: AssetProblem[] = [];
   const bytesAt = async (path: string) => {
     const response = await fetcher(new URL(path, base));
-    return { status: response.status, type: response.headers.get('content-type') ?? '', bytes: Buffer.from(await response.arrayBuffer()) };
+    // Media types are case-insensitive (RFC 9110): compare them in lower case.
+    return {
+      status: response.status,
+      type: (response.headers.get('content-type') ?? '').toLowerCase(),
+      bytes: Buffer.from(await response.arrayBuffer()),
+    };
   };
   for (const path of [...paths].sort()) {
     if (!/[?&]v=[0-9a-f]{8,}/.test(path)) problems.push({ path, problem: 'unversioned URL to a fixed-name file' });

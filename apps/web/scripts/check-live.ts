@@ -81,7 +81,7 @@ const MEDIA_PAGES = ['/', '/product', '/use-cases/compliance-evidence', '/use-ca
 const publicOrigin = siteConfigFrom(loadPublicEnv()).SITE_URL;
 
 function collectAssets(path: string, pageUrl: string, body: string, capturePage: boolean) {
-  const { urls: found, problems: collected } = collectAssetUrls(body, pageUrl, publicOrigin);
+  const { urls: found, problems: collected } = collectAssetUrls(body, pageUrl, [base, publicOrigin]);
   for (const url of found) assetUrls.add(url);
   const fail = (problem: string) => problems.push(`${path}: ${problem}`);
   for (const { path: asset, problem } of collected) fail(`${asset}: ${problem}`);
@@ -183,7 +183,7 @@ for (const path of consoleOwned) {
 for (const manifest of [...assetUrls].filter((url) => url.startsWith('/site.webmanifest'))) {
   const response = await fetch(new URL(manifest, base));
   if (!response.ok) continue;
-  const icons = manifestIconUrls(await response.text(), response.url, publicOrigin);
+  const icons = manifestIconUrls(await response.text(), response.url, [base, publicOrigin]);
   for (const icon of icons.urls) assetUrls.add(icon);
   for (const { path, problem } of icons.problems) problems.push(`${manifest}: ${path}: ${problem}`);
 }

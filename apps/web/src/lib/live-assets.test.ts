@@ -15,7 +15,7 @@ describe('live asset check', () => {
       <picture><source srcset="/media/a-light-640.avif?v=1111111111 640w, /media/a-light-1024.avif?v=1111111111 1024w"></picture>
       <video src=/media/clip.webm?v=2222222222 poster="/media/clip-poster.webp?v=3333333333&amp;x=1"></video>
       <a href="/product">not an asset</a></body></html>`;
-    const { urls, problems } = collectAssetUrls(html, base, publicOrigin);
+    const { urls, problems } = collectAssetUrls(html, base, [base, publicOrigin]);
     expect([...urls].sort()).toEqual([
       '/brand/logbird-favicon.svg?v=aaaaaaaaaa',
       '/brand/logbird-wordmark-light.svg?v=dddddddddd',
@@ -28,14 +28,16 @@ describe('live asset check', () => {
       '/site.webmanifest?v=bbbbbbbbbb',
     ]);
     expect(problems).toEqual([]);
-    expect(manifestIconUrls('{"icons":[{"src":"/brand/logbird-favicon.svg?v=aaaaaaaaaa"}]}', `${base}/site.webmanifest`, publicOrigin)).toEqual({
+    expect(
+      manifestIconUrls('{"icons":[{"src":"/brand/logbird-favicon.svg?v=aaaaaaaaaa"}]}', `${base}/site.webmanifest`, [base, publicOrigin]),
+    ).toEqual({
       urls: ['/brand/logbird-favicon.svg?v=aaaaaaaaaa'],
       problems: [],
     });
   });
 
   it('resolves relative references against the page, and reports one that lands outside the asset directories', () => {
-    const { urls, problems } = collectAssetUrls('<img src="media/a-light-640.webp?v=1111111111">', `${base}/product/`, publicOrigin);
+    const { urls, problems } = collectAssetUrls('<img src="media/a-light-640.webp?v=1111111111">', `${base}/product/`, [base, publicOrigin]);
     expect([...urls]).toEqual([]);
     expect(problems).toEqual([
       {
@@ -45,16 +47,27 @@ describe('live asset check', () => {
     ]);
   });
 
+  it('a page or manifest that redirected to another origin does not widen the allowed origins', () => {
+    const redirected = 'http://127.0.0.1:9999/about/';
+    expect(collectAssetUrls('<img src="/media/a-light-640.webp?v=1111111111">', redirected, [base, publicOrigin]).problems).toEqual([
+      { path: '/media/a-light-640.webp?v=1111111111', problem: "on http://127.0.0.1:9999, not the site's origin" },
+    ]);
+    const manifest = '{"icons":[{"src":"/brand/logbird-favicon.svg?v=aaaaaaaaaa"}]}';
+    expect(manifestIconUrls(manifest, 'http://127.0.0.1:9999/site.webmanifest', [base, publicOrigin]).problems).toEqual([
+      { path: '/brand/logbird-favicon.svg?v=aaaaaaaaaa', problem: "manifest icon on http://127.0.0.1:9999, not the site's origin" },
+    ]);
+  });
+
   it('reports a manifest icon on another host', () => {
     const manifest = '{"icons":[{"src":"https://missing.invalid/brand/logbird-favicon.svg?v=aaaaaaaaaa"}]}';
-    expect(manifestIconUrls(manifest, `${base}/site.webmanifest`, publicOrigin).problems).toEqual([
+    expect(manifestIconUrls(manifest, `${base}/site.webmanifest`, [base, publicOrigin]).problems).toEqual([
       { path: '/brand/logbird-favicon.svg?v=aaaaaaaaaa', problem: "manifest icon on https://missing.invalid, not the site's origin" },
     ]);
   });
 
   it('reports an asset URL on another host', () => {
     const html = '<meta property="og:image" content="https://elsewhere.example/og/home.png?v=cccccccc">';
-    expect(collectAssetUrls(html, base, publicOrigin).problems).toEqual([
+    expect(collectAssetUrls(html, base, [base, publicOrigin]).problems).toEqual([
       { path: '/og/home.png?v=cccccccc', problem: "on https://elsewhere.example, not the site's origin" },
     ]);
   });
@@ -67,7 +80,8 @@ describe('live asset check', () => {
       }
       const uncached = url.searchParams.has('cb');
       const body = url.pathname.includes('stale') && !uncached ? 'old bytes' : 'new bytes';
-      return new Response(body, { headers: { 'content-type': url.pathname.endsWith('.svg') ? 'image/svg+xml' : 'image/webp' } });
+      // Upper case on purpose: media types are case-insensitive.
+      return new Response(body, { headers: { 'content-type': url.pathname.endsWith('.svg') ? 'image/svg+xml' : 'Image/WebP' } });
     }) as typeof fetch;
     const problems = await compareAssets(
       [
