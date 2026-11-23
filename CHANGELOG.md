@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Highlights
+
+- The hourly retention run no longer holds a project's lock while ClickHouse deletes expired events, so ingest is no longer refused during it (#268). It takes the lock for two short steps (milliseconds), creates its DELETEs without waiting, and readers see them applied while ClickHouse finishes them in the background.
+
+### Changes
+
+**Retention.** Settings shows the hourly run as Preparing, then Finishing while ClickHouse applies its DELETEs, then Completed. Exports of a project whose run is finishing are refused with "Retention is finishing…" and `Retry-After: 60` until the DELETEs are done, normally under a minute. DELETEs still pending after 15 minutes mark the run failed in Settings with ClickHouse's reason; ingest and reads continue. While 20 or more mutations are pending on the events table, the run waits (up to 2 minutes per project, otherwise the next hour), which bounds the extra read latency they cause. Lowering retention, repairs and project or sample deletion are unchanged. The method is described in [docs/SPEC.md](docs/SPEC.md).
+
+**Reads while an outside mutation is pending.** Every Logbird ClickHouse client reads with `apply_mutations_on_fly`. A mutation created outside Logbird whose condition uses `now()`, `rand()` or a subquery cannot be applied that way: while it is pending, console and API reads of the events answer `503 store_maintenance_blocking` ("A maintenance operation on the event store is blocking reads", `Retry-After: 30`). Ingest and `/readyz` are not affected. See "Stuck retention deletes" in [docs/self-hosting.md](docs/self-hosting.md) for finding and cancelling such a mutation.
+
+### Upgrade notes
+
+- **ClickHouse 26.9 or newer is required.** The server and worker now check it at startup and refuse to start against an older server, naming its version.
+- **Upgrade the server before the worker.** The Compose files already start the worker only after a healthy server. If you run them separately (Kubernetes, systemd), roll out every server replica first. For as long as a new worker runs next to an old server, the old server's reads can show expired events and double-counted rollups for under a minute after each hourly run, until ClickHouse finishes that run's DELETEs. An old worker next to a new server is safe: it keeps today's slower behaviour until it is upgraded.
+- The ClickHouse writer still needs `SYSTEM FLUSH ASYNC INSERT QUEUE` (as before); without it, hourly runs are skipped with that reason in Settings.
+- If you rebuild a project's rollups by hand after killing a Logbird mutation, use `scripts/repair-rollups.ts PROJECT` (it refuses that project's ingest while it runs).
+
 ## 0.2.1
 
 ### Highlights

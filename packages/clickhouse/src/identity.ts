@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { canonicalDecimal, isRawJson, parseJsonExact, rawJsonNumber } from '@logbird/contracts';
-import type { ClickHouseClient } from './client';
+import { type ClickHouseClient, withPlainReads } from './client';
 import { projectMaintenance } from './maintenance-tag';
 import { type EventRow, normalizeEvent } from './normalize';
 import { deleteAndVerify, read } from './queries';
@@ -122,7 +122,8 @@ export async function rawEventIdentities(ch: ClickHouseClient, projectId: string
   if (!ids.length) return new Map<string, EventIdentity>();
   return identities(
     await read<EventRow>(
-      ch,
+      // Plain reads: identity never depends on a pending mutation (see withPlainReads).
+      withPlainReads(ch),
       'SELECT * EXCEPT(category,search_text) FROM events WHERE project_id={project:String} AND event_id IN {ids:Array(String)} ORDER BY received_at,timestamp,event_id LIMIT 1 BY event_id',
       { project: projectId, ids },
     ),
@@ -131,15 +132,18 @@ export async function rawEventIdentities(ch: ClickHouseClient, projectId: string
 /** Fresh misses stay narrow. Payload reads happen only for index hits; dangling pointers fall back per id. */
 export async function existingEventIdentities(ch: ClickHouseClient, projectId: string, ids: string[]) {
   if (!ids.length) return new Map<string, EventIdentity>();
+  // Plain reads: ingest must not fail while a foreign mutation that cannot be applied on the fly is pending, and a
+  // pending Logbird DELETE hides only rows past retention (a retry of one is then a duplicate, as it always was).
+  const plain = withPlainReads(ch);
   const hits = await read<{ event_id: string; timestamp: string; received_at: string }>(
-    ch,
+    plain,
     'SELECT event_id,timestamp,received_at FROM event_ids WHERE project_id={project:String} AND event_id IN {ids:Array(String)} ORDER BY received_at,timestamp,event_id LIMIT 1 BY event_id',
     { project: projectId, ids },
   );
   if (!hits.length) return new Map<string, EventIdentity>();
   const found = identities(
     await read<EventRow>(
-      ch,
+      plain,
       'SELECT * EXCEPT(category,search_text) FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN arrayZip({timestamps:Array(DateTime64(3))},{hitIds:Array(String)}) AND (timestamp,event_id,received_at) IN arrayZip({timestamps:Array(DateTime64(3))},{hitIds:Array(String)},{received:Array(DateTime64(3))}) ORDER BY received_at,timestamp,event_id LIMIT 1 BY event_id',
       {
         project: projectId,

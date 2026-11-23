@@ -309,6 +309,16 @@ hourly run therefore creates its DELETEs without waiting for them, between two s
    after 15 minutes mark the run `failed` with ClickHouse's reason; ingest and reads are unaffected, and the run
    completes by itself if they finish later. While a project has pending DELETEs, its hourly run waits.
 
+Pending mutations on `events` add to every on-the-fly read of it (about 5-7 ms each per query, measured), so the sweep
+creates no more DELETEs while 20 or more are pending on that table (waiting up to 2 minutes per project, otherwise the
+next hour). Every mutation Logbird creates resolves `now()` and subqueries to literals
+(`mutations_execute_nondeterministic_on_initiator`, `mutations_execute_subqueries_on_initiator`), so it can always be
+applied on the fly. A pending mutation created outside Logbird that cannot be (its condition calls `now()`, `rand()` or
+a subquery) makes on-the-fly reads of its table fail: console and API reads then answer `503 store_maintenance_blocking`
+with Retry-After 30 and never fall back to plain reads. Ingest's identity lookups read plain (a pending Logbird DELETE
+hides only rows past retention, so a retry of one is a duplicate as before), so ingest never depends on the setting;
+`/readyz` does not read events.
+
 `staging`, `materializing` and `canceled` never refuse ingest or reads. A failure after the DELETEs exist marks the run
 `failed` and records a failed ingest repair, which fences rollup reads until the next run rebuilds the rollups.
 

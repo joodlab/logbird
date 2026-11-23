@@ -32,6 +32,7 @@ vi.mock('@logbird/clickhouse', () => ({
   projectMaintenance: (client: unknown) => client,
   hasExpiredEvents: fake.expired,
   pendingProjectMutations: async () => [],
+  pendingEventMutations: async () => 0,
   retentionCutoff: (now: number, days: number) => new Date(now - days * 86_400_000),
   createSessionClickHouseClient: () => ({ close: async () => undefined }),
   purgeProject: vi.fn(),

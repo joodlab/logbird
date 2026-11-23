@@ -5,6 +5,7 @@ import {
   createSessionClickHouseClient,
   hasExpiredEvents,
   INGEST_CLAIM_LEASE_MS,
+  pendingEventMutations,
   pendingProjectMutations,
   projectMaintenance,
   purgeProject,
@@ -221,6 +222,20 @@ async function settleProjectInserts(projectId: string) {
 const cancelRun = (id: string, error: string) =>
   prisma.retentionRun.updateMany({ where: { id, status: RETENTION_STAGING }, data: { status: 'canceled', finishedAt: new Date(), error } });
 
+/**
+ * Pending mutations on `events` slow every on-the-fly read of it (about 5-7 ms each per query, measured): the sweep
+ * creates no more DELETEs while this many are pending, so read latency is bounded whatever the number of projects.
+ */
+export const RETENTION_MAX_PENDING_DELETES = 20;
+const PENDING_WAIT_MS = 120_000;
+async function underPendingBound() {
+  const deadline = Date.now() + PENDING_WAIT_MS;
+  while ((await pendingEventMutations(clickhouse)) >= RETENTION_MAX_PENDING_DELETES) {
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return true;
+}
 /** Test seams: run between the fences, and right after the DELETE mutations exist (before the replacement rows). */
 export type BackgroundRetentionHooks = { betweenFences?: () => Promise<void>; afterDeletes?: () => Promise<void> };
 /** The hourly sweep's per-project run. Unusual states fall back to (or wait for) the synchronous path. */
@@ -253,6 +268,10 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     if (await recordNothingExpired(projectId, current.retentionDays, cutoff)) return 'nothing_expired';
     await enforceProjectRetention(projectId);
     return 'synchronous';
+  }
+  if (!(await underPendingBound())) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'retention.deferred_pending_deletes', projectId, bound: RETENTION_MAX_PENDING_DELETES }));
+    return 'deferred';
   }
 
   // Fence A.

@@ -280,6 +280,26 @@ To act:
    `node --env-file=.env --import tsx scripts/repair-rollups.ts PROJECT`. The rebuild holds the project's exclusive
    lock, so its ingest is refused (503 `project_busy`, retried by the SDKs) while it runs.
 
+**Worked example (from our own development store).** A test held a mutation on `events` with
+`sleepEachRow(0.1)` over 200 rows: 20 s per block, above ClickHouse's 3 s background limit, so every background
+attempt failed and was retried. In `system.mutations` it showed as the oldest pending row with
+`latest_fail_reason = Code: 160 … The maximum sleep time is 3000000 microseconds`, and every later pending DELETE on
+the same part (other projects' cleanups, created minutes after it) showed the *same* `latest_fail_reason` and
+`parts_to_do = 1`, because ClickHouse applies the queued mutations of a part together. The culprit is the oldest
+pending mutation with that reason whose `command` is not a Logbird statement (Logbird's DELETEs are
+`UPDATE _row_exists = 0 WHERE project_id = '…' AND …`, with literal values only). `KILL MUTATION WHERE database =
+currentDatabase() AND mutation_id = 'mutation_….txt' SYNC` on that one id was enough: the DELETEs queued behind it
+finished within seconds, and the queue was empty again.
+
+**A mutation that blocks reads.** A mutation created outside Logbird whose condition calls `now()`, `rand()` or a
+subquery cannot be applied on the fly, so while it is pending, console and API reads of that table answer
+`503 store_maintenance_blocking` (Retry-After 30); ingest and `/readyz` are unaffected. Find it with
+`SELECT mutation_id, table, command, create_time FROM system.mutations WHERE database = currentDatabase() AND
+is_done = 0 AND (positionCaseInsensitive(command, 'now(') > 0 OR positionCaseInsensitive(command, 'rand') > 0 OR
+positionCaseInsensitive(command, 'select') > 0)`. Let it finish if it will finish soon; otherwise
+`KILL MUTATION WHERE database = currentDatabase() AND mutation_id = '…' SYNC` and rerun it with literal values (or
+with `mutations_execute_nondeterministic_on_initiator = 1` and `mutations_execute_subqueries_on_initiator = 1`).
+
 Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashtags=true`, matching brace-enclosed BullMQ prefixes such as {logbird} across producers/workers, and no queue eviction. Do not use ioredis keyPrefix.
 
 ## Upgrades and backups

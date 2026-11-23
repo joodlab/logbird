@@ -1,5 +1,5 @@
 import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from '@logbird/auth';
-import { CursorError, QueryError } from '@logbird/clickhouse';
+import { CursorError, isPendingMutationBlockingReads, QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
 import { failedRepairStatus } from '@logbird/worker/project-repair';
@@ -146,6 +146,20 @@ app.onError((error, c) => {
   if (deleteFailure) {
     c.header('Retry-After', deleteFailure.retryAfter);
     return c.json(deleteFailure.body, deleteFailure.status);
+  }
+  // A foreign mutation that ClickHouse cannot apply on the fly is pending: say so (no fallback to plain reads, which
+  // could show expired events or double-counted rollups while Logbird's own DELETEs finish).
+  if (isPendingMutationBlockingReads(error)) {
+    c.header('Retry-After', '30');
+    return c.json(
+      {
+        error: {
+          code: 'store_maintenance_blocking',
+          message: 'A maintenance operation on the event store is blocking reads. Retry in about 30 seconds.',
+        },
+      },
+      503,
+    );
   }
   if ('code' in error || /timeout|budget/i.test(error.message))
     return c.json(

@@ -78,6 +78,33 @@ function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExe
 }
 /** For the reads that must see stored parts as they are, ignoring pending DELETE mutations (retention verification). */
 export const CLICKHOUSE_PLAIN_READ = { apply_mutations_on_fly: 0 } as const;
+/**
+ * The client with every query read plain (CLICKHOUSE_PLAIN_READ). Only ingest's identity lookups use it: a pending
+ * Logbird DELETE hides only rows that are already past retention, so seeing them is safe there, and ingest must not
+ * fail when a foreign mutation that cannot be applied on the fly is pending (#268, condition 8).
+ */
+export function withPlainReads(ch: ClickHouseClient): ClickHouseClient {
+  return new Proxy(ch, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (property === 'query' && typeof value === 'function')
+        return (params: Parameters<ClickHouseClient['query']>[0]) =>
+          value.call(target, { ...params, clickhouse_settings: { ...params.clickhouse_settings, ...CLICKHOUSE_PLAIN_READ } });
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+/**
+ * A read refused because a pending mutation on the table cannot be applied on the fly (its predicate calls now(),
+ * rand() or a subquery, created outside Logbird). Readers answer 503 `store_maintenance_blocking` until it finishes.
+ */
+export function isPendingMutationBlockingReads(error: unknown): boolean {
+  for (let current = error, depth = 0; current && depth < 5; depth++) {
+    if (current instanceof Error && /cannot be applied on fly/i.test(current.message)) return true;
+    current = current && typeof current === 'object' && 'cause' in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
+}
 /** The ClickHouse line Logbird supports (docs/self-hosting.md). Retention relies on apply_mutations_on_fly as measured on it. */
 export const SUPPORTED_CLICKHOUSE = { major: 26, minor: 9 } as const;
 /**

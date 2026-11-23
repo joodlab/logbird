@@ -339,3 +339,72 @@ it('cannot be moved by an app instance clock: fences use the database clock, and
   expect(await runBackgroundRetention(f.project)).toBe('deferred');
   expect(await prisma.retentionRun.count({ where: { projectId: f.project } })).toBe(before);
 });
+
+it(
+  'never refuses ingest while a foreign mutation that cannot be applied on the fly is pending; reads say so and readiness holds',
+  purgeLimit(180_000),
+  async () => {
+    await f.authorize();
+    const foreign = `${f.project}-foreign`;
+    // 40,000 rows: the held mutation sleeps 0.25 ms per row, about 2 s per 8,192-row block, under ClickHouse's 3 s
+    // background cap (so it never fails and retries), for roughly 10 s pending in total.
+    for (let start = 0; start < 40_000; start += 10_000)
+      await insertEvents(
+        clickhouse,
+        Array.from({ length: 10_000 }, (_, k) =>
+          f.row({ id: `foreign-${start + k}`, action: 'qa.foreign', occurredAt: new Date(Date.now() - DAY).toISOString() }),
+        ).map((row) => ({ ...row, project_id: foreign })),
+      );
+    try {
+      // An operator's mutation with now() in its predicate, created without Logbird's initiator settings.
+      await maintenanceClickhouse.command({
+        query:
+          'ALTER TABLE events DELETE WHERE project_id = {fp:String} AND timestamp < now() AND if(project_id = {fp:String}, sleepEachRow(0.00025), 0) = 0',
+        query_params: { fp: foreign },
+        clickhouse_settings: {
+          mutations_sync: '0',
+          allow_nondeterministic_mutations: 1,
+          short_circuit_function_evaluation: 'force_enable',
+          mutations_execute_nondeterministic_on_initiator: 0,
+          mutations_execute_subqueries_on_initiator: 0,
+        } as never,
+      });
+      expect((await pendingProjectMutations(maintenanceClickhouse, foreign)).length).toBe(1);
+      // Ingest is never refused: a new event and an exact retry (which goes through the identity lookups) both land.
+      const event = liveEvent(7000);
+      expect((await f.post(event)).status).toBe(202);
+      expect((await f.post(event)).status).toBe(202);
+      // A console read refuses clearly and retryably, never a 500 and never a plain-read fallback.
+      const blocked = await f.management(`/api/projects/${f.project}/events?from=${new Date(Date.now() - 7 * DAY).toISOString()}`);
+      expect(blocked.status).toBe(503);
+      expect(blocked.headers.get('Retry-After')).toBe('30');
+      expect((await blocked.json()).error).toMatchObject({
+        code: 'store_maintenance_blocking',
+        message: expect.stringContaining('maintenance operation on the event store is blocking reads'),
+      });
+      // Readiness does not flip.
+      expect((await f.management('/readyz')).status).toBe(200);
+      expect((await pendingProjectMutations(maintenanceClickhouse, foreign)).length).toBe(1);
+      const deadline = Date.now() + slowStore(120_000);
+      while ((await pendingProjectMutations(maintenanceClickhouse, foreign)).length) {
+        if (Date.now() > deadline) throw new Error('The foreign mutation did not finish');
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      const recovered = await f.management(`/api/projects/${f.project}/events?from=${new Date(Date.now() - 7 * DAY).toISOString()}`);
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).data.map((e: { id: string }) => e.id)).toContain(event.id);
+    } finally {
+      // Never leave the held mutation behind, even when an assertion failed: it would hold other mutations on its part.
+      for (const m of await pendingProjectMutations(maintenanceClickhouse, foreign))
+        await maintenanceClickhouse.command({
+          query: `KILL MUTATION WHERE database = currentDatabase() AND mutation_id = '${m.mutationId.replace(/[^\w.-]/g, '')}' SYNC`,
+        });
+      for (const table of ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys'])
+        await maintenanceClickhouse.command({
+          query: `DELETE FROM ${table} WHERE project_id = {fp:String}`,
+          query_params: { fp: foreign },
+          clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' } as never,
+        });
+    }
+  },
+);

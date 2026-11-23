@@ -158,6 +158,16 @@ export async function applyRetention(
   }
 }
 
+/** Unfinished mutations on `events`, every project's: each one adds to every on-the-fly read of the table. */
+export async function pendingEventMutations(ch: ClickHouseClient) {
+  const counted = await rows<{ n: number }>(
+    ch,
+    "SELECT count() n FROM system.mutations WHERE database=currentDatabase() AND table='events' AND is_done=0",
+    {},
+  );
+  return Number(counted[0]?.n ?? 0);
+}
+
 /** The project's DELETE mutations that ClickHouse has not finished, with the reason any of them last failed. */
 export async function pendingProjectMutations(ch: ClickHouseClient, p: string) {
   return rows<{ table: string; mutationId: string; created: string; failReason: string; failedAt: string | null }>(
