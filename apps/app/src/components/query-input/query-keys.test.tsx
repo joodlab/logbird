@@ -73,6 +73,25 @@ const press = (key: string, init: KeyboardEventInit = {}) =>
   });
 const options = () => [...host.querySelectorAll<HTMLElement>('[role="option"]')].filter((o) => o.getAttribute('aria-disabled') !== 'true');
 
+// Browser storage as CI's test environment has it (some local Node versions leave it out), so recent queries behave
+// the same everywhere.
+if (!window.localStorage) {
+  const items = new Map<string, string>();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (k: string) => items.get(k) ?? null,
+      setItem: (k: string, v: string) => items.set(k, String(v)),
+      removeItem: (k: string) => items.delete(k),
+      clear: () => items.clear(),
+      key: (i: number) => [...items.keys()][i] ?? null,
+      get length() {
+        return items.size;
+      },
+    },
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -80,6 +99,13 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   submit.mockClear();
+  // Recent queries are kept in the browser's storage (where the test environment has one, as in CI): each test starts
+  // without the ones an earlier test ran.
+  try {
+    window.localStorage?.clear();
+  } catch {
+    // No storage: no recent queries either.
+  }
   fixture.gate();
   fixture.fields = [{ key: 'attr.plan', kind: 'attribute', coverage: 0.4, distinctApprox: 1, samples: ['pro'], lastSeen: null }];
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -181,4 +207,33 @@ it('a KQL-looking search that ran from a link shows its offer at once, and one A
   press('Enter', { altKey: true });
   expect(submit).toHaveBeenCalledTimes(1);
   expect(submit).toHaveBeenLastCalledWith('action:booked', 'query');
+});
+
+it('a row chosen with the arrows for one term is not taken by Enter once the caret moves to another term', async () => {
+  // The same field twice: both terms get the same value rows.
+  const q = 'action:b OR action:b';
+  act(() => {
+    const t = textarea();
+    t.focus();
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(t, q);
+    t.setSelectionRange(8, 8);
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await flush();
+  expect(options()[0]?.dataset.from).toBe('7');
+  press('ArrowDown');
+  // Move the caret the way a click does. The test DOM does not report selection changes to React, so the field's own
+  // select handler is called with the new caret.
+  act(() => {
+    const t = textarea();
+    t.setSelectionRange(q.length, q.length);
+    const props = Object.entries(t).find(([k]) => k.startsWith('__reactProps$'))?.[1] as {
+      onSelect?: (e: { currentTarget: HTMLTextAreaElement }) => void;
+    };
+    props?.onSelect?.({ currentTarget: t });
+  });
+  await flush();
+  expect(options()[0]?.dataset.from).toBe('19');
+  press('Enter');
+  expect(submit).toHaveBeenLastCalledWith(q, 'query');
 });

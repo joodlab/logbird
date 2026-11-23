@@ -516,6 +516,8 @@ describe('neighbourSafeInsert (accepting a completion changes only its own term)
     // `((action:"b"-tenant:west` closes with `))`: unquoted, `booked` would turn the field `-tenant` into NOT tenant.
     expect(neighbourSafeInsert('((action:"b"-tenant:west', 9, 12, 'booked ', 7, true)).toBe('"booked"');
     expect(neighbourSafeInsert('one OR', 6, 6, 'actor:', 6)).toBe(' actor:');
+    // Up to the parser's 16 levels of groups are closed for the check; nine open groups keep the OR after a space.
+    expect(neighbourSafeInsert('(((((((((one OR', 15, 15, 'actor:', 6)).toBe(' actor:');
   });
 
   it('refuses a key that would take the next term as its value', () => {

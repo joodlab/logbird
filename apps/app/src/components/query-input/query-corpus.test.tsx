@@ -95,6 +95,8 @@ const parses = (q: string) => {
 const SERVER_TEST = readFileSync(resolve(ROOT, 'packages/clickhouse/src/query.test.ts'), 'utf8');
 const stringsIn = (text: string) => [...text.matchAll(/'((?:[^'\\\n]|\\.)*)'/g)].map((m) => unescapeLiteral(m[1] ?? ''));
 const LITERAL_VALUES = stringsIn(/const literalValues = \[([^\]]*)\]/.exec(SERVER_TEST)?.[1] ?? '');
+// The values the server's round-trip loop quotes: `literalValues` and the ones it adds (`team*`, `a*b*`, …), read from it.
+const QUOTED_VALUES = [...LITERAL_VALUES, ...stringsIn(/for \(const value of \[\.\.\.literalValues, ([^\]]*)\]\)/.exec(SERVER_TEST)?.[1] ?? '')];
 const FIELD_NAMES = [
   ...new Set(stringsIn(SERVER_TEST).filter((f) => /^[a-z_][\w]*(\.[\w]+)*$/.test(f) && (coreField(f) || /^(attr|attributes|metadata)\./.test(f)))),
 ];
@@ -103,7 +105,7 @@ const PLACEHOLDERS: Record<string, string[]> = {
   k: FIELD_NAMES,
   unit: ['s', 'm', 'h', 'd', 'w'],
   value: ['booked', 'a b', ...LITERAL_VALUES],
-  'quoteQueryValue(value)': [...LITERAL_VALUES, 'team*', 'a*b', 'a\\*'].map(quoteQueryValue),
+  'quoteQueryValue(value)': QUOTED_VALUES.map(quoteQueryValue),
 };
 /**
  * The queries a test template generates. Each placeholder runs through all its values, the others cycling alongside
@@ -281,8 +283,8 @@ it('has a real corpus, generated server inputs and the reviewed cases included',
     'action:"b"-tenant:west',
   ])
     expect(valid).toContain(q);
-  // Every value the server tests quote reaches the corpus with a field (`…:"🦜"`).
-  for (const value of LITERAL_VALUES.filter((v) => ![...v].some((c) => c.charCodeAt(0) < 0x20)))
+  // Every value the server's loop quotes reaches the corpus with a field (`…:"🦜"`, `…:"a*b*"`).
+  for (const value of QUOTED_VALUES.filter((v) => ![...v].some((c) => c.charCodeAt(0) < 0x20)))
     expect(valid.some((q) => q.endsWith(`:${quoteQueryValue(value)}`))).toBe(true);
 });
 
@@ -321,7 +323,9 @@ function editable(q: string, caret: number, from: number, to: number, fix: boole
   // (`action:"b"|-tenant:west`), a row may change either, never both.
   const regions = [widen(caret, caret), ...all.filter(({ leaf }) => touches(leaf)).map(({ leaf }) => widen(start(leaf), leaf.end))];
   if (regions.some(([lo, hi]) => from >= lo && to <= hi)) return true;
-  return fix && all.every(({ leaf }) => !(leaf.start < to && leaf.end > from) || leaf.kind === 'text' || touches(leaf));
+  // A fix may take in plain words (`tenant =`) beside the one term at the caret, never a second field or presence term.
+  const others = all.filter(({ leaf }) => leaf.start < to && leaf.end > from && leaf.kind !== 'text');
+  return fix && others.length <= 1 && others.every(({ leaf }) => touches(leaf));
 }
 
 /** `result` as the reader will finish it: as it is, or (for a row that asks for more) with a word or range bounds typed. */
@@ -373,6 +377,18 @@ const rowShape = (o: HTMLElement) => {
   const named = kind === 'key' || kind === 'value' || kind === 'term' || kind === 'attr';
   return `${kind}|${o.dataset.from}|${o.dataset.to}|${named ? insert.replace(/[A-Za-z0-9_]+/g, 'w') : insert}|${o.dataset.keepOpen ?? '-'}`;
 };
+
+it('the oracle itself refuses a row that removes a neighbour at a boundary two terms share, whatever its kind', () => {
+  const q = 'action:"b"-tenant:west';
+  for (const kind of ['value', 'key', 'fix', 'keyword'])
+    for (const result of ['action:booked ', 'actor:amy']) {
+      const row: Row = { from: 0, to: q.length, insert: result, kind, asksForMore: false };
+      expect(withinRules(q, 10, row, result, result.length), `${kind} ${result}`).not.toBeNull();
+    }
+  // The value row the bar does offer there keeps the neighbour.
+  const value: Row = { from: 7, to: 10, insert: '"booked"', kind: 'value', asksForMore: false };
+  expect(withinRules(q, 10, value, 'action:"booked"-tenant:west', 15)).toBeNull();
+});
 
 it('every row accepted at any term boundary changes only its own term, and the query still parses', async () => {
   const broken: string[] = [];
