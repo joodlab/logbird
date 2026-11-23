@@ -21,6 +21,7 @@ import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForK
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
 import { andQuery, scopedQuery } from '@/lib/query-language';
+import { isKnownFieldName, lintQuery, suggestedConversion } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { ALL_RANGE, absoluteRange, isValidRange, rangeInSentence, rangeLabel, resolveRange } from '@/lib/range';
 import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
@@ -363,6 +364,7 @@ function ProjectExplorer({
       ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
       : 'Remove a filter or change the query.';
 
+  const conversion = lang === 'query' && q ? suggestedConversion(q, lintQuery(q, isKnownFieldName)) : null;
   const empty = problem ? (
     <EmptyState description="Fix the query above to see results." icon={SearchXIcon} title="Query not run" />
   ) : events.isError ? (
@@ -397,6 +399,12 @@ function ProjectExplorer({
           Search <span className="font-mono">{entityQuery(e.kind, e.id, e.type)}</span>
         </Button>
       ))}
+      {conversion ? (
+        // The text search found nothing; the filter its KQL spelling suggests is one click away (never applied unasked).
+        <Button data-testid="empty-conversion" onClick={() => onChange({ q: conversion })} size="sm">
+          Search <span className="font-mono">{conversion}</span> instead
+        </Button>
+      ) : null}
       {q ? (
         <Button onClick={() => onChange({ q: '' })} size="sm" variant="outline">
           Clear query

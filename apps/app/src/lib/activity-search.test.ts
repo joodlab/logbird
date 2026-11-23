@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { activityChip, activityFreeText, activityQuery, toggleActivityChip } from './activity-search';
+import { activityChip, activityFreeText, activityQuery, queryMeaning, toggleActivityChip } from './activity-search';
 import { createSearchCommitter } from './search-committer';
 
 const roundTrip = (q: string) => activityQuery(activityChip(q), activityFreeText(q));
@@ -57,6 +57,22 @@ describe('workspace activity chips (#226)', () => {
     expect(toggleActivityChip('revoked AND category:auth', 'auth')).toBe('revoked');
     expect(toggleActivityChip('category:auth AND revoked', 'auth')).toBe('revoked');
     expect(activityFreeText('revoked AND category:auth AND -category:member')).toBe('revoked AND -category:member');
+  });
+
+  it('a toggle changes exactly that one chip: the same terms, negations and grouping otherwise, whatever the order', () => {
+    for (const [q, value, expected] of [
+      // [query, chip clicked, the original with only that chip changed]
+      ['revoked AND "category":auth', 'member', 'revoked AND category:member'],
+      ['revoked AND "category":auth', 'auth', 'revoked'],
+      ['category:api_key -category:auth (actor:a OR actor:b)', 'member', 'category:member -category:auth (actor:a OR actor:b)'],
+      ['NOT (actor:a action:x) category:member', 'auth', 'NOT (actor:a action:x) category:auth'],
+      ['category:member "attr.ticket status":open', 'member', '"attr.ticket status":open'],
+      ['-category:auth', 'api_key', '-category:auth category:api_key'],
+    ] as const) {
+      const toggled = toggleActivityChip(q, value);
+      expect(queryMeaning(toggled), `${q} → ${toggled}`).toBe(queryMeaning(expected));
+      expect(queryMeaning(toggled)).not.toBeNull();
+    }
   });
 });
 

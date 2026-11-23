@@ -7,6 +7,7 @@ import {
   quoteQueryValue,
   SQL_MAX_QUERY_BYTES,
 } from '@logbird/contracts';
+import { Button } from '@logbird/ui/components/ui/button';
 import { Kbd } from '@logbird/ui/components/ui/kbd';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
@@ -20,7 +21,7 @@ import { toast } from 'sonner';
 import { suggestQuery, viewsQuery } from '@/lib/api/queries';
 import { coreField, sqlColumn } from '@/lib/query-catalog';
 import type { QueryProblem } from '@/lib/query-error';
-import { applyFixes, autoFixes } from '@/lib/query-lint';
+import { applyFixes, fixesOnSubmit, suggestedConversion } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { useRecentQueries } from '@/lib/recent-queries';
 import { tokenizeSql } from '@/lib/sql-language';
@@ -164,6 +165,9 @@ export function QueryInput({
   const [active, setActive] = useState(0);
   /** The user moved through the list (arrows / hover), so Enter means "pick this". */
   const [navigated, setNavigated] = useState(false);
+  /** A filter offered for the text search that just ran (`action=booked` → `action:booked`), shown until the text changes. */
+  const [offer, setOffer] = useState<{ q: string; text: string } | null>(null);
+  const offerShown = Boolean(offer) && lang === 'query' && draft.trim() === offer?.q;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const listId = `qi-list-${lang}`;
@@ -235,9 +239,12 @@ export function QueryInput({
   const submit = (q = draft, nextLang = lang) => {
     setOpen(false);
     let text = q.trim();
-    // Familiar Lucene / KQL spellings with one clear meaning are converted when the query runs.
+    let offered: string | null = null;
+    // Familiar Lucene / KQL spellings are converted when the query runs only when the server would reject them as
+    // typed. A query it accepts runs exactly as typed; a KQL-looking one gets the filter offered beside the bar instead.
     if (nextLang === 'query' && q === draft) {
-      const fixes = autoFixes(completions.fixes);
+      const fixes = fixesOnSubmit(draft, completions.fixes);
+      offered = fixes.length ? null : suggestedConversion(draft, completions.fixes);
       if (fixes.length) {
         const original = text;
         text = applyFixes(draft, fixes).trim();
@@ -248,8 +255,20 @@ export function QueryInput({
         });
       }
     }
+    setOffer(offered ? { q: text, text: offered } : null);
     if (text) recent.add(text, nextLang);
     onSubmit(text, nextLang);
+  };
+
+  /** The reader chose the offered filter: run it, with Undo back to the text search. */
+  const applyOffer = () => {
+    if (!offer) return;
+    const original = offer.q;
+    setText(offer.text, offer.text.length);
+    setOffer(null);
+    recent.add(offer.text, 'query');
+    onSubmit(offer.text, 'query');
+    toast('Converted to Logbird syntax', { description: offer.text, action: { label: 'Undo', onClick: () => onSubmit(original, 'query') } });
   };
 
   const accept = (s: Suggestion) => {
@@ -288,7 +307,7 @@ export function QueryInput({
     if (!text) {
       submit('', next);
     } else if (next === 'sql') {
-      const sql = translateQueryToSql(applyFixes(draft, autoFixes(completions.fixes)));
+      const sql = translateQueryToSql(applyFixes(draft, fixesOnSubmit(draft, completions.fixes)));
       if (!sql) {
         toast.error('Could not switch to SQL', { description: 'This filter has no exact SQL translation. Your query is still active.' });
       } else if (new TextEncoder().encode(sql).byteLength > SQL_MAX_QUERY_BYTES) {
@@ -307,6 +326,11 @@ export function QueryInput({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && e.altKey && offerShown) {
+      e.preventDefault();
+      applyOffer();
+      return;
+    }
     if (e.key === ' ' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       setOpen(true);
@@ -495,6 +519,17 @@ export function QueryInput({
           <Kbd className="me-1 hidden md:inline-flex">/</Kbd>
         </div>
       </div>
+      {offerShown && offer ? (
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs" data-testid="query-conversion">
+          <span>
+            Searched for the text as typed. Did you mean the filter <code className="font-mono text-foreground">{offer.text}</code>?
+          </span>
+          <Button onClick={applyOffer} size="xs" variant="outline">
+            Use the filter
+          </Button>
+          <Kbd className="hidden md:inline-flex">Alt+Enter</Kbd>
+        </p>
+      ) : null}
       <span className="sr-only" id={`${listId}-keys`}>
         Arrows choose a suggestion, Enter or Right arrow inserts it, Escape closes. Enter runs the query.
       </span>

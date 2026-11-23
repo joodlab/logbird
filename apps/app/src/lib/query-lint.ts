@@ -6,6 +6,7 @@
  * Nothing here changes what the server accepts (the server parser is the source of truth).
  */
 import { parseQueryExpression, type QueryAtom, QueryError } from '@logbird/contracts';
+import { coreField } from './query-catalog';
 import { type QueryToken, tokenize } from './query-language';
 
 export interface QueryFix {
@@ -181,3 +182,36 @@ export function applyFixes(q: string, fixes: QueryFix[]): string {
 export function autoFixes(fixes: QueryFix[]): QueryFix[] {
   return fixes.filter((f) => !(f.soft || f.incomplete));
 }
+
+/** Whether the server accepts `q` exactly as written. */
+export function serverAccepts(q: string): boolean {
+  try {
+    parseQueryExpression(q);
+    return true;
+  } catch (error) {
+    if (error instanceof QueryError) return false;
+    throw error;
+  }
+}
+
+/**
+ * The fixes Enter applies: only to a query the server rejects (`tenant = biz_7`, `!env:staging`, `a && b`), as before.
+ * A query the server accepts runs exactly as typed, whatever it looks like (`action=booked` searches that text).
+ */
+export function fixesOnSubmit(q: string, fixes: QueryFix[]): QueryFix[] {
+  return serverAccepts(q) ? [] : autoFixes(fixes);
+}
+
+/**
+ * The filter to offer for a query the server accepts as text but that is spelled like a KQL comparison on a known field
+ * (`action=booked` searches the words; `action:booked` is the filter): the reader chooses, nothing is applied. Null when
+ * there is nothing to offer.
+ */
+export function suggestedConversion(q: string, fixes: QueryFix[]): string | null {
+  if (!q.trim() || !serverAccepts(q)) return null;
+  const comparisons = autoFixes(fixes).filter((f) => f.message.startsWith('KQL-style'));
+  return comparisons.length ? applyFixes(q, comparisons).trim() : null;
+}
+
+/** Fields a KQL comparison may name without the attribute list at hand: core fields and explicit attributes. */
+export const isKnownFieldName = (name: string) => Boolean(coreField(name)) || /^(attr|attributes)\.\S/.test(name);
