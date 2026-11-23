@@ -1,6 +1,6 @@
 import { formatRecordTerm } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { entityBaseQuery, entityMatchRank, entityQuery, exactPerKind, idFromFreeText, resolveJump } from './entities';
+import { countsMentions, entityBaseQuery, entityMatchRank, entityQuery, exactPerKind, idFromFreeText, resolveJump } from './entities';
 
 describe('entity match rank (the order Jump to lists entities in)', () => {
   const tenant = (id: string, name = '') => ({ kind: 'tenant' as const, id, name, type: '' });
@@ -90,5 +90,12 @@ describe('a record page history starts from the link when it carries the exact p
     // A linked type that does not belong to the id is ignored.
     expect(entityBaseQuery('target', 'order:archived:A1', 'invoice', undefined)).toBe('');
     expect(entityBaseQuery('actor', 'qa-user-1', undefined, undefined)).toBe('actor:qa-user-1');
+  });
+
+  it('calls the all-time count mentions only where the server reads it from the rollup', () => {
+    expect(countsMentions('target', 'page:7')).toBe(true);
+    // More colons: the server counts the events themselves.
+    expect(countsMentions('target', 'order:archived:A1')).toBe(false);
+    expect(countsMentions('actor', 'qa-user-1')).toBe(false);
   });
 });

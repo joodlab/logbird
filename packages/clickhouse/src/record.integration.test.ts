@@ -204,6 +204,8 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
       { type: 'order:archived', id: 'A1' },
       { type: '', id: 'A2' },
       { type: 'commande:é', id: 'B7' },
+      // The same bare id under another type sums into one suggestion.
+      { type: 'invoice', id: 'A1' },
     ];
     try {
       await insertEvents(
@@ -219,6 +221,7 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
       );
       const suggested = await suggestValues(ch, suggestProject, { field: 'target', limit: 10 });
       expect(suggested.values.map((v) => v.value).sort()).toEqual(['A1', 'A2', 'B7']);
+      expect(suggested.values.find((v) => v.value === 'A1')?.count).toBe(2);
     } finally {
       await purgeProject(ch, suggestProject);
     }

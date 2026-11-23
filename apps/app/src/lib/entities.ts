@@ -66,6 +66,15 @@ export function entityQuery(kind: EntityKind, id: string, targetType?: string): 
 }
 
 /**
+ * Whether a profile's all-time count is mentions rather than events. The server reads a record's count from the rollup
+ * when its id holds one colon, and the rollup counts each time an event names the record (twice if it lists it twice);
+ * with more colons it counts the events themselves (`ambiguousTarget` in packages/clickhouse/src/queries.ts).
+ */
+export function countsMentions(kind: EntityKind, id: string): boolean {
+  return kind === 'target' && id.indexOf(':') === id.lastIndexOf(':');
+}
+
+/**
  * The filter an entity page's history runs under, or '' while it is not known yet. A record's filter needs its type: a
  * link that carries the exact pair (`?targetType=`, consistent with the id) already has it, so the history starts at
  * once; otherwise it comes with the profile (#220). Other entities never wait.

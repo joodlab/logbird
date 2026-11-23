@@ -8,11 +8,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 // B's answers never arrive in this test: only A's cached answers exist.
 const { never } = vi.hoisted(() => ({ never: () => new Promise<never>(() => undefined) }));
 vi.mock('@/lib/api/client', () => ({
-  api: { events: { search: vi.fn(never), histogram: vi.fn(never) }, entities: { profile: vi.fn(never) } },
+  api: { events: { search: vi.fn(never), histogram: vi.fn(never) }, entities: { profile: vi.fn(never), list: vi.fn(never) } },
 }));
 
 import { current } from './api/current';
-import { entityProfileQuery, eventsInfiniteQuery, histogramQuery } from './api/queries';
+import { entityProfileQuery, entitySeenQuery, eventsInfiniteQuery, histogramQuery } from './api/queries';
 import { scopedQuery } from './query-language';
 
 const project = 'qa-project';
@@ -52,5 +52,19 @@ it("never reads record A's history, chart or profile as record B's while B loads
   }
   // The profile keeps no placeholder across records at all.
   expect(profile.getCurrentResult().data).toBeUndefined();
+
+  // B's profile prefetched (a hovered link): B's header shows at once, while A's rows and chart still never do.
+  client.setQueryData(entityProfileQuery(project, 'target', `${b.type}:${b.id}`, range, b.type).queryKey, { entity: { name: 'B' } } as never);
+  expect(current(profile.getCurrentResult())).toMatchObject({ entity: { name: 'B' } });
+  for (const observer of [rows, chart]) expect(current(observer.getCurrentResult())).toBeUndefined();
+  // The history window's source keeps no placeholder either: B's window is never A's.
+  client.setQueryData(entitySeenQuery(project, 'target', `${a.type}:${a.id}`).queryKey, {
+    firstSeen: '2026-01-01T00:00:00.000Z',
+    lastSeen: '2026-01-02T00:00:00.000Z',
+  } as never);
+  const seen = new QueryObserver(client, entitySeenQuery(project, 'target', `${a.type}:${a.id}`) as never);
+  stop.push(seen.subscribe(() => undefined));
+  seen.setOptions(entitySeenQuery(project, 'target', `${b.type}:${b.id}`) as never);
+  expect(seen.getCurrentResult().data).toBeUndefined();
   for (const unsubscribe of stop) unsubscribe();
 });

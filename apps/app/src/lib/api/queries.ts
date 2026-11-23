@@ -227,6 +227,24 @@ export const operationQuery = (projectId: string, operationId: string) =>
     retry: shouldRetry,
   });
 
+/**
+ * When an entity was first and last seen, from the directory's rollup: the default history window comes from it without
+ * waiting for the profile's slower parts (#220). For a record whose type and id join into another's key the rollup's
+ * window is the wider of the two, so it still covers every event of this record. Null when the directory does not list
+ * exactly this id. No placeholder: an answer always belongs to this entity.
+ */
+export const entitySeenQuery = (projectId: string, kind: EntityKind, entityId: string) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'entity-seen', kind, entityId] as const,
+    queryFn: async ({ signal }) => {
+      const page = await api.entities.list(projectId, { kind, q: entityId, limit: 5 }, signal);
+      const entity = page.data.find((e) => e.id === entityId);
+      return entity ? { firstSeen: entity.firstSeen, lastSeen: entity.lastSeen } : null;
+    },
+    staleTime: 30_000,
+    retry: shouldRetry,
+  });
+
 export const entityListQuery = (projectId: string, kind: EntityKind, q: string, type?: string, sort: EntitySort = 'events') =>
   infiniteQueryOptions({
     queryKey: [...keys.project(projectId), 'entities', kind, q, type ?? null, sort] as const,
