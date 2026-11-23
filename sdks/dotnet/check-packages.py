@@ -72,7 +72,9 @@ def check_png(data, label):
         offset = end
     if not chunks or chunks[0][0] != b"IHDR" or len(chunks[0][1]) != 13 or chunks[-1][0] != b"IEND":
         raise SystemExit(f"{label}: not a complete PNG (IHDR first and IEND last)")
-    width, height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", chunks[0][1])
+    width, height, depth, color, compression, filtering, interlace = struct.unpack(">IIBBBBB", chunks[0][1])
+    if compression != 0 or filtering != 0:
+        raise SystemExit(f"{label}: compression method {compression} or filter method {filtering} is not the PNG standard's 0")
     if (width, height) != (128, 128):
         raise SystemExit(f"{label}: {width}x{height}, not 128x128")
     if color not in CHANNELS or interlace != 0:
