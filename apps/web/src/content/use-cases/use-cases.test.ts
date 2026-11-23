@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { quietHrefWarnings, renderPages } from '../../test/render-pages';
+import { SITE } from '../site';
 import { complianceEvidence } from './compliance-evidence';
 
 /** The use-case pages, as they render: the rules the maintainer set for each, and a sound structure for the shared layout. */
@@ -56,8 +57,10 @@ describe('use-case pages', () => {
       const limitAt = text.indexOf('A read key reads the whole project.');
       expect(limitAt).toBeGreaterThan(-1);
       expect(limitAt).toBeLessThan(text.indexOf('Authorize every read in one place.'));
-      // Scoped read access stays off the page until its production proof is confirmed.
-      expect(text).not.toMatch(/viewer token|scoped read|scoped key|\/v1\/viewer-tokens/i);
+      // Scoped read access appears, as the last section, exactly when SCOPED_READ_LIVE is on.
+      expect(/viewer token/i.test(text), 'scoped section').toBe(SITE.scopedReadLive);
+      if (SITE.scopedReadLive)
+        expect(text.indexOf('Scoped keys and viewer tokens.')).toBeGreaterThan(text.indexOf('Render it with your own components.'));
       expect(html.match(/<h1[\s>]/g)?.length).toBe(1);
       const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id);
       expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([]);

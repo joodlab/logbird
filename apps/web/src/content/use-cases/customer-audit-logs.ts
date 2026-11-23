@@ -1,11 +1,11 @@
+import { homeContent } from '../home';
 import { SITE, type SiteState } from '../site';
 import type { UseCase } from './types';
 
 /**
  * /use-cases/customer-audit-logs. Brief, with the source of every claim: marketing/copy/use-cases/customer-audit-logs.md.
- * Scoped read keys and viewer tokens are not described here until the maintainer confirms their production proof
- * (SiteState.scopedReadLive); today the page describes reading through your own backend, and its limit comes before
- * the how-to.
+ * The page leads with reading through your own backend, and that limit comes before the how-to. Once scoped read access
+ * is live (SiteState.scopedReadLive), a last section adds it, with the landing page's points and limit (one source).
  */
 const event = `{
   "action": "booking.cancelled",
@@ -14,7 +14,7 @@ const event = `{
   "targets": [{ "type": "booking", "id": "bk_1042" }]
 }`;
 
-const config = `// nuxt.config.ts: register your authorize() module. Set NUXT_LOGBIRD_READ_KEY on the server only.
+const config = `// nuxt.config.ts. Set NUXT_LOGBIRD_READ_KEY on the server only.
 import { fileURLToPath } from 'node:url';
 
 export default defineNuxtConfig({
@@ -25,15 +25,15 @@ export default defineNuxtConfig({
   },
 });`;
 
-const authorize = `// server/logbird.ts: Nuxt calls authorize() on your server for every history request, each next page included.
+const authorize = `// server/logbird.ts: runs on your server for every history request and next page.
 import type { LogbirdHooks } from '@logbird/nuxt';
 import { trailQuery } from '@logbird/sdk/read';
 
 export default {
   authorize: async (event, query) => {
-    const session = await getSession(event); // your own authentication and roles
-    if (!session?.canViewHistory) return false; // denied: nothing is forwarded to Logbird
-    // Build the query here, from the signed-in user's account; the browser's filter is ignored.
+    const session = await getSession(event); // your own authentication
+    if (!session?.canViewHistory) return false; // denied: nothing is forwarded
+    // Built from the user's account; the browser's filter is ignored.
     // trailQuery quotes the id for the query language.
     return trailQuery({
       tenant: session.tenantId,
@@ -55,7 +55,8 @@ const { data, error, nextCursor, loadMore } = useAuditTrail({});
   <button v-if="nextCursor" type="button" @click="loadMore">Load more</button>
 </template>`;
 
-export function customerAuditLogsContent(_site: SiteState): UseCase {
+export function customerAuditLogsContent(site: SiteState): UseCase {
+  const scoped = homeContent(site).customers.scoped;
   return {
     meta: {
       title: 'Customer-facing audit logs',
@@ -139,6 +140,18 @@ export function customerAuditLogsContent(_site: SiteState): UseCase {
           zoom: true,
         },
       },
+      ...(site.scopedReadLive
+        ? [
+            {
+              id: 'scoped',
+              eyebrow: 'Or let Logbird enforce it',
+              title: 'Scoped keys and viewer tokens.',
+              lead: 'Instead of building the query in your backend, give a scoped key or a viewer token one customer account. Logbird applies that scope to every read.',
+              points: scoped.points,
+              limit: { label: 'The limit', text: scoped.limit },
+            },
+          ]
+        : []),
     ],
   };
 }
