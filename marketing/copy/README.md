@@ -23,6 +23,8 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 | [`cloud.md`](cloud.md) | Cloud | `/cloud` |
 | [`pricing.md`](pricing.md) | Pricing (brief; the words and data are in `apps/web/src/content/pricing.ts`) | `/pricing` |
 | [`use-cases/compliance-evidence.md`](use-cases/compliance-evidence.md) | Compliance evidence (brief; the words are in `apps/web/src/content/use-cases/compliance-evidence.ts`) | `/use-cases/compliance-evidence` |
+| [`use-cases/customer-audit-logs.md`](use-cases/customer-audit-logs.md) | Customer-facing audit logs (brief; the words are in `apps/web/src/content/use-cases/customer-audit-logs.ts`) | `/use-cases/customer-audit-logs` |
+| [`use-cases/support-investigations.md`](use-cases/support-investigations.md) | Support investigations (brief; the words are in `apps/web/src/content/use-cases/support-investigations.ts`) | `/use-cases/support-investigations` |
 | [`open-source.md`](open-source.md) | Open source | `/open-source` |
 | [`security.md`](security.md) | Security and data handling | `/security` |
 | [`compare/README.md`](compare/README.md) | Compare (index) | `/compare` |

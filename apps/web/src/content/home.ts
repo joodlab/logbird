@@ -158,7 +158,7 @@ export function homeContent(site: SiteState) {
         caption:
           "A customer account's page in the console: its events, activity, outcomes, top actions and the people, workers and records involved.",
       },
-      cta: { label: 'Read the integration guide', to: '/developers', hash: 'integrations' } satisfies Cta,
+      cta: { label: 'How to show customers their history', to: '/use-cases/customer-audit-logs' } satisfies Cta,
     },
     evidence: {
       eyebrow: 'Compliance evidence',
@@ -209,7 +209,7 @@ export function homeContent(site: SiteState) {
           body: 'The events that share an operation id, from the request to the jobs it spawned, as one tree.',
         },
       } satisfies Record<string, Item>,
-      cta: { label: 'Take the product tour', to: '/product' } satisfies Cta,
+      cta: { label: 'How support investigates an account', to: '/use-cases/support-investigations' } satisfies Cta,
     },
     developers: {
       eyebrow: 'For developers',

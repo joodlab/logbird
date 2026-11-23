@@ -31,6 +31,8 @@ import { Route as CompareWorkosAuditLogsRouteImport } from './routes/compare.wor
 import { Route as LegalPrivacyRouteImport } from './routes/legal.privacy'
 import { Route as LegalTermsRouteImport } from './routes/legal.terms'
 import { Route as UseCasesComplianceEvidenceRouteImport } from './routes/use-cases.compliance-evidence'
+import { Route as UseCasesCustomerAuditLogsRouteImport } from './routes/use-cases.customer-audit-logs'
+import { Route as UseCasesSupportInvestigationsRouteImport } from './routes/use-cases.support-investigations'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -143,6 +145,18 @@ const UseCasesComplianceEvidenceRoute =
     path: '/use-cases/compliance-evidence',
     getParentRoute: () => rootRouteImport,
   } as any)
+const UseCasesCustomerAuditLogsRoute =
+  UseCasesCustomerAuditLogsRouteImport.update({
+    id: '/use-cases/customer-audit-logs',
+    path: '/use-cases/customer-audit-logs',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const UseCasesSupportInvestigationsRoute =
+  UseCasesSupportInvestigationsRouteImport.update({
+    id: '/use-cases/support-investigations',
+    path: '/use-cases/support-investigations',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -165,6 +179,8 @@ export interface FileRoutesByFullPath {
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
   '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
+  '/use-cases/customer-audit-logs': typeof UseCasesCustomerAuditLogsRoute
+  '/use-cases/support-investigations': typeof UseCasesSupportInvestigationsRoute
   '/blog/': typeof BlogIndexRoute
   '/compare/': typeof CompareIndexRoute
 }
@@ -189,6 +205,8 @@ export interface FileRoutesByTo {
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
   '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
+  '/use-cases/customer-audit-logs': typeof UseCasesCustomerAuditLogsRoute
+  '/use-cases/support-investigations': typeof UseCasesSupportInvestigationsRoute
   '/blog': typeof BlogIndexRoute
   '/compare': typeof CompareIndexRoute
 }
@@ -214,6 +232,8 @@ export interface FileRoutesById {
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
   '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
+  '/use-cases/customer-audit-logs': typeof UseCasesCustomerAuditLogsRoute
+  '/use-cases/support-investigations': typeof UseCasesSupportInvestigationsRoute
   '/blog/': typeof BlogIndexRoute
   '/compare/': typeof CompareIndexRoute
 }
@@ -240,6 +260,8 @@ export interface FileRouteTypes {
     | '/legal/privacy'
     | '/legal/terms'
     | '/use-cases/compliance-evidence'
+    | '/use-cases/customer-audit-logs'
+    | '/use-cases/support-investigations'
     | '/blog/'
     | '/compare/'
   fileRoutesByTo: FileRoutesByTo
@@ -264,6 +286,8 @@ export interface FileRouteTypes {
     | '/legal/privacy'
     | '/legal/terms'
     | '/use-cases/compliance-evidence'
+    | '/use-cases/customer-audit-logs'
+    | '/use-cases/support-investigations'
     | '/blog'
     | '/compare'
   id:
@@ -288,6 +312,8 @@ export interface FileRouteTypes {
     | '/legal/privacy'
     | '/legal/terms'
     | '/use-cases/compliance-evidence'
+    | '/use-cases/customer-audit-logs'
+    | '/use-cases/support-investigations'
     | '/blog/'
     | '/compare/'
   fileRoutesById: FileRoutesById
@@ -313,6 +339,8 @@ export interface RootRouteChildren {
   LegalPrivacyRoute: typeof LegalPrivacyRoute
   LegalTermsRoute: typeof LegalTermsRoute
   UseCasesComplianceEvidenceRoute: typeof UseCasesComplianceEvidenceRoute
+  UseCasesCustomerAuditLogsRoute: typeof UseCasesCustomerAuditLogsRoute
+  UseCasesSupportInvestigationsRoute: typeof UseCasesSupportInvestigationsRoute
   BlogIndexRoute: typeof BlogIndexRoute
   CompareIndexRoute: typeof CompareIndexRoute
 }
@@ -473,6 +501,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UseCasesComplianceEvidenceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/use-cases/customer-audit-logs': {
+      id: '/use-cases/customer-audit-logs'
+      path: '/use-cases/customer-audit-logs'
+      fullPath: '/use-cases/customer-audit-logs'
+      preLoaderRoute: typeof UseCasesCustomerAuditLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/use-cases/support-investigations': {
+      id: '/use-cases/support-investigations'
+      path: '/use-cases/support-investigations'
+      fullPath: '/use-cases/support-investigations'
+      preLoaderRoute: typeof UseCasesSupportInvestigationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -497,6 +539,8 @@ const rootRouteChildren: RootRouteChildren = {
   LegalPrivacyRoute: LegalPrivacyRoute,
   LegalTermsRoute: LegalTermsRoute,
   UseCasesComplianceEvidenceRoute: UseCasesComplianceEvidenceRoute,
+  UseCasesCustomerAuditLogsRoute: UseCasesCustomerAuditLogsRoute,
+  UseCasesSupportInvestigationsRoute: UseCasesSupportInvestigationsRoute,
   BlogIndexRoute: BlogIndexRoute,
   CompareIndexRoute: CompareIndexRoute,
 }

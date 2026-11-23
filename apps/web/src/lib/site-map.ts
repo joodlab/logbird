@@ -1,6 +1,8 @@
 import { homeMeta } from '../content/home';
 import { pricing } from '../content/pricing';
 import { complianceEvidence } from '../content/use-cases/compliance-evidence';
+import { customerAuditLogs } from '../content/use-cases/customer-audit-logs';
+import { supportInvestigations } from '../content/use-cases/support-investigations';
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from './cloud';
 import { buildLog, postPath, posts, releases } from './publications';
@@ -110,6 +112,28 @@ export const siteMap: SitePage[] = [
     changefreq: 'monthly',
     ready: true,
     ogSlug: 'use-case-compliance-evidence',
+    inNav: false,
+    inFooter: true,
+  },
+  {
+    path: '/use-cases/customer-audit-logs',
+    ...customerAuditLogs.meta,
+    section: 'product',
+    priority: 0.7,
+    changefreq: 'monthly',
+    ready: true,
+    ogSlug: 'use-case-customer-audit-logs',
+    inNav: false,
+    inFooter: true,
+  },
+  {
+    path: '/use-cases/support-investigations',
+    ...supportInvestigations.meta,
+    section: 'product',
+    priority: 0.7,
+    changefreq: 'monthly',
+    ready: true,
+    ogSlug: 'use-case-support-investigations',
     inNav: false,
     inFooter: true,
   },

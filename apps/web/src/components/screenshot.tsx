@@ -6,12 +6,26 @@ const PHONE = '(max-width: 639px)';
 const srcSet = (id: string, theme: 'light' | 'dark', format: string, widths: number[]) =>
   widths.map((width) => `/media/${id}-${theme}-${width}.${format} ${width}w`).join(', ');
 
-function ThemePicture({ entry, theme, sizes, className }: { entry: ScreenshotEntry; theme: 'light' | 'dark'; sizes: string; className?: string }) {
+function ThemePicture({
+  entry,
+  theme,
+  sizes,
+  className,
+  zoomLabel,
+}: {
+  entry: ScreenshotEntry;
+  theme: 'light' | 'dark';
+  sizes: string;
+  className?: string;
+  /** When set, the picture links to its full-size image, so a phone reader can open it and zoom. */
+  zoomLabel?: string;
+}) {
   const pick = (variant: Variant) => (theme === 'dark' && variant.dark ? 'dark' : 'light');
   const desktopTheme = pick(entry);
   const widths = imageWidths(entry.width);
-  return (
-    <picture className={className}>
+  const fullSize = `/media/${entry.id}-${desktopTheme}-${widths.at(-1)}.webp`;
+  const picture = (
+    <picture className={zoomLabel ? undefined : className}>
       {entry.phone
         ? FORMATS.map((format) => (
             <source
@@ -28,16 +42,16 @@ function ThemePicture({ entry, theme, sizes, className }: { entry: ScreenshotEnt
       {FORMATS.map((format) => (
         <source key={format} sizes={sizes} srcSet={srcSet(entry.id, desktopTheme, format, widths)} type={`image/${format}`} />
       ))}
-      <img
-        alt={entry.alt}
-        decoding="async"
-        height={entry.height}
-        loading="lazy"
-        sizes={sizes}
-        src={`/media/${entry.id}-${desktopTheme}-${widths.at(-1)}.webp`}
-        width={entry.width}
-      />
+      <img alt={entry.alt} decoding="async" height={entry.height} loading="lazy" sizes={sizes} src={fullSize} width={entry.width} />
     </picture>
+  );
+  if (!zoomLabel) {
+    return picture;
+  }
+  return (
+    <a aria-label={zoomLabel} className={className} href={fullSize} rel="noopener" target="_blank">
+      {picture}
+    </a>
   );
 }
 
@@ -46,7 +60,7 @@ function ThemePicture({ entry, theme, sizes, className }: { entry: ScreenshotEnt
  * hides the other variant; hidden lazy images are never fetched, so each visitor downloads exactly one image, with no
  * swap after hydration. Below 640px a phone capture replaces the shrunken desktop one when the entry has it.
  */
-export function Screenshot({ id, sizes = '100vw' }: { id: string; sizes?: string }) {
+export function Screenshot({ id, sizes = '100vw', zoomLabel }: { id: string; sizes?: string; zoomLabel?: string }) {
   const entry = screenshots.find((item) => item.id === id);
   if (!entry) {
     throw new Error(`Unknown screenshot: ${id}`);
@@ -56,11 +70,11 @@ export function Screenshot({ id, sizes = '100vw' }: { id: string; sizes?: string
     <div className="screenshot">
       {themed ? (
         <>
-          <ThemePicture className="theme-light" entry={entry} sizes={sizes} theme="light" />
-          <ThemePicture className="theme-dark" entry={entry} sizes={sizes} theme="dark" />
+          <ThemePicture className="theme-light" entry={entry} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
+          <ThemePicture className="theme-dark" entry={entry} sizes={sizes} theme="dark" zoomLabel={zoomLabel} />
         </>
       ) : (
-        <ThemePicture entry={entry} sizes={sizes} theme="light" />
+        <ThemePicture entry={entry} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
       )}
     </div>
   );
