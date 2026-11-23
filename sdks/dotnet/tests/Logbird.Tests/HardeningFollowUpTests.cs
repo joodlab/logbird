@@ -473,10 +473,13 @@ public class HardeningFollowUpTests
     [Fact]
     public async Task A_body_read_failing_with_any_exception_still_disposes_the_response()
     {
-        // Outside the exceptions the client maps: it still reaches the caller, and the response is still disposed.
+        // Any exception from the body is a transport failure (step-4 A17): reported as unreachable without its message, and
+        // the response is still disposed.
         var content = new FailingContent(new InvalidOperationException("fictional content fault"));
         using var reader = Reader(new Answer(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => reader.SearchAsync(new EventSearch()));
+        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync(new EventSearch()));
+        Assert.Equal("unreachable", error.Code);
+        Assert.DoesNotContain("fictional content fault", error.Message, StringComparison.Ordinal);
         Assert.True(content.Disposed);
     }
 
