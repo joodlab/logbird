@@ -371,7 +371,9 @@ internal sealed class StandIn : IDisposable
                 await WriteAsync(stream, exchange, 413, Error("payload_too_large", "Request exceeds 5 MB."), null).ConfigureAwait(false);
                 return true;
             case Fault.Latency:
-                await Task.Delay(NextInt(2000)).ConfigureAwait(false);
+                // 1 to 2,000 ms, recorded in the sample so the contract check can see the delay happened.
+                exchange.DelayMs = NextInt(2000) + 1;
+                await Task.Delay(exchange.DelayMs.Value).ConfigureAwait(false);
                 break;
         }
 
@@ -924,6 +926,9 @@ internal sealed class Exchange(Fault fault)
 
     /// <summary>Per event, in order: accepted, rejected or unresolved (stand-in mode).</summary>
     public List<string> Dispositions { get; } = [];
+
+    /// <summary>The delay the latency fault applied, in milliseconds.</summary>
+    public int? DelayMs { get; set; }
 }
 
 /// <summary>
@@ -972,6 +977,7 @@ internal sealed class Samples : IDisposable
                 ["request"] = exchange.Request is null ? null : TryParse(exchange.Request),
                 ["response"] = exchange.Response?.DeepClone(),
                 ["dispositions"] = new JsonArray(exchange.Dispositions.Select(d => (JsonNode?)JsonValue.Create(d)).ToArray()),
+                ["delayMs"] = exchange.DelayMs,
             }.ToJsonString();
         }
         catch (InvalidOperationException)

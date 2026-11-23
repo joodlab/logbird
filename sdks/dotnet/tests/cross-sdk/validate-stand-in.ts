@@ -34,6 +34,7 @@ type Exchange = {
   response: unknown;
   dispositions: string[];
   undecodable?: boolean;
+  delayMs?: number | null;
 };
 
 const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
@@ -56,7 +57,8 @@ const exchanges = lines.slice(1).map((line, index) => {
     'response' in x &&
     Array.isArray(x.dispositions) &&
     x.dispositions.every((d) => dispositionValues.has(d)) &&
-    (x.undecodable === undefined || typeof x.undecodable === 'boolean');
+    (x.undecodable === undefined || typeof x.undecodable === 'boolean') &&
+    (x.delayMs === undefined || x.delayMs === null || typeof x.delayMs === 'number');
   if (!shaped) throw new Error(`line ${index + 2} is not an exchange record`);
   return x;
 });
@@ -130,7 +132,11 @@ for (const [number, x] of exchanges.entries()) {
   // server refuses, a bad key, an oversized request) may answer first; any other answer is a mismatch.
   const code = (x.response as { error?: { code?: unknown } } | null)?.error?.code;
   const wholeRequest = x.status !== null && [400, 401, 422].includes(x.status);
-  const shows: Record<string, boolean> = {
+  // Is this answer legal for the fault, and does it prove the fault happened? An ordinary 202 is a legal answer to the
+  // partial and reject faults (the stand-in picks events at random), but only a visible effect earns coverage.
+  const details = (x.response as { error?: { details?: { indices?: unknown[] } } } | null)?.error?.details;
+  const rejected = (x.response as { rejected?: { code?: unknown }[] } | null)?.rejected ?? [];
+  const legal: Record<string, boolean> = {
     RateLimited: x.status === 429 && code === 'rate_limited',
     Unavailable: x.status === 503 && code === 'ingest_unavailable',
     TooLarge: x.status === 413 && code === 'payload_too_large',
@@ -143,8 +149,14 @@ for (const [number, x] of exchanges.entries()) {
     Ok: true,
     Latency: true,
   };
-  if (shows[x.fault] === true) seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
-  else if (!wholeRequest && !(x.status === 413 && code === 'payload_too_large'))
+  const covers: Record<string, boolean> = {
+    ...legal,
+    PartialUnavailable: x.status === 503 && code === 'ingest_pending' && Array.isArray(details?.indices) && details.indices.length > 0,
+    Reject: x.status === 202 && Array.isArray(rejected) && rejected.some((r) => r?.code === 'invalid_event'),
+    Latency: typeof x.delayMs === 'number' && x.delayMs > 0,
+  };
+  if (covers[x.fault] === true) seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
+  if (legal[x.fault] !== true && !wholeRequest && !(x.status === 413 && code === 'payload_too_large'))
     fail(`the ${x.fault} fault answered ${x.status ?? 'nothing'} ${code ?? ''}`.trim());
 
   // A request .NET could not re-encode (a lone surrogate) is sampled without its body: only its status and code, above.
