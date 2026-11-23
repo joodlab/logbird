@@ -105,7 +105,10 @@ try {
       await go('/events?range=7d');
       await page.getByRole('combobox', { name: 'Query', exact: true }).fill('outcome:');
       // Wait for real values with their counts, not an operator row shown while values load.
-      await page.getByRole('option', { name: /success/ }).first().waitFor();
+      await page
+        .getByRole('option', { name: /success/ })
+        .first()
+        .waitFor();
       await page.getByText(/loading values/i).waitFor({ state: 'hidden' });
       await page.waitForTimeout(300);
       await shot(`query-suggestions-${theme}`);
