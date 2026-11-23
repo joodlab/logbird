@@ -1,9 +1,9 @@
 // From the delivery checkout, after frozen installs and Prisma generation here and at v0.2.1:
-// node --env-file=.env --import tsx scripts/webhook-upgrade-proof.ts logbird_t2_scratch_webhooks <v0.2.1-worktree> [--suites]
-// Uses local Postgres, ClickHouse, Redis and Mailpit. The database name must be unused.
+// node --env-file=.env --import tsx scripts/webhook-upgrade-proof.ts <v0.2.1-worktree> [--suites]
+// Uses local Postgres, ClickHouse, Redis and Mailpit. Each run creates its own scratch database.
 import assert from 'node:assert/strict';
 import { type ChildProcess, spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -16,9 +16,9 @@ import { createProjectResponseSchema, createWebhookResponseSchema, ingestRespons
 import { verifyWebhook } from '@logbird/sdk';
 import { Client } from 'pg';
 
-const [name, baseline, suites] = process.argv.slice(2);
-assert(name && /^logbird_t2_scratch_[a-z0-9_]{1,40}$/.test(name), 'Pass an unused logbird_t2_scratch_* database name');
-assert(baseline && (!suites || suites === '--suites') && process.argv.length <= 5, 'Pass the pre-delivery worktree and optional --suites');
+const [baseline, suites] = process.argv.slice(2);
+assert(baseline && (!suites || suites === '--suites') && process.argv.length <= 4, 'Pass the pre-delivery worktree and optional --suites');
+const name = `logbird_t2_scratch_webhooks_${randomBytes(4).toString('hex')}`;
 const oldRoot = resolve(baseline);
 const newRoot = resolve(import.meta.dirname, '..');
 const rolloutMigration = 'packages/database/prisma/migrations/20261122140000_webhook_deliveries';
@@ -42,6 +42,7 @@ const databaseUrl = new URL(adminUrl);
 databaseUrl.pathname = `/${name}`;
 adminUrl.pathname = '/postgres';
 const admin = new Client({ connectionString: adminUrl.toString() });
+const scratch = new Client({ connectionString: databaseUrl.toString() });
 const servers = new Set<ChildProcess>();
 const streams: string[] = [];
 const email = `qa-webhook-upgrade-${randomUUID()}@example.invalid`;
@@ -168,6 +169,7 @@ async function scratchDatabaseOid() {
 let createdDatabaseOid: string | undefined;
 let loginStarted = false;
 const errors: unknown[] = [];
+scratch.on('error', (error) => errors.push(error));
 try {
   freeMemory();
   await admin.connect();
@@ -175,6 +177,7 @@ try {
   await admin.query(`CREATE DATABASE "${name}" TEMPLATE template0`);
   createdDatabaseOid = await scratchDatabaseOid();
   assert(createdDatabaseOid, `Could not record the identity of scratch database ${name}`);
+  await scratch.connect();
   process.env.DATABASE_URL = databaseUrl.toString();
   process.env.BULLMQ_PREFIX = '{logbird-t2w}';
   process.env.AUTH_SIGNUP = 'open';
@@ -206,7 +209,7 @@ try {
     createWebhookResponseSchema.parse(await (await old(base, 'POST', { url: 'https://8.8.8.8/qa', description, filterQuery: filter })).json());
   const empty = await createEndpoint('QA existing empty filter');
   const filtered = await createEndpoint('QA existing non-empty filter', filterQuery);
-  async function ingest(api: string, events: { id: string; action: string }[]) {
+  async function ingest(api: string, events: readonly { id: string; action: string }[]) {
     const response = await fetch(`${api}/v1/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${project.ingestKey.secret}` },
@@ -266,12 +269,20 @@ try {
     const untrusted = await db.prisma.webhookEndpoint.create({
       data: { projectId, url: 'https://8.8.8.8/qa', description: 'QA deliberately future cursor', cursorReceivedAt: untrustedAt },
     });
-    const post = ['qa-post-01', 'qa-post-02', 'qa-post-03'] as const;
-    await ingest(newApi, [
-      { id: post[0], action: 'qa.matches' },
-      { id: post[1], action: 'qa.other' },
-      { id: post[2], action: 'qa.matches' },
-    ]);
+    const oldPost = [
+      { id: 'qa-post-01-old', action: 'qa.matches' },
+      { id: 'qa-post-02-old', action: 'qa.other' },
+    ];
+    const newPost = [
+      { id: 'qa-post-03-new', action: 'qa.matches' },
+      { id: 'qa-post-04-new', action: 'qa.other' },
+      { id: 'qa-post-05-new', action: 'qa.matches' },
+    ];
+    await ingest(oldApi, oldPost);
+    await ingest(newApi, newPost);
+    const post = [...oldPost, ...newPost];
+    const postIds = post.map(({ id }) => id);
+    const matchingIds = post.filter(({ action }) => action === 'qa.matches').map(({ id }) => id);
     const events = await read<{ id: string; ms: number }>(
       ch,
       `SELECT event_id AS id, toUnixTimestamp64Milli(received_at) AS ms
@@ -280,7 +291,7 @@ try {
     );
     assert.deepEqual(
       events.map(({ id }) => id),
-      [...pre, ...post],
+      [...pre, ...postIds],
     );
     assert(events.slice(0, pre.length).every(({ ms }) => ms < +rollout));
     assert(events.slice(pre.length).every(({ ms }) => ms >= Math.max(+rollout, +rollingRow.createdAt)));
@@ -318,8 +329,8 @@ try {
       assert.equal(response.status, 200);
       return webhookEndpointSchema.parse(await response.json());
     };
-    await drain(empty.endpoint.id, 3);
-    await drain(rolling.endpoint.id, 3);
+    await drain(empty.endpoint.id, postIds.length);
+    await drain(rolling.endpoint.id, postIds.length);
     const held = await refetch(filtered.endpoint.id);
     assert.equal(held.filterReviewRequired, true);
     assert.equal(held.cursorReviewRequired, false);
@@ -331,12 +342,12 @@ try {
     const confirmed = await update(held.id, { filterQuery });
     assert.equal(confirmed.filterWarning, undefined);
     assert.equal(confirmed.cursorWarning, undefined);
-    await drain(held.id, 2);
+    await drain(held.id, matchingIds.length);
     await pass();
     const expected = [
-      [empty.endpoint.id, post],
-      [rolling.endpoint.id, post],
-      [held.id, [post[0], post[2]]],
+      [empty.endpoint.id, postIds],
+      [rolling.endpoint.id, postIds],
+      [held.id, matchingIds],
     ] as const;
     for (const [id, ids] of expected) {
       const posts = delivered(id);
@@ -372,6 +383,7 @@ try {
             deltaMs: +rollingRow.createdAt - +rollingRow.cursorReceivedAt,
           },
           events: events.map(({ id, ms }) => ({ id, receivedAt: new Date(ms) })),
+          postMigration: { oldApi: oldPost.map(({ id }) => id), newApi: newPost.map(({ id }) => id) },
           signedPosts: {
             existing: delivered(empty.endpoint.id).map(({ id }) => id),
             rolling: delivered(rolling.endpoint.id).map(({ id }) => id),
@@ -427,14 +439,17 @@ try {
   } finally {
     try {
       if (createdDatabaseOid) {
+        await scratch.query('SELECT 1');
         assert.equal(await scratchDatabaseOid(), createdDatabaseOid, `Scratch database ${name} changed identity. Cleanup stopped.`);
+        // Assumes no administrator force-disconnects this session or reuses the name between close and drop.
+        await scratch.end();
         await admin.query(`DROP DATABASE "${name}"`);
         console.log(`Dropped scratch database ${name} with OID ${createdDatabaseOid}`);
       }
     } catch (error) {
       errors.push(error);
     } finally {
-      await admin.end();
+      await Promise.all([scratch.end(), admin.end()]);
     }
   }
 }

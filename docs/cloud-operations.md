@@ -286,6 +286,12 @@ Fence all direct/administrative writers too, take the matched recovery set, and
 record the stopped-Pod inventory. A drain timeout keeps the release stopped;
 never force-kill a purge to meet a maintenance estimate.
 
+For the first upgrade that enables webhook delivery, run the scale and both Pod deletion waits above
+before applying the new workloads. Verify no previous-version API Pod remains, including any alternate
+deployment that can still ingest. An event accepted with overlapping old API and new worker versions can
+remain searchable while its webhook delivery is missed. See [Webhook delivery on upgrade](self-hosting.md#webhook-delivery-on-upgrade)
+for the search and cursor reconciliation procedure.
+
 **First install only:** create the three scoped Secrets, then the registry hook
 above if needed. Never print files or use a wholesale developer `.env`.
 

@@ -12,7 +12,8 @@ import { deliverWebhooks } from './webhook-delivery';
 import { discoverWebhookDeliveries, scanWebhooks } from './webhook-discovery';
 
 const ch = createClickHouseClient();
-const projectId = `qa-webhook-discovery-${randomUUID()}`;
+const runId = randomUUID();
+const projectId = `qa-webhook-discovery-${runId}`;
 const scanClock = (from: Date) => ({ now: new Date(), rollout: new Date(+from - 1) });
 
 beforeAll(async () => {
@@ -67,8 +68,8 @@ it('scans and sends the 33rd endpoint when the first 32 cannot finish their firs
     received.push(JSON.parse(body).id);
     res.writeHead(204).end();
   });
-  const blockedIds = Array.from({ length: 32 }, (_, index) => `qa-scan-first-${String(index).padStart(2, '0')}`);
-  const healthyId = 'qa-scan-last';
+  const blockedIds = Array.from({ length: 32 }, (_, index) => `qa-scan-${runId}-first-${String(index).padStart(2, '0')}`);
+  const healthyId = `qa-scan-${runId}-last`;
   const secretKey = Buffer.alloc(32, 7);
   const receiptKey = { projectId, eventId: receiptId };
   try {
@@ -116,6 +117,7 @@ it('scans and sends the 33rd endpoint when the first 32 cannot finish their firs
     };
     await pass();
     expect(await queuedIds(healthyId)).toEqual([]);
+    // Discovery schedules across projects. The second-pass assertion requires an isolated database.
     await pass();
     expect(received).toEqual([eventId]);
     await pass();
@@ -139,7 +141,7 @@ it('scans and sends the 33rd endpoint when the first 32 cannot finish their firs
     receiver.closeAllConnections();
     await new Promise<void>((done) => receiver.close(() => done()));
     await prisma.ingestReceipt.deleteMany({ where: receiptKey });
-    await prisma.webhookEndpoint.deleteMany({ where: { id: { in: [...blockedIds, healthyId] } } });
+    await prisma.webhookEndpoint.deleteMany({ where: { projectId, id: { in: [...blockedIds, healthyId] } } });
   }
 });
 

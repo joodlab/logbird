@@ -546,8 +546,12 @@ target. The scan window ends at the earlier of:
 - The current database time minus the async-insert flush bound and a safety margin (15 seconds total).
 - The millisecond before the project's oldest unconfirmed ingest receipt.
 
-The worker queues for the receipt gate while writers assign their arrival clocks and register receipts.
-Unconfirmed receipts then fence the scan during ClickHouse writes. Each discovery pass takes up to 32 eligible endpoints
+With webhook-delivery-aware writers, the worker queues for the receipt gate while writers assign their arrival
+clocks and register receipts. Unconfirmed receipts then fence the scan during ClickHouse writes. Stop previous-version
+API servers before starting the worker on the first
+[webhook delivery upgrade](self-hosting.md#webhook-delivery-on-upgrade). If the roles overlap, a stalled old
+identity lookup can leave an accepted, searchable event without a webhook delivery.
+Each discovery pass takes up to 32 eligible endpoints
 in order of oldest scan attempt, with never-attempted endpoints first and endpoint ID breaking ties. Blocked or failed
 attempts also update this order. Only recorded progress updates the cursor and its scan timestamp. Each query examines up to five minutes of
 receive time and reads up to 10,000 matching event positions, ordered by receive time and ID. Empty slices advance

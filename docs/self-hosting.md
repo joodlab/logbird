@@ -292,6 +292,24 @@ for signal handling; its live acceptance is pending in #77.
 
 ### Webhook delivery on upgrade
 
+When upgrading from a release without webhook delivery, stop all servers running the previous version before
+starting the new worker. The Compose upgrade above already stops `app`, `server` and `worker` before migration.
+Follow the equivalent stopped-server steps for [K3s](cloud-operations.md#fence-and-drain) and
+[Coolify](coolify.md#first-webhook-delivery-upgrade).
+
+If the previous server and new worker overlap, an identity lookup that stalls for more than 15 seconds before
+registering its receipt can let discovery scan past the event. An event accepted in that gap is stored and
+searchable, but may be missed by webhook delivery. This window applies to the first webhook delivery upgrade.
+
+If the roles overlapped, search the affected project in Explorer with `receivedAt:>=… receivedAt:<…`, using UTC
+timestamps from migration start through the last old server shutdown. For an endpoint with an earlier saved startup
+cursor, include that earlier receive time. Set the event-time range wide enough to include backdated or future-dated
+events. Compare matching event IDs and receive times against
+the endpoint's delivery log and receiver records. A missed occurrence has no delivery row to resend. To deliver
+still-retained events, use [Reconcile a webhook discovery cursor](#reconcile-a-webhook-discovery-cursor) to rewind
+the affected endpoint to the earliest uncertain eligible receive millisecond. Preserve delivery history and expect
+possible duplicates where the deduplication records have expired.
+
 An existing enabled endpoint with an empty filter starts automatically. Its first eligible delivery is the first matching event
 received at or after the delivery migration's UTC start time (`20261122140000_webhook_deliveries`).
 Events received before that millisecond are excluded. An endpoint created by the new API starts at its creation millisecond, inclusive.
