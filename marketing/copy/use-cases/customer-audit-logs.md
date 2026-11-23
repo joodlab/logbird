@@ -45,6 +45,6 @@ that it appears exactly when the flag is on.
 
 ## Visual
 
-`tenant-account`: a crop of the reviewed `tenant` capture (header, counts and "who did it"). It opens full size on tap
+`tenant-summary`: a crop of the reviewed `tenant` capture (header, counts and "who did it"), light and dark. It opens full size on tap
 (the layout's `zoom`), because console detail is too small to read at phone width. The caption says it's your team's
 view in the console, not what your customers see.

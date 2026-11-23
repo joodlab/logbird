@@ -36,6 +36,12 @@ async function go(path) {
   await page.goto(`${p}${path}`);
   await settle();
 }
+async function crop(from, name, region) {
+  await sharp(resolve(output, `${from}.webp`))
+    .extract(region)
+    .webp({ quality: 88 })
+    .toFile(resolve(output, `${name}.webp`));
+}
 async function shot(name) {
   await sharp(await page.screenshot())
     .webp({ quality: 88 })
@@ -87,6 +93,8 @@ try {
       await page.locator('[data-index]').first().click();
       await settle();
       await shot(`event-sheet-${theme}`);
+      // event-detail: the sheet panel of this capture, at the size the site uses (docs/media/README.md).
+      await crop(`event-sheet-${theme}`, `event-detail-${theme}`, { left: 801, top: 0, width: 639, height: 860 });
       await page.keyboard.press('Escape');
       await go(`/events?range=7d&lang=sql&q=${encodeURIComponent("job_attempt > 1 AND outcome = 'success'")}`);
       await shot(`sql-${theme}`);
@@ -128,6 +136,8 @@ try {
       await page.locator('main a[href*="/tenants/"]').first().click();
       await settle();
       await shot(`tenant-${theme}`);
+      // tenant-summary: the account's header, counts and "who did it" from this capture (docs/media/README.md).
+      await crop(`tenant-${theme}`, `tenant-summary-${theme}`, { left: 250, top: 70, width: 1160, height: 425 });
       await go('/actors');
       await page.locator('main a[href*="/actors/"]').first().click();
       await settle();
@@ -156,6 +166,7 @@ try {
       storageState: await context.storageState(),
     });
     const phonePage = await phoneHero.newPage();
+    const phoneProblems = watch(phonePage);
     for (const theme of ['light', 'dark']) {
       await page.emulateMedia({ colorScheme: theme });
       await go(`/events?range=7d&q=${encodeURIComponent(heroQuery)}`);
@@ -170,6 +181,7 @@ try {
         .toFile(resolve(output, `phone-explorer-hero-${theme}.webp`));
     }
     await phoneHero.close();
+    problems.push(...phoneProblems);
 
     // A real completed evidence export: download it through the console's own API (the whole body, so the export
     // completes), then open its completed record in Workspace activity. Nothing on the page is edited.

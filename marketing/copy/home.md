@@ -54,7 +54,7 @@ other one.
 | Section (module key) | Job | Visual |
 | --- | --- | --- |
 | `hero` | The promise: the two jobs, how events get in, where it runs; the real explorer beside it | `explorer-hero-{light,dark}.webp` (phone: `phone-explorer-hero-*`), the explorer with the visible query `explorer.query` (`-actor.type:system`, compiled in `landing-visuals.test.ts`), at high fetch priority with nothing layered over it (maintainer, design pass 2); the curl sample below it. No `LogStack` in the hero. |
-| `customers` | Job 1: show each customer account its own history, with the limit as its own visible line | `tenant-account-{light,dark}.webp` (a crop of the tenant page: counts and "who did it"), opens full size |
+| `customers` | Job 1: show each customer account its own history, with the limit as its own visible line | `tenant-summary-{light,dark}.webp` (a crop of the tenant page: counts and "who did it"), opens full size |
 | `evidence` | Job 2: what you can show an auditor, each row with where it ends | `export-record-{light,dark}.webp`: a real completed evidence export's record in Workspace activity (docs/media/README.md), with "What a match shows" (`evidenceLimits.exportMatch`) beside it; the caption says only what the image shows. Opens full size. Then the limits table. |
 | `operators` | Support investigations: one search, entity pages, operation trees | `event-sheet-{light,dark}.webp`, opens full size |
 | `developers` | One call per action; TypeScript tabs; one sentence for every other stack and .NET | The Route and Worker tabs |

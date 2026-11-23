@@ -31,7 +31,7 @@ export const screenshots: ScreenshotEntry[] = [
     dark: `${C}/explorer-dark.webp`,
     ...desktop,
     phone: { light: `${C}/phone-explorer-light.webp`, dark: `${C}/phone-explorer-dark.webp`, ...phone },
-    alt: 'The explorer filtered to booking actions: a histogram of the last seven days, facets for outcome, severity and action, and a table of events.',
+    alt: 'The explorer filtered to booking actions: a histogram of the last seven days and the matching events.',
   },
   {
     id: 'overview',

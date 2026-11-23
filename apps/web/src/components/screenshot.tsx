@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { imageWidths, type ScreenshotEntry, screenshots, type Variant } from '../lib/media-manifest';
 
 const FORMATS = ['avif', 'webp'] as const;
@@ -27,6 +28,12 @@ function ThemePicture({
   /** When set, the picture links to its full-size image, so a phone reader can open it and zoom. */
   zoomLabel?: string;
 }) {
+  const image = useRef<HTMLImageElement>(null);
+  // After a client-side navigation the inline script does not run: switch the visible variant here too.
+  useEffect(() => {
+    const element = image.current;
+    if (priority && element && element.getClientRects().length > 0) element.loading = 'eager';
+  }, [priority]);
   const pick = (variant: Variant) => (theme === 'dark' && variant.dark ? 'dark' : 'light');
   const desktopTheme = pick(entry);
   const widths = imageWidths(entry.width);
@@ -55,8 +62,11 @@ function ThemePicture({
         fetchPriority={priority ? 'high' : undefined}
         height={entry.height}
         loading="lazy"
+        ref={image}
         sizes={sizes}
         src={fullSize}
+        // The inline script may already have switched `loading` to eager before hydration.
+        suppressHydrationWarning={priority}
         width={entry.width}
       />
     </picture>
