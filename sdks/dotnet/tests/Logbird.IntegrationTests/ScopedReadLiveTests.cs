@@ -137,13 +137,25 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
             Assert.DoesNotContain(email, Encoding.UTF8.GetString(file.ToArray()), StringComparison.Ordinal);
         }
 
+        // CSV: the server's text/csv answer is accepted, with a header line and one line per in-scope event, and no
+        // control's id in it.
+        using (var csv = new MemoryStream())
+        {
+            await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv) { From = from }, csv);
+            var text = Encoding.UTF8.GetString(csv.ToArray());
+            Assert.All(inScope, id => Assert.Contains(id, text, StringComparison.Ordinal));
+            Assert.DoesNotContain(sameTenantOtherSite, text, StringComparison.Ordinal);
+            Assert.DoesNotContain(otherTenantSameSite, text, StringComparison.Ordinal);
+            Assert.DoesNotContain(Ip, text, StringComparison.Ordinal);
+        }
+
         using (var evidence = new MemoryStream())
         {
             var refused = await Assert.ThrowsAsync<LogbirdApiException>(() => scoped.ExportAsync(new ExportQuery(ExportFormat.JsonlEvidence) { From = from }, evidence));
             Assert.Equal("masked_export", refused.Code);
         }
 
-        output.WriteLine($"server {version}: viewer token read {found.Count} in-scope events (ip, agent, email masked on search, detail and export), controls hidden, facets scoped, evidence export refused");
+        output.WriteLine($"server {version}: viewer token read {found.Count} in-scope events (ip, agent, email masked on search, detail and export), controls hidden, facets scoped, CSV and JSONL exports scoped, evidence export refused");
     }
 
     [LiveFact(requires: "LOGBIRD_IT_SCOPED")]
