@@ -19,23 +19,57 @@ public sealed record AuditCarrier
     /// <summary>The carrier as UTF-8 JSON bytes, the same JSON as <see cref="ToJson"/>.</summary>
     public byte[] ToJsonUtf8Bytes() => JsonSerializer.SerializeToUtf8Bytes(this, AuditCarrierJsonContext.Default.AuditCarrier);
 
-    /// <summary>Reads a carrier written by <see cref="ToJson"/> (or any System.Text.Json serialization of it).</summary>
+    /// <summary>
+    /// Reads a carrier from the JSON <see cref="ToJson"/> writes. Member names are matched without regard to case, so the
+    /// PascalCase a default <c>JsonSerializer.Serialize</c> writes is read too. An empty object is a carrier with
+    /// nothing in it.
+    /// </summary>
     /// <param name="json">The JSON text.</param>
     /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
-    /// <exception cref="JsonException">The text is not a JSON object of a carrier.</exception>
+    /// <exception cref="JsonException">
+    /// The text is not valid JSON or not a carrier: <c>null</c>, not an object, a member a carrier does not have, or an
+    /// actor, impersonator or tenant without its id (or an actor without its type).
+    /// </exception>
     public static AuditCarrier FromJson(string json)
     {
         Logbird.Internal.Guard.NotNull(json, nameof(json));
-        return JsonSerializer.Deserialize(json, AuditCarrierJsonContext.Default.AuditCarrier)
-            ?? throw new JsonException("The JSON is null, not a carrier.");
+        AuditCarrier? carrier;
+        try
+        {
+            carrier = JsonSerializer.Deserialize(json, AuditCarrierJsonContext.Default.AuditCarrier);
+        }
+        catch (ArgumentException e)
+        {
+            // The text cannot be transcoded to UTF-8 (a lone surrogate): it is not JSON.
+            throw new JsonException("The text is not valid JSON.", e);
+        }
+
+        return Checked(carrier);
     }
 
-    /// <summary>Reads a carrier from UTF-8 JSON bytes written by <see cref="ToJsonUtf8Bytes"/>.</summary>
+    /// <summary>Reads a carrier from UTF-8 JSON bytes, such as those <see cref="ToJsonUtf8Bytes"/> writes.</summary>
     /// <param name="utf8Json">The UTF-8 JSON bytes.</param>
-    /// <exception cref="JsonException">The bytes are not a JSON object of a carrier.</exception>
+    /// <exception cref="JsonException">The bytes are not valid JSON or not a carrier, as for <see cref="FromJson(string)"/>.</exception>
     public static AuditCarrier FromJson(ReadOnlySpan<byte> utf8Json)
-        => JsonSerializer.Deserialize(utf8Json, AuditCarrierJsonContext.Default.AuditCarrier)
-            ?? throw new JsonException("The JSON is null, not a carrier.");
+        => Checked(JsonSerializer.Deserialize(utf8Json, AuditCarrierJsonContext.Default.AuditCarrier));
+
+    /// <summary>A carrier read from JSON, refused when it is null or names a party without its identity.</summary>
+    private static AuditCarrier Checked(AuditCarrier? carrier)
+    {
+        if (carrier is null)
+        {
+            throw new JsonException("The JSON is null, not a carrier.");
+        }
+
+        if ((carrier.Actor is { } actor && (actor.Type is null || actor.Id is null))
+            || (carrier.Impersonator is { } impersonator && impersonator.Id is null)
+            || (carrier.Tenant is { } tenant && tenant.Id is null))
+        {
+            throw new JsonException("The carrier names an actor, impersonator or tenant without its id (or an actor without its type).");
+        }
+
+        return carrier;
+    }
 
     /// <summary>
     /// <c>ToString()</c> lists no values (the carrier holds user and tenant ids). A structured logger that serializes its
@@ -72,7 +106,11 @@ public sealed record AuditCarrier
 }
 
 /// <summary>Source-generated serialization behind <see cref="AuditCarrier.ToJson"/> and <see cref="AuditCarrier.FromJson(string)"/>.</summary>
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    PropertyNameCaseInsensitive = true,
+    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(AuditCarrier))]
 internal sealed partial class AuditCarrierJsonContext : JsonSerializerContext
 {

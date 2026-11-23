@@ -9,15 +9,22 @@ namespace Logbird.Tests;
 public class ApiDecisionTests
 {
     [Fact]
-    public void Stats_have_no_public_constructor_and_default_is_every_count_zero()
+    public void Stats_have_no_public_constructor_that_takes_counts_and_default_is_every_count_zero()
     {
         // Only the SDK fills a snapshot, so adding a counter later never changes a public constructor or Deconstruct.
+        // (A struct always has the parameterless constructor, which gives default(LogbirdStats).)
         Assert.Empty(typeof(LogbirdStats).GetConstructors(BindingFlags.Public | BindingFlags.Instance));
         Assert.Null(typeof(LogbirdStats).GetMethod("Deconstruct"));
         Assert.All(typeof(LogbirdStats).GetProperties(), p => Assert.Null(p.SetMethod));
 
         var empty = default(LogbirdStats);
-        Assert.Equal(0, empty.Tracked + empty.Delivered + empty.Rejected + empty.Dropped + empty.Filtered + empty.FailedSends + empty.QueueLength + empty.Warnings);
+        Assert.Equal(
+            (0L, 0L, 0L, 0L, 0L, 0L, 0, 0L),
+            (empty.Tracked, empty.Delivered, empty.Rejected, empty.Dropped, empty.Filtered, empty.FailedSends, empty.QueueLength, empty.Warnings));
+        var filled = new LogbirdStats(1, 2, 3, 4, 5, 6, 7, 8);
+        Assert.Equal(
+            (1L, 2L, 3L, 4L, 5L, 6L, 7, 8L),
+            (filled.Tracked, filled.Delivered, filled.Rejected, filled.Dropped, filled.Filtered, filled.FailedSends, filled.QueueLength, filled.Warnings));
     }
 
     [Fact]

@@ -35,12 +35,43 @@ public class AuditCarrierJsonTests
     }
 
     [Fact]
-    public void Null_or_malformed_json_is_refused()
+    public void A_null_string_is_an_argument_error()
+        => Assert.Throws<ArgumentNullException>(() => AuditCarrier.FromJson((string)null!));
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[1]")]
+    [InlineData("{")]
+    [InlineData("{\"operationId\":\"op_1\"")]
+    [InlineData("{\"unrelated\":42}")]
+    [InlineData("{\"tenant\":{\"id\":null}}")]
+    [InlineData("{\"tenant\":{}}")]
+    [InlineData("{\"actor\":{\"id\":\"user_42\"}}")]
+    [InlineData("{\"actor\":{\"type\":\"user\"}}")]
+    [InlineData("{\"impersonator\":{\"name\":\"Fictional\"}}")]
+    [InlineData("{\"actor\":{\"type\":\"user\",\"id\":\"u\",\"unknown\":1}}")]
+    public void Json_that_is_not_a_carrier_is_refused_as_text_and_as_bytes(string json)
     {
-        Assert.Throws<ArgumentNullException>(() => AuditCarrier.FromJson((string)null!));
-        Assert.Throws<JsonException>(() => AuditCarrier.FromJson("null"));
-        Assert.Throws<JsonException>(() => AuditCarrier.FromJson("[1]"));
-        Assert.Throws<JsonException>(() => AuditCarrier.FromJson("null"u8));
+        Assert.Throws<JsonException>(() => AuditCarrier.FromJson(json));
+        Assert.Throws<JsonException>(() => AuditCarrier.FromJson(Encoding.UTF8.GetBytes(json)));
+    }
+
+    [Fact]
+    public void Text_that_cannot_be_utf8_is_a_json_error()
+        => Assert.Throws<JsonException>(() => AuditCarrier.FromJson("{\"operationId\":\"op" + (char)0xD800 + "\"}"));
+
+    [Fact]
+    public void An_empty_object_is_an_empty_carrier()
+    {
+        Assert.Equal(new AuditCarrier(), AuditCarrier.FromJson("{}"));
+        Assert.Equal(new AuditCarrier(), AuditCarrier.FromJson("{}"u8));
+    }
+
+    [Fact]
+    public void The_pascal_case_a_default_serializer_writes_is_read_too()
+    {
+        var pascal = "{\"OperationId\":\"op_1\",\"RequestId\":\"req_1\",\"ParentEventId\":\"evt_1\",\"Actor\":{\"Type\":\"user\",\"Id\":\"user_42\",\"Name\":\"Fictional\"},\"Tenant\":{\"Id\":\"acct_7\"}}";
+        Assert.Equal(Carrier, AuditCarrier.FromJson(pascal));
     }
 
     [Fact]
