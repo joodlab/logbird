@@ -59,7 +59,9 @@ public sealed class LogbirdOptions
 
     /// <summary>
     /// The most events held in memory while waiting to be sent. Defaults to 10,000. When it is full,
-    /// <see cref="QueueFullBehavior"/> decides which event is dropped; <c>Track</c> never blocks or throws.
+    /// <see cref="QueueFullBehavior"/> decides which event is dropped; <c>Track</c> never blocks or throws. The batch
+    /// being sent comes on top (up to <see cref="BatchSize"/> more events), and <see cref="LogbirdStats.QueueLength"/>
+    /// counts both.
     /// </summary>
     public int MaxQueueSize { get; set; } = 10_000;
 
