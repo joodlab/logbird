@@ -52,6 +52,13 @@ function queryWhoFilter(q: string): WhoFilter {
     if (error instanceof QueryError) return 'all';
     throw error;
   }
+  // Redundant brackets around the whole query change nothing: `(a OR b)` is read as `a OR b`.
+  for (
+    let only = expression[0]?.[0]?.atom;
+    expression.length === 1 && expression[0]?.length === 1 && only?.kind === 'group';
+    only = expression[0]?.[0]?.atom
+  )
+    expression = only.expression;
   if (!expression.length) return 'all';
   const branchSplit = (branch: QueryExpression[number]): WhoFilter => {
     let support = false;
@@ -65,9 +72,16 @@ function queryWhoFilter(q: string): WhoFilter {
         if (e.length === 1 && (!negated || e[0]?.length === 1)) for (const part of e[0] ?? []) visit(part.atom, negated);
         else if (negated && e.every((b) => b.length === 1)) for (const b of e) visit((b[0] as { atom: QueryAtom }).atom, true);
       } else if (node.kind === 'field' && canonicalField(node.field) === 'impersonator') {
-        const presence = node.value.kind === 'value' && node.value.token.wildcard && node.value.token.value === '*';
-        if (!negated) support = true;
-        else if (presence) self = true;
+        const v = node.value;
+        // `_exists_:impersonator` and `impersonator:*` are the same presence test to the server.
+        const presence = v.kind === 'presence' || (v.kind === 'value' && v.token.kind !== 'regex' && v.token.wildcard && v.token.value === '*');
+        // Only exact agents or presence say who: a regex (`/.*/`) also matches the empty id of self activity, and ranges
+        // or comparisons say nothing about support.
+        const agents =
+          (v.kind === 'value' && v.token.kind !== 'regex' && v.token.value !== '') ||
+          (v.kind === 'group' && v.members.every((m) => m.kind !== 'regex' && m.value !== ''));
+        if (!negated && (presence || agents)) support = true;
+        else if (negated && presence) self = true;
       }
     };
     for (const part of branch) visit(part.atom, false);

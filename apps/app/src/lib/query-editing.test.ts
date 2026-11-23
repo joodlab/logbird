@@ -221,5 +221,11 @@ describe('#283 verification', () => {
     expect(whoFilter('-impersonator:* OR (NOT impersonator:* action:x)')).toBe('self');
     expect(whoFilter('NOT (impersonator:* OR impersonator:qa-agent-1)')).toBe('self');
     expect(whoFilter('(impersonator:* OR outcome:failure) action:x')).toBe('all');
+    // Redundant brackets, the _exists_ spelling of presence, and a regex that also matches self activity.
+    expect(whoFilter('(impersonator:amy OR impersonator:bea)')).toBe('support');
+    expect(whoFilter('NOT _exists_:impersonator')).toBe('self');
+    expect(whoFilter('_exists_:impersonator')).toBe('support');
+    expect(whoFilter('impersonator:/.*/')).toBe('all');
+    expect(whoFilter('impersonator:(amy OR bea)')).toBe('support');
   });
 });
