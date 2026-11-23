@@ -1,5 +1,6 @@
 import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
 import { evidenceLimits } from './evidence-limits';
+import { scopedReadLimits } from './scoped-read-limits';
 import { sharedContent } from './shared';
 import { byCloud, byRepo, type Cta, type Item, type Marked, SITE, type SiteState } from './site';
 
@@ -131,6 +132,7 @@ export function homeContent(site: SiteState) {
           },
         ] satisfies Item[],
         limit: 'A read key reads the whole project, so your backend must decide which customer account each user may see.',
+        limitLink: undefined as Cta | undefined,
       },
       /** After the production proof of scoped read access (SiteState.scopedReadLive). */
       scoped: {
@@ -148,8 +150,9 @@ export function homeContent(site: SiteState) {
             body: "A scoped read key reads one customer account's events. It can also be limited to events that name one record, to actions with given prefixes, or both.",
           },
         ] satisfies Item[],
-        limit:
-          "One customer account per scope, matched on the id Logbird stored. Logbird's query builders always apply the scope. ClickHouse checks the customer account as well once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade, and a source installation runs `create-query-user` once. A web page on another origin can read with a token only if that origin is listed on the key.",
+        limit: scopedReadLimits.scope,
+        /** The rest of the limit lives on /security § Scoped reads (content/scoped-read-limits.ts). */
+        limitLink: scopedReadLimits.enforced as Cta | undefined,
       },
       /** What the page shows: scoped access only once its production proof is confirmed. */
       get access() {

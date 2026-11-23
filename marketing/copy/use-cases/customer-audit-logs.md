@@ -40,7 +40,7 @@ that it appears exactly when the flag is on.
 | TanStack Start: `readAuditTrail` with `trailQuery`; any backend: the read API with the read key (`read`) | `packages/integrations/tanstack-start/README.md`; `docs/SPEC.md` §5 (read keys) |
 | `useAuditTrail` pages, has loading/error/refresh/load-more, discards stale responses; `AuditTimeline` is headless (`render`) | `packages/integrations/vue/README.md`; `docs/integrations.md` § Design |
 | In Nuxt, `useAuditTrail` reads through the module's authorized route; the sample destructures `data`, `error`, `nextCursor`, `loadMore` (`render` sample) | `packages/integrations/nuxt/README.md` ("Auto-imported `useAuditTrail(...)` uses the server route `/api/_logbird/events`") |
-| Once `SCOPED_READ_LIVE` is on, a last section adds scoped keys and viewer tokens with the landing page's points and limit (`scoped`, from `homeContent(site).customers.scoped`) | `marketing/copy/home.md` (the `customers.scoped` row and its sources: `docs/scoped-read-access.md`, `docs/security.md` § Two enforcement layers, `CHANGELOG.md` 0.2.0) |
+| Once `SCOPED_READ_LIVE` is on, a last section adds scoped keys and viewer tokens with the landing page's scoped points (`homeContent(site).customers.scoped.points`) and the full limit from `scopedReadLimitText` (`content/scoped-read-limits.ts`) (`scoped`) | `marketing/copy/home.md` (the `customers.scoped` row and its sources: `docs/scoped-read-access.md`, `docs/security.md` § Two enforcement layers, `CHANGELOG.md` 0.2.0) |
 | The tenant-page visual: events in 24 hours and in all, and the support agents who acted while signed in as the customer (`render`) | The reviewed `tenant` capture (`marketing/media/staydesk/tenant-light.webp`), cropped |
 
 ## Visual
