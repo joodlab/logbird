@@ -1,6 +1,10 @@
 import { imageWidths, type ScreenshotEntry, screenshots, type Variant } from '../lib/media-manifest';
 
 const FORMATS = ['avif', 'webp'] as const;
+
+/** Loads the visible variant of the preceding screenshot eagerly (see Screenshot's `priority`). */
+const EAGER_VISIBLE =
+  "document.currentScript.previousElementSibling.querySelectorAll('img').forEach(function(i){if(i.getClientRects().length)i.loading='eager'})";
 const PHONE = '(max-width: 639px)';
 
 const srcSet = (id: string, theme: 'light' | 'dark', format: string, widths: number[]) =>
@@ -79,15 +83,23 @@ export function Screenshot({ id, sizes = '100vw', zoomLabel, priority }: { id: s
   }
   const themed = Boolean(entry.dark || entry.phone?.dark);
   return (
-    <div className="screenshot">
-      {themed ? (
-        <>
-          <ThemePicture className="theme-light" entry={entry} priority={priority} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
-          <ThemePicture className="theme-dark" entry={entry} priority={priority} sizes={sizes} theme="dark" zoomLabel={zoomLabel} />
-        </>
-      ) : (
-        <ThemePicture entry={entry} priority={priority} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
-      )}
-    </div>
+    <>
+      <div className="screenshot">
+        {themed ? (
+          <>
+            <ThemePicture className="theme-light" entry={entry} priority={priority} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
+            <ThemePicture className="theme-dark" entry={entry} priority={priority} sizes={sizes} theme="dark" zoomLabel={zoomLabel} />
+          </>
+        ) : (
+          <ThemePicture entry={entry} priority={priority} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
+        )}
+      </div>
+      {priority ? (
+        // The theme class is set before first paint, so the hidden variant has no layout box. This switches only the
+        // visible variant from lazy to eager as soon as it is parsed; the hidden one stays lazy and is never fetched.
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: a constant, CSP-hashed inline script with no input
+        <script dangerouslySetInnerHTML={{ __html: EAGER_VISIBLE }} />
+      ) : null}
+    </>
   );
 }

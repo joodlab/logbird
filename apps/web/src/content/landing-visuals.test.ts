@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { compileQuery } from '../../../../packages/clickhouse/src/query';
 import { screenshots } from '../lib/media-manifest';
@@ -41,7 +43,20 @@ describe('landing visuals', () => {
     expect(evidence.replace(/<[^>]+>/g, '').replaceAll('&#x27;', "'")).toContain(evidenceLimits.exportMatch);
     expect(evidence).toContain('Open the image full size: Workspace activity');
 
-    expect(section(html, 'customers')).toContain('/media/tenant-account-');
+    expect(section(html, 'customers')).toContain('/media/tenant-summary-');
     expect(section(html, 'operators')).toContain('Open the image full size: Event detail');
+
+    // Nothing is positioned over the explorer: the hero's only absolutely positioned element is its background grid.
+    expect(hero.match(/class="[^"]*\babsolute\b/g) ?? []).toHaveLength(0);
+    expect(html.slice(html.lastIndexOf('<section', html.indexOf('id="hero-title"')), html.indexOf('id="hero-title"'))).toContain(
+      'ledger-bg pointer-events-none absolute',
+    );
+    // The visible variant is switched to eager loading right after the picture is parsed.
+    expect(hero).toContain("i.loading='eager'");
   }, 60_000);
+
+  it('the capture script shows the same query the page describes and the tests compile', () => {
+    const script = readFileSync(fileURLToPath(new URL('../../../app/scripts/capture-media.mjs', import.meta.url)), 'utf8');
+    expect(script).toContain(`const heroQuery = '${home.explorer.query}';`);
+  });
 });

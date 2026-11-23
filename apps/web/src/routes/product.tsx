@@ -321,7 +321,7 @@ function ProductPage() {
         title="Keep events as long as you decide, then delete them."
         visual={
           <ScreenshotFrame
-            caption="Lowering retention: the preview shows what will be deleted, and you confirm by typing the project's slug."
+            caption="A project's retention settings: the current window, the policies you can choose, and when the purge last ran."
             id="retention"
             label="Retention"
             zoomLabel={zoom('Retention')}

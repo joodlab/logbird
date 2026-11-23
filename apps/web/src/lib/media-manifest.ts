@@ -96,7 +96,15 @@ export const screenshots: ScreenshotEntry[] = [
     // A crop of the tenant capture above: the header, the counts and "who did it", at a size where the text reads.
     id: 'tenant-account',
     light: `${C}/tenant-account-light.webp`,
-    dark: `${C}/tenant-account-dark.webp`,
+    width: 588,
+    height: 414,
+    alt: 'One customer account in the console: Dar Al Wafa Hotels had 428 events in the last 24 hours and 2,634 in all. Support agent Leena Ashford performed 5 of the 428 while signed in as the customer.',
+  },
+  {
+    // The same panel from the 2026-11-24 tenant capture, light and dark, at its own size (tenant-account keeps master's).
+    id: 'tenant-summary',
+    light: `${C}/tenant-summary-light.webp`,
+    dark: `${C}/tenant-summary-dark.webp`,
     width: 1160,
     height: 425,
     alt: 'One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.',

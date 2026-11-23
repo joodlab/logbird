@@ -157,7 +157,7 @@ export function homeContent(site: SiteState) {
       },
       limitLabel: 'The limit',
       screenshot: {
-        id: 'tenant-account',
+        id: 'tenant-summary',
         label: 'Customer account',
         caption:
           "A customer account's page in the console: its event counts, and how many events support did while signed in as the customer, by agent.",

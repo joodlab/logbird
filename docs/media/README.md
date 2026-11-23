@@ -10,9 +10,11 @@ because it sits above the fold; the site's tests compile the query) and `export-
 attribute table truncates long keys and the digest, so the capture opens its raw payload and keeps the sheet from its
 sticky header (the record's title and `export.completed`) to the end of the raw `attributes` block: one contiguous
 region of the real screen. The export is downloaded through the console's own API during the capture; nothing on the
-page is edited. `tenant-account` is a crop of `tenant-{light,dark}` (box 250, 70 to 1410, 495): the account's header,
-counts and "who did it" panel. A shot that gains a dark variant is replaced in light and dark together, from one
-fixture, so both themes show the same data. The other stills date from 2026-11-09.
+page is edited. `tenant-summary` is a crop of `tenant-{light,dark}` (box 250, 70 to 1410, 495): the account's header,
+counts and "who did it" panel (`tenant-account` keeps its 2026-11-09 crop and size). `event-detail` is the sheet panel of
+`event-sheet-{light,dark}` (box 801, 0 to 1440, 860). A shot that gains a dark variant is replaced in light and dark
+together, from one fixture, so both themes show the same data. The 2026-11-09 stills that showed the capture machine's
+time zone (overview, explorer, event sheet, SQL and their phone views) were recaptured in UTC on 2026-11-24.
 
 ## Reproduce
 
