@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useMatches, useParams } from '@tanstack/react-router';
 import { ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { useMemo } from 'react';
-import { projectQuery } from '@/lib/api/queries';
+import { projectsQuery } from '@/lib/api/queries';
 import { useCrumb } from '@/lib/crumbs';
 import { zoneOffsetMs } from '@/lib/format';
 import { modKeyLabel, useIsMac } from '@/lib/platform';
@@ -22,7 +22,11 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const pickerZone = useMemo(() => ({ offsetMs: zoneOffsetMs, label: zone }), [zone]);
   const matches = useMatches();
   const params = useParams({ strict: false }) as { projectId?: string };
-  const project = useQuery({ ...projectQuery(params.projectId ?? ''), enabled: Boolean(params.projectId) });
+  // The project's name comes from the workspace's project list (the sidebar reads it too), never a fetch by id: a
+  // project the list does not hold (a stale link on its not-found page) gets no crumb and no request answering 404.
+  const projects = useQuery(projectsQuery());
+  const listed = projects.data?.find((p) => p.id === params.projectId);
+  const projectId = params.projectId && (!projects.isSuccess || listed) ? params.projectId : undefined;
   const dynamicCrumb = useCrumb();
   const { range, setRange, wholeHistory } = useRange();
   const resolved = useMemo(() => {
@@ -30,16 +34,17 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
     return { from: new Date(r.fromMs), to: new Date(r.toMs) };
   }, [range]);
 
-  const sections = matches
+  const sections = (params.projectId && !projectId ? [] : matches)
     .filter((m) => m.staticData?.crumb)
     .map((m) => ({
       id: m.id,
       label: m.staticData.crumb as string,
       path: m.pathname,
-      to: m.staticData.crumbTo && params.projectId ? m.staticData.crumbTo.replace('$projectId', params.projectId) : undefined,
+      to: m.staticData.crumbTo && projectId ? m.staticData.crumbTo.replace('$projectId', projectId) : undefined,
       search: m.staticData.crumbSearch,
     }));
-  const showRange = matches.some((m) => m.staticData?.range);
+  // A project that is not found has no range to pick.
+  const showRange = !(params.projectId && !projectId) && matches.some((m) => m.staticData?.range);
   const isMac = useIsMac();
 
   return (
@@ -47,13 +52,13 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <SidebarTrigger className="-ms-1 text-muted-foreground" />
       <Separator className="me-1 h-4 data-[orientation=vertical]:self-center" orientation="vertical" />
       <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 text-sm">
-        {params.projectId ? (
+        {projectId ? (
           <Link
             className="-my-3 hidden max-w-40 truncate py-3 text-muted-foreground hover:text-foreground sm:block"
-            params={{ projectId: params.projectId }}
+            params={{ projectId }}
             to="/p/$projectId"
           >
-            {project.data?.name ?? '…'}
+            {listed?.name ?? '…'}
           </Link>
         ) : null}
         {sections.map((s, i) => {
@@ -62,7 +67,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
             // Section crumbs ("Actors", "Settings") stay whole; only the page's own name truncates. On a phone only the
             // page's own name shows: a section cut to "R…" helps nobody, and the sidebar is one tap away.
             <span className={cn('flex min-w-0 items-center gap-1', !last && 'shrink-0 max-sm:hidden')} key={s.id}>
-              {i === 0 && !params.projectId ? null : <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 max-sm:hidden" />}
+              {i === 0 && !projectId ? null : <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 max-sm:hidden" />}
               {last ? (
                 <span aria-current="page" className="truncate font-medium">
                   {s.label}

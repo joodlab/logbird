@@ -1,4 +1,5 @@
-import { createFileRoute, notFound, Outlet, retainSearchParams } from '@tanstack/react-router';
+import { Button } from '@logbird/ui/components/ui/button';
+import { createFileRoute, Link, notFound, Outlet, retainSearchParams } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { z } from 'zod';
 import { NotFound } from '@/components/not-found';
@@ -13,6 +14,14 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // falls back to its default range instead of failing validation.
   validateSearch: z.object({ range: z.string().optional().catch(undefined) }),
   search: { middlewares: [retainSearchParams(['range'])] },
+  // A project this workspace does not list (deleted, another workspace's, a stale bookmark) is not found before any of
+  // its requests runs: the loader and the page's own queries would each answer 404 into the console. A project created
+  // since the list was cached is re-read once before it counts as missing.
+  beforeLoad: async ({ context, params }) => {
+    const listed = (projects: readonly { id: string }[]) => projects.some((p) => p.id === params.projectId);
+    if (listed(await context.queryClient.ensureQueryData(projectsQuery()))) return;
+    if (!listed(await context.queryClient.fetchQuery({ ...projectsQuery(), staleTime: 0 }))) throw notFound();
+  },
   loader: async ({ context, params }) => {
     try {
       const [project] = await Promise.all([
@@ -32,7 +41,20 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
       <PageSkeleton />
     </AppShell>
   ),
-  notFoundComponent: () => <NotFound description="This project does not exist in your workspace, or it was deleted." title="Project not found" />,
+  // Inside the shell, so the sidebar and the workspace switcher stay: the way out is one click, not a reload.
+  notFoundComponent: () => (
+    <AppShell>
+      <NotFound
+        action={
+          <Button nativeButton={false} render={<Link to="/projects" />} size="sm" variant="outline">
+            All projects
+          </Button>
+        }
+        description="This project does not exist in your workspace, or it was deleted. Pick another project."
+        title="Project not found"
+      />
+    </AppShell>
+  ),
   component: ProjectLayout,
 });
 
