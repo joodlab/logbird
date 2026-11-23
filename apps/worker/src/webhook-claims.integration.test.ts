@@ -191,11 +191,11 @@ it('delivers another project within bounded passes while the oldest row stays lo
   const locked = await ping((await endpoint(first, 'locked')).id, 'locked', new Date(+now - 120_000));
   const other = await ping((await endpoint(second, 'unlocked')).id, 'unlocked', new Date(+now - 60_000));
   // Another worker or a long transaction keeps the oldest due row locked across every pass.
-  let release = () => {};
+  let release: () => void = () => undefined;
   const released = new Promise<void>((done) => {
     release = done;
   });
-  let ready = () => {};
+  let ready: () => void = () => undefined;
   const holding = new Promise<void>((done) => {
     ready = done;
   });
