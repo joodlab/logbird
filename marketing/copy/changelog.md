@@ -21,7 +21,7 @@ path: /changelog
 
 - **id:** `releases`
 - **heading:** Releases
-- **body:** <!-- copy-sync: skip (engineering note: how the list is built) --> One entry per GitHub Release (stable `vX.Y.Z`, published), newest first, with the `### Highlights`
+- **body:** One entry per GitHub Release (stable `vX.Y.Z`, published), newest first, with the `### Highlights`
   bullets of its `CHANGELOG.md` section and, once the repository is public, a link to its full release notes. The
   build reads the list from the GitHub API and falls back to `apps/web/src/lib/releases.snapshot.ts`; run
   `pnpm --filter @logbird/web releases:sync` after each release.
@@ -43,8 +43,8 @@ path: /changelog
 ## how-we-write
 
 - **id:** `how-we-write`
-- **heading:** How entries are written (internal guidance, not shown on the page) <!-- copy-sync: skip (internal) -->
-- **rules:** <!-- copy-sync: skip (internal writing guidance, not on the page) -->
+- **heading:** How entries are written (internal guidance, not shown on the page)
+- **rules:**
   - **One change per entry, in the user's words.** "You can now search your audit log with SQL, safely." Not
     "Refactored query pipeline."
   - **Say the limit with the change.** "Live tail polls over HTTP; there's no WebSocket."
