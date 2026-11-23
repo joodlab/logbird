@@ -1,0 +1,89 @@
+name: .NET SDK soak
+
+# Sustained load with injected failures against an in-process stand-in (sdks/dotnet/tests/Logbird.Soak/README.md).
+# Pull requests that touch the harness run a short variant; the nightly run lasts 30 minutes; a manual run takes the
+# duration as an input. A failed run fails red and still uploads its report. The master reads failures until the owner
+# names someone.
+
+on:
+  pull_request:
+    paths:
+      - 'sdks/dotnet/tests/Logbird.Soak/**'
+      - 'sdks/dotnet/tests/cross-sdk/validate-stand-in.ts'
+      - '.github/workflows/dotnet-soak.yml'
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Run length per target, for example 30m or 2h (at most 5h)'
+        required: true
+        default: '2h'
+      rate:
+        description: 'Events per second'
+        required: true
+        default: '200'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Scheduled and manual runs share one group and queue instead of overlapping; a newer push replaces a PR's older run.
+  group: dotnet-soak-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  soak:
+    name: Soak ${{ matrix.os }} ${{ matrix.tfm }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 330 || github.event_name == 'schedule' && 60 || 25 }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && '{"include":[{"os":"ubuntu-latest","tfm":"net8.0"},{"os":"windows-latest","tfm":"net48"}]}' || '{"include":[{"os":"ubuntu-latest","tfm":"net8.0"},{"os":"ubuntu-latest","tfm":"net10.0"},{"os":"windows-latest","tfm":"net48"},{"os":"windows-latest","tfm":"net8.0"}]}') }}
+    env:
+      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || github.event_name == 'schedule' && '30m' || '3m' }}
+      RATE: ${{ github.event_name == 'workflow_dispatch' && inputs.rate || '200' }}
+      REPORT: ${{ github.workspace }}/soak-report
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Soak (${{ env.DURATION }} at ${{ env.RATE }} events/s)
+        working-directory: sdks/dotnet
+        shell: bash
+        run: dotnet run -c Release -f ${{ matrix.tfm }} --project tests/Logbird.Soak -- --duration "$DURATION" --rate "$RATE" --report "$REPORT"
+      - uses: pnpm/action-setup@v6
+        if: always()
+      - uses: actions/setup-node@v7
+        if: always()
+        with:
+          node-version: '22.18.0'
+          cache: pnpm
+      - name: Install the contracts
+        if: always()
+        run: pnpm install --frozen-lockfile --filter . --filter @logbird/contracts
+      # Fails when an answer or accepted batch of the stand-in does not match packages/contracts.
+      - name: Stand-in matches the contracts
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$REPORT/stand-in-samples.jsonl" ]; then
+            pnpm exec tsx sdks/dotnet/tests/cross-sdk/validate-stand-in.ts "$REPORT/stand-in-samples.jsonl"
+          else
+            echo "no stand-in samples: the soak did not finish (see the step above)"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: soak-${{ matrix.os }}-${{ matrix.tfm }}
+          path: ${{ github.workspace }}/soak-report
+          retention-days: 30
+          if-no-files-found: warn

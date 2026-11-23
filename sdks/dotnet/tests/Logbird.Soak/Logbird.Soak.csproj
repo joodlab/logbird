@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- A console runner, not a test project: `dotnet test` skips it, `dotnet build` compiles it. net8.0 runs the net8.0
+         build, net48 the netstandard2.0 build on .NET Framework (Windows only). -->
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(OS)' == 'Windows_NT'">net8.0;net10.0;net48</TargetFrameworks>
+    <RollForward>Major</RollForward>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1515;CA1861;CA2000;CA1031;CA5394;CA1849;CA1859;CA2016;CA2022;CA1835;CA1303;CA1305;CA1307;CA1310;CA1812;CA1852;CA1822;CA1846;CA2263;CA2249</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Logbird\Logbird.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+</Project>
