@@ -318,6 +318,37 @@ public class Step4SecurityFollowUpTests
         AssertNoSecret(error);
     }
 
+    // ---------------------------------------------------------------- the ingest sender's final response disposal
+
+    [Fact]
+    public async Task An_accepted_batch_whose_response_throws_from_dispose_is_delivered_once_with_no_error()
+    {
+        var drops = new System.Collections.Concurrent.ConcurrentQueue<DroppedEvent>();
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var server = new FakeServer().Then(request =>
+        {
+            var accepted = FakeServer.Accept(request);
+            return new ThrowingDisposeResponse(accepted.StatusCode) { Content = accepted.Content };
+        });
+        var options = new LogbirdOptions
+        {
+            Endpoint = Endpoint,
+            IngestKey = "lb_ingest_fictional",
+            FlushInterval = TimeSpan.FromHours(1),
+            OnDrop = drops.Enqueue,
+            OnError = errors.Enqueue,
+        };
+        await using var client = new LogbirdClient(options, new HttpClient(server), logger: null, delay: (_, _) => Task.CompletedTask);
+
+        client.Track(new AuditEvent("x"));
+        Assert.True(await client.FlushAsync());
+
+        Assert.Single(server.Requests);
+        Assert.Equal(1, client.Stats.Delivered);
+        Assert.Empty(drops);
+        Assert.Empty(errors);
+    }
+
     // ---------------------------------------------------------------- doubles
 
     /// <summary>Counts disposals that started, and holds each until released.</summary>

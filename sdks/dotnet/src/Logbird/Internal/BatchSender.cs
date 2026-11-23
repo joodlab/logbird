@@ -245,7 +245,9 @@ internal sealed class BatchSender
             // The status counts as soon as the headers arrived, even when the body could not be read afterwards.
             var answeredStatus = response is null ? headersStatus.Value : (int)response.StatusCode;
 
-            using (response)
+            // The response is disposed quietly on every exit: a throwing Dispose must not change an outcome already
+            // recorded (accepted events are settled before this block ends).
+            try
             {
                 if (stop.IsCancellationRequested)
                 {
@@ -451,6 +453,13 @@ internal sealed class BatchSender
                 catch (OperationCanceledException)
                 {
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
+                }
+            }
+            finally
+            {
+                if (response is not null)
+                {
+                    DisposeQuietly(response);
                 }
             }
         }

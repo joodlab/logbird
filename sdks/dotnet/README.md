@@ -343,9 +343,10 @@ EventDetail? detail = await reader.GetEventAsync(eventId);   // null when it doe
 
 Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
 cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. For an export, the limit covers only
-the wait for its headers, not the download. A request abandoned at its limit keeps running until the handler returns; at
-most 4 such requests are kept, and while 4 are still running a new call fails at once with `unreachable` instead of
-adding another. Any other failure of the transport or a response body, including an unexpected exception from a custom
+the wait for its headers, not the download. A request abandoned at its limit keeps running until the handler returns. While at
+least 4 abandoned requests are still running, a new call fails at once with `unreachable` instead of adding another;
+requests already in flight when that threshold is reached are not stopped, so more than 4 can be abandoned at once.
+Each one holds its slot until its cancellation and the disposal of any late response are done. Any other failure of the transport or a response body, including an unexpected exception from a custom
 handler, is reported as `unreachable` with only the exception's type, never its message; a failure of your own export
 destination reaches you unchanged. The limit is per request, not per
 call: a first call that also reads the server's version, or a `SearchAllAsync` iteration, makes several requests, each
