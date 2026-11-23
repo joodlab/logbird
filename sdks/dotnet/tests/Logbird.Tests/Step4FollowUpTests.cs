@@ -513,6 +513,33 @@ public class Step4FollowUpTests
     }
 
     [Fact]
+    public void A_child_whose_keys_do_not_tell_its_rule_keeps_its_own_options()
+    {
+        // An explicitly case-sensitive child holding only the Kelvin sign, under a case-insensitive parent: no key tells the
+        // rule, so the child's own options decide, and later writes of "Plan" and "plan" stay two fields, as on the source.
+        var child = new JsonObject(new JsonNodeOptions()) { [((char)0x212A).ToString()] = 1 };
+        var parent = new JsonObject(CaseInsensitive) { ["child"] = child };
+
+        var copiedChild = (JsonObject)((JsonObject)JsonTree.Clone(parent)!)["child"]!;
+        copiedChild["Plan"] = 2;
+        copiedChild["plan"] = 3;
+        Assert.Equal(3, copiedChild.Count);
+
+        var cloned = new AuditEvent("x") { Metadata = parent }.Clone();
+        var clonedChild = (JsonObject)cloned.Metadata["child"]!;
+        clonedChild["Plan"] = 2;
+        clonedChild["plan"] = 3;
+        Assert.Equal(3, clonedChild.Count);
+
+        // And the other way: an explicitly case-insensitive empty child under a case-sensitive parent stays insensitive.
+        var insensitive = new JsonObject(CaseInsensitive);
+        var copied = (JsonObject)((JsonObject)JsonTree.Clone(new JsonObject { ["child"] = insensitive })!)["child"]!;
+        copied["Plan"] = 2;
+        copied["plan"] = 3;
+        Assert.Single(copied);
+    }
+
+    [Fact]
     public void A_copy_keeps_a_custom_converters_representation()
     {
         var options = new JsonSerializerOptions { TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver() };

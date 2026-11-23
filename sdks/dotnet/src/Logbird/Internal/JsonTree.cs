@@ -105,8 +105,10 @@ internal static class JsonTree
             return options;
         }
 
-        // No key tells (empty, or no letters): the rule the copy would have inherited.
-        return inherited;
+        // No key tells (empty, no letters, or only keys like the Kelvin sign): the object's own options, which are exact
+        // for an object created with options of its own and otherwise the nearest ancestor's. Reading them walks the
+        // source's parents, which JsonSize has counted, outside parents included, before anything copies the event.
+        return source.Options ?? inherited;
     }
 
     private static bool HasKey(JsonObject source, string key)
