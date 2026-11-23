@@ -313,7 +313,7 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         var stored = await LiveServer.WaitForEventAsync(reader, id);
         output.WriteLine($"server {await LiveServer.ServerVersionAsync()} stored actor id \"{stored.Event.Actor?.Id}\"; warnings: {string.Join(" | ", warnings.Select(w => w.Reason))}");
 
-        // The exact-identifier rule ships after the exact-number fix; until then the server may trim.
+        // Opt-in until the server's exact-identifier rule ships: Logbird up to 0.2.x indexes the id trimmed (issue #269).
         if (Environment.GetEnvironmentVariable("LOGBIRD_IT_ENTITY_IDS") == "1")
         {
             Assert.Equal(" user_42 ", stored.Event.Actor?.Id);
