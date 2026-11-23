@@ -9,12 +9,15 @@ namespace Logbird;
 public sealed class StoredEvent
 {
     /// <summary>The event id.</summary>
+    [JsonRequired]
     public string Id { get; init; } = string.Empty;
 
     /// <summary>The project the event belongs to.</summary>
+    [JsonRequired]
     public string ProjectId { get; init; } = string.Empty;
 
     /// <summary>When it happened (UTC, millisecond precision).</summary>
+    [JsonRequired]
     public DateTimeOffset Timestamp { get; init; }
 
     /// <summary>When Logbird received it.</summary>
@@ -24,6 +27,7 @@ public sealed class StoredEvent
     public string Environment { get; init; } = string.Empty;
 
     /// <summary>The action, for example <c>invoice.updated</c>.</summary>
+    [JsonRequired]
     public string Action { get; init; } = string.Empty;
 
     /// <summary>The first segment of the action, for example <c>invoice</c>.</summary>
@@ -96,6 +100,7 @@ public sealed class EventPage
 {
     /// <summary>The events on this page.</summary>
     [JsonPropertyName("data")]
+    [JsonRequired]
     public IReadOnlyList<StoredEvent> Events { get; init; } = [];
 
     /// <summary>The cursor for the next page, or <see langword="null"/> on the last page.</summary>
@@ -118,9 +123,11 @@ public sealed class EventPage
 public sealed class EventDetail
 {
     /// <summary>The normalized event.</summary>
+    [JsonRequired]
     public StoredEvent Event { get; init; } = new();
 
     /// <summary>The raw JSON exactly as Logbird received it (after client-side redaction).</summary>
+    [JsonRequired]
     public JsonElement Payload { get; init; }
 
     /// <summary>The causation chain, from the root to the direct parent.</summary>

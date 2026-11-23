@@ -227,7 +227,7 @@ public sealed class Redactor
         => field switch
         {
             null => "null",
-            JsonValue value when value.TryGetValue<string>(out var text) => text,
+            JsonValue value when Internal.JsJson.TryGetString(value, out var text) => text,
             _ => field.ToJsonString(),
         };
 }

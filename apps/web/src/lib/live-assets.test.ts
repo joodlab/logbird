@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectAssetUrls, compareAssets, manifestIconUrls } from './live-assets';
+import { bodyText, collectAssetUrls, compareAssets, manifestIconUrls, reasonText } from './live-assets';
 
 const base = 'http://127.0.0.1:4750';
 const publicOrigin = 'https://site.example.test';
@@ -76,6 +76,77 @@ describe('live asset check', () => {
     });
   });
 
+  it('reports a manifest that is not an object with an icons list, and icons without a usable src', () => {
+    const at = `${base}/site.webmanifest`;
+    for (const manifest of ['null', '[]', '"x"', '{}', '{"icons":null}']) {
+      expect(manifestIconUrls(manifest, at, [base])).toEqual({ urls: [], problems: [{ path: at, problem: 'the web manifest has no icons list' }] });
+    }
+    expect(manifestIconUrls('{"icons":[null,{"src":7},{"src":"http://["},{"src":" "},{"src":"/brand/a.png?v=aaaaaaaaaa"}]}', at, [base])).toEqual({
+      urls: [`${base}/brand/a.png?v=aaaaaaaaaa`],
+      problems: [
+        { path: at, problem: 'a manifest icon has no usable src (none)' },
+        { path: at, problem: 'a manifest icon has no usable src (7)' },
+        { path: at, problem: 'a manifest icon has no usable src ("http://[")' },
+        { path: at, problem: 'a manifest icon has no usable src (" ")' },
+      ],
+    });
+  });
+
+  it('hands back the compared bodies, so manifest icons come from the bytes compared; a null rejection is reported', async () => {
+    const at = `${base}/site.webmanifest?v=bbbbbbbbbb`;
+    const manifest = (src: string) => `{"icons":[{"src":"${src}"}]}`;
+    const answer = (respond: (url: URL) => Response | Promise<Response>) =>
+      (async (input: URL | RequestInfo, init?: RequestInit) => {
+        expect(init?.redirect).toBe('manual');
+        return respond(new URL(String(input)));
+      }) as typeof fetch;
+    const json = { 'content-type': 'application/manifest+json' };
+    // Stale: the cached copy names the old icon, the fresh one a new icon. Both bodies come back, so both icons are read.
+    const bodies = new Map<string, Buffer[]>();
+    const stale = answer((url) => new Response(manifest(url.searchParams.has('cb') ? '/brand/new.png' : '/brand/old.png'), { headers: json }));
+    expect((await compareAssets([at], stale, bodies)).map((problem) => problem.problem)).toEqual([
+      expect.stringMatching(/^stale: \d+ bytes as written vs \d+ bytes uncached$/),
+    ]);
+    expect((bodies.get(at) ?? []).map((body) => manifestIconUrls(body.toString('utf8'), at, [base]).urls[0])).toEqual([
+      `${base}/brand/old.png`,
+      `${base}/brand/new.png`,
+    ]);
+    // A redirect, a refused connection and a body that errors (with an Error or with null) leave no body to read icons
+    // from, and each is reported; nothing throws.
+    const cases: [string, typeof fetch][] = [
+      ['redirect', answer(() => new Response(null, { status: 302, headers: { location: '/empty.webmanifest' } }))],
+      ['refused', answer(() => Promise.reject(new Error('connect ECONNREFUSED')))],
+      ['body error', answer(() => new Response(new ReadableStream({ pull: (controller) => controller.error(new Error('body reset')) })))],
+      ['body null', answer(() => new Response(new ReadableStream({ pull: (controller) => controller.error(null) })))],
+      ['rejects null', answer(() => Promise.reject(null))],
+    ];
+    const reported: Record<string, string[]> = {};
+    for (const [label, fetcher] of cases) {
+      const caseBodies = new Map<string, Buffer[]>();
+      reported[label] = (await compareAssets([at], fetcher, caseBodies)).map((problem) => problem.problem);
+      expect(caseBodies.get(at) ?? []).toEqual([]);
+    }
+    expect(reported).toEqual({
+      redirect: [
+        'redirects (302 to /empty.webmanifest, as written)',
+        'redirects (302 to /empty.webmanifest, uncached)',
+        'served as no content type (as written)',
+        'served as no content type (uncached)',
+        'answered 302 as written and 302 uncached',
+      ],
+      refused: ['fetch failed: connect ECONNREFUSED'],
+      'body error': ['fetch failed: body reset'],
+      'body null': ['fetch failed: null'],
+      'rejects null': ['fetch failed: null'],
+    });
+  });
+
+  it('reports an asset reference that is not a URL', () => {
+    expect(collectAssetUrls('<img src="http://[/media/a.webp">', base, [base]).problems).toEqual([
+      { path: base, problem: 'an asset reference is not a URL (http://[/media/a.webp)' },
+    ]);
+  });
+
   it('reports an asset URL on another host', () => {
     const html = '<meta property="og:image" content="https://elsewhere.example/og/home.png?v=cccccccc">';
     expect(collectAssetUrls(html, base, [base, publicOrigin]).problems).toEqual([
@@ -130,5 +201,27 @@ describe('live asset check', () => {
     ]);
     // The card on the public origin was fetched there, not on the checked origin.
     expect(requested).toContain(publicOrigin);
+  });
+
+  it('never throws formatting a rejection, keeps a first body when the second request fails, and decodes a BOM', async () => {
+    const unprintable = Object.create(null) as object;
+    expect(() => String(unprintable)).toThrow();
+    expect(reasonText(unprintable)).toBe('a reason that cannot be shown as text');
+    expect(reasonText(null)).toBe('null');
+    const at = `${base}/site.webmanifest?v=bbbbbbbbbb`;
+    const json = { 'content-type': 'application/manifest+json' };
+    const icon = '{"icons":[{"src":"/brand/new.png"}]}';
+    expect(await compareAssets([at], (async () => Promise.reject(unprintable)) as typeof fetch)).toEqual([
+      { path: at, problem: 'fetch failed: a reason that cannot be shown as text' },
+    ]);
+    // The as-written copy answers; the uncached request rejects. The first body is still handed back for its icons.
+    const bodies = new Map<string, Buffer[]>();
+    const halfway = (async (input: URL | RequestInfo) =>
+      new URL(String(input)).searchParams.has('cb') ? Promise.reject(null) : new Response(icon, { headers: json })) as typeof fetch;
+    expect(await compareAssets([at], halfway, bodies)).toEqual([{ path: at, problem: 'fetch failed: null' }]);
+    expect((bodies.get(at) ?? []).map((body) => manifestIconUrls(bodyText(body), at, [base]).urls)).toEqual([[`${base}/brand/new.png`]]);
+    // A manifest saved with a UTF-8 byte order mark parses, as Response.text() would decode it.
+    const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(icon)]);
+    expect(manifestIconUrls(bodyText(withBom), at, [base])).toEqual({ urls: [`${base}/brand/new.png`], problems: [] });
   });
 });

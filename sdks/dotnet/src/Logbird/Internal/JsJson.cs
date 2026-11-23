@@ -79,9 +79,32 @@ internal static class JsJson
         }
     }
 
+    /// <summary>
+    /// The text of a string value. A parsed JSON string can hold an escaped lone surrogate ("\ud800"), which
+    /// JsonElement.GetString refuses (and TryGetValue&lt;string&gt; throws for): its UTF-16 code units are decoded from
+    /// the raw text instead, so every reader of an event (the shape check, redaction, the writer) sees it exactly as parsed.
+    /// </summary>
+    internal static bool TryGetString(JsonValue value, out string text)
+    {
+        if (value.TryGetValue<JsonElement>(out var parsed))
+        {
+            text = parsed.ValueKind == JsonValueKind.String ? DecodeString(parsed.GetRawText()) : string.Empty;
+            return parsed.ValueKind == JsonValueKind.String;
+        }
+
+        if (value.TryGetValue<string>(out var own))
+        {
+            text = own;
+            return true;
+        }
+
+        text = string.Empty;
+        return false;
+    }
+
     private static void WriteValue(StringBuilder builder, JsonValue value)
     {
-        if (value.TryGetValue<string>(out var text))
+        if (TryGetString(value, out var text))
         {
             AppendString(builder, text);
             return;
@@ -164,7 +187,9 @@ internal static class JsJson
         for (var precision = 1; precision <= 17; precision++)
         {
             var text = value.ToString("E" + (precision - 1).ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
-            if (double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture) == value)
+            // TryParse, not Parse: a trial that rounds past MaxValue (2E+308 for double.MaxValue) overflows, which Parse
+            // reports by throwing on .NET Framework.
+            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) && parsed == value)
             {
                 return text;
             }
@@ -184,13 +209,51 @@ internal static class JsJson
         for (var precision = 1; precision <= 9; precision++)
         {
             var text = value.ToString("E" + (precision - 1).ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
-            if (float.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture) == value)
+            if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) && parsed == value)
             {
                 return text;
             }
         }
 
         return value.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// The UTF-16 code units of a JSON string literal (with its quotes), lone surrogates included, exactly as JavaScript's
+    /// JSON.parse reads them.
+    /// </summary>
+    internal static string DecodeString(string raw)
+    {
+        var builder = new StringBuilder(raw.Length);
+        for (var i = 1; i < raw.Length - 1; i++)
+        {
+            var c = raw[i];
+            if (c != (char)92)
+            {
+                builder.Append(c);
+                continue;
+            }
+
+            var escape = raw[++i];
+            switch (escape)
+            {
+                case 'b': builder.Append((char)8); break;
+                case 'f': builder.Append((char)12); break;
+                case 'n': builder.Append((char)10); break;
+                case 'r': builder.Append((char)13); break;
+                case 't': builder.Append((char)9); break;
+                case 'u':
+                    builder.Append((char)int.Parse(raw.Substring(i + 1, 4), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture));
+                    i += 4;
+                    break;
+                default:
+                    // The quote, the reverse solidus and the solidus stand for themselves.
+                    builder.Append(escape);
+                    break;
+            }
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>

@@ -1,14 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router';
+import { Fragment } from 'react';
 import { ButtonLink } from '../components/marketing/button-link';
 import { SiteCode } from '../components/marketing/code';
 import { CtaBand } from '../components/marketing/cta-band';
 import { FeatureRow, MiniFeature } from '../components/marketing/feature-row';
 import { ClipFrame, ScreenshotFrame } from '../components/marketing/frame';
+import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
+import { product } from '../content/product';
 import { roadmap } from '../content/roadmap';
 import { shared } from '../content/shared';
-import { ACCESS_CTA } from '../lib/cloud';
 import { pageHead } from '../lib/seo';
 
 /** A console capture opens full size on tap, so a phone reader can zoom; the link is named after the frame label. */
@@ -16,69 +18,35 @@ const zoom = (label: string) => `${shared.openFullSize}: ${label}`;
 
 export const Route = createFileRoute('/product')({ head: () => pageHead('/product'), component: ProductPage });
 
-// Copy: marketing/copy/product.md. Change wording there first.
-const searchSample = `actor:usr_42 action:booking.* -env:staging
-outcome:(failure OR denied) attempt:>2
-tenant.name:"Azure Hotels" occurredAt:>now-7d
-impersonator:*  metadata.channel:whatsapp`;
-
-const readSample = `import { readAuditTrail, trailQuery } from '@logbird/sdk/read';
-
-// Server only. First check that the signed-in user may see this booking.
-const page = await readAuditTrail(
-  { endpoint: process.env.LOGBIRD_ENDPOINT!, readKey: process.env.LOGBIRD_READ_KEY! },
-  trailQuery({
-    target: { type: 'booking', id: 'bk_1042' },
-    tenant: 'biz_7',
-    range: { from: '2026-01-01T00:00:00Z', to: new Date().toISOString() },
-  }),
-);
-// Keep only events where one target is this booking (type and id on the same target).
-const events = page.data.filter((event) => event.targets.some((t) => t.type === 'booking' && t.id === 'bk_1042'));
-// page.nextCursor: pass back as \`cursor\` for the next page`;
-
-const toc = [
-  ['explorer', 'Explorer'],
-  ['search', 'Search'],
-  ['sql-mode', 'SQL mode'],
-  ['entities', 'Entity pages'],
-  ['operations', 'Operations'],
-  ['event-detail', 'Event detail'],
-  ['setup', 'Setup'],
-  ['retention', 'Retention'],
-  ['read-api', 'Read API'],
-] as const;
-
+// Words and samples: content/product.ts. This file is layout only (content-modules.test.ts).
 const sideSizes = '(min-width: 1024px) 640px, calc(100vw - 2rem)';
+/** This page's bold lead-ins are a lighter weight than Rich's default. */
+const strongClass = 'font-medium text-foreground';
+const codeTitleClass = 'font-mono text-[0.85em] tracking-normal';
 
 function ProductPage() {
+  const { samples, hero, overview, toc, explorer, search, sql, entities, operations, eventDetail, more, setup, retention, readApi } = product;
   return (
     <>
       <PageHero
         actions={
           <>
             <ButtonLink size="lg" to="/contact">
-              {ACCESS_CTA}
+              {shared.accessCta}
             </ButtonLink>
             <SelfHostCta />
           </>
         }
-        eyebrow="Product"
-        lead="The Logbird console is for the people who operate your product: engineers on call, support, and whoever answers the auditor. It is not a portal for your end customers. To show history inside your own product, use the read API."
-        title={'Everything your team needs to answer "who did what".'}
+        eyebrow={hero.eyebrow}
+        lead={hero.lead}
+        title={hero.title}
       />
 
-      <section aria-label="The console overview" className="pt-12">
+      <section aria-label={overview.label} className="pt-12">
         <div className="container-site flex flex-col gap-8">
-          <ScreenshotFrame
-            caption="The overview: events by outcome, the most frequent actions, and a setup checklist until your integration is complete."
-            id="overview"
-            label="Overview"
-            priority
-            zoomLabel={zoom('Overview')}
-          />
-          <nav aria-label="On this page" className="flex flex-wrap gap-2">
-            {toc.map(([id, label]) => (
+          <ScreenshotFrame caption={overview.caption} id="overview" label={overview.frameLabel} priority zoomLabel={zoom(overview.frameLabel)} />
+          <nav aria-label={toc.label} className="flex flex-wrap gap-2">
+            {toc.items.map(([id, label]) => (
               <a
                 className="inline-flex min-h-9 items-center rounded-full border bg-background px-3.5 text-muted-foreground text-sm hover:text-foreground"
                 href={`#${id}`}
@@ -93,260 +61,180 @@ function ProductPage() {
 
       <FeatureRow
         bullets={[
-          'Facets with counts: click to include, Alt-click to exclude.',
-          'Configurable columns and infinite scroll.',
+          ...explorer.bullets,
           <>
-            Keyboard first: <kbd>/</kbd> focuses search, <kbd>j</kbd> and <kbd>k</kbd> move through events, <kbd>Esc</kbd> closes the panel,{' '}
-            <kbd>⌘K</kbd> opens the command palette.
+            {explorer.keyboard.lead}
+            {explorer.keyboard.keys.map(([key, text]) => (
+              <Fragment key={key}>
+                <kbd>{key}</kbd>
+                {text}
+              </Fragment>
+            ))}
           </>,
-          'Export the current results as CSV or JSONL.',
+          explorer.lastBullet,
         ]}
-        eyebrow="Explorer"
+        eyebrow={explorer.eyebrow}
         id="explorer"
-        title="Every event, in one table."
-        visual={<ClipFrame caption="Type a query, open an event, follow its operation." id="investigate" label="Explorer" />}
+        title={explorer.title}
+        visual={<ClipFrame caption={explorer.clipCaption} id="investigate" label={explorer.clipLabel} />}
       >
-        Pick a time range, type a query, and narrow it down with facets. Drag across the chart to zoom. Click a row to open the full event. The query,
-        time range and columns live in the URL, so a link opens the same search for a teammate. A relative range such as the last hour resolves when
-        they open it. Share an absolute range to preserve the time window, or a downloaded export to preserve the results.
+        {explorer.body}
       </FeatureRow>
 
       <FeatureRow
-        bullets={[
-          'Fields are suggested from what your project actually sends, with how often each one appears.',
-          'Errors point at the exact token and say what was expected, for example "attempt is a number".',
-          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 custom attributes, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.',
-        ]}
-        eyebrow="Search"
+        bullets={[...search.bullets]}
+        eyebrow={search.eyebrow}
         id="search"
         reverse
-        title="A query language you already half know."
+        title={search.title}
         visual={
           <div className="flex flex-col gap-4">
-            <SiteCode code={searchSample} language="text" title="Query language" />
+            <SiteCode code={samples.searchSample} language="text" title={search.codeTitle} />
             <ScreenshotFrame
-              caption="Value suggestions with counts, and the operators that fit the field."
+              caption={search.caption}
               id="query-suggestions"
-              label="Search"
-              zoomLabel={zoom('Search')}
+              label={search.frameLabel}
+              zoomLabel={zoom(search.frameLabel)}
               sizes={sideSizes}
             />
           </div>
         }
       >
-        Type <code>field:value</code> and Logbird suggests fields and values as you go. It covers what you'd expect from Lucene-style search:
-        wildcards, negation, ranges, regex and groups. If you type KQL-style syntax like <code>f = v</code>, it offers to convert it.
+        <Rich text={search.body} />
       </FeatureRow>
 
       <Section compact id="sql-mode" labelledBy="sql-mode-title" tone="sunken">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)] lg:items-center lg:gap-14">
           <div className="flex flex-col gap-4">
-            <p className="eyebrow">SQL mode</p>
+            <p className="eyebrow">{sql.eyebrow}</p>
             <h2 className="font-semibold text-[clamp(1.5rem,2.6vw,2rem)] leading-tight tracking-[-0.025em]" id="sql-mode-title">
-              Or write a SQL <code className="font-mono text-[0.85em] tracking-normal">WHERE</code> expression, safely.
+              {sql.title.before}
+              <code className={codeTitleClass}>{sql.title.code}</code>
+              {sql.title.after}
             </h2>
             <p className="body-copy text-muted-foreground leading-relaxed">
-              Switch the bar to SQL and write a ClickHouse boolean expression, such as{' '}
-              <code>job_attempt &gt; 2 AND attributes['metadata.channel'] = 'whatsapp'</code>. You write only the condition. Logbird writes the rest
-              of the statement.
+              <Rich text={sql.body} />
             </p>
           </div>
-          <ScreenshotFrame
-            caption="A subquery, rejected inline before anything runs."
-            id="sql-rejected"
-            label="SQL mode"
-            zoomLabel={zoom('SQL mode')}
-            sizes={sideSizes}
-          />
+          <ScreenshotFrame caption={sql.caption} id="sql-rejected" label={sql.frameLabel} zoomLabel={zoom(sql.frameLabel)} sizes={sideSizes} />
         </div>
         <ol className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[
-            ['Parsed by ClickHouse', "Logbird asks ClickHouse for the expression's syntax tree and checks it before running anything."],
-            [
-              'Allowlisted',
-              'Only known columns and a fixed list of functions are allowed. Subqueries, joins, table functions, SETTINGS and system tables are rejected.',
-            ],
-            ['Run as a restricted user', 'Queries run as a separate read-only ClickHouse user with its own CPU, memory and row limits.'],
-            ['Scoped to your project', "Database row policies limit that user to the project you're looking at, even if the expression is 1 OR 1."],
-          ].map(([title, body], index) => (
+          {sql.guards.map(([title, body], index) => (
             <li className="panel flex flex-col gap-2 p-5" key={title}>
-              <span className="font-mono text-muted-foreground text-xs">Guard {index + 1}</span>
+              <span className="font-mono text-muted-foreground text-xs">{sql.guardLabel(index + 1)}</span>
               <h3 className="font-semibold">{title}</h3>
               <p className="text-muted-foreground text-sm leading-relaxed">{body}</p>
             </li>
           ))}
         </ol>
-        <p className="mt-6 text-muted-foreground text-sm">
-          SQL mode is for the console only. The public read API accepts the query language, not SQL. A free-form SQL console isn't part of Logbird.
-        </p>
+        <p className="mt-6 text-muted-foreground text-sm">{sql.note}</p>
       </Section>
 
       <FeatureRow
-        bullets={[
-          <>
-            <strong className="font-medium text-foreground">Actors:</strong> who caused it. Users, API keys, integrations, the system.
-          </>,
-          <>
-            <strong className="font-medium text-foreground">Tenants:</strong> whose account. "What happened at Azure Hotels last week?" is one click.
-          </>,
-          <>
-            <strong className="font-medium text-foreground">Executors:</strong> what did the work. The API, each queue worker and cron job, with job
-            ids and attempts.
-          </>,
-          <>
-            <strong className="font-medium text-foreground">Records:</strong> what changed. <code>booking:bk_1042</code> has a history of its own.
-          </>,
-        ]}
-        eyebrow="Follow anything"
+        bullets={entities.bullets.map((bullet) => <Rich key={bullet} strongClassName={strongClass} text={bullet} />)}
+        eyebrow={entities.eyebrow}
         id="entities"
-        title="A page for each actor, tenant, worker and record."
+        title={entities.title}
         visual={
           <ScreenshotFrame
-            caption="A tenant's page: event counts, what support did while signed in as the customer, and its history with a chart and every event."
+            caption={entities.caption}
             id="tenant"
-            label="Tenant"
-            zoomLabel={zoom('Tenant')}
+            label={entities.frameLabel}
+            zoomLabel={zoom(entities.frameLabel)}
             sizes={sideSizes}
           />
         }
       >
-        Actors, tenants, executors and records in your events get their own pages (records from the first 64 targets of each event). Each one shows an
-        activity chart, its top actions, its outcome split, related entities and a full timeline. Directory pages list them all, most active first,
-        with fuzzy search.
+        {entities.body}
       </FeatureRow>
 
       <FeatureRow
-        eyebrow="Operation trees"
+        eyebrow={operations.eyebrow}
         id="operations"
         reverse
-        title="One request, every job it started, as a single tree."
+        title={operations.title}
         visual={
           <ScreenshotFrame
-            caption="An operation tree: a scheduler request, the jobs it started, failed attempts and the retries that worked."
+            caption={operations.caption}
             id="operation"
-            label="Operation"
-            zoomLabel={zoom('Operation')}
+            label={operations.frameLabel}
+            zoomLabel={zoom(operations.frameLabel)}
             sizes={sideSizes}
           />
         }
       >
-        Send the same <code>operationId</code> on a request and the jobs it starts. Add <code>parentEventId</code> to say which event caused which.
-        Logbird draws the tree: each step with its outcome, executor and timing. A failed first attempt and the retry that worked sit side by side.
+        <Rich text={operations.body} />
       </FeatureRow>
 
       <FeatureRow
-        bullets={[
-          'The before and after values you send, for the first 256 changes.',
-          'The causation breadcrumb, with a link to the whole operation.',
-          'Context ids (request, trace, IP), the indexed attributes, and the full parsed event as JSON.',
-          'Copy a link, or copy the event as a curl command.',
-          'Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent has a page.',
-        ]}
-        eyebrow="Event detail"
+        bullets={[...eventDetail.bullets]}
+        eyebrow={eventDetail.eyebrow}
         id="event-detail"
-        title="The full story of one event."
+        title={eventDetail.title}
         visual={
           <ScreenshotFrame
-            caption="An event in detail: actor and executor, tenant, targets, the status change and the causation chain."
+            caption={eventDetail.caption}
             id="event-sheet"
-            label="Event detail"
-            zoomLabel={zoom('Event detail')}
+            label={eventDetail.frameLabel}
+            zoomLabel={zoom(eventDetail.frameLabel)}
             sizes={sideSizes}
           />
         }
       >
-        Open any event to read it as a sentence: who did what, in which account, to which records, and how it ended. The actor and the executor are on
-        separate cards. When a support agent acted for a customer, the agent appears beside the customer.
+        {eventDetail.body}
       </FeatureRow>
 
       <Section compact labelledBy="more-title" tone="sunken">
-        <SectionHeader id="more-title" title="And the parts you use every day." />
+        <SectionHeader id="more-title" title={more.title} />
         <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <MiniFeature
-            eyebrow="Live"
-            id="live-tail"
-            limit="Live tail polls over HTTP. It doesn't use WebSockets, so it works behind any proxy."
-            title="Watch events arrive during a deploy."
-          >
-            Turn on Live and new events appear at the top of the table as they arrive, with your current query still applied.
-          </MiniFeature>
-          <MiniFeature eyebrow="Saved views" id="saved-views" title="Save the searches your team runs every week.">
-            Save a query, its time range and its columns as a view, in query or SQL mode. Views appear in the sidebar and in the search bar's
-            suggestions. Anyone in the workspace can open them; members can delete their own.
-          </MiniFeature>
-          <MiniFeature eyebrow="Workspace activity" id="workspace-activity" title="Logbird records its own management actions.">
-            Logbird records management actions (projects, keys, retention, invitations) in workspace activity. You read it with the same explorer.
-          </MiniFeature>
-          <MiniFeature
-            eyebrow="Workspaces and roles"
-            id="team"
-            limit="SSO isn't available yet. It's on the roadmap."
-            title="Owners and admins manage it. Members use it."
-          >
-            Sign-in is by emailed one-time code. There are no passwords. Owners and admins manage projects, keys, retention and invitations. Members
-            search, export, save views and read workspace activity. The server checks every role on every request.
-          </MiniFeature>
+          {more.items.map((item) => (
+            <MiniFeature eyebrow={item.eyebrow} id={item.id} key={item.id} limit={'limit' in item ? item.limit : undefined} title={item.title}>
+              {item.body}
+            </MiniFeature>
+          ))}
         </div>
       </Section>
 
       <FeatureRow
-        bullets={[
-          'Onboarding picks up where you left off.',
-          '"Send a test event" and "Load sample data" show the console before you integrate. Sample data is 2000 fictional events over seven days; it never counts as setup, and you can remove it.',
-          'A conformance score on every event, and a Fields page that shows coverage for the single-value core fields and the attributes your events carry in the selected range.',
-        ]}
-        eyebrow="Setup that checks itself"
+        bullets={[...setup.bullets]}
+        eyebrow={setup.eyebrow}
         id="setup"
-        title="The setup page tells you what's still missing."
-        visual={
-          <ScreenshotFrame
-            caption="The setup page checks each part of the integration against the events it has received."
-            id="setup"
-            label="Setup"
-            zoomLabel={zoom('Setup')}
-            sizes={sideSizes}
-          />
-        }
+        title={setup.title}
+        visual={<ScreenshotFrame caption={setup.caption} id="setup" label={setup.frameLabel} zoomLabel={zoom(setup.frameLabel)} sizes={sideSizes} />}
       >
-        Send your first event and the setup page notices on its own. It then checks your integration against your real events: for actors, tenants,
-        executors and targets it shows the coverage and links to the events missing each one; for operation ids it shows the coverage and links to the
-        events that have one. Reviewing retention and inviting your team are separate checklist items.
+        {setup.body}
       </FeatureRow>
 
       <FeatureRow
-        eyebrow="Retention"
+        eyebrow={retention.eyebrow}
         id="retention"
-        limit="Retention deletes are permanent. There's no archive and no undo. The count can change between preview and deletion."
+        limit={retention.limit}
         reverse
-        title="Keep events as long as you decide, then delete them."
+        title={retention.title}
         visual={
           <ScreenshotFrame
-            caption="A project's retention settings: the current window, the policies you can choose, and when the purge last ran."
+            caption={retention.caption}
             id="retention"
-            label="Retention"
-            zoomLabel={zoom('Retention')}
+            label={retention.frameLabel}
+            zoomLabel={zoom(retention.frameLabel)}
             sizes={sideSizes}
           />
         }
       >
-        Each project keeps events for a window you choose, from 7 days to 10 years. New projects start at 90 days. A worker deletes expired events
-        every hour. Before you lower the window, Logbird shows how many events will be deleted. To confirm, you type the project's slug, and the purge
-        starts right away.
+        {retention.body}
       </FeatureRow>
 
       <FeatureRow
-        eyebrow="Read API"
+        eyebrow={readApi.eyebrow}
         id="read-api"
-        limit="A read key can read the whole project. Your backend must check that the person asking may see that tenant or record, on every page it fetches."
-        title="Show history inside your own product."
-        visual={<SiteCode code={readSample} language="ts" title="Your backend" />}
+        limit={readApi.limit}
+        title={readApi.title}
+        visual={<SiteCode code={samples.readSample} language="ts" title={readApi.codeTitle} />}
       >
-        Give your customers a "History" tab. Your backend calls <code>GET /v1/events</code> with a read key and a query for that record and tenant,
-        and checks that each returned event names that record, then returns the page to your UI. Results are paginated with a cursor. The Vue, Nuxt
-        and TanStack Start packages include helpers for this.
+        <Rich text={readApi.body} />
         <span className="mt-4 block">
           <ButtonLink to="/developers" variant="link">
-            Read API on the developer page
+            {readApi.developersLink}
           </ButtonLink>
         </span>
       </FeatureRow>

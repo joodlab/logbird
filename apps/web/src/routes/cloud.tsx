@@ -3,78 +3,31 @@ import { ButtonLink } from '../components/marketing/button-link';
 import { CtaBand } from '../components/marketing/cta-band';
 import { type FaqItem, FaqList } from '../components/marketing/faq';
 import { PlanCards } from '../components/marketing/plan-cards';
+import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
+import { cloud } from '../content/cloud';
 import { pricing } from '../content/pricing';
-import { GITHUB_PUBLIC } from '../env';
-import { ACCESS_CTA, CLOUD_OPEN, SIGN_IN_URL } from '../lib/cloud';
+import { shared } from '../content/shared';
+import { SITE } from '../content/site';
 import { faqLd, pageHead } from '../lib/seo';
-import { getPage } from '../lib/site-map';
 
-// Copy: marketing/copy/cloud.md. Change wording there first. No prices, limits, SLAs or dates on this page.
-const privacyReady = getPage('/legal/privacy').ready;
-
-const faq: FaqItem[] = [
-  CLOUD_OPEN
-    ? {
-        q: 'When can everyone sign up?',
-        a: "We haven't set a date. Logbird Cloud is in early access: sign-ups are limited to invited teams while we onboard them. Request access and we'll be in touch.",
-      }
-    : { q: 'When does Logbird Cloud open?', a: "We haven't set a date. People on the waitlist hear first." },
-  {
-    q: 'Where will my data be stored?',
-    a: CLOUD_OPEN
-      ? GITHUB_PUBLIC
-        ? "We'll publish the hosting region with the Cloud's launch terms. Ask us before you send production data. If your data must stay in a particular place, self-host Logbird."
-        : "We'll publish the hosting region with the Cloud's launch terms. Ask us before you send production data. If your data must stay in a particular place, self-hosting is an option once the source opens."
-      : GITHUB_PUBLIC
-        ? "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place today, self-host Logbird."
-        : "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place, self-hosting is an option once the source opens.",
-  },
-  {
-    q: 'Is the cloud a different product?',
-    a: `No. It ${CLOUD_OPEN ? 'runs' : 'will run'} the same codebase as the self-hosted version. One difference is already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL WHERE mode in the explorer is in both.`,
-    body: (
-      <>
-        No. It {CLOUD_OPEN ? 'runs' : 'will run'} the same codebase as the self-hosted version. One difference is already decided: Logbird Cloud won't
-        offer a free-form SQL console. The guarded SQL <code>WHERE</code> mode in the explorer is in both.
-      </>
-    ),
-  },
-  {
-    q: 'Can I move between self-host and cloud?',
-    a: CLOUD_OPEN
-      ? "Not with a tool or a guide today. Both run the same codebase, but there's no migration tool and no documented migration path yet."
-      : "Not with a tool or a guide. Logbird Cloud will run the same codebase, but there's no migration tool and no documented migration path yet.",
-  },
-  {
-    q: 'How much will it cost?',
-    // From content/pricing.ts, so the answer changes with the pricing data.
-    a: pricing.cloud.lead,
-  },
-  {
-    q: 'Will there be an SLA?',
-    a: CLOUD_OPEN
-      ? 'Not during early access. There are no published service levels or limits yet.'
-      : 'There are no published service levels or limits yet.',
-  },
-  {
-    q: CLOUD_OPEN ? 'What do you do with the email I give you?' : 'What do you do with my waitlist email?',
-    // The privacy notice is referenced only once /legal/privacy is ready (site-map), here and in the FAQ JSON-LD.
-    a: privacyReady
-      ? 'We store it to contact you about Logbird. No trackers. See the privacy policy.'
-      : 'We store it to contact you about Logbird. No trackers.',
-    body: privacyReady ? (
-      <>
-        We store it to contact you about Logbird. No trackers. See the{' '}
-        <Link className="text-link" to="/legal/privacy">
-          privacy policy
-        </Link>
-        .
-      </>
-    ) : undefined,
-  },
-];
+// Words: content/cloud.ts; the pricing section: content/pricing.ts. This file is layout only (content-modules.test.ts).
+const faq: FaqItem[] = cloud.faq.items.map(({ q, a, rich, privacyLink }) => ({
+  q,
+  a,
+  body: privacyLink ? (
+    <>
+      {privacyLink.before}
+      <Link className="text-link" to="/legal/privacy">
+        {privacyLink.label}
+      </Link>
+      {privacyLink.after}
+    </>
+  ) : rich ? (
+    <Rich text={rich} />
+  ) : undefined,
+}));
 
 export const Route = createFileRoute('/cloud')({
   head: () => {
@@ -85,22 +38,13 @@ export const Route = createFileRoute('/cloud')({
 });
 
 function StatusPanel() {
-  const rows = [
-    CLOUD_OPEN
-      ? { label: 'Logbird Cloud', value: 'Early access', note: 'Invited teams' }
-      : { label: 'Logbird Cloud', value: 'Not open yet', note: 'Waitlist' },
-    pricing.cloud.status,
-    GITHUB_PUBLIC
-      ? { label: 'Self-host', value: 'Available today', note: 'Free, MIT' }
-      : { label: 'Self-host', value: 'When the source opens', note: 'Free, MIT' },
-  ];
   return (
     <div className="panel overflow-hidden">
       <p className="border-b bg-[var(--surface-sunken)] px-5 py-3 font-mono text-muted-foreground text-xs uppercase tracking-wider">
-        Where things stand
+        {cloud.status.title}
       </p>
       <dl>
-        {rows.map((row) => (
+        {cloud.status.rows.map((row) => (
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b px-5 py-4 last:border-b-0" key={row.label}>
             <dt className="font-medium">{row.label}</dt>
             <dd className="text-end">
@@ -115,17 +59,18 @@ function StatusPanel() {
 }
 
 function CloudPage() {
+  const { hero } = cloud;
   return (
     <>
       <PageHero
         actions={
           <>
             <ButtonLink size="lg" to="/contact">
-              {ACCESS_CTA}
+              {shared.accessCta}
             </ButtonLink>
-            {SIGN_IN_URL ? (
-              <ButtonLink href={SIGN_IN_URL} size="lg" variant="outline">
-                Sign in
+            {SITE.signInUrl ? (
+              <ButtonLink href={SITE.signInUrl} size="lg" variant="outline">
+                {hero.signIn}
               </ButtonLink>
             ) : (
               <SelfHostCta />
@@ -133,13 +78,9 @@ function CloudPage() {
           </>
         }
         aside={<StatusPanel />}
-        eyebrow="Logbird Cloud"
-        lead={
-          CLOUD_OPEN
-            ? `Logbird Cloud runs the same ${GITHUB_PUBLIC ? 'open-source codebase you can' : "codebase you'll be able to"} self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are limited to invited teams for now. Request access, or sign in if you've been invited.`
-            : `Logbird Cloud will run the same ${GITHUB_PUBLIC ? 'open-source codebase you can' : "codebase you'll be able to"} self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.`
-        }
-        title="The same Logbird, run by us."
+        eyebrow={hero.eyebrow}
+        lead={hero.lead}
+        title={hero.title}
       />
 
       <Section id="pricing" labelledBy="pricing-title" tone="sunken">
@@ -156,13 +97,13 @@ function CloudPage() {
       </Section>
 
       <Section id="faq" labelledBy="faq-title">
-        <SectionHeader eyebrow="Questions" id="faq-title" title="Cloud questions, answered as far as we can today." />
+        <SectionHeader eyebrow={cloud.faq.eyebrow} id="faq-title" title={cloud.faq.title} />
         <div className="mt-12">
           <FaqList items={faq} />
         </div>
       </Section>
 
-      <CtaBand title={CLOUD_OPEN ? 'Want early access?' : 'Be first to hear when it opens.'} />
+      <CtaBand title={cloud.ctaTitle} />
     </>
   );
 }

@@ -28,6 +28,23 @@ const MOVED = [
   'routes/use-cases.support-investigations.tsx',
   'components/marketing/self-host-cta.tsx',
   'components/marketing/steps.tsx',
+  'routes/compare.index.tsx',
+  'routes/compare.bemi.tsx',
+  'routes/compare.pangea.tsx',
+  'routes/compare.retraced.tsx',
+  'routes/compare.workos-audit-logs.tsx',
+  'components/marketing/comparison-page.tsx',
+  'components/marketing/capture-lanes.tsx',
+  'routes/developers.tsx',
+  'routes/open-source.tsx',
+  'components/marketing/feature-row.tsx',
+  'routes/about.tsx',
+  'routes/contact.tsx',
+  'routes/changelog.tsx',
+  'routes/product.tsx',
+  'routes/cloud.tsx',
+  'routes/security.tsx',
+  'routes/self-hosting.tsx',
 ];
 
 /** Props and keys whose string value is always wording, even one word. */
