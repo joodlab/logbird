@@ -1,7 +1,10 @@
+import { readFile } from 'node:fs/promises';
+import { webhookSettingsPath } from '@logbird/contracts';
 import { HtmlValidate } from 'html-validate';
 import { describe, expect, it, vi } from 'vitest';
 import { clientIp, describeUserAgent, formatRelative } from './format';
 import { createFixtures, type EmailDefinition, emails, fixtures, type RenderedEmail, renderEmail } from './index';
+import { webhookFilterReview } from './templates/webhook-filter-review';
 
 // Email HTML is XHTML-transitional tables by necessity; everything else in the standard + a11y presets applies.
 const validator = new HtmlValidate({
@@ -16,6 +19,24 @@ const visibleText = (html: string) =>
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<[^>]+>/g, ' ');
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]?.replaceAll('&amp;', '&') ?? '');
+
+it('uses the shared console route and encodes the project ID in the filter-review button', async () => {
+  const appUrl = 'https://console.example.invalid';
+  const projectId = 'qa proj/1';
+  const path = webhookSettingsPath(projectId);
+  const { html } = await renderEmail(webhookFilterReview, {
+    appUrl,
+    projectId,
+    project: 'QA project',
+    email: 'qa-owner@example.invalid',
+    host: 'receiver.example.invalid',
+    description: 'QA webhook',
+  });
+  expect(path.split('/')[2]).toBe('qa%20proj%2F1');
+  expect(hrefs(html)).toContain(new URL(path, appUrl).href);
+  const source = await readFile(new URL('./templates/webhook-filter-review.tsx', import.meta.url), 'utf8');
+  expect(source).not.toContain('settings/webhooks');
+});
 
 const cases = Object.entries(emails).map(([key, email]) => ({
   key,

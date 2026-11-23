@@ -10,24 +10,21 @@ vi.mock('@logbird/database', async (original) => {
   const db = await original<typeof import('@logbird/database')>();
   return {
     ...db,
-    findIngestProject: async (...args: Parameters<typeof db.findIngestProject>) => {
-      const result = await db.findIngestProject(...args);
+    ingestReceiptClock: async (...args: Parameters<typeof db.ingestReceiptClock>) => {
+      const result = await db.ingestReceiptClock(...args);
       if (args[1] === trace.project)
-        trace.clocks.push({ batch: trace.batch, acceptedAt: result?.acceptedAt.toISOString(), observedAt: new Date().toISOString() });
+        trace.clocks.push({ batch: trace.batch, acceptedAt: result.toISOString(), observedAt: new Date().toISOString() });
       return result;
     },
     claimIngestReceipts: async (...args: Parameters<typeof db.claimIngestReceipts>) => {
       if (args[0] !== trace.project) return db.claimIngestReceipts(...args);
       const batch = trace.batch;
-      const before = await db.prisma.exportLease.findMany({
-        where: { projectId: trace.project },
-        select: { id: true, receivedBefore: true, invalidated: true },
-      });
+      const tx = args[3] ?? db.prisma;
+      const snapshot = () => tx.$queryRaw<{ id: string; receivedBefore: Date; invalidated: boolean }[]>`
+        SELECT id, "receivedBefore", invalidated FROM "ExportLease" WHERE "projectId" = ${trace.project}`;
+      const before = await snapshot();
       const result = await db.claimIngestReceipts(...args);
-      const after = await db.prisma.exportLease.findMany({
-        where: { projectId: trace.project },
-        select: { id: true, receivedBefore: true, invalidated: true },
-      });
+      const after = await snapshot();
       trace.ctes.push({
         batch,
         count: args[2].length,
@@ -161,10 +158,10 @@ it('measures actual export outcomes during bounded c1-like ingestion in one fict
       batchTimings,
       telemetry: {
         clockSource:
-          'acceptance: Postgres clock_timestamp() inside shared project lock, greater than max active fence by at least 1ms; export: frozen API Date.now()',
+          'acceptance: Postgres clock_timestamp() under the project lock and receipt gate, at least 1ms past every active fence; export: frozen API Date.now()',
         clocks: trace.clocks,
         ctes: trace.ctes,
-        instrumentation: 'two test-only lease snapshots per batch; production adds zero PG round trips',
+        instrumentation: 'two test-only lease snapshots per batch inside the receipt registration transaction',
       },
     };
     console.log(JSON.stringify(metrics));

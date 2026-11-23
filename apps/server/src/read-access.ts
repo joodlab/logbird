@@ -141,61 +141,15 @@ export const clearTokenKeyCache = () => keyCache.clear();
 /* Field masks                                                         */
 /* ------------------------------------------------------------------ */
 
+export { assertNotMasked, maskedEmail } from '@logbird/clickhouse';
+
 let maskKeyCache: Buffer | undefined;
-const maskKey = () => {
-  maskKeyCache ??= Buffer.from(hkdfSync('sha256', env.BETTER_AUTH_SECRET, '', 'logbird-field-mask-v1', 32));
-  return maskKeyCache;
-};
-/** `actor_email` mask: a per-project keyed hash, stable for the same address so a viewer can still group by person. */
-export const maskedEmail = (projectId: string, email: string, secret = maskKey()) =>
-  email ? `masked:${createHmac('sha256', secret).update(`${projectId}\0${email.toLowerCase()}`).digest('hex').slice(0, 24)}` : '';
 export function maskEvent(event: AuditEvent, mask: ReadScope['mask']): AuditEvent {
   if (!mask?.length) return event;
-  const masked: AuditEvent = { ...event, context: { ...event.context }, attributes: { ...event.attributes } };
-  if (mask.includes('ip')) masked.context.ip = '';
-  if (mask.includes('user_agent')) masked.context.userAgent = '';
-  if (mask.includes('actor_email') && masked.actor) {
-    const { email, name } = masked.actor;
-    const hidden = maskedEmail(event.projectId, email);
-    // A producer that used the address as the display name too: the name would show what the mask hides. Same value.
-    const nameIsEmail = Boolean(email) && name.trim().toLowerCase() === email.trim().toLowerCase();
-    masked.actor = { ...masked.actor, email: hidden, name: nameIsEmail ? hidden : name };
-  }
-  for (const preset of mask) for (const key of ch.MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];
-  return masked;
+  maskKeyCache ??= ch.fieldMaskKey(env.BETTER_AUTH_SECRET);
+  return ch.maskEvent(event, mask, maskKeyCache);
 }
 
-/**
- * A masked scope may not filter or group on a masked column or a masked attribute path: the result would reveal the
- * hidden value. Attribute paths are checked on the compiled query's bound attribute keys (`attributes[{qN:String}]`)
- * and on both facet levels, before anything reaches ClickHouse.
- */
-export function assertNotMasked(scope: ReadScope | null, input: { q?: string; field?: string; by?: string }) {
-  if (!scope?.mask?.length) return;
-  const hidden = scope.mask.map((m) => ch.MASKED_COLUMNS[m]);
-  const hiddenPaths = scope.mask.flatMap((m) => ch.MASKED_ATTRIBUTES[m]);
-  const fail = (start: number | null, end: number | null) => {
-    throw new ch.QueryError('This field is masked for this key or token.', {
-      lang: 'query',
-      reason: 'not_allowed',
-      start,
-      end,
-      hint: 'Remove filters and facets on masked fields',
-    });
-  };
-  if (input.q) {
-    const compiled = ch.compileQuery(input.q);
-    if (hidden.some((column) => new RegExp(`\\b${column}\\b`).test(compiled.sql))) fail(0, input.q.length);
-    for (const [, key] of compiled.sql.matchAll(/(?:attributes\[|mapContains\(attributes,)\{(q\d+):String\}/g))
-      if (key && hiddenPaths.includes(String(compiled.params[key]))) fail(0, input.q.length);
-  }
-  for (const field of [input.field, input.by]) {
-    if (!field) continue;
-    const column = ch.facetColumn(field);
-    if (column && hidden.includes(column)) fail(null, null);
-    if (!column && hiddenPaths.includes(field.replace(/^(attr|attributes)\./, ''))) fail(null, null);
-  }
-}
 export const forbidMaskedEvidence = (scope: ReadScope | null, format: string) => {
   if (scope?.mask?.length && format === 'jsonl-evidence')
     throw new ApiError(422, 'masked_export', 'Evidence exports carry the original payload and are not available with field masks.');

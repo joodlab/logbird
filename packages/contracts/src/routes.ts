@@ -43,6 +43,9 @@ export const routes = {
     update: { method: 'PATCH', path: '/api/projects/:projectId/webhooks/:id', auth: 'session' },
     remove: { method: 'DELETE', path: '/api/projects/:projectId/webhooks/:id', auth: 'session' },
     rotateSecret: { method: 'POST', path: '/api/projects/:projectId/webhooks/:id/rotate-secret', auth: 'session' },
+    test: { method: 'POST', path: '/api/projects/:projectId/webhooks/:id/test', auth: 'session' },
+    deliveries: { method: 'GET', path: '/api/projects/:projectId/webhooks/:id/deliveries', auth: 'session' },
+    resend: { method: 'POST', path: '/api/projects/:projectId/webhooks/:id/deliveries/:deliveryId/resend', auth: 'session' },
   },
   keys: {
     list: { method: 'GET', path: '/api/projects/:projectId/keys', auth: 'session' },

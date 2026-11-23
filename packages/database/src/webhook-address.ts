@@ -1,4 +1,4 @@
-import { lookup } from 'node:dns/promises';
+import { Resolver } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 /** Conservative public-unicast policy; WHATWG normalizes decimal/octal/hex IPv4.
@@ -20,7 +20,8 @@ export function isAllowedWebhookAddress(address: string): boolean {
       a === 10 ||
       a === 127 ||
       a >= 224 ||
-      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 100 && b >= 64 && b <= 127) || // Includes Alibaba ECS metadata.
+      host === '168.63.129.16' || // Azure WireServer (platform-only address outside special-use ranges).
       (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)) || (b === 88 && c === 99))) ||
@@ -48,96 +49,90 @@ export function isAllowedWebhookAddress(address: string): boolean {
 export class WebhookUrlError extends Error {
   readonly code = 'webhook_url_not_allowed';
 }
+export class WebhookLookupBusyError extends Error {
+  readonly code = 'webhook_lookup_busy';
+}
 export type WebhookLookup = (hostname: string, options: { all: true }) => Promise<{ address: string; family: number }[]>;
 
-/** `dns.lookup` runs getaddrinfo on libuv's small thread pool (4 threads by default), shared with fs, crypto and password
- * hashing. A hostname whose nameserver never answers holds a thread for the resolver's own timeout, so save-time lookups
- * get a deadline and at most two pool threads per process; requests over that wait for a slot within the same deadline. */
 export const WEBHOOK_LOOKUP_TIMEOUT_MS = 3000;
-const MAX_CONCURRENT_LOOKUPS = 2;
+const MAX_LOOKUPS = 64;
+const MAX_ORG_LOOKUPS = 2;
+const activeByOrg = new Map<string, number>();
 let activeLookups = 0;
-const lookupWaiters: (() => void)[] = [];
-function releaseLookup() {
-  // The slot passes straight to the next waiter, if any.
-  const next = lookupWaiters.shift();
-  if (next) next();
-  else activeLookups--;
-}
-function acquireLookup(ms: number) {
-  if (activeLookups < MAX_CONCURRENT_LOOKUPS) {
-    activeLookups++;
-    return Promise.resolve(true);
-  }
-  return new Promise<boolean>((resolve) => {
-    const grant = () => {
-      clearTimeout(timer);
-      resolve(true);
-    };
-    const timer = setTimeout(() => {
-      lookupWaiters.splice(lookupWaiters.indexOf(grant), 1);
-      resolve(false);
-    }, ms);
-    lookupWaiters.push(grant);
-  });
-}
-async function boundedLookup(resolve: WebhookLookup, hostname: string, timeoutMs: number) {
-  const deadline = Date.now() + timeoutMs;
-  if (!(await acquireLookup(timeoutMs))) throw new WebhookUrlError('Webhook hostname lookup timed out; try again.');
-  // A slot granted at the deadline would start a lookup whose answer is thrown away: hand it on instead.
-  if (deadline - Date.now() <= 0) {
-    releaseLookup();
-    throw new WebhookUrlError('Webhook hostname lookup timed out; try again.');
-  }
-  // The slot is held until the lookup really settles, not just until the deadline: its pool thread is busy until then.
-  const pending = Promise.resolve().then(() => resolve(hostname, { all: true }));
-  pending.then(releaseLookup, releaseLookup);
-  let timer: ReturnType<typeof setTimeout> | undefined;
+
+async function resolveAddresses(hostname: string): ReturnType<WebhookLookup> {
+  // c-ares does not occupy the libuv pool. A resolver belongs to one lookup, so cancel never affects another tenant.
+  const resolver = new Resolver({ timeout: WEBHOOK_LOOKUP_TIMEOUT_MS, tries: 1 });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    resolver.cancel();
+  }, WEBHOOK_LOOKUP_TIMEOUT_MS);
   try {
-    return await Promise.race([
-      pending,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new WebhookUrlError('Webhook hostname lookup timed out; try again.')), Math.max(0, deadline - Date.now()));
-      }),
-    ]);
+    const answers = await Promise.allSettled([resolver.resolve4(hostname), resolver.resolve6(hostname)]);
+    if (timedOut) throw new WebhookLookupBusyError('Webhook hostname lookup timed out; try again.');
+    return answers.flatMap((answer, index) => {
+      if (answer.status === 'fulfilled') return answer.value.map((address) => ({ address, family: index === 0 ? 4 : 6 }));
+      const code = (answer.reason as NodeJS.ErrnoException).code;
+      if (code === 'ENODATA' || code === 'ENOTFOUND') return [];
+      if (code === 'ETIMEOUT') throw new WebhookLookupBusyError('Webhook hostname lookup timed out; try again.');
+      throw answer.reason;
+    });
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Save-time check only. Senders must resolve and pin an allowed address again at connect time. */
-export async function validateWebhookUrl(
+/** Shared URL and public-address checks. The sender must connect using the returned address only. */
+export async function resolveWebhookDestination(
   raw: string,
-  allowHttp = false,
-  resolve: WebhookLookup = lookup,
-  timeoutMs = WEBHOOK_LOOKUP_TIMEOUT_MS,
-): Promise<string> {
-  const reject = (reason: string): never => {
-    throw new WebhookUrlError(reason);
-  };
-  if (raw.length > 2048) reject('Webhook URL exceeds 2048 characters.');
+  {
+    allowHttp = false,
+    lookup = resolveAddresses,
+    allowAddress = isAllowedWebhookAddress,
+  }: { allowHttp?: boolean; lookup?: WebhookLookup; allowAddress?: (address: string) => boolean } = {},
+) {
+  if (raw.length > 2048) throw new WebhookUrlError('Webhook URL exceeds 2048 characters.');
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    return reject('Webhook URL must be an absolute URL.');
+    throw new WebhookUrlError('Webhook URL must be an absolute URL.');
   }
-  if (url.protocol !== 'https:' && !(allowHttp && url.protocol === 'http:')) reject('Webhook URL must use HTTPS.');
-  if (url.username || url.password) reject('Webhook URL must not contain credentials.');
-  if (raw.includes('#')) reject('Webhook URL must not contain a fragment.');
-  if (url.port === '0') reject('Webhook URL port must be between 1 and 65535.');
+  if (url.protocol !== 'https:' && !(allowHttp && url.protocol === 'http:')) throw new WebhookUrlError('Webhook URL must use HTTPS.');
+  if (url.username || url.password) throw new WebhookUrlError('Webhook URL must not contain credentials.');
+  if (raw.includes('#')) throw new WebhookUrlError('Webhook URL must not contain a fragment.');
+  if (url.port === '0') throw new WebhookUrlError('Webhook URL port must be between 1 and 65535.');
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
-  if (isIP(hostname)) {
-    if (!isAllowedWebhookAddress(hostname)) reject('Webhook URL address is not public unicast.');
-  } else {
-    let addresses: Awaited<ReturnType<WebhookLookup>>;
-    try {
-      addresses = await boundedLookup(resolve, hostname, timeoutMs);
-    } catch (error) {
-      if (error instanceof WebhookUrlError) throw error;
-      return reject('Webhook hostname could not be resolved.');
-    }
-    if (!addresses.length || addresses.some(({ address }) => !isAllowedWebhookAddress(address)))
-      reject('Webhook hostname must resolve only to public unicast addresses.');
+  const family = isIP(hostname);
+  let addresses: Awaited<ReturnType<WebhookLookup>>;
+  try {
+    addresses = family ? [{ address: hostname, family }] : await lookup(hostname, { all: true });
+  } catch (error) {
+    if (error instanceof WebhookLookupBusyError) throw error;
+    throw new WebhookUrlError('Webhook hostname could not be resolved.');
   }
-  return url.href;
+  const first = addresses[0];
+  if (!first || addresses.some(({ address, family: version }) => !version || isIP(address) !== version || !allowAddress(address)))
+    throw new WebhookUrlError('Webhook hostname must resolve only to public unicast addresses.');
+  return { url, ...first };
+}
+
+/** Enforce separate per-workspace budgets before doing asynchronous DNS. Literal IPs need no slot. */
+export async function validateWebhookUrl(raw: string, allowHttp = false, resolve: WebhookLookup = resolveAddresses, organizationId = '') {
+  const lookup: WebhookLookup = async (hostname, options) => {
+    const active = activeByOrg.get(organizationId) ?? 0;
+    if (active >= MAX_ORG_LOOKUPS || activeLookups >= MAX_LOOKUPS) throw new WebhookLookupBusyError('Webhook hostname lookup is busy; try again.');
+    activeByOrg.set(organizationId, active + 1);
+    activeLookups++;
+    try {
+      return await resolve(hostname, options);
+    } finally {
+      activeLookups--;
+      const remaining = (activeByOrg.get(organizationId) ?? 1) - 1;
+      if (remaining) activeByOrg.set(organizationId, remaining);
+      else activeByOrg.delete(organizationId);
+    }
+  };
+  return (await resolveWebhookDestination(raw, { allowHttp, lookup })).url.href;
 }

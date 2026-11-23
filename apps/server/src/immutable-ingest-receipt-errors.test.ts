@@ -18,6 +18,8 @@ vi.mock('@logbird/database', () => ({
   confirmIngestReceipts: fake.confirm,
   expireIngestReceipts: fake.expire,
   takeOverIngestReceipts: vi.fn(),
+  ingestReceiptClock: async () => new Date(),
+  withIngestReceiptGate: async (_id: string, _mode: string, work: (db: object) => Promise<unknown>) => work({}),
   INGEST_RECEIPT_WINDOW_MS: 600_000,
   prisma: { ingestReceipt: { deleteMany: fake.release } },
 }));
@@ -36,7 +38,7 @@ vi.mock('@logbird/clickhouse', () => ({
   existingEventIdentities: fake.lookup,
   insertEvents: fake.insert,
   normalizeEvent: vi.fn(),
-  resolveTimestamp: vi.fn(),
+  resolveTimestamp: (_value: unknown, timestamp: Date) => ({ timestamp, valid: false, problem: null }),
 }));
 vi.mock('@logbird/worker/ingest-recovery', () => ({ ingestRecoveryRetryAfter: fake.retryAfter }));
 vi.mock('./clickhouse', () => ({ clickhouse: {} }));

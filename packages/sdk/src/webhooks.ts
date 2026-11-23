@@ -23,6 +23,7 @@ export class WebhookVerificationError extends Error {
 }
 
 export interface SignWebhookOptions {
+  /** Exact webhook-id header value, including any Logbird encoding. */
   id: string;
   /** Integer Unix seconds, also sent as webhook-timestamp. */
   timestamp: number;
@@ -43,7 +44,7 @@ export type VerifyWebhookOptions = {
 } & ({ secret: string; secrets?: never } | { secret?: never; secrets: readonly string[] });
 
 /** Signatures checked per request: enough for any rotation overlap, bounded against a header stuffed with junk. */
-const MAX_SIGNATURES = 10;
+export const MAX_WEBHOOK_SIGNATURES = 10;
 const SIGNATURE_BYTES = 32;
 
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> | undefined {
@@ -98,6 +99,7 @@ function signedContent(id: string, timestamp: string | number, payload: string):
 export async function signWebhook({ id, timestamp, payload, secrets }: SignWebhookOptions): Promise<string> {
   if (!id || id.includes('.') || /[\r\n]/.test(id)) throw new TypeError('Webhook id must be nonempty and contain no dots or newlines.');
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) throw new RangeError('Webhook timestamp must be whole Unix seconds.');
+  if (secrets.length > MAX_WEBHOOK_SIGNATURES) throw new RangeError(`At most ${MAX_WEBHOOK_SIGNATURES} webhook signatures are supported.`);
   const message = signedContent(id, timestamp, payload);
   const signatures: string[] = [];
   for (const key of decodeSecrets(secrets)) {
@@ -117,7 +119,7 @@ function getHeader(headers: WebhookHeaders, name: string): string | undefined {
 
 /**
  * Authenticates the raw body, then parses it as JSON and returns it. The body is not validated against a schema; pass
- * the type you expect (for Logbird, the delivery shape documented in docs/webhooks.md).
+ * the type you expect. For Logbird, `webhook-id` is signed as received and the original event ID is in the body.
  */
 export async function verifyWebhook<T = unknown>(options: VerifyWebhookOptions): Promise<T> {
   const { payload, headers, toleranceSeconds = 300, now = Math.floor(Date.now() / 1000) } = options;
@@ -136,7 +138,7 @@ export async function verifyWebhook<T = unknown>(options: VerifyWebhookOptions):
 
   const candidates: Uint8Array[] = [];
   for (const entry of signatureHeader.split(/\s+/)) {
-    if (candidates.length === MAX_SIGNATURES) break;
+    if (candidates.length === MAX_WEBHOOK_SIGNATURES) break;
     if (!entry.startsWith('v1,')) continue;
     const signature = decodeBase64(entry.slice(3));
     if (signature?.length === SIGNATURE_BYTES) candidates.push(signature);

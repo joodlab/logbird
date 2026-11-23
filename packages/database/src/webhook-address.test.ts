@@ -7,9 +7,11 @@ const blockedV4 = [
   '10.0.0.1',
   '10.255.255.255',
   '100.64.0.0',
+  '100.100.100.200',
   '100.127.255.255',
   '127.0.0.1',
   '127.255.255.255',
+  '168.63.129.16',
   '169.254.0.1',
   '169.254.169.254',
   '172.16.0.0',
@@ -30,6 +32,7 @@ const blockedV4 = [
 it.each(blockedV4)('rejects special-use IPv4 %s and its mapped/NAT64 forms', (address) => {
   expect(isAllowedWebhookAddress(address)).toBe(false);
   expect(isAllowedWebhookAddress(`::ffff:${address}`)).toBe(false);
+  expect(isAllowedWebhookAddress(`::${address}`)).toBe(false);
   expect(isAllowedWebhookAddress(`64:ff9b::${address}`)).toBe(false);
 });
 it.each([
@@ -129,24 +132,20 @@ it('fails closed on mixed DNS answers, no answers and DNS failure', async () => 
     }),
   ).rejects.toBeInstanceOf(WebhookUrlError);
 });
-it('gives up on a lookup that never answers, and uses at most two lookups at once', async () => {
-  const never: { settle: () => void }[] = [];
-  const hanging = vi.fn(
-    () => new Promise<{ address: string; family: number }[]>((resolve) => never.push({ settle: () => resolve([{ address: '8.8.8.8', family: 4 }]) })),
-  );
-  const timedOut = { message: 'Webhook hostname lookup timed out; try again.' };
+it('reserves lookup capacity for other organizations when one holds its slots', async () => {
+  let complete!: (addresses: { address: string; family: number }[]) => void;
+  const blocked = new Promise<{ address: string; family: number }[]>((resolve) => {
+    complete = resolve;
+  });
+  const raw = 'https://receiver.example.test/';
+  const first = validateWebhookUrl(raw, false, () => blocked, 'org-a');
+  const second = validateWebhookUrl(raw, false, () => blocked, 'org-a');
   try {
-    // Two hung lookups take both slots and time out; a third waits for a slot, then times out without starting a lookup.
-    const attempts = await Promise.allSettled([1, 2, 3].map(() => validateWebhookUrl('https://receiver.example.test', false, hanging, 50)));
-    expect(attempts).toEqual([1, 2, 3].map(() => ({ status: 'rejected', reason: expect.objectContaining(timedOut) })));
-    expect(hanging).toHaveBeenCalledTimes(2);
-    // The slots stay taken until the hung lookups really end, because their pool threads are still busy.
-    await expect(validateWebhookUrl('https://receiver.example.test', false, publicLookup, 50)).rejects.toMatchObject(timedOut);
+    await expect(validateWebhookUrl(raw, false, () => blocked, 'org-a')).rejects.toMatchObject({ code: 'webhook_lookup_busy' });
+    await expect(validateWebhookUrl(raw, false, publicLookup, 'org-b')).resolves.toBe(raw);
   } finally {
-    // Settle even when an assertion failed, so the module-wide slots are free for later tests.
-    for (const lookup of never) lookup.settle();
+    complete([{ address: '8.8.8.8', family: 4 }]);
+    await Promise.all([first, second]);
   }
-  await vi.waitFor(async () =>
-    expect(await validateWebhookUrl('https://receiver.example.test/', false, publicLookup, 50)).toBe('https://receiver.example.test/'),
-  );
+  await expect(validateWebhookUrl(raw, false, publicLookup, 'org-a')).resolves.toBe(raw);
 });

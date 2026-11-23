@@ -514,14 +514,132 @@ stable `WEBHOOK_SECRET_KEY` or HKDF-SHA256 from `BETTER_AUTH_SECRET`. See
 [self-hosting](self-hosting.md#webhook-endpoint-settings) before rotating keys.
 
 Endpoint configuration includes URL, description, enabled state/disabled reason,
-Logbird `filterQuery`, and optional `{ tenantId?, target?: { type, id } }` scope.
+Logbird `filterQuery`, and optional `{ tenantId?, target?: { type, id }, mask? }` scope.
 PATCH scope replaces the whole scope (`null` clears it); absent fields preserve
 stored values. URLs require HTTPS unless `WEBHOOKS_ALLOW_HTTP=true`; every resolved
-address must be public unicast, and the save-time lookup gives up after 3 seconds.
-Rejections return 400 `webhook_url_not_allowed`. A scope needs a `tenantId` or a
-`target`; `{}` is rejected (use `null` for no scope).
-Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800; secrets already past their window are deleted then. This API
-stores configuration only; delivery, cursors and delivery logs arrive separately.
+address must be public unicast. Save-time DNS uses a cancellable c-ares resolver
+with a 3-second deadline and separate per-workspace capacity. Invalid destinations
+return 400 `webhook_url_not_allowed`. A lookup timeout or exhausted capacity
+returns 503 `webhook_lookup_busy` with `Retry-After: 3`. A scope needs a `tenantId`
+or a `target` and uses the same [stored-ID rules as scoped reads](security.md#scopes-name-stored-ids).
+An invalid legacy scope returns `scopeWarning: webhook_invalid_scope` and blocks discovery and delivery until corrected.
+Create and update reject filters on masked fields with HTTP 422 `invalid_query`.
+An existing enabled endpoint with an empty filter starts automatically at the delivery migration's UTC start time.
+Its first eligible delivery is the first matching event received at or after that millisecond. Events received before it are excluded.
+A new endpoint starts at its creation millisecond, inclusive. For endpoints created at or after rollout by the old API,
+the worker accepts a never-scanned cursor up to 60 seconds before creation and can deliver matching events received
+from that stored cursor, inclusive.
+
+An existing endpoint with a non-empty filter delivers nothing until an owner or admin confirms its filter in the console.
+It returns `filterWarning: webhook_filter_review_required` and keeps the rollout cursor while held.
+The worker sends one review notice per held endpoint to workspace owners and admins.
+An explicit `filterQuery` in PATCH confirms the filter, even when its text stays the same.
+Discovery then starts at rollout and queues each still-stored occurrence that matches the confirmed filter and current scope,
+including events received during the hold. Project event retention determines which occurrences remain available.
+The 30-day delivery log retention applies to delivery records and attempts, and the regular discovery limits govern catch-up speed.
+
+The worker reads ClickHouse in
+`(received_at, event_id)` order through the Logbird query compiler. The scope
+applies as an AND. A target must match both the type and ID on the same event
+target. The scan window ends at the earlier of:
+
+- The current database time minus the async-insert flush bound and a safety margin (15 seconds total).
+- The millisecond before the project's oldest unconfirmed ingest receipt.
+
+With webhook-delivery-aware writers, the worker queues for the receipt gate while writers assign their arrival
+clocks and register receipts. Unconfirmed receipts then fence the scan during ClickHouse writes. Stop previous-version
+API servers before starting the worker on the first
+[webhook delivery upgrade](self-hosting.md#webhook-delivery-on-upgrade). If the roles overlap, a stalled old
+identity lookup can leave an accepted, searchable event without a webhook delivery.
+Each discovery pass takes up to 32 eligible endpoints
+in order of oldest scan attempt, with never-attempted endpoints first and endpoint ID breaking ties. Blocked or failed
+attempts also update this order. Only recorded progress updates the cursor and its scan timestamp. Each query examines up to five minutes of
+receive time and reads up to 10,000 matching event positions, ordered by receive time and ID. Empty slices advance
+the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
+through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
+sorts by event time. On very large projects delivery can stall until the arrival-time index is present.
+A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
+Larger pages shorten that delay by requiring fewer ClickHouse queries to drain the import.
+The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an untrusted cursor, including a future
+position, an early position outside the tolerance or without evidence of progress, an event ID without a recorded scan,
+or a position beyond the allowed scan bound.
+The API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
+The worker commits at most 100 deliveries with their cursor position in each Postgres transaction. An interrupted page
+resumes after the last committed position. Deliveries are unique
+by endpoint, event ID, and stored receive time. If retention frees an event ID and it is used again,
+the new occurrence gets its own delivery even while the earlier delivery is retained. Disabled endpoints pause scanning and sending. On
+re-enable, scanning resumes from the saved cursor. Legacy scopes with
+`webhook_invalid_scope` also hold pending deliveries without consuming attempts.
+Correcting the scope resumes delivery and starts a fresh retry window for pending
+rows with prior attempts. The worker rechecks the current scope and filter before
+sending an event. If a stored event no longer matches, the delivery is `skipped`
+with `scope_mismatch` and does not count toward endpoint failure. A missing event
+finishes with `event_unavailable`.
+In webhook filters, `now` in a relative time is each event's arrival time (`received_at`), and `now/d` is the
+UTC start of the arrival day. Discovery and the send-time recheck therefore select the same events whenever and
+however often they run, including after a partial page or a worker outage. Webhook filter regexes are checked against RE2's
+syntax rather than JavaScript's: create and update reject a pattern RE2 rejects with HTTP 422 `invalid_query` and
+accept RE2 syntax such as `\Q…\E`. Explorer, search and export filters keep their existing check. When discovery meets a stored filter
+that can never run (a compile error, or ClickHouse error 427 `CANNOT_COMPILE_REGEXP`), it holds the endpoint at
+its cursor with `filterWarning: webhook_filter_invalid` and sends the filter-review notice. Timeouts, limits and
+network errors are retried and never hold a filter. A PATCH with a valid `filterQuery` resumes from the cursor.
+The PostgreSQL server clock must not step backwards; run a time service that slews it. After a backward step, an
+event admitted behind a committed cursor is stored and searchable but its webhook delivery can be missed until an
+operator [rewinds the cursor](self-hosting.md#rewind-a-webhook-cursor-after-a-missed-delivery).
+Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
+If settings change while the worker prepares a request, it discards the prepared request without counting an attempt.
+
+Each POST body is the public event shape returned in `/v1/events/:id`'s
+`event`. It is built from stored event columns, which preserve exact attribute
+text such as large numeric identifiers supplied as strings. The body excludes the original document and applies the
+[scoped-read field masks](scoped-read-access.md#masks) when configured, including on retry and resend.
+The worker signs the exact bytes with the Standard Webhooks headers
+`webhook-id`, `webhook-timestamp` (Unix seconds), and `webhook-signature`.
+New event deliveries use an opaque `lb1_`-prefixed header ID for the stored occurrence. A reused event ID
+gets a distinct header ID, and the original event ID stays in the JSON body. Test pings and deliveries queued
+before occurrence IDs use the original header form. A visible ASCII ID without a dot or the `lb1_` prefix is
+used directly. Other IDs in that form use `lb1_` followed by unpadded base64url of the UTF-8 ID.
+The SDK verifies the signature using the exact header value.
+
+Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800. Up to ten active secrets
+can contribute space-separated `v1,<base64>` signatures. A rotation above the limit returns 409
+`webhook_secret_overlap_limit`. Wait for an overlap to expire or rotate with zero overlap.
+A zero-overlap rotation deletes every earlier secret in the same transaction, so no clock change can make one sign again.
+An endpoint with more than ten active secrets from an earlier version returns
+`secretOverlapWarning: webhook_secret_overlap_limit` and signs with the ten newest active secrets.
+The worker logs the condition once per endpoint.
+Receivers use the stable `webhook-id` to deduplicate retries and resends, including when a worker cannot record the outcome of an accepted POST.
+
+Each send resolves the destination again, checks all addresses against the
+save-time policy, and pins one validated address for the socket while preserving
+the original TLS hostname. Redirects and HTTP upgrades count as failures. Connect and total
+deadlines are 5 and 10 seconds. The sender reads up to 64 KiB of the response
+and keeps the first 2 KiB of body in the attempt log. It sends
+`User-Agent: Logbird-Webhooks/<version>` and no console headers or cookies.
+
+Each endpoint has four concurrent sends by default and a limit of 50 attempts
+per second. A separate worker-wide cap defaults to 16 concurrent sends.
+2xx succeeds. Network failures and other responses retry with jitter at roughly
+5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h for up to 24 hours.
+Internal lookup failures, including deadlines reached before starting an HTTP request, are recorded as
+`lookup_failed` and retry within the same window without counting toward endpoint disablement.
+Once the window expires, the delivery is marked failed before another attempt can start.
+HTTP 410 disables immediately with `gone_410`. An endpoint also disables with
+`consecutive_failures` after 50 consecutive failed deliveries by default or
+24 hours of failures without a success. Auto-disable records `webhook.disabled`
+in workspace activity and queues email to owners and admins. Pending disable notices survive delivery-log
+pruning and retry until SMTP accepts them or the recipient loses eligibility.
+
+Owners and admins can use `POST .../webhooks/:id/test` to queue a
+`logbird.webhook.test` event with its own ID. Use
+`GET .../webhooks/:id/deliveries?status=&cursor=` to page delivery statuses
+and the five most recent retained attempts per delivery. `attemptCount` counts all attempts,
+including those outside the retention window. Use `POST .../webhooks/:id/deliveries/:deliveryId/resend` to give
+a completed delivery a new retry window. Both POSTs return 202 and require
+an enabled endpoint. Attempt logs include status, attempt number, latency,
+response code, and a body preview, with no response headers. The worker
+keeps completed attempt history for 30 days from the attempt. Delivery records expire 30 days
+after terminal settlement. Pending deliveries remain available while an endpoint is disabled.
 
 ### 5.1 Query language (`q`)
 
