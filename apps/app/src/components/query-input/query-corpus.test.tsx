@@ -13,7 +13,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseQueryExpression, type QueryAtom } from '@logbird/contracts';
+import { parseQueryExpression, type QueryAtom, quoteQueryValue } from '@logbird/contracts';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,6 +60,7 @@ vi.mock('@/lib/api/client', () => ({
   },
 }));
 
+import { coreField } from '@/lib/query-catalog';
 import { QueryInput } from './query-input';
 
 /* ---------------- the corpus ---------------- */
@@ -75,7 +76,12 @@ const SOURCES = [
   'apps/app/src/lib/query-lint.test.ts',
   'apps/app/src/lib/impersonation.test.ts',
 ];
-const unescapeLiteral = (s: string) => s.replace(/\\(.)/g, (_, c: string) => ({ n: '\n', r: '\r', t: '\t' })[c] ?? c);
+const unescapeLiteral = (s: string) =>
+  s.replace(/\\(u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|.)/g, (_, c: string) =>
+    /^[ux]/.test(c) && c.length > 1
+      ? String.fromCodePoint(Number.parseInt(c.replace(/^u\{?|^x|\}$/g, ''), 16))
+      : (({ n: '\n', r: '\r', t: '\t' } as Record<string, string>)[c] ?? c),
+  );
 const parses = (q: string) => {
   try {
     parseQueryExpression(q);
@@ -84,17 +90,41 @@ const parses = (q: string) => {
     return false;
   }
 };
-// What the tests' generated inputs (`${field}:x*`, `occurredAt:>now-1${unit}`) are generated over.
+// What the tests' generated inputs (`${field}:x*`, `${field}:${quoteQueryValue(value)}`, `occurredAt:>now-1${unit}`,
+// `${'('.repeat(16)}x…`) are generated over: the fields and values the server tests list, read from them below.
+const SERVER_TEST = readFileSync(resolve(ROOT, 'packages/clickhouse/src/query.test.ts'), 'utf8');
+const stringsIn = (text: string) => [...text.matchAll(/'((?:[^'\\\n]|\\.)*)'/g)].map((m) => unescapeLiteral(m[1] ?? ''));
+const LITERAL_VALUES = stringsIn(/const literalValues = \[([^\]]*)\]/.exec(SERVER_TEST)?.[1] ?? '');
+const FIELD_NAMES = [
+  ...new Set(stringsIn(SERVER_TEST).filter((f) => /^[a-z_][\w]*(\.[\w]+)*$/.test(f) && (coreField(f) || /^(attr|attributes|metadata)\./.test(f)))),
+];
 const PLACEHOLDERS: Record<string, string[]> = {
-  field: ['action', 'actor', 'tenant', 'impersonator', 'record', 'attr.plan'],
-  k: ['action', 'attr.plan'],
+  field: FIELD_NAMES,
+  k: FIELD_NAMES,
   unit: ['s', 'm', 'h', 'd', 'w'],
-  value: ['booked', 'a b'],
+  value: ['booked', 'a b', ...LITERAL_VALUES],
+  'quoteQueryValue(value)': [...LITERAL_VALUES, 'team*', 'a*b', 'a\\*'].map(quoteQueryValue),
 };
+/**
+ * The queries a test template generates. Each placeholder runs through all its values, the others cycling alongside
+ * (every field and every value appears, without the full product); `'('.repeat(16)` is evaluated.
+ */
 function expand(template: string): string[] {
-  const names = [...template.matchAll(/\$\{(\w+)\}/g)].map((m) => m[1] as string);
-  if (template.replace(/\$\{\w+\}/g, '').includes('${') || names.some((n) => !PLACEHOLDERS[n])) return [];
-  return names.reduce<string[]>((outs, name) => outs.flatMap((o) => (PLACEHOLDERS[name] ?? []).map((v) => o.replace(`\${${name}}`, v))), [template]);
+  const filled = template.replace(/\$\{'([^']*)'\.repeat\((\d+)\)\}/g, (_, text: string, n: string) => text.repeat(Number(n)));
+  const names = [...filled.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1] as string);
+  if (names.some((n) => !PLACEHOLDERS[n])) return [];
+  if (!names.length) return [filled];
+  const longest = Math.max(...names.map((n) => PLACEHOLDERS[n]?.length ?? 0));
+  return Array.from({ length: longest }, (_, i) =>
+    names.reduce(
+      (out, n) =>
+        out.replace(`\${${n}}`, () => {
+          const values = PLACEHOLDERS[n] ?? [];
+          return values[i % values.length] ?? '';
+        }),
+      filled,
+    ),
+  );
 }
 const literals = [
   ...new Set(
@@ -123,6 +153,9 @@ const REVIEWED = [
   '(((x)))',
   'act',
   'action=booked',
+  'one OR',
+  'one AND',
+  '((action:"b"-tenant:west))',
 ];
 // Every literal the parser accepts (free text, KQL-looking text and bare prefixes included), without control characters
 // (a textarea has its own rules for those).
@@ -238,7 +271,19 @@ afterAll(() => {
 
 it('has a real corpus, generated server inputs and the reviewed cases included', () => {
   expect(valid.length).toBeGreaterThan(900);
-  for (const q of ['occurredAt:>now-1w', 'NOT _exists_:actor', 'one AND two', 'action:"b"-tenant:west']) expect(valid).toContain(q);
+  for (const q of [
+    'occurredAt:>now-1w',
+    'NOT _exists_:actor',
+    '-target.type:x*',
+    'NOT _exists_:attr.metadata.plan',
+    `${'('.repeat(16)}x${')'.repeat(16)}`,
+    'one AND two',
+    'action:"b"-tenant:west',
+  ])
+    expect(valid).toContain(q);
+  // Every value the server tests quote reaches the corpus with a field (`…:"🦜"`).
+  for (const value of LITERAL_VALUES.filter((v) => ![...v].some((c) => c.charCodeAt(0) < 0x20)))
+    expect(valid.some((q) => q.endsWith(`:${quoteQueryValue(value)}`))).toBe(true);
 });
 
 /**
@@ -262,20 +307,20 @@ function boundaries(q: string): number[] {
  */
 function editable(q: string, caret: number, from: number, to: number, fix: boolean): boolean {
   const all = leaves(q) ?? [];
-  let lo = caret;
-  let hi = caret;
   // A term starts at its NOT sign (`-_exists_:tenant`).
   const start = (leaf: Leaf) => (/[-!]/.test(q[leaf.start - 1] ?? '') ? leaf.start - 1 : leaf.start);
   const touches = (leaf: Leaf) => start(leaf) <= caret && leaf.end >= caret;
-  for (const { leaf } of all) {
-    if (touches(leaf)) {
-      lo = Math.min(lo, start(leaf));
-      hi = Math.max(hi, leaf.end);
-    }
-  }
-  while (lo > 0 && /\s/.test(q[lo - 1] ?? '')) lo -= 1;
-  while (hi < q.length && /\s/.test(q[hi] ?? '')) hi += 1;
-  if (from >= lo && to <= hi) return true;
+  const widen = (from0: number, to0: number): [number, number] => {
+    let lo = from0;
+    let hi = to0;
+    while (lo > 0 && /\s/.test(q[lo - 1] ?? '')) lo -= 1;
+    while (hi < q.length && /\s/.test(q[hi] ?? '')) hi += 1;
+    return [lo, hi];
+  };
+  // One term touching the caret (with the spaces around it), or the gap at the caret: at a boundary two terms share
+  // (`action:"b"|-tenant:west`), a row may change either, never both.
+  const regions = [widen(caret, caret), ...all.filter(({ leaf }) => touches(leaf)).map(({ leaf }) => widen(start(leaf), leaf.end))];
+  if (regions.some(([lo, hi]) => from >= lo && to <= hi)) return true;
   return fix && all.every(({ leaf }) => !(leaf.start < to && leaf.end > from) || leaf.kind === 'text' || touches(leaf));
 }
 
@@ -318,19 +363,41 @@ function withinRules(q: string, caret: number, row: Row, result: string, resultC
   return outside(done, row.from, end, structural) === outside(q, row.from, row.to, structural) ? null : 'another term changed';
 }
 
-const MAX_ROWS = 8;
+/**
+ * What a row does, for trying each kind once: key and value rows that differ only in a name (`action:` and `actor:`,
+ * `booked` and `west`) do the same to their neighbours; every operator, snippet, fix and odd name is its own.
+ */
+const rowShape = (o: HTMLElement) => {
+  const kind = o.dataset.kind ?? '';
+  const insert = o.dataset.insert ?? '';
+  const named = kind === 'key' || kind === 'value' || kind === 'term' || kind === 'attr';
+  return `${kind}|${o.dataset.from}|${o.dataset.to}|${named ? insert.replace(/[A-Za-z0-9_]+/g, 'w') : insert}|${o.dataset.keepOpen ?? '-'}`;
+};
 
 it('every row accepted at any term boundary changes only its own term, and the query still parses', async () => {
   const broken: string[] = [];
   let accepted = 0;
   for (const q of ['', '  ', ...valid]) {
     for (const b of boundaries(q)) {
-      for (let r = 0; r < MAX_ROWS; r++) {
+      setValue(q, b);
+      key(' ', { ctrlKey: true });
+      await flush();
+      const seen = new Set<string>();
+      const tries: { i: number; shape: string }[] = [];
+      for (const [i, o] of options().entries()) {
+        if (seen.has(rowShape(o))) continue;
+        seen.add(rowShape(o));
+        tries.push({ i, shape: rowShape(o) });
+      }
+      for (const { i: r, shape } of tries) {
         setValue(q, b);
         key(' ', { ctrlKey: true });
         await flush();
         const option = options()[r];
-        if (!option) break;
+        if (!option || rowShape(option) !== shape) {
+          broken.push(`${JSON.stringify(q)} @${b}: the rows changed between two openings`);
+          break;
+        }
         const row: Row = {
           from: Number(option.dataset.from),
           to: Number(option.dataset.to),
@@ -361,7 +428,7 @@ it('every row accepted at any term boundary changes only its own term, and the q
     }
   }
   expect(broken).toEqual([]);
-  expect(accepted).toBeGreaterThan(5000);
+  expect(accepted).toBeGreaterThan(15_000);
 }, 1_800_000);
 
 // After the boundary phase: running each query adds it to the recent queries, whose rows replace the whole query by design.

@@ -512,6 +512,12 @@ describe('neighbourSafeInsert (accepting a completion changes only its own term)
     expect(neighbourSafeInsert('action:"b"-tenant:west attempt:[', 7, 10, 'booked ', 7, true)).toBe('"booked"');
   });
 
+  it('checks the neighbours inside groups still open, and declines what it cannot check', () => {
+    // `((action:"b"-tenant:west` closes with `))`: unquoted, `booked` would turn the field `-tenant` into NOT tenant.
+    expect(neighbourSafeInsert('((action:"b"-tenant:west', 9, 12, 'booked ', 7, true)).toBe('"booked"');
+    expect(neighbourSafeInsert('one OR', 6, 6, 'actor:', 6)).toBe(' actor:');
+  });
+
   it('refuses a key that would take the next term as its value', () => {
     expect(neighbourSafeInsert('action:booked', 0, 0, 'outcome:', 8)).toBeNull();
     expect(neighbourSafeInsert('fixed in #290', 6, 8, 'impersonator:', 13)).toBeNull();

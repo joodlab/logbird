@@ -8,18 +8,19 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 vi.mock(import('@tanstack/react-router'), async (original) => ({ ...(await original()), useNavigate: () => vi.fn() }));
 
 const { fixture } = vi.hoisted(() => {
-  let release: () => void = () => undefined;
-  return {
-    fixture: {
-      // The project's field names arrive only when a test releases them.
-      fieldsArrive: new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-      release: () => release(),
-      fields: [{ key: 'attr.plan', kind: 'attribute', coverage: 0.4, distinctApprox: 1, samples: ['pro'], lastSeen: null }],
-      values: { action: ['booked', 'booking.created'], actor: ['amy'] } as Record<string, string[]>,
+  const fixture = {
+    // The project's field names arrive only when a test releases them (a new gate for each test).
+    fieldsArrive: Promise.resolve(),
+    release: (() => undefined) as () => void,
+    gate() {
+      fixture.fieldsArrive = new Promise<void>((resolve) => {
+        fixture.release = resolve;
+      });
     },
+    fields: [] as { key: string; kind: string; coverage: number; distinctApprox: number; samples: string[]; lastSeen: null }[],
+    values: { action: ['booked', 'booking.created'], actor: ['amy'] } as Record<string, string[]>,
   };
+  return { fixture };
 });
 
 vi.mock('@/lib/api/client', () => ({
@@ -42,6 +43,16 @@ import { QueryInput } from './query-input';
 
 let root: Root;
 let host: HTMLDivElement;
+let client: QueryClient;
+/** The bar showing `value`, the query that ran (from the URL, say). */
+const render = (value: string) =>
+  act(() =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <QueryInput lang="query" onSubmit={submit} projectId="qa-keys" range="24h" value={value} />
+      </QueryClientProvider>,
+    ),
+  );
 const submit = vi.fn();
 const textarea = () => host.querySelector('textarea') as HTMLTextAreaElement;
 const flush = async () => {
@@ -69,14 +80,10 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   submit.mockClear();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  act(() =>
-    root.render(
-      <QueryClientProvider client={client}>
-        <QueryInput lang="query" onSubmit={submit} projectId="qa-keys" range="24h" value="" />
-      </QueryClientProvider>,
-    ),
-  );
+  fixture.gate();
+  fixture.fields = [{ key: 'attr.plan', kind: 'attribute', coverage: 0.4, distinctApprox: 1, samples: ['pro'], lastSeen: null }];
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render('');
 });
 
 afterEach(() => {
@@ -140,4 +147,38 @@ it('right after a closed value group offers OR and AND, and an operator goes aft
   act(() => dash?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })));
   // `action:(booked)-tenant:west` would read `-tenant` as a field name; after a space the dash is a NOT.
   expect(textarea().value).toBe('action:(booked) -');
+});
+
+it('a row chosen with the arrows stops being chosen when the rows change under it', async () => {
+  // Coverage for core fields reorders the key rows without changing how many there are.
+  fixture.fields = ['actor', 'action'].map((key) => ({ key, kind: 'core', coverage: 1, distinctApprox: 9, samples: [], lastSeen: null }));
+  type(' ');
+  await flush();
+  press('ArrowDown');
+  const chosen = options()[1]?.dataset.insert;
+  fixture.release();
+  await flush();
+  await flush();
+  expect(options()[1]?.dataset.insert).not.toBe(chosen);
+  press('Enter');
+  expect(submit).toHaveBeenLastCalledWith(' ', 'query');
+  expect(textarea().value).toBe(' ');
+});
+
+it('right after a finished operator a key starts a new term, after a space, and keeps the operator', async () => {
+  type('one OR');
+  await flush();
+  // No second operator is offered right after one.
+  expect(options().map((o) => o.dataset.insert?.trim())).not.toContain('OR');
+  press('ArrowRight');
+  expect(textarea().value).toMatch(/^one OR \S/);
+});
+
+it('a KQL-looking search that ran from a link shows its offer at once, and one Alt+Enter applies it', async () => {
+  render('action=booked');
+  await flush();
+  expect(host.querySelector('[data-testid="query-conversion"]')?.textContent).toContain('action:booked');
+  press('Enter', { altKey: true });
+  expect(submit).toHaveBeenCalledTimes(1);
+  expect(submit).toHaveBeenLastCalledWith('action:booked', 'query');
 });
