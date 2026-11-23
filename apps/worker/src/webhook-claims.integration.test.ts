@@ -18,7 +18,7 @@ import { deliverWebhooks } from './webhook-delivery';
 
 const ch = createClickHouseClient();
 const runId = randomUUID();
-const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11', 'p12', 'p13', 'p14', 'p15'].map(
+const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11', 'p12', 'p13', 'p14', 'p15', 'p16', 'p17', 'p18'].map(
   (name) => `qa-webhook-claims-${name}-${runId}`,
 );
 const secretKey = Buffer.alloc(32, 9);
@@ -407,16 +407,44 @@ function seeded(seed: number) {
 // (comma-separate several seeds). A failure names its seed.
 const FAIRNESS_SEEDS = process.env.WEBHOOK_FAIRNESS_SEEDS?.split(',').map(Number) ?? Array.from({ length: 32 }, (_, index) => 1000 + index);
 
+// Hold endpoint rows locked from an open transaction, as an endpoint edit would, until released.
+async function holdLockedEndpoints(ids: string[]) {
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((done) => {
+    release = done;
+  });
+  let ready: () => void = () => undefined;
+  const holding = new Promise<void>((done) => {
+    ready = done;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ANY(${ids}::text[]) FOR UPDATE`;
+      ready();
+      await released;
+    },
+    { timeout: 120_000, maxWait: 5000 },
+  );
+  await holding;
+  return async () => {
+    release();
+    await holder;
+  };
+}
+
 it('claims every project within ceil(P / N) passes and each delivery within r * ceil(P / N) passes across seeded layouts', {
-  timeout: 600_000,
+  timeout: 900_000,
 }, async () => {
-  const perEndpoint = 2;
+  // The r * ceil(P / N) bound is asserted for each project's first RANKS claimable rows, which keeps the pass count bounded.
+  const RANKS = 4;
   for (const seed of FAIRNESS_SEEDS) {
     const random = seeded(seed);
     const pick = (low: number, high: number) => low + Math.floor(random() * (high - low + 1));
     const ids = Array.from({ length: pick(2, 4) }, (_, index) => `qa-webhook-fair-${runId}-${seed}-${index}`);
     const slots = pick(1, 3);
-    let unlock: () => Promise<void> = async () => undefined;
+    const perEndpoint = pick(1, 2);
+    let unlockRows: () => Promise<void> = async () => undefined;
+    let unlockEndpoint: () => Promise<void> = async () => undefined;
     try {
       for (const id of ids) {
         await prisma.organization.create({ data: { id, name: id, slug: id, createdAt: new Date() } });
@@ -426,53 +454,76 @@ it('claims every project within ceil(P / N) passes and each delivery within r * 
       type Row = { id: string; eventId: string; project: string; endpointId: string; due: Date };
       const rows: Row[] = [];
       const endpoints: { id: string; project: string }[] = [];
-      for (const project of ids) {
+      for (const project of ids)
         for (let e = pick(1, 3); e > 0; e--) {
           const hook = await endpoint(project, `fair-${seed}-${endpoints.length}`);
           endpoints.push({ id: hook.id, project });
-          for (let r = pick(1, 3); r > 0; r--) {
-            const due = new Date(+now - 600_000 + pick(0, 500_000));
-            const row = await ping(hook.id, `fair-${seed}-${rows.length}`, due);
-            rows.push({ id: row.id, eventId: row.eventId, project, endpointId: hook.id, due });
-          }
         }
-      }
       // One endpoint with an invalid stored scope (a legacy tenant with surrounding whitespace), not yet flagged.
       const invalid = endpoints[pick(0, endpoints.length - 1)];
       if (!invalid) throw new Error('No endpoint');
       await prisma.webhookEndpoint.update({ where: { id: invalid.id }, data: { scopeTenantId: ' qa-invalid ' } });
-      const locked = rows.filter(() => random() < 0.3);
-      if (locked.length) unlock = await holdLocked(locked.map(({ id }) => id));
+      const valid = endpoints.filter(({ id }) => id !== invalid.id);
+      // Deep locked prefix: more locked rows on one endpoint than a claim scans in one go, then one unlocked row.
+      const deep = random() < 0.6 ? valid[pick(0, valid.length - 1)] : undefined;
+      // Allowance pressure: a deep unlocked backlog on one endpoint.
+      const backlog = random() < 0.5 ? valid[pick(0, valid.length - 1)] : undefined;
+      const locked: Row[] = [];
+      const addRow = async (hook: { id: string; project: string }, due: Date) => {
+        const row = await ping(hook.id, `fair-${seed}-${rows.length}`, due);
+        const entry = { id: row.id, eventId: row.eventId, project: hook.project, endpointId: hook.id, due };
+        rows.push(entry);
+        return entry;
+      };
+      for (const hook of endpoints) {
+        if (hook === deep) {
+          const count = pick(33, 36);
+          for (let r = 0; r < count; r++) {
+            const entry = await addRow(hook, new Date(+now - 600_000 + r));
+            if (r < count - 1) locked.push(entry);
+          }
+          continue;
+        }
+        const count = hook === backlog ? pick(8, 12) : pick(1, 3);
+        for (let r = 0; r < count; r++) {
+          const entry = await addRow(hook, new Date(+now - 600_000 + pick(0, 500_000)));
+          if (hook !== backlog && random() < 0.3) locked.push(entry);
+        }
+      }
+      if (locked.length) unlockRows = await holdLocked(locked.map(({ id }) => id));
+      // The invalid-scope endpoint's own row is held locked in some layouts.
+      const invalidLocked = random() < 0.5;
+      if (invalidLocked) unlockEndpoint = await holdLockedEndpoints([invalid.id]);
       const claimable = rows
         .filter((row) => row.endpointId !== invalid.id && !locked.includes(row))
         .sort((a, b) => +a.due - +b.due || a.id.localeCompare(b.id));
       // The first project keeps getting newer work between passes, on an endpoint that can take it.
-      const busy = endpoints.find(({ project, id }) => project === ids[0] && id !== invalid.id);
+      const busy = valid.find(({ project, id }) => project === ids[0] && id !== deep?.id);
       const competing = new Set([...claimable.map(({ project }) => project), ...(busy ? [busy.project] : [])]);
       const bound = Math.ceil(competing.size / slots);
       const rank = new Map<string, number>();
       for (const project of competing)
         for (const [index, row] of claimable.filter((candidate) => candidate.project === project).entries()) rank.set(row.id, index + 1);
-      const maxPasses = Math.max(1, ...[...rank.values()].map((r) => r * bound));
+      const maxPasses = RANKS * bound;
       const sentAt = new Map<string, number>();
       const sentCount = (eventId: string) => received.filter(({ id }) => id === eventId).length;
       const record = (pass: number) => {
         for (const row of rows) if (!sentAt.has(row.id) && sentCount(row.eventId)) sentAt.set(row.id, pass);
       };
-      for (let pass = 1; pass <= maxPasses; pass++) {
-        if (busy) await ping(busy.id, `fair-${seed}-newer-${pass}`, (await webhookCursorClock(prisma)).now);
-        await deliverWebhooks(ch, { ...options(), concurrency: slots, perEndpoint }, ids);
-        record(pass);
+      const pass = async () => deliverWebhooks(ch, { ...options(), concurrency: slots, perEndpoint }, ids);
+      for (let n = 1; n <= maxPasses; n++) {
+        if (busy) await ping(busy.id, `fair-${seed}-newer-${n}`, (await webhookCursorClock(prisma)).now);
+        const started = performance.now();
+        await pass();
+        // No pass waits on a locked row or endpoint.
+        expect(performance.now() - started, `seed ${seed}: pass ${n} duration`).toBeLessThan(5000);
+        record(n);
       }
-      // A few more passes, without new work, so the invalid endpoint is reached if it holds an unlocked row.
-      for (let pass = maxPasses + 1; pass <= maxPasses + 6; pass++) {
-        await deliverWebhooks(ch, { ...options(), concurrency: slots, perEndpoint }, ids);
-        record(pass);
-      }
-      const layout = `P=${competing.size} N=${slots} A=${perEndpoint} bound=${bound} rows=${rows.length} locked=${locked.length}`;
+      const layout = `P=${competing.size} N=${slots} A=${perEndpoint} bound=${bound} rows=${rows.length} locked=${locked.length} deep=${!!deep} backlog=${!!backlog} invalidLocked=${invalidLocked}`;
       for (const row of claimable) {
-        const limit = (rank.get(row.id) ?? 1) * bound;
-        expect(sentAt.get(row.id), `${layout}: ${row.eventId} (rank ${rank.get(row.id)}) within ${limit} passes`).toBeLessThanOrEqual(limit);
+        const r = rank.get(row.id) ?? 1;
+        if (r > RANKS) continue;
+        expect(sentAt.get(row.id), `${layout}: ${row.eventId} (rank ${r}) within ${r * bound} passes`).toBeLessThanOrEqual(r * bound);
       }
       for (const project of new Set(claimable.map(({ project }) => project))) {
         const first = Math.min(...rows.filter((row) => row.project === project).map((row) => sentAt.get(row.id) ?? Number.POSITIVE_INFINITY));
@@ -484,17 +535,23 @@ it('claims every project within ceil(P / N) passes and each delivery within r * 
       }
       for (const row of rows) expect(sentCount(row.eventId), `${layout}: ${row.eventId} sent at most once`).toBeLessThanOrEqual(1);
       const invalidRows = rows.filter((row) => row.endpointId === invalid.id);
-      const wasted = await prisma.webhookAttempt.count({ where: { delivery: { endpointId: invalid.id } } });
-      expect(wasted, `${layout}: slots spent on the invalid-scope endpoint`).toBeLessThanOrEqual(1);
       for (const row of invalidRows) expect(sentCount(row.eventId)).toBe(0);
-      if (invalidRows.some((row) => !locked.includes(row)))
+      expect(await prisma.webhookAttempt.count({ where: { delivery: { endpointId: invalid.id } } }), `${layout}: slots spent on invalid scope`).toBe(
+        0,
+      );
+      // Once nothing holds the endpoint row, a pass records the scope hold.
+      await unlockEndpoint();
+      unlockEndpoint = async () => undefined;
+      await pass();
+      if (invalidRows.length)
         expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: invalid.id } }), `${layout}: invalid scope held`).toMatchObject({
           scopeReviewRequired: true,
         });
     } catch (error) {
       throw new Error(`Fairness seed ${seed} failed (replay: WEBHOOK_FAIRNESS_SEEDS=${seed}): ${error instanceof Error ? error.message : error}`);
     } finally {
-      await unlock();
+      await unlockEndpoint();
+      await unlockRows();
       await prisma.organization.deleteMany({ where: { id: { in: ids } } });
     }
   }
@@ -582,4 +639,44 @@ it("removes a project's claim rotation row when the project is deleted", async (
   await prisma.project.delete({ where: { id } });
   expect(await prisma.webhookClaimRotation.findUnique({ where: { projectId: id } })).toBeNull();
   await prisma.organization.deleteMany({ where: { id } });
+});
+
+it('claims the first unlocked row behind more locked rows than a claim scans at once, on the first pass', { timeout: 60_000 }, async () => {
+  const [, , , , , , , , , , , , , , , deepProject = '', other = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const deepHook = await endpoint(deepProject, 'deep-prefix');
+  const prefix: { id: string; eventId: string }[] = [];
+  for (let index = 0; index < 32; index++) prefix.push(await ping(deepHook.id, `deep-prefix-${index}`, new Date(+now - 300_000 + index)));
+  const thirtyThird = await ping(deepHook.id, 'deep-prefix-33rd', new Date(+now - 300_000 + 32));
+  const otherHook = await endpoint(other, 'deep-other');
+  await ping(otherHook.id, 'deep-other-0', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const unlock = await holdLocked(prefix.map(({ id }) => id));
+  try {
+    // The other project also keeps receiving newer work.
+    await ping(otherHook.id, 'deep-other-newer', (await webhookCursorClock(prisma)).now);
+    await deliverWebhooks(ch, { ...options(), concurrency: 2 }, [deepProject, other]);
+    expect(sent(thirtyThird.eventId)).toBe(1);
+    for (const row of prefix) expect(sent(row.eventId)).toBe(0);
+  } finally {
+    await unlock();
+  }
+});
+
+it('fills every slot from endpoints with room when two endpoints have deep older backlogs', { timeout: 60_000 }, async () => {
+  const [, , , , , , , , , , , , , , , , , project = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const hooks = await Promise.all(['fill-a', 'fill-b', 'fill-c', 'fill-d'].map((name) => endpoint(project, name)));
+  const [a, b, c, d] = hooks;
+  if (!a || !b || !c || !d) throw new Error('Missing endpoint');
+  const mine: string[] = [];
+  for (let index = 0; index < 20; index++)
+    for (const hook of [a, b]) mine.push((await ping(hook.id, `fill-${hook.id}-${index}`, new Date(+now - 600_000 + index))).eventId);
+  for (let index = 0; index < 3; index++)
+    for (const hook of [c, d]) mine.push((await ping(hook.id, `fill-${hook.id}-${index}`, new Date(+now - 60_000 + index))).eventId);
+  // Eight slots and two leases per endpoint: every endpoint has room for two, so one pass fills all eight.
+  await deliverWebhooks(ch, { ...options(), concurrency: 8, perEndpoint: 2 }, project);
+  expect(received.filter(({ id }) => mine.includes(id))).toHaveLength(8);
+  for (const hook of hooks)
+    expect(received.filter(({ path, id }) => path.endsWith(hook.url.split('/').pop() ?? '') && mine.includes(id))).toHaveLength(2);
 });
