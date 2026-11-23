@@ -61,6 +61,25 @@ proxy in front of a real Logbird.
   The raw-row counts send `final=0`. The self-test insert sends `optimize_on_insert=0`, `async_insert=0` and
   `insert_deduplicate=0`.
 
+**What the read-back proves, and what it cannot.**
+- **It proves:**
+  - every event the server acknowledged to the client is stored and readable by its id under the run's tag (the run
+    waits up to five minutes for indexing);
+  - no event id has more than one raw row at the time of the count;
+  - every stored event of the run is one the harness tracked.
+
+  With the accounting above, that shows the SDK's retries, resends after a lost answer and partial resends did not make
+  the server store an id twice.
+- **It cannot show:**
+  - an event stored twice under two different ids. Only "nothing is stored that was not tracked" covers that, and only
+    for events that still carry the run's tag, which the server copies from the payload; the harness gives every event
+    its own id, so the SDK cannot re-key a retry without that check failing;
+  - duplicates a background merge collapsed before the count, so a pass is evidence, not proof;
+  - a stored event whose content differs from what was sent, because it compares ids, not payloads (the stand-in's
+    first-arrival fingerprint covers changed retries on the wire, not what the server keeps);
+  - events stored without the run's tag, which would appear as missing rather than as strangers;
+  - durability across a server restart, which the run does not perform.
+
 Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse, with no user
 info, query or fragment, and its HTTP clients never follow a redirect, so keys never leave the machine and a production
 host is refused. Everything else comes from the environment:
