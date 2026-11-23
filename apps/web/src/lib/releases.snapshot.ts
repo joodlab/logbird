@@ -7,6 +7,15 @@ import type { Release } from './releases';
  */
 export const snapshotReleases: Release[] = [
   {
+    version: '0.2.1',
+    date: '2026-11-22',
+    highlights: [
+      'Jump to (Ctrl K) finds an entity by its id: the exact id leads the list, a record is found by its bare id (`article_27_2` for `article:article_27_2`), and "Search events for" runs the id query instead of free text.',
+      'For a recognized entity ID entered as a single free-text term, the explorer\'s empty state offers the ID query. Otherwise, it offers "Search all time" when the all-time check finds matches outside the selected range.',
+      'The console forwards `/pricing` and `/use-cases` to the marketing site when one is configured.',
+    ],
+  },
+  {
     version: '0.2.0',
     date: '2026-11-22',
     highlights: [

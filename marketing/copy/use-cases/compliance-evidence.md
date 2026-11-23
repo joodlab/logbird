@@ -25,6 +25,8 @@ The landing page's evidence section links here.
 - **Near the export digest:** no "integrity", "tamper", "proof" or "certified". The digest sentence says what a match shows (the file is the one Logbird produced for that export) and what it doesn't (who saved it, when, or that the events were never changed before the export).
 - **Units:** the change limit names its unit and source, "up to 256 changes per event".
 - **Retention:** lowering retention "starts right away", not "immediate". `docs/SPEC.md` §1 says "immediately purges" and §4 says the worker "runs immediately after retention decreases"; the removal itself takes time on a large table.
+- **One source for two limits:** the retention-shortening limit and the "what a match shows" sentence live in
+  `apps/web/src/content/evidence-limits.ts`; this page and the landing evidence table both render them, and a test checks it.
 - **Gated:** the read API export (`/v1/export`) belongs to the scoped-read work and stays off this page until that gate opens. The steps use the console.
 
 ## Proof

@@ -3,8 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { parseAst } from 'vite';
 import { describe, expect, it } from 'vitest';
 import { renderPages } from '../test/render-pages';
+import { evidenceLimits } from './evidence-limits';
 import { homeContent, homeMetaFor } from './home';
 import { SITE, type SiteState } from './site';
+import { complianceEvidenceContent } from './use-cases/compliance-evidence';
 
 /**
  * Pages render the typed content modules in this folder, so each claim has one source (#250). A file that has moved holds
@@ -21,6 +23,8 @@ const MOVED = [
   'routes/pricing.tsx',
   'components/marketing/use-case.tsx',
   'routes/use-cases.compliance-evidence.tsx',
+  'routes/use-cases.customer-audit-logs.tsx',
+  'routes/use-cases.support-investigations.tsx',
   'components/marketing/self-host-cta.tsx',
   'components/marketing/steps.tsx',
 ];
@@ -308,4 +312,28 @@ describe('content modules', () => {
       expect(text, where).not.toMatch(/on the roadmap|within seconds|tamper|immutable|certified|verify integrity/i);
     }
   }, 120_000);
+});
+
+describe('evidence limits', () => {
+  it('the landing evidence table and the compliance page render the same retention and export limits', async () => {
+    const home = homeContent(SITE).evidence.rows;
+    expect(home[1]?.limit).toBe(evidenceLimits.shortenRetention);
+    expect(home[2]?.limit).toBe(evidenceLimits.exportMatch);
+    const sections = complianceEvidenceContent(SITE).sections;
+    expect(sections.find((section) => section.id === 'retention')?.limits?.rows[1]?.limit).toBe(evidenceLimits.shortenRetention);
+    expect(sections.find((section) => section.id === 'export')?.limit?.text).toBe(evidenceLimits.exportMatch);
+
+    // Both pages show both sentences, and no page says the deletion starts "immediately" (maintainer rule).
+    const pages = await renderPages(['/', '/use-cases/compliance-evidence', '/security']);
+    for (const { path, html } of pages) {
+      const text = html
+        .replace(/<[^>]+>/g, '')
+        .replaceAll('&#x27;', "'")
+        .replaceAll('&quot;', '"');
+      expect(text, path).not.toMatch(/starts immediately/i);
+      if (path === '/security') continue;
+      expect(text, path).toContain(evidenceLimits.shortenRetention);
+      expect(text, path).toContain(evidenceLimits.exportMatch);
+    }
+  }, 60_000);
 });

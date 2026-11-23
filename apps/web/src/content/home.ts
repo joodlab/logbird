@@ -1,4 +1,5 @@
 import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
+import { evidenceLimits } from './evidence-limits';
 import { sharedContent } from './shared';
 import { byCloud, byRepo, type Cta, type Item, type Marked, SITE, type SiteState } from './site';
 
@@ -157,7 +158,7 @@ export function homeContent(site: SiteState) {
         caption:
           "A customer account's page in the console: its events, activity, outcomes, top actions and the people, workers and records involved.",
       },
-      cta: { label: 'Read the integration guide', to: '/developers', hash: 'integrations' } satisfies Cta,
+      cta: { label: 'How to show customers their history', to: '/use-cases/customer-audit-logs' } satisfies Cta,
     },
     evidence: {
       eyebrow: 'Compliance evidence',
@@ -172,14 +173,12 @@ export function homeContent(site: SiteState) {
         },
         {
           promise: 'Retention per project, from 7 days to 10 years. Expired events are permanently deleted every hour.',
-          limit:
-            'An owner or admin can shorten retention, and the deletion then starts immediately and is final. There is no retention lock or legal hold yet.',
+          limit: evidenceLimits.shortenRetention,
         },
         {
           promise:
             'The evidence export (`jsonl-evidence`) carries every matching event with its original payload. When the export completes, its record keeps the filter, the fixed query clock, the SHA-256, the size and the row count, so a file can be matched to its record.',
-          limit:
-            "Matching the SHA-256 and size establishes that the file matches Logbird's output; it does not establish who saved it or when it reached a client's disk.",
+          limit: evidenceLimits.exportMatch,
         },
         {
           promise:
@@ -210,7 +209,7 @@ export function homeContent(site: SiteState) {
           body: 'The events that share an operation id, from the request to the jobs it spawned, as one tree.',
         },
       } satisfies Record<string, Item>,
-      cta: { label: 'Take the product tour', to: '/product' } satisfies Cta,
+      cta: { label: 'How support investigates an account', to: '/use-cases/support-investigations' } satisfies Cta,
     },
     developers: {
       eyebrow: 'For developers',

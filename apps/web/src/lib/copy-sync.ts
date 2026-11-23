@@ -29,6 +29,8 @@ export const NOT_CHECKED: Record<string, string> = {
   'home.md': 'a brief: the page renders apps/web/src/content/home.ts, and content-modules.test.ts guards the route file',
   'pricing.md': 'a brief: the page renders apps/web/src/content/pricing.ts; pricing.test.ts and content-modules.test.ts guard it',
   'use-cases/compliance-evidence.md': 'a brief: the page renders apps/web/src/content/use-cases/compliance-evidence.ts',
+  'use-cases/customer-audit-logs.md': 'a brief: the page renders apps/web/src/content/use-cases/customer-audit-logs.ts',
+  'use-cases/support-investigations.md': 'a brief: the page renders apps/web/src/content/use-cases/support-investigations.ts',
 };
 
 const releaseDate = (iso: string) => {

@@ -25,9 +25,10 @@ public enum DropReason
     Invalid = 5,
 
     /// <summary>
-    /// An entity identifier cannot be stored exactly as sent (<c>invalid_entity_id</c>): an actor, impersonator,
-    /// executor or tenant id or a target id longer than 256 UTF-16 code units, a target type longer than 64, a lone
-    /// surrogate, or more than 256 targets. Checked before sending, with the same rule as the server.
+    /// The SDK refused an entity identifier before sending (<c>invalid_entity_id</c>), and the event is not sent: an
+    /// actor, impersonator, executor or tenant id or a target id longer than 256 UTF-16 code units, a target type longer
+    /// than 64, a lone surrogate, or more than 256 targets. Logbird would not index such an identifier as given: Logbird
+    /// 0.2.x keeps the payload as sent but indexes a shortened or repaired copy, and only the first 64 targets.
     /// </summary>
     InvalidEntityId = 6,
 
@@ -85,7 +86,7 @@ public sealed class DroppedEvent
 /// <param name="Filtered">Events <see cref="LogbirdOptions.BeforeSend"/> chose to skip.</param>
 /// <param name="FailedSends">Batches that failed after all retries and went back to the queue.</param>
 /// <param name="QueueLength">Events currently waiting, including a batch being sent.</param>
-/// <param name="Warnings">Warnings about stored events: surrounding whitespace in an identifier, or a server warning such as an adjusted timestamp.</param>
+/// <param name="Warnings">Warnings about events: surrounding whitespace in an identifier (found by the SDK before sending), or a server warning about a stored event such as an adjusted timestamp.</param>
 public readonly record struct LogbirdStats(
     long Tracked,
     long Delivered,

@@ -609,6 +609,8 @@ describe('round 3 (#220): submitting never rewrites a value, and SQL never match
 
   it('reads N as nothing and keeps a leading byte-order mark, as ClickHouse does', () => {
     expect(unquoteSql(String.raw`a\Nb`)).toBe('ab');
+    expect(unquoteSql(String.raw`a\=b`)).toBe('a=b');
+    expect(unquoteSql(String.raw`a\zb`)).toBe(String.raw`a\zb`);
     expect(parsePresenceSql(String.raw`impersonator_id = '\xEF\xBB\xBF'`, 'impersonator_id')).toEqual({ value: '\uFEFF', negated: false });
   });
 });

@@ -1,3 +1,4 @@
+import { evidenceLimits } from '../evidence-limits';
 import { SITE, type SiteState } from '../site';
 import type { UseCase } from './types';
 
@@ -43,7 +44,8 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
           id: 'event-detail',
           label: 'Event detail',
           caption:
-            'One event in the console: who caused it and what performed it, the customer account, the records it touched, the before and after value, and what caused it.',
+            'One event in the console: who caused it and what performed it, the customer account, the records it touched, the before and after value, and what caused it. Select the image to open it full size.',
+          zoom: true,
         },
       },
       {
@@ -67,7 +69,7 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
             },
             {
               promise: 'Only an owner or admin can change a project’s retention.',
-              limit: 'An owner or admin can shorten it at any time. There is no retention lock or legal hold yet.',
+              limit: evidenceLimits.shortenRetention,
             },
           ],
         },
@@ -101,7 +103,7 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
         ],
         limit: {
           label: 'What a match shows',
-          text: 'A matching SHA-256 shows that the file you hold is the file Logbird produced for that export, not that the events were never changed before the export ran, and not who saved the file or when.',
+          text: evidenceLimits.exportMatch,
         },
       },
       {

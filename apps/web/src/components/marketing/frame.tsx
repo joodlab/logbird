@@ -9,6 +9,7 @@ export function ScreenshotFrame({
   sizes = '(min-width: 1152px) 1104px, calc(100vw - 2rem)',
   className,
   label,
+  zoomLabel,
 }: {
   id: string;
   caption?: string;
@@ -16,6 +17,8 @@ export function ScreenshotFrame({
   className?: string;
   /** Text in the window bar, e.g. the console page shown. */
   label?: string;
+  /** Makes the image open full size (its accessible name); for detailed captures that are small on a phone. */
+  zoomLabel?: string;
 }) {
   return (
     <figure className={cn('flex flex-col gap-3', className)}>
@@ -26,7 +29,7 @@ export function ScreenshotFrame({
           <i />
           {label ? <span className="ms-2 truncate font-mono text-[11px] text-muted-foreground">{label}</span> : null}
         </div>
-        <Screenshot id={id} sizes={sizes} />
+        <Screenshot id={id} sizes={sizes} zoomLabel={zoomLabel} />
       </div>
       {caption ? <figcaption className="text-muted-foreground text-sm">{caption}</figcaption> : null}
     </figure>
