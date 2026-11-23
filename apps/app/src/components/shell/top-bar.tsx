@@ -17,16 +17,18 @@ import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
 /**
- * The project crumb's name: the list entry while the list is healthy, else the cached detail (the list failed its last
- * refresh, or does not hold the project yet), else whatever the list last had.
+ * The project crumb's name, from the project list entry and the cached project detail, each with the time it was last
+ * read successfully (`dataUpdatedAt`): the later read wins, so a rename shows and a failed list refresh (which keeps
+ * its last successful data and time) never brings back an older name. Without a server-side version on projects this
+ * is arrival order, so one narrow race remains: a detail read that started before a rename but answered after the
+ * list's newer read (tracked in the follow-up issue).
  */
 export function projectCrumbName(
-  listed: string | undefined,
-  listStatus: 'pending' | 'error' | 'success',
-  detail: string | undefined,
+  listed: { name: string; at: number } | undefined,
+  detail: { name: string; at: number } | undefined,
 ): string | undefined {
-  if (listed !== undefined && listStatus === 'success') return listed;
-  return detail ?? listed;
+  if (listed && (!detail || listed.at >= detail.at)) return listed.name;
+  return detail?.name ?? listed?.name;
 }
 
 export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalette: () => void; projectMissing?: boolean }) {
@@ -41,11 +43,12 @@ export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalett
   const listed = projects.data?.find((p) => p.id === params.projectId);
   // While the list is unreadable, loading or lacks the project, the detail the route loader already read names the crumb
   // (#339). `enabled: false` subscribes to that cached detail (a rename updates it) without ever fetching it, so a stale
-  // id still sends nothing. The list names the project while it is healthy; once its last refresh failed its entry is
-  // known to be stale, so the detail does. Never by arrival time: a slow response can arrive last and still be the
-  // older read (projects carry no version).
+  // id still sends nothing. Whichever was read successfully last names the project (see projectCrumbName).
   const detail = useQuery({ ...projectQuery(params.projectId ?? ''), enabled: false });
-  const name = projectCrumbName(listed?.name, projects.status, detail.data?.name);
+  const name = projectCrumbName(
+    listed ? { name: listed.name, at: projects.dataUpdatedAt } : undefined,
+    detail.data ? { name: detail.data.name, at: detail.dataUpdatedAt } : undefined,
+  );
   const projectId = projectMissing ? undefined : params.projectId;
   const dynamicCrumb = useCrumb();
   const { range, setRange, wholeHistory } = useRange();
