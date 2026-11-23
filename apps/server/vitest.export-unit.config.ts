@@ -21,6 +21,7 @@ export default defineConfig({
       'src/legacy-sdk-011-fixture.test.ts',
       'src/ingest-storage-fault-fixture.test.ts',
       'src/slow-store.test.ts',
+      'src/openapi-servers.test.ts',
     ],
     maxWorkers: 1,
     fileParallelism: false,

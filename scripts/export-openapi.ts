@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { prisma } from '@logbird/database';
 import { app } from '../apps/server/src/app';
 import { clickhouse } from '../apps/server/src/clickhouse';
+import { committedOpenApiDocument } from '../apps/server/src/openapi';
 import { rateLimitStore } from '../apps/server/src/rate-limit';
 import { closeRetentionQueue } from '../apps/worker/src/queue';
 
@@ -34,14 +35,14 @@ try {
     }
   }
   await mkdir('openapi', { recursive: true });
-  // The live document names this instance's APP_URL. The committed export names the documented local default instead,
-  // so the files depend only on the code: CI checks them for drift (`pnpm openapi:check`).
-  const servers = [{ url: 'http://localhost:4600', description: 'This Logbird instance' }];
+  // The served document names this instance's APP_URL; the committed files name the documented local default, so they
+  // depend only on the code and CI checks them for drift (`pnpm openapi:check`).
+  const committed = committedOpenApiDocument(spec);
   for (const [name, paths] of [
     ['openapi', spec.paths],
     ['public', Object.fromEntries(Object.entries(spec.paths).filter(([path]) => path.startsWith('/v1/')))],
   ] as const)
-    await writeFile(`openapi/${name}.json`, `${JSON.stringify(stable({ ...spec, servers, paths }), null, 2)}\n`);
+    await writeFile(`openapi/${name}.json`, `${JSON.stringify(stable({ ...committed, paths }), null, 2)}\n`);
   console.log(`Exported ${ids.size} operations in-process (no listening server).`);
 } finally {
   await rateLimitStore.quit();
