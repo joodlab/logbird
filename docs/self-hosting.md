@@ -1199,10 +1199,10 @@ request or a charge to the endpoint's failure counters.
 Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
 Each delivery claim has a two-minute lease. Before a POST starts, the worker reserves 56.5 seconds of that lease to store the outcome. Each settlement can wait up to 12.25 seconds for a PostgreSQL connection, and the worker retries the same result within the lease when settlement fails.
 
-Each pass, the worker claims deliveries fairly across projects. Projects take turns, least recently served first and new projects before all others. Each project's oldest waiting delivery goes first, and a delivery row that another transaction holds never takes a slot.
+Each pass, the worker claims deliveries fairly across projects. Projects take turns, least recently served first and new projects before all others. Each project's oldest waiting delivery goes first, and a delivery row that another transaction holds never takes a slot. When a project's claim times out and is retried one endpoint at a time, endpoints go in order of their oldest due row, so a newer row on one endpoint can be sent before an older row on another.
 Delivery fairness and the claim bounds hold for locks and load that Logbird itself creates: rows locked only for the length of its own claim or dispatch transactions, its own workers at their configured concurrency, and backlogs within the documented limits. A long-running transaction from anything other than Logbird that holds rows on the webhook tables (an operator session, a migration, a foreign tool) can delay or starve deliveries until it ends.
 
-To find such a transaction, run this read-only query. Logbird's own transactions on these tables end within about 15 seconds (claims 2 seconds, dispatch 10 seconds, settlement 15 seconds), so it lists only transactions open for more than 30 seconds:
+To find such a transaction, run this read-only query in the Logbird database. Logbird's claim, dispatch and settlement transactions end within about 15 seconds (claims 2 seconds, dispatch 10 seconds, settlement 15 seconds), but other Logbird work on these tables, such as webhook retention, can run longer. The query lists transactions open for more than 30 seconds that hold a granted lock on a webhook table; treat 30 seconds as a threshold for looking closer, not as proof that the session is foreign:
 
 ```sql
 SELECT a.pid, a.application_name, a.usename, a.client_addr, a.state,
@@ -1211,6 +1211,8 @@ SELECT a.pid, a.application_name, a.usename, a.client_addr, a.state,
 FROM pg_locks l
 JOIN pg_stat_activity a ON a.pid = l.pid
 WHERE l.locktype = 'relation'
+  AND l.granted
+  AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
   AND l.relation IN ('"WebhookDelivery"'::regclass, '"WebhookEndpoint"'::regclass,
                      '"WebhookAttempt"'::regclass, '"WebhookClaimRotation"'::regclass)
   AND a.pid <> pg_backend_pid()
@@ -1218,7 +1220,7 @@ WHERE l.locktype = 'relation'
 ORDER BY transaction_age DESC;
 ```
 
-Ending that transaction (or the session, with `pg_terminate_backend(pid)` once you know what it is) lets deliveries continue. One effect of such a transaction stays within a single endpoint: if it holds a prefix of an endpoint's due delivery rows so long that the endpoint's claim scan reaches its 2-second statement timeout every time, an unlocked row behind that prefix is not delivered until the locks are released. The endpoint's siblings and other projects keep being claimed, because a project whose claim times out is retried one endpoint at a time.
+Each row is a candidate: `transaction_age` is the age of the transaction, not of the lock, so confirm the session's application, role and query before acting. Ending that transaction (or the session, with `pg_terminate_backend(pid)` once you know what it is) lets deliveries continue. One effect of such a transaction stays within a single endpoint: if it holds a prefix of an endpoint's due delivery rows so long that the endpoint's claim scan reaches its 2-second statement timeout every time, an unlocked row behind that prefix is not delivered until the locks are released. The endpoint's siblings and other projects keep being claimed, because a project whose claim times out is retried one endpoint at a time.
 
 Webhook delivery runs on PostgreSQL time: the server assigns arrival times and the worker
 scans, schedules and selects signing secrets with it. The PostgreSQL server clock must not

@@ -35,7 +35,7 @@ type DeliveryOptions = {
   beforeRequest?: (tx: Prisma.TransactionClient, delivery: WebhookDelivery) => Promise<void>;
   /** Internal: statement timeout of each claim statement. Default 2 s. */
   claimTimeoutMs?: number;
-  /** Tests only: make the claim scan of one endpoint slow, to force a statement timeout there. */
+  /** Tests only, ignored outside Vitest: make the claim scan of one endpoint slow, to force a statement timeout there. */
   claimScanDelay?: { endpointId: string; seconds: number };
 };
 
@@ -308,7 +308,8 @@ export async function claimWebhookDeliveries(
     perEndpoint: options.perEndpoint,
     excludeEndpoints: [],
     timeoutMs: options.claimTimeoutMs ?? 2000,
-    scanDelay: options.claimScanDelay,
+    // The pg_sleep hook exists only for the timeout regression; no production caller can turn it on.
+    scanDelay: process.env.VITEST === 'true' ? options.claimScanDelay : undefined,
   };
   // An endpoint with an invalid stored scope gets the existing scope hold before it can take a slot.
   for (const { id, scope: columns, updatedAt } of await invalidScopedEndpoints(now, projects)) {
