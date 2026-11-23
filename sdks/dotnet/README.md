@@ -315,6 +315,12 @@ await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: inv
 EventDetail? detail = await reader.GetAsync(eventId);   // null when it does not exist
 ```
 
+Every read call ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
+cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. Cancelling your token throws
+`OperationCanceledException`, and a call whose token is already cancelled sends nothing. A success answer is checked
+against the server's contract before it is read: a missing member, or `null` where none is allowed, throws
+`invalid_response` instead of reading as an empty page. An answer over 64 MB throws `response_too_large`.
+
 `SearchAllAsync` follows cursors until the last page. Logbird's cursors are keyset-ordered and never repeat; as a guard
 against a misbehaving server, the client stops with `LogbirdApiException` (`pagination_stalled`) if a cursor repeats within
 its last 1,000 pages, and you can bound every iteration with `LogbirdReadOptions.MaxPages` (code `page_limit` when more
@@ -353,9 +359,12 @@ await using var file = File.Create("audit.csv");
 await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
 ```
 
-- A scope names a tenant and, optionally, one target (type and id together), action prefixes and masks (`Ip`,
+- A scope names a tenant and, optionally, one target (type and id together), 1 to 20 action prefixes and masks (`Ip`,
   `UserAgent`, `ActorEmail`; any mask also hides the original payload). Ids must be as Logbird stored them; the client
-  rejects a scope that could never match before sending it.
+  rejects a scope that could never match before sending it. The client sends a copy of your scope, so changing your
+  list afterwards changes nothing, and the granted scope's prefixes are read-only.
+- A token lives a whole number of seconds, from 60 seconds to 1 hour (15 minutes when you pass no lifetime). A
+  fraction of a second throws `ArgumentException` rather than being dropped.
 - A browser can use a viewer token only from an origin listed in the minting key's **embed origins** (set when the key
   is created, as `https://host[:port]`, lowercase, no path). From any other origin every read answers
   `403 origin_not_allowed`. A server-to-server call sends no `Origin` and is not affected.
@@ -364,8 +373,12 @@ await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
 - `FacetsAsync` counts events by a stored field (such as `action`, `outcome`, `tenant`, `target.type`) or an attribute
   (`attr.<path>`), optionally split by a second. Virtual selectors such as `record` work in `Query` but cannot be
   counted. `ExportAsync` streams CSV, JSONL or JSONL with payloads (`JsonlEvidence`, refused for a masked scope) into
-  your stream. Queries are at most 4,096 characters. The read `Timeout` covers the start of an export; pass a
+  your stream. Queries are at most 4,096 characters. The read `Timeout` covers the wait for the export's headers; pass a
   cancellation token to bound the download.
+- Only the requested export is written. An answer with a status other than 200 (such as a `206` partial answer) or
+  another content type (`text/csv` for CSV, `application/x-ndjson` for JSONL; such as a proxy's HTML page) throws
+  `invalid_response` and writes nothing. A download that fails part way throws `unreachable` and leaves a partial file.
+  An exception from your stream itself (for example a full disk) reaches you unchanged, never as a network failure.
 
 ## Verify webhooks
 

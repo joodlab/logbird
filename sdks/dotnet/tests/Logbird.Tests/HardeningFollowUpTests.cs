@@ -387,8 +387,18 @@ public class HardeningFollowUpTests
     }
 
     /// <summary>A body that starts arriving only after a delay.</summary>
-    private sealed class SlowContent(string text, TimeSpan delay) : HttpContent
+    private sealed class SlowContent : HttpContent
     {
+        private readonly string text;
+        private readonly TimeSpan delay;
+
+        public SlowContent(string text, TimeSpan delay)
+        {
+            this.text = text;
+            this.delay = delay;
+            Headers.TryAddWithoutValidation("Content-Type", "application/x-ndjson");
+        }
+
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
             await Task.Delay(delay);
