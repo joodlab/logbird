@@ -3,10 +3,12 @@ using System.Collections.Generic;
 namespace Logbird.Internal;
 
 /// <summary>
-/// The server's entity-identifier rule, checked before sending so a caller learns about a problem at once. Identifiers
-/// (actor, impersonator, executor and tenant ids, and each target's type and id) are sent exactly as given: never
-/// trimmed, truncated or repaired. One that cannot be stored as sent drops the event with <c>invalid_entity_id</c>;
-/// surrounding whitespace is kept and reported as a warning.
+/// The SDK's own identifier check, run before sending so a caller learns about a problem at once. Identifiers (actor,
+/// impersonator, executor and tenant ids, and each target's type and id) are sent as given: never trimmed, truncated or
+/// repaired. Logbird 0.2.x keeps the payload as sent but indexes a shortened, repaired or trimmed copy, and indexes only
+/// the first 64 targets. So an identifier Logbird would not index as given (too long, a lone surrogate) or more than 256
+/// targets is refused with <c>invalid_entity_id</c> and the event is not sent; surrounding whitespace is sent as given
+/// and reported as a warning (issue #269).
 /// </summary>
 internal static class EntityIds
 {
@@ -14,12 +16,43 @@ internal static class EntityIds
     public const int MaxTargetTypeLength = 64;
     public const int MaxTargets = 256;
 
-    /// <summary>Returns the <c>invalid_entity_id</c> reason when the event cannot be stored, else null.</summary>
+    /// <summary>How many targets Logbird 0.2.x indexes; the rest are kept in the stored payload only.</summary>
+    public const int IndexedTargets = 64;
+
+    /// <summary>The warning for surrounding whitespace in <paramref name="field"/> (a field name only, never a value).</summary>
+    public static string WhitespaceReason(string field)
+        => TargetIndex(field) >= IndexedTargets
+            ? $"surrounding whitespace in {field}: sent exactly as given; Logbird up to 0.2.x indexes only the first {IndexedTargets} targets, so this one is kept in the stored payload only"
+            : $"surrounding whitespace in {field}: sent exactly as given; Logbird up to 0.2.x indexes it trimmed, so a search for the value with its whitespace does not find it";
+
+    private static int TargetIndex(string field)
+    {
+        if (!field.StartsWith("targets[", System.StringComparison.Ordinal))
+        {
+            return -1;
+        }
+
+        // The field names come from CheckTargets ("targets[12].id"), so the index is plain ASCII digits.
+        var index = 0;
+        for (var i = 8; i < field.Length && field[i] != ']'; i++)
+        {
+            if (field[i] is < '0' or > '9')
+            {
+                return -1;
+            }
+
+            index = (index * 10) + (field[i] - '0');
+        }
+
+        return index;
+    }
+
+    /// <summary>Returns the <c>invalid_entity_id</c> reason when the SDK refuses the event, else null.</summary>
     public static string? Validate(AuditEvent e, List<string> whitespaceFields)
     {
         if (e.EmitTargets && e.Targets.Count > MaxTargets)
         {
-            return $"invalid_entity_id: an event can have at most {MaxTargets} targets";
+            return $"invalid_entity_id: the event has more than {MaxTargets} targets, the most this SDK sends (Logbird up to 0.2.x indexes only the first {IndexedTargets}), so the SDK did not send the event";
         }
 
         return Check("actor.id", e.Actor?.Id, MaxIdLength, whitespaceFields)
@@ -36,17 +69,20 @@ internal static class EntityIds
             return null;
         }
 
+        // Positions are counted as sent: a null target is not serialized, so it takes no position.
         var index = 0;
         foreach (var target in e.Targets)
         {
-            if (target is not null)
+            if (target is null)
             {
-                var reason = Check($"targets[{index}].type", target.Type, MaxTargetTypeLength, whitespaceFields)
-                    ?? Check($"targets[{index}].id", target.Id, MaxIdLength, whitespaceFields);
-                if (reason is not null)
-                {
-                    return reason;
-                }
+                continue;
+            }
+
+            var reason = Check($"targets[{index}].type", target.Type, MaxTargetTypeLength, whitespaceFields)
+                ?? Check($"targets[{index}].id", target.Id, MaxIdLength, whitespaceFields);
+            if (reason is not null)
+            {
+                return reason;
             }
 
             index++;
@@ -65,12 +101,12 @@ internal static class EntityIds
 
         if (value!.Length > maxLength)
         {
-            return $"invalid_entity_id: {field} is longer than {maxLength} UTF-16 code units";
+            return $"invalid_entity_id: {field} is longer than {maxLength} UTF-16 code units; Logbird would not index it as given, so the SDK did not send the event";
         }
 
         if (HasLoneSurrogate(value))
         {
-            return $"invalid_entity_id: {field} contains a lone surrogate";
+            return $"invalid_entity_id: {field} contains a lone surrogate; Logbird would not index it as given, so the SDK did not send the event";
         }
 
         if (EventJson.JsTrim(value).Length != value.Length)

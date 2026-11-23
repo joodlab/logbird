@@ -580,7 +580,7 @@ internal sealed class BatchSender
     }
 
     /// <summary>
-    /// Reports the server's per-event warnings (for example an adjusted timestamp or whitespace kept in an identifier).
+    /// Reports the server's per-event warnings (for example an adjusted timestamp).
     /// Warnings for still-unresolved rows of a 503 are left for the attempt that settles them.
     /// </summary>
     private void Warn(State state, int[] attempt, JsonElement warnings, HashSet<long>? unresolved)
