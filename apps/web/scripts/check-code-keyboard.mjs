@@ -6,10 +6,16 @@ const base = process.env.BASE_URL;
 const browser = await chromium.launch();
 const failures = [];
 try {
-  for (const path of ['/use-cases/compliance-evidence', '/use-cases/customer-audit-logs']) {
+  const expected = { '/use-cases/compliance-evidence': 2, '/use-cases/customer-audit-logs': 4 };
+  for (const [path, blocks] of Object.entries(expected)) {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    await page.goto(new URL(path, base).href, { waitUntil: 'networkidle' });
+    const response = await page.goto(new URL(path, base).href, { waitUntil: 'networkidle' });
     const count = await page.locator('.site-code').count();
+    if (!response?.ok() || count !== blocks) {
+      failures.push(`${path}: status ${response?.status()}, ${count} code blocks (expected ${blocks})`);
+      await page.close();
+      continue;
+    }
     for (let i = 0; i < count; i++) {
       const block = page.locator('.site-code').nth(i);
       const button = block.getByRole('button', { name: 'Copy code' });
@@ -30,7 +36,8 @@ try {
       const scrolled = await pre.evaluate((el) => el.scrollLeft);
       const after = await where();
       const stays = before && after && before.x === after.x && before.y === after.y;
-      const ok = focused && outline !== 'none' && stays && (overflow <= 0 || scrolled > 0);
+      // Every sample on these pages is wider than a phone, so each must overflow and actually scroll.
+      const ok = focused && outline !== 'none' && stays && overflow > 0 && scrolled > 0;
       console.log(
         `${path} block ${i + 1}: focus=${focused} outline=${outline} overflow=${overflow}px scrolled=${scrolled}px copyButtonStays=${stays} ${ok ? 'OK' : 'FAIL'}`,
       );
