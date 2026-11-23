@@ -157,13 +157,22 @@ var options = new LogbirdOptions
   front of Logbird answers 2xx without acknowledging events, they are retried with the same bytes and, once the retry
   budget is spent, dropped with `DropReason.Unacknowledged`; they are never counted as delivered.
 - A 4xx other than 429 (for example a revoked key) drops the batch (`DropReason.HttpError`) and reports it. So does
-  a redirect: the client never follows one, because that would send audit data to another address. If you pass your
-  own `HttpClient`, configure its handler with `AllowAutoRedirect = false` as well.
+  a redirect: the client never follows one, because that would send audit data to another address.
+- **Proxies and your own transport.** The HTTP clients the SDK creates (for `LogbirdClient`, `LogbirdReadClient` and the
+  ASP.NET Core package's named client) never use a proxy, not even the system or environment one: a proxy reads the
+  ingest or read key in clear text on an HTTP endpoint, and so does one that intercepts TLS (an HTTPS tunnel through an
+  ordinary proxy does not expose it). To go through a proxy, pass your own `HttpClient` (or, with
+  ASP.NET Core, configure the `Logbird` named client's primary handler). A transport you supply is yours to secure:
+  disable automatic redirects (`AllowAutoRedirect = false`), use only a proxy you trust with the key, and keep request
+  and header logging off, since the `Authorization` header carries the key.
 - `OnDrop`, `OnError` and log messages run in order on a background thread, never on the thread that called `Track`
   and never on the shutdown path, so a slow callback cannot slow your requests. If the callbacks fall more than
   `MaxQueueSize` (at least 1,000) notifications behind, further notifications are skipped and counted on the
-  `logbird.notifications.lost` meter; the counters below still record every event. `FlushAsync` returns after the
-  callbacks for what it settled have run.
+  `logbird.notifications.lost` meter; the counters below still record every event. The first time any is skipped, one
+  notice saying so goes to the logger and `OnError` straight from the thread pool (the ordered queue is full at that
+  moment): it can run while another callback is still running, and `FlushAsync` does not wait for it. `FlushAsync`
+  returns after the callbacks for what it settled have run, except those skipped because the callbacks were behind
+  (counted, never run), so `OnDrop` is a report, not a durability mechanism.
 - `client.Stats` gives counts of tracked, delivered, rejected, dropped, filtered and warned events, as a snapshot only
   the SDK fills (a test double for `ILogbirdClient` can return `default(LogbirdStats)`, every count zero). The `Logbird` meter
   publishes the same counts for OpenTelemetry (`logbird.events.*`, `logbird.batches.failed`, `logbird.queue.length`,
@@ -199,8 +208,8 @@ met the same rejection.
 | `Reason` | Why | `MayBeStored` |
 | --- | --- | --- |
 | `Rejected` | The server rejected this event (see `Code` and `Detail`) | `false`, except `true` for `stored_event_unreadable` or `unverified_after_parse_failure` when an earlier request carrying it had an unresolved outcome |
-| `TooLarge` | The serialized event is larger than 256 KB | always `false` |
-| `Invalid` | The event could not be prepared, for example `BeforeSend` threw | always `false` |
+| `TooLarge` | The event as sent (after `BeforeSend` and redaction) is larger than 256 KB of UTF-8 JSON; or its data measures more than 1 MiB before redaction (one byte per character of text, plus punctuation and parsed numbers' digits), in which case it is refused without being copied, whatever redaction would have removed (a memory guard) | always `false` |
+| `Invalid` | The event could not be prepared, for example `BeforeSend` threw; or its metadata or a change value nests JSON deeper than 1,000 levels as given, before `BeforeSend` and redaction (tested on a 256 KB thread stack; see "Size and depth" under [The contract with your code](#the-contract-with-your-code)) | always `false` |
 | `QueueFull` | Evicted from a full queue | `false` if it was never sent, or every answer said it was not stored; `true` if a request carrying it had an unresolved outcome |
 | `HttpError` | A 4xx other than 429, or a redirect | `false` if every answer said it was not stored; `true` if an earlier request had an unresolved outcome, or the final answer was a redirect |
 | `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if it was never sent, or every answer said it was not stored; `true` if it was in flight without a "not stored" answer, or an earlier request had an unresolved outcome |
@@ -257,15 +266,31 @@ What the client's own methods guarantee:
   microseconds for a typical event) and returns. Your own `BeforeSend` and redaction patterns are the only code that
   can make it slower.
 - **`FlushAsync()`** never throws. It returns `true` when every event queued before the call is stored or permanently
-  settled, after the `OnDrop`/`OnError` callbacks for those events have run. It has **no time limit of its own**:
+  settled, after the `OnDrop`/`OnError` callbacks for those events have run (a callback skipped because the
+  callbacks fell behind is counted on `logbird.notifications.lost` and never runs). It has **no time limit of its own**:
   delivery of each batch is bounded (`MaxRetries`, `RequestTimeout`, five minutes per batch), and a blocking callback
   holds it. Pass a token or use `FlushAsync(TimeSpan)` / `Flush(TimeSpan)` for a hard limit.
 - **`Flush(TimeSpan)`** blocks for at most the timeout (the deadline starts on your thread, even when the thread pool is
   busy) and cannot deadlock on a UI or classic ASP.NET synchronization context. Called from inside an `OnDrop`/`OnError`
   callback, it returns `false` at once instead of waiting on itself.
-- **`DisposeAsync`** returns within `ShutdownTimeout` (10 seconds by default) plus at most 2 seconds to unwind a
-  cancelled request, plus at most 5 seconds for pending callbacks. **`Dispose`** waits at most `ShutdownTimeout` plus 10
-  seconds. Events not sent by then are reported once each through `OnDrop` (`DropReason.Shutdown`).
+- **`DisposeAsync`** waits up to `ShutdownTimeout` (10 seconds by default) for delivery, then up to 2 seconds for a
+  cancelled request to unwind. Events not sent by then are dropped as `DropReason.Shutdown`: in-memory work with no I/O,
+  proportional to the events left. Then it waits up to 5 seconds for pending callbacks.
+- **`Dispose`** runs the same steps on the thread pool, never on your thread, and blocks for at most `ShutdownTimeout`
+  plus 10 seconds, counted from the call. If the thread pool was too busy to finish in time, the `Shutdown` accounting
+  still runs on the thread pool after `Dispose` returns; a process that exits at once may not finish it.
+- **Size and depth.** The 256 KB limit applies to what is sent, after `BeforeSend` and redaction, so a large secret that
+  redaction replaces does not drop the event. Separately, data measuring more than 1 MiB before redaction is refused
+  before anything copies it (a memory guard; it counts one byte per character of text, plus punctuation and parsed
+  numbers' digits, so it never refuses JSON smaller than that). Metadata and each change value may nest up to 1,000
+  levels (a value that is part of a larger tree of yours also counts the parents it has there, which System.Text.Json
+  walks through), checked on the event as given: a deep part that `BeforeSend` or redaction would remove still counts, because
+  walking it is the risk. The SDK walks them without recursion, and that depth is tested on a 256 KB thread stack. The
+  number is the server's limit for exact numbers, which the server applies to the objects and arrays of the whole event,
+  and only when the event holds, anywhere, a number a double cannot keep exactly. So a deeper tree in an event without
+  such a number, which the server would store, is refused here; and because a change value sits three levels into the
+  event, a change value whose objects or arrays nest more than 997 levels (a leaf at level 999 or deeper), in an event
+  holding such a number, is rejected by the server.
 - **Memory** is bounded: at most `MaxQueueSize` queued events (each at most 256 KB), one in-flight batch (at most 5 MB),
   at most 4 abandoned requests, and at most `MaxQueueSize` (at least 1,000) pending callback notifications. Very large
   pre-parsed JSON (`JsonNode.Parse`) in metadata or change values is measured before it is refused, which builds its
@@ -279,19 +304,38 @@ What the client's own methods guarantee:
 Secrets are redacted by default. A key matching passwords, secrets, tokens, one-time codes, API keys,
 authorization, cookies, credentials or private keys keeps its name, and its value becomes `[redacted]`. This applies
 at any depth (actor, targets, context, metadata) and to the before and after values of matching change fields.
+
+- **Keys match as substrings**: the default also redacts `tokenCount`, `csrfTokenValue` and `secretary`. To match
+  whole keys only, set `Redaction.Keys` to an anchored pattern such as `^(token|secret)$`.
+- **Only ASCII letter case is ignored** by the default pattern and by `AddKeys`: `TOKEN` matches, but a key spelled
+  with a look-alike character (U+212A KELVIN SIGN for `k`, U+017F LONG S for `s`) does not, exactly as JavaScript's
+  `/i` behaves. A pattern you supply is matched with the options you give it.
+
 The default does not cover personal data, so add your own keys:
 
 ```csharp
 options.Redaction.AddKeys("email", "phone", "iban");
 ```
 
-**Identifier fields are never redacted**: actor, impersonator, executor and tenant ids, and each target's type and id.
-They are structural; a redacted id would merge every identity into one and destroy the trail. If your pattern would match
-one of them (for example `AddKeys("id")`), Logbird reports it once at startup through the logger and `OnError` and keeps
-running, redacting everything else. To pseudonymise an id, transform it before recording, for example with a keyed hash.
-This is stricter than today's TypeScript `redact()`, which redacts any matching key.
+**Identifier fields are never redacted** (`Redactor.IdentifierFields`): the actor's type and id, the impersonator's
+and tenant's id, the executor's type, id, job id and attempt, and each target's type and id, as well as the event's own
+`id` and `action`. They are structural: a redacted id would merge every identity into one and destroy the trail, and an
+executor's attempt must stay a number. If your pattern would match one of their names (for example `AddKeys("id")`),
+Logbird reports it once at startup through the logger and `OnError` and keeps running, redacting everything else. To
+pseudonymise an id, transform it before recording, for example with a keyed hash.
 
-Otherwise redaction behaves like the TypeScript SDK's `redact()`. Set `Redaction.Enabled = false` to turn it off, or replace
+**A pattern that matches a party's own key** (`actor`, `impersonator`, `executor`, `tenant` or `targets`, for example
+`AddKeys("actor")`) redacts every other field of that party, such as its name and email, and keeps its identifier
+fields; so does a pattern matching a target's index (`^0$`). A party object is never replaced as a whole (a party
+that is not an object, such as a string `actor`, is replaced like any other value). A change's before and
+after values are replaced when its `field` is a string that `ChangeFields` matches.
+
+Redaction follows the same rules as the TypeScript SDK's `redact()`: both run one shared fixture of cases
+(`tests/Logbird.Tests/Fixtures/redaction-parity.json`). With the default pattern and names added with `AddKeys` (matched
+apart from `Redaction.Keys`, so that pattern's options and syntax never change them), both redact exactly the same keys. A `Regex` of your own
+runs on .NET's engine and a TypeScript one on JavaScript's, which differ at the edges: in .NET, `$` also matches before a
+final line feed (use `\z` for the end of a key), and case-insensitive options fold case differently. Keep a pattern you
+share between the SDKs to plain alternatives and `^` anchors. Set `Redaction.Enabled = false` to turn it off, or replace
 `Redaction.Keys` with your own pattern. `BeforeSend` runs before redaction on a copy of each event; return `null`
 to skip an event.
 
@@ -318,7 +362,12 @@ EventDetail? detail = await reader.GetEventAsync(eventId);   // null when it doe
 
 Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
 cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. For an export, the limit covers only
-the wait for its headers, not the download. The limit is per request, not per
+the wait for its headers, not the download. A request abandoned at its limit keeps running until the handler returns. While at
+least 4 abandoned requests are still running, a new call fails at once with `unreachable` instead of adding another;
+requests already in flight when that threshold is reached are not stopped, so more than 4 can be abandoned at once.
+Each one holds its slot until its cancellation and the disposal of any late response are done. Any other failure of the transport or a response body, including an unexpected exception from a custom
+handler, is reported as `unreachable` with only the exception's type, never its message; a failure of your own export
+destination reaches you unchanged. The limit is per request, not per
 call: a first call that also reads the server's version, or a `SearchAllAsync` iteration, makes several requests, each
 with its own limit. Cancelling your token throws `OperationCanceledException`, and a call whose token is already
 cancelled sends nothing. A search, detail or facet answer is checked against the server's contract before it is read:
@@ -432,4 +481,3 @@ bytes, and a live test replays a TypeScript event from C#. Deliberate difference
   both SDKs can represent; a test lists these differences.
 - `OccurredAt` is always sent as UTC with milliseconds (`2026-11-22T08:00:00.123Z`), the form the TypeScript SDK
   generates by default.
-- Identifier fields are never redacted (see Redaction).

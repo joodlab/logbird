@@ -374,8 +374,10 @@ public sealed class FacetResult
     /// <summary>The second field, when one was requested.</summary>
     public string? By { get; init; }
 
-    /// <summary>The most frequent values, most frequent first.</summary>
-    public IReadOnlyList<FacetValue> Values { get; init; } = [];
+    /// <summary>The most frequent values, most frequent first. Read-only: a copy, which a cast cannot change.</summary>
+    public IReadOnlyList<FacetValue> Values { get => _values; init => _values = Internal.ReadOnly.List(value); }
+
+    private readonly IReadOnlyList<FacetValue> _values = Internal.ReadOnly.List<FacetValue>(null);
 
     /// <summary>How many events have a value not listed.</summary>
     public long OtherCount { get; init; }
@@ -393,8 +395,10 @@ public sealed class FacetValue
     /// <summary>How many events have it.</summary>
     public long Count { get; init; }
 
-    /// <summary>The second-level split, when <see cref="FacetQuery.By"/> was given.</summary>
-    public IReadOnlyList<FacetGroup>? Groups { get; init; }
+    /// <summary>The second-level split, when <see cref="FacetQuery.By"/> was given. Read-only: a copy, which a cast cannot change.</summary>
+    public IReadOnlyList<FacetGroup>? Groups { get => _groups; init => _groups = Internal.ReadOnly.ListOrNull(value); }
+
+    private readonly IReadOnlyList<FacetGroup>? _groups;
 
     /// <summary>Events with this value whose second-level value is not listed.</summary>
     public long? GroupsOtherCount { get; init; }

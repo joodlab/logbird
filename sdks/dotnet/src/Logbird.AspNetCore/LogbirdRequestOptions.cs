@@ -58,14 +58,24 @@ public sealed class LogbirdRequestOptions
 
     /// <summary>
     /// Use an incoming <c>X-Request-Id</c> header as the request id when present (a longer value than 256 characters is
-    /// ignored, never cut); otherwise
-    /// <see cref="HttpContext.TraceIdentifier"/>. Defaults to <see langword="true"/>.
+    /// ignored, never cut); otherwise <see cref="HttpContext.TraceIdentifier"/>. Defaults to <see langword="false"/>.
     /// </summary>
-    public bool UseRequestIdHeader { get; set; } = true;
+    /// <remarks>
+    /// Turn it on only behind a trusted ingress (a gateway or load balancer) that sets this header itself, or strips or
+    /// overwrites one a client sent. Any caller can send the header, so without that a client chooses the request id its
+    /// events are recorded and searched under, and can make unrelated requests look like one.
+    /// </remarks>
+    public bool UseRequestIdHeader { get; set; }
 
     /// <summary>
-    /// Use an incoming <c>X-Logbird-Operation</c> header as the operation id, so one operation can span services.
-    /// Defaults to <see langword="true"/>; when absent or longer than 256 characters, each request gets a new operation id.
+    /// Use an incoming <c>X-Logbird-Operation</c> header as the operation id, so one operation can span services. When it
+    /// is off, absent or longer than 256 characters, each request gets a new operation id. Defaults to
+    /// <see langword="false"/>.
     /// </summary>
-    public bool UseOperationHeader { get; set; } = true;
+    /// <remarks>
+    /// Turn it on only for traffic between your own services, behind a trusted ingress that strips or overwrites the
+    /// header on requests from outside. Any caller can send it, so without that a client can group its requests with
+    /// someone else's operation in the audit trail.
+    /// </remarks>
+    public bool UseOperationHeader { get; set; }
 }

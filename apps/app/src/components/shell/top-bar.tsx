@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useMatches, useParams } from '@tanstack/react-router';
 import { ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { useMemo } from 'react';
-import { projectQuery } from '@/lib/api/queries';
+import { projectQuery, projectsQuery } from '@/lib/api/queries';
 import { useCrumb } from '@/lib/crumbs';
 import { zoneOffsetMs } from '@/lib/format';
 import { modKeyLabel, useIsMac } from '@/lib/platform';
@@ -16,13 +16,40 @@ import { absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange
 import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
-export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
+/**
+ * The project crumb's name, from the project list entry and the cached project detail, each with the time it was last
+ * read successfully (`dataUpdatedAt`): the later read wins, so a rename shows and a failed list refresh (which keeps
+ * its last successful data and time) never brings back an older name. Without a server-side version on projects this
+ * is arrival order, so one narrow race remains: a detail read that started before a rename but answered after the
+ * list's newer read (tracked in the follow-up issue).
+ */
+export function projectCrumbName(
+  listed: { name: string; at: number } | undefined,
+  detail: { name: string; at: number } | undefined,
+): string | undefined {
+  if (listed && (!detail || listed.at >= detail.at)) return listed.name;
+  return detail?.name ?? listed?.name;
+}
+
+export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalette: () => void; projectMissing?: boolean }) {
   // Range labels and the custom range editor follow the console zone; re-render when the reader switches it.
   const zone = useConsoleZone();
   const pickerZone = useMemo(() => ({ offsetMs: zoneOffsetMs, label: zone }), [zone]);
   const matches = useMatches();
   const params = useParams({ strict: false }) as { projectId?: string };
-  const project = useQuery({ ...projectQuery(params.projectId ?? ''), enabled: Boolean(params.projectId) });
+  // The project's name comes from the workspace's project list (the sidebar reads it too), never a fetch by id, so a
+  // stale link sends no request answering 404. A project the route found missing gets no crumb, sections or range.
+  const projects = useQuery(projectsQuery());
+  const listed = projects.data?.find((p) => p.id === params.projectId);
+  // While the list is unreadable, loading or lacks the project, the detail the route loader already read names the crumb
+  // (#339). `enabled: false` subscribes to that cached detail (a rename updates it) without ever fetching it, so a stale
+  // id still sends nothing. Whichever was read successfully last names the project (see projectCrumbName).
+  const detail = useQuery({ ...projectQuery(params.projectId ?? ''), enabled: false });
+  const name = projectCrumbName(
+    listed ? { name: listed.name, at: projects.dataUpdatedAt } : undefined,
+    detail.data ? { name: detail.data.name, at: detail.dataUpdatedAt } : undefined,
+  );
+  const projectId = projectMissing ? undefined : params.projectId;
   const dynamicCrumb = useCrumb();
   const { range, setRange, wholeHistory } = useRange();
   const resolved = useMemo(() => {
@@ -30,16 +57,17 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
     return { from: new Date(r.fromMs), to: new Date(r.toMs) };
   }, [range]);
 
-  const sections = matches
+  const sections = (projectMissing ? [] : matches)
     .filter((m) => m.staticData?.crumb)
     .map((m) => ({
       id: m.id,
       label: m.staticData.crumb as string,
       path: m.pathname,
-      to: m.staticData.crumbTo && params.projectId ? m.staticData.crumbTo.replace('$projectId', params.projectId) : undefined,
+      to: m.staticData.crumbTo && projectId ? m.staticData.crumbTo.replace('$projectId', projectId) : undefined,
       search: m.staticData.crumbSearch,
     }));
-  const showRange = matches.some((m) => m.staticData?.range);
+  // A project that is not found has no range to pick.
+  const showRange = !projectMissing && matches.some((m) => m.staticData?.range);
   const isMac = useIsMac();
 
   return (
@@ -47,13 +75,13 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <SidebarTrigger className="-ms-1 text-muted-foreground" />
       <Separator className="me-1 h-4 data-[orientation=vertical]:self-center" orientation="vertical" />
       <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 text-sm">
-        {params.projectId ? (
+        {projectId ? (
           <Link
             className="-my-3 hidden max-w-40 truncate py-3 text-muted-foreground hover:text-foreground sm:block"
-            params={{ projectId: params.projectId }}
+            params={{ projectId }}
             to="/p/$projectId"
           >
-            {project.data?.name ?? '…'}
+            {name ?? '…'}
           </Link>
         ) : null}
         {sections.map((s, i) => {
@@ -62,7 +90,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
             // Section crumbs ("Actors", "Settings") stay whole; only the page's own name truncates. On a phone only the
             // page's own name shows: a section cut to "R…" helps nobody, and the sidebar is one tap away.
             <span className={cn('flex min-w-0 items-center gap-1', !last && 'shrink-0 max-sm:hidden')} key={s.id}>
-              {i === 0 && !params.projectId ? null : <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 max-sm:hidden" />}
+              {i === 0 && !projectId ? null : <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 max-sm:hidden" />}
               {last ? (
                 <span aria-current="page" className="truncate font-medium">
                   {s.label}
@@ -91,7 +119,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <div className="flex shrink-0 items-center gap-2">
         {showRange ? (
           <TimeRangePicker
-            className="w-auto max-w-[min(60vw,15rem)]"
+            className="w-auto max-w-[min(60vw,15rem)] md:max-w-48 lg:max-w-[min(40vw,28rem)]"
             // An entity page with no range chosen shows its whole History; the range scopes only the summary (stats,
             // support split, activity chart). The picker says so; picking a range narrows the History too.
             label={rangeButtonLabel(range, wholeHistory, typeof window !== 'undefined' && window.innerWidth < 640)}
@@ -105,7 +133,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         ) : null}
         <Button
           aria-label="Open command palette"
-          className="w-(--control-size-compact) justify-start gap-2 px-0 font-normal text-muted-foreground max-sm:justify-center sm:w-52 sm:px-2.5 sm:pe-1.5"
+          className="w-(--control-size-compact) justify-start gap-2 px-0 font-normal text-muted-foreground max-sm:justify-center sm:w-40 sm:px-2.5 sm:pe-1.5 lg:w-52"
           onClick={onOpenPalette}
           size="sm"
           variant="outline"

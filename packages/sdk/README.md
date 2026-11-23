@@ -79,6 +79,21 @@ const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
   dropPolicy: 'oldest', onDrop: () => metrics.increment('audit.dropped') });
 ```
 
+`trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or
+query, and a selector key passed without a value (say `tenant: undefined`) is an error, not an absent filter. A `q` must
+parse as one complete Logbird query on its own; it is ANDed with the selectors.
+`trailQuery` and `readAuditTrail` first copy their input into a frozen snapshot of strings and numbers, reading each
+property once (getters, inherited and non-enumerable properties included), and throw a `TrailQueryError` (a `TypeError`;
+test with `isTrailQueryError`) for a value of the wrong type. Selectors, `q` and `cursor` are strings; a range bound is
+a `Date`, whole epoch milliseconds or an ISO 8601 string (checked by the server); a `range` needs at least one bound;
+`limit` is an integer or its decimal digits; the options, `target`, `range` and query are plain objects or class
+instances whose fields are named properties. Containers that keep entries elsewhere are refused: anything with an
+iterator, or with a method named `get`, `getTime`, `getReader` or `then` (arrays, `Map`s, `URLSearchParams`, `Headers`,
+`FormData`, Map-like stores, streams, promises, `Date`s). Whatever the input, `readAuditTrail` never sends a request
+without a non-blank `q`: build it with `trailQuery`, or pass `q: 'timestamp:*'` to read a whole project on purpose. `readAuditTrail` sends only the known search
+fields (`q`, `lang`, `from`, `to`, `limit`, `cursor`, `order`).
+The read helpers require Logbird 0.2.0 or later: against an older server a selector value containing `*` is read as a
+prefix, so it can match more than the named tenant, actor or record.
 Read adapters expose failures: Vue `useAuditTrail` sets `error` and clears `loading`;
 render that error before treating an empty `data` array as success. Its `refresh()` resolves
 with the error in reactive state, including SSR; never throw it from `serverPrefetch`.
@@ -117,8 +132,28 @@ stamping, before serialization and size checks. Returning null/undefined silentl
 a throwing hook fails closed and reports onError. Neither counts as an overflow drop.
 
 `redact({ keys?, changeFields?, replacement? })` deep copies the event, redacts matching
-object-key values throughout objects/arrays (except top-level id/action), retaining the keys, and replaces present
+object-key values throughout objects/arrays, retaining the keys, and replaces present
 before/after values of matching change fields. Default replacement is `[redacted]`.
+Keys match as substrings (the default also redacts `tokenCount` and `secretary`; anchor
+your own pattern, `/^token$/`, to match whole keys). Identity is never redacted: the
+top-level `id` and `action`, and `IDENTIFIER_FIELDS` (the actor's type and id, the
+impersonator's and tenant's id, the executor's type, id, jobId and attempt, and each
+target's type and id). A pattern matching a party's own key (`actor`, `impersonator`,
+`executor`, `tenant` or `targets`), or a target's index, redacts that party's other
+fields, such as its name and email, and keeps its identifier fields; a party object is
+never replaced as a whole (a party that is not an object, such as a string `actor`, is
+replaced like any other value). A change's values are replaced when its `field` is a string the
+change pattern matches. The .NET SDK redacts by the same rules, checked against one shared
+fixture: with `DEFAULT_SECRET_KEYS` both redact exactly the same keys. A pattern of your
+own runs on each platform's engine, which differ at the edges (in .NET `$` also matches
+before a final line feed, and flags such as `i` fold case differently), so keep a pattern
+you share between the SDKs to plain alternatives and anchors. `redact()` is exact for JSON
+data, which is what `EventInput` types (plain objects, arrays, primitives, and `toJSON`
+values such as `Date` without side effects on other parts of the event); getters or
+`toJSON` with such side effects are outside that contract. A change whose `field` is a
+getter, an inherited or non-enumerable property, or a value (an object or a function) with a
+`toJSON` has its `before` and `after` redacted, whatever the pattern; any other non-string
+`field`, or none, is not matched.
 `DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
 cookies, credentials and private keys. Add email/phone patterns for your PII policy;
 the default secret pattern does not cover all PII. Supplying `keys` replaces the default pattern; combine them to retain secret protection. `changeFields` defaults to the resulting `keys` pattern. Hooks compose:

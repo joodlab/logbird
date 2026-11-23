@@ -19,7 +19,7 @@ import { SetupChecklistCard } from '@/components/setup/setup-checklist-card';
 import { Timestamp } from '@/components/timestamp';
 import { awaiting, current } from '@/lib/api/current';
 import { overviewQuery, projectQuery, projectSetupQuery } from '@/lib/api/queries';
-import { eventSentence } from '@/lib/events';
+import { eventSentence, personLabel } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { outcomeBandQuery, RECENT_PROBLEMS_QUERY } from '@/lib/overview-queries';
 import { placeholderKeys } from '@/lib/placeholders';
@@ -98,6 +98,8 @@ function OverviewPage() {
         />
         <StatCard
           delta={k && compare ? delta(k.actors, k.actorsPrev) : undefined}
+          // A count of distinct actor ids: an actor recorded by a name or email alone is in the events, not here (#333).
+          hint="Distinct actor IDs"
           label="Active actors"
           loading={loading}
           onClick={() => navigate({ to: '/p/$projectId/actors', params: { projectId } })}
@@ -322,9 +324,9 @@ function ProblemRow({ event, projectId }: { event: AuditEvent; projectId: string
         <span className="flex shrink-0 items-center gap-3 ps-4.5 sm:ps-0">
           <SeverityBadge hideInfo severity={event.severity} />
           <ActionName action={event.action} className="hidden max-w-56 md:inline" />
-          {event.actor ? (
+          {event.actor && personLabel(event.actor) ? (
             <span className="hidden max-w-44 lg:inline-flex">
-              <EntityChip id={event.actor.id} name={event.actor.name} />
+              <EntityChip id={event.actor.id} name={personLabel(event.actor)} />
             </span>
           ) : null}
           <Timestamp className="w-24 shrink-0 text-end text-muted-foreground text-xs" iso={event.timestamp} />

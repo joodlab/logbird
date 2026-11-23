@@ -1,6 +1,16 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { actorLabel, causedCount, directChildren, eventSentence, humanizeNoun } from './events';
+import {
+  actorLabel,
+  causedCount,
+  directChildren,
+  distinctParties,
+  eventSentence,
+  humanizeNoun,
+  partyKey,
+  sentenceSubject,
+  unlinkedPartyLabel,
+} from './events';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -56,6 +66,43 @@ describe('eventSentence', () => {
     const e = event({ action: 'member.joined_via_link', actor: joiner, targets: [{ type: 'user', id: joiner.id, name: '' }] });
     expect(eventSentence(e)).toBe('max@logbird.local joined via link');
     expect(actorLabel(e)).toBe('max@logbird.local');
+  });
+
+  it('never drops a target recorded without an id because the actor has none either', () => {
+    const e = event({
+      action: 'user.updated',
+      description: '',
+      actor: { type: 'user', id: '', name: 'Lina', email: '' },
+      targets: [{ type: 'user', id: '', name: 'Omar' }],
+    });
+    expect(eventSentence(e)).toContain('Omar');
+  });
+
+  it("keeps the object when a worker updates the actor's own record (#333)", () => {
+    const lina = { type: 'user', id: 'usr_42', name: 'Lina', email: '' };
+    const e = event({
+      action: 'user.updated',
+      description: '',
+      actor: lina,
+      executor: { type: 'worker', id: 'wrk_1', name: 'Billing worker', jobId: '', attempt: 0 },
+      targets: [{ type: 'user', id: 'usr_42', name: 'Lina' }],
+    });
+    expect(eventSentence(e)).not.toBe('Billing worker updated');
+    expect(eventSentence(e)).toContain('Lina');
+    // The actor as the subject still reads without repeating themself.
+    expect(eventSentence({ ...e, executor: null, action: 'member.joined_via_link' })).toBe('Lina joined via link');
+  });
+
+  it('keeps the object when a worker and the actor share a display name (#333)', () => {
+    const e = event({
+      action: 'user.updated',
+      description: '',
+      actor: { type: 'user', id: 'usr_42', name: 'Lina', email: '' },
+      executor: { type: 'worker', id: 'wrk_lina', name: 'Lina', jobId: '', attempt: 0 },
+      targets: [{ type: 'user', id: 'usr_42', name: 'Lina' }],
+    });
+    expect(eventSentence(e)).not.toBe('Lina updated');
+    expect(sentenceSubject(e).party).toBe('executor');
   });
 
   it('never says "Something" for an action-only event', () => {
@@ -246,5 +293,46 @@ describe('directChildren de-duplication', () => {
     expect(directChildren([child('2026-11-05T10:00:02.000Z'), child('2026-11-05T10:00:01.000Z')], 'root').map((e) => e.timestamp)).toEqual([
       '2026-11-05T10:00:01.000Z',
     ]);
+  });
+});
+
+describe('distinctParties', () => {
+  const p = (id: string, type = 'user', name = '') => ({ id, type, name });
+  it('keeps each id once, in first-seen order, and skips events that recorded no party', () => {
+    expect(distinctParties([p('u1'), null, p('u2'), p('u1'), undefined, p('', '', '')])).toEqual([p('u1'), p('u2')]);
+  });
+  it('never collapses two different parties recorded without an id', () => {
+    const parties = distinctParties([p('', 'worker', 'Billing worker'), p('', 'worker', 'Mailer'), p('', 'user'), p('', 'worker', 'Mailer')]);
+    expect(parties).toEqual([p('', 'worker', 'Billing worker'), p('', 'worker', 'Mailer'), p('', 'user')]);
+  });
+  it('counts five distinct actors as five, so "and 1 more" follows the first four', () => {
+    const five = distinctParties([p('a'), p('b'), p('', 'user', 'Lina'), p('c'), p('', 'user', 'Omar'), p('a')]);
+    expect(five).toHaveLength(5);
+    expect(distinctParties([p('a'), p('b'), p('c'), p('d'), p('d')])).toHaveLength(4);
+  });
+  it('is empty while there are no events yet', () => {
+    expect(distinctParties([])).toEqual([]);
+  });
+});
+
+describe('unlinkedPartyLabel', () => {
+  it('reads the name, else the email, else nothing', () => {
+    expect(unlinkedPartyLabel({ name: ' Billing worker ' })).toBe('Billing worker');
+    expect(unlinkedPartyLabel({ name: '', email: 'lina@example.test' })).toBe('lina@example.test');
+    expect(unlinkedPartyLabel({ name: '' })).toBe('');
+  });
+});
+
+describe('distinctParties, round 2', () => {
+  const p = (id: string, type = 'user', name = '', email = '') => ({ id, type, name, email });
+  it('tells ID-less actors apart by email', () => {
+    expect(distinctParties([p('', 'user', '', 'a@example.test'), p('', 'user', '', 'b@example.test')])).toHaveLength(2);
+  });
+  it('reads a repeated id by its latest record, in its first place', () => {
+    expect(distinctParties([p('u1'), p('u2', 'user', 'Omar'), p('u1', 'user', 'Lina')])).toEqual([p('u1', 'user', 'Lina'), p('u2', 'user', 'Omar')]);
+  });
+  it('gives no two different parties the same key, whatever their type and name contain', () => {
+    expect(partyKey(p('', 'service:billing', 'west'))).not.toBe(partyKey(p('', 'service', 'billing:west')));
+    expect(distinctParties([p('', 'service:billing', 'west'), p('', 'service', 'billing:west')])).toHaveLength(2);
   });
 });

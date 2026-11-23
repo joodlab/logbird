@@ -38,6 +38,9 @@ const msFmt = () => inZone('ms', 'en-GB', { hour: '2-digit', minute: '2-digit', 
 const dayFmt = () => inZone('day', 'en-US', { month: 'short', day: 'numeric' });
 const dayYearFmt = () => inZone('dayYear', 'en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const shortTimeFmt = () => inZone('shortTime', 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+const secondTimeFmt = () => inZone('secondTime', 'en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const msTimeFmt = () =>
+  inZone('msTime', 'en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false });
 const fullFmt = (zone?: string) =>
   inZone(
     'full',
@@ -69,6 +72,9 @@ const at = (v: Instant) => (v instanceof Date ? v : new Date(v));
 export const localDayKey = (v: Instant): string => dayKeyFmt().format(at(v));
 /** "14:32" */
 export const formatClock = (v: Instant): string => shortTimeFmt().format(at(v));
+/** "14:32:07", or "14:32:07.042" with milliseconds: for spans too short to tell apart by the minute. */
+export const formatClockPrecise = (v: Instant, unit: 'second' | 'millisecond'): string =>
+  (unit === 'second' ? secondTimeFmt() : msTimeFmt()).format(at(v));
 /** "Nov 4" */
 export const formatMonthDay = (v: Instant): string => dayFmt().format(at(v));
 /** "Nov 2026" */
@@ -152,8 +158,10 @@ export function formatDuration(ms: number): string {
   if (ms < 1) return '0 ms';
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
+  // Round to whole seconds before splitting, so 119,999 ms reads "2 m", never "1 m 60 s".
+  const total = Math.round(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   if (m < 60) return s ? `${m} m ${s} s` : `${m} m`;
   const h = Math.floor(m / 60);
   return `${h} h ${m % 60} m`;

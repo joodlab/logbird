@@ -1,0 +1,39 @@
+title: Page not found · Logbird
+description: (none)
+
+headings:
+h1 No event at this address.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+404
+No event at this address.
+We searched and found nothing. The page may have moved, or the link may be wrong.
+[aria-hidden] path:"/this-page" → 0 events
+Go to the home page
+Product tour
+Developers
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[aria-hidden] room.rate.updated
+[aria-hidden] Omar Saleh via support → Room 12
+[aria-hidden] 14:18:47
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+Go to the home page → /
+Product tour → /product
+Developers → /developers
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

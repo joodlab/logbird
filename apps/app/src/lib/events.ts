@@ -48,13 +48,28 @@ export function creatorLabel(creator: { name?: string | null; email?: string | n
  * The human sentence for an event. Prefer the producer's `description`; otherwise build
  * "<actor> <verb> <target>" from the envelope so even off-standard events read naturally.
  */
+/** Whether the sentence is the producer's own description rather than one built from the envelope. */
+export const usesDescription = (e: Pick<AuditEvent, 'description' | 'action'>) => Boolean(e.description) && e.description !== e.action;
+
+/**
+ * Who a built sentence credits, and which party that is. Work done by a worker/scheduler/webhook reads best credited
+ * to the executor ("CRM worker upserted …"); the actor who caused it stays visible in the actor column and the detail
+ * panel. Callers compare parties, never display names: a worker and a user may both be called "Lina".
+ */
+export function sentenceSubject(e: AuditEvent): { who: string; party: 'actor' | 'executor' | null } {
+  const machine = e.executor && ['worker', 'scheduler', 'webhook', 'job'].includes(e.executor.type);
+  const executorLabel = e.executor?.name || e.executor?.id || '';
+  if (machine && executorLabel) return { who: executorLabel, party: 'executor' };
+  const actor = personLabel(e.actor);
+  if (actor) return { who: actor, party: 'actor' };
+  if (executorLabel) return { who: executorLabel, party: 'executor' };
+  return { who: '', party: null };
+}
+
 export function eventSentence(e: AuditEvent): string {
   // Some producers repeat the action as the description ("project.deleted"): build a sentence instead.
-  if (e.description && e.description !== e.action) return e.description;
-  // Work done by a worker/scheduler/webhook reads best credited to the executor ("CRM worker upserted …");
-  // the actor who caused it stays visible in the actor column and the detail panel.
-  const performedByMachine = e.executor && ['worker', 'scheduler', 'webhook', 'job'].includes(e.executor.type);
-  const who = (performedByMachine ? e.executor?.name || e.executor?.id : '') || personLabel(e.actor) || e.executor?.name || e.executor?.id || '';
+  if (usesDescription(e)) return e.description;
+  const { who, party } = sentenceSubject(e);
   const parts = e.action.split('.');
   const verb = parts.at(-1) ?? e.action;
   const noun = parts.slice(0, -1).join('.');
@@ -64,7 +79,11 @@ export function eventSentence(e: AuditEvent): string {
   if (INTRANSITIVE.has(verb)) return `${who} ${verb.replaceAll('_', ' ')}`;
   const verbText = VERB_PAST[verb] ?? verb.replaceAll('_', ' ');
   // "joined via link" with the joiner as the target: the object would only repeat the subject.
-  if (target && e.actor && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
+  // Only by id: an actor and a target both recorded without one are not the same party.
+  // Only when the actor is also the sentence's subject: a worker updating the actor's own record keeps its object
+  // ("Billing worker updated Lina's profile", not "Billing worker updated") (#333).
+  const actorIsSubject = party === 'actor';
+  if (actorIsSubject && target && e.actor?.id && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
   const special = specialSentence(e, who, noun, verb);
   if (special) return special;
   // A named target of the action's own kind reads "API key ‘Production’" (also when the kind is the noun's last part:
@@ -214,11 +233,11 @@ export function actorAttributeHint(attributes: Record<string, string>): { key: s
   return key && value ? { key, value: value.trim() } : null;
 }
 
-/** The nearest step in the causation chain (root → direct parent) that recorded an actor. */
+/** The nearest step in the causation chain (root → direct parent) that recorded an actor it can name (name, email or id). */
 export function parentActor(parents: readonly Pick<AuditEvent, 'actor'>[]): NonNullable<AuditEvent['actor']> | null {
   for (let i = parents.length - 1; i >= 0; i--) {
     const actor = parents[i]?.actor;
-    if (actor && (actor.id || actor.name)) return actor;
+    if (actor && personLabel(actor)) return actor;
   }
   return null;
 }
@@ -245,4 +264,36 @@ export function directChildren(events: readonly AuditEvent[], eventId: string): 
  */
 export function causedCount(detail: { childCount: number }, e: Pick<AuditEvent, 'id' | 'context'>): number {
   return Math.max(0, detail.childCount - (e.context.parentEventId === e.id ? 1 : 0));
+}
+
+type Party = { id: string; type: string; name: string; email?: string };
+
+/**
+ * One party's identity, as a collision-free string (a JSON tuple, so no separator inside a type or name can make two
+ * parties alike): its id when it has one, else everything it was recorded with. Used both to group parties and as their
+ * React key.
+ */
+export function partyKey(p: Party): string {
+  return p.id ? JSON.stringify(['id', p.id]) : JSON.stringify(['anon', p.type, p.name, p.email ?? '']);
+}
+
+/**
+ * Who an operation's events name as a party (actors, or executors), each once, in the order first seen. A party with an
+ * id is the same party wherever it appears and reads as its latest record (events come oldest first, so a name added
+ * later wins); one recorded without an id is told apart by its type, name and email, so two different id-less parties
+ * never collapse into one. Events that recorded nothing for the party add nothing.
+ */
+export function distinctParties<P extends Party>(parties: readonly (P | null | undefined)[]): P[] {
+  const byKey = new Map<string, P>();
+  for (const p of parties) {
+    if (!p || !(p.id || p.type || p.name || p.email)) continue;
+    // Map.set on an existing key keeps its position: the party stays where it first appeared.
+    byKey.set(partyKey(p), p);
+  }
+  return [...byKey.values()];
+}
+
+/** A party recorded without an id has no profile to link to: its name, else its email, else empty (callers show the type). */
+export function unlinkedPartyLabel(p: { name?: string; email?: string }): string {
+  return p.name?.trim() || p.email?.trim() || '';
 }

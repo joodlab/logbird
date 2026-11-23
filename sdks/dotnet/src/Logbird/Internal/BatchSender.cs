@@ -47,17 +47,22 @@ internal sealed class BatchSender
     private readonly AuthenticationHeaderValue _authorization;
     private readonly int _maxRetries;
     private readonly TimeSpan _requestTimeout;
-    private readonly Action<QueuedEvent, DropReason, string?, string?> _drop;
+    // Prepares an event's drop report (null when nobody listens); it is posted inside the settlement, see State.TryReject.
+    private readonly Func<QueuedEvent, DropReason, string?, string?, Action?> _drop;
     private readonly Action<QueuedEvent, string> _warn;
     private readonly Action _progress;
 
-    // Settling and counting happen together (under the queue lock, see EventQueue.Settle), so a flush that sees an event
-    // settled also sees it counted; _drop then only notifies.
+    // Settling, counting and posting the drop report happen together (under the queue lock, see EventQueue.Settle), so a
+    // flush that sees an event settled also sees it counted and finds its report already posted.
     private readonly Action? _delivered;
     private readonly Action<DropReason>? _countDrop;
     private readonly Func<QueuedEvent, Action, bool> _settle;
     private int _abandonedAttempts;
     private readonly Action<Exception> _report;
+
+    // Reserves the place of a batch-level OnError report before the events it is about settle, so no flush can see them
+    // settled and return before the report is posted; the returned callback posts it (or releases the place with null).
+    private readonly Func<Action<Exception?>> _reserveReport;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<double> _random;
     private readonly Func<TimeSpan> _elapsed;
@@ -68,7 +73,7 @@ internal sealed class BatchSender
         string ingestKey,
         int maxRetries,
         TimeSpan requestTimeout,
-        Action<QueuedEvent, DropReason, string?, string?> drop,
+        Func<QueuedEvent, DropReason, string?, string?, Action?> drop,
         Action<QueuedEvent, string> warn,
         Action progress,
         Action<Exception> report,
@@ -77,7 +82,8 @@ internal sealed class BatchSender
         Func<TimeSpan>? clock = null,
         Action? delivered = null,
         Action<DropReason>? countDrop = null,
-        Func<QueuedEvent, Action, bool>? settle = null)
+        Func<QueuedEvent, Action, bool>? settle = null,
+        Func<Action<Exception?>>? reserveReport = null)
     {
         _delivered = delivered;
         _countDrop = countDrop;
@@ -100,6 +106,13 @@ internal sealed class BatchSender
         _warn = warn;
         _progress = progress;
         _report = report;
+        _reserveReport = reserveReport ?? (() => error =>
+        {
+            if (error is not null)
+            {
+                report(error);
+            }
+        });
         _delay = delay ?? Task.Delay;
         var jitter = new Random();
         _random = random ?? (() =>
@@ -232,7 +245,9 @@ internal sealed class BatchSender
             // The status counts as soon as the headers arrived, even when the body could not be read afterwards.
             var answeredStatus = response is null ? headersStatus.Value : (int)response.StatusCode;
 
-            using (response)
+            // The response is disposed quietly on every exit: a throwing Dispose must not change an outcome already
+            // recorded (accepted events are settled before this block ends).
+            try
             {
                 if (stop.IsCancellationRequested)
                 {
@@ -245,7 +260,12 @@ internal sealed class BatchSender
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
                 }
 
-                var status = response is null ? 0 : (int)response.StatusCode;
+                // A permanent answer (a redirect, or a 4xx other than 429) stays permanent when its body could not be read:
+                // the headers already decided it. Any other unread answer is handled as no answer (0) and retried, which is
+                // safe: the server keeps one copy per id.
+                var status = response is not null ? (int)response.StatusCode
+                    : answeredStatus is >= 300 and < 500 and not 429 ? answeredStatus
+                    : 0;
                 if (status is >= 200 and < 300)
                 {
                     // A success counts only for events the response acknowledges: rejected by index, or accepted by id. A
@@ -367,20 +387,22 @@ internal sealed class BatchSender
                     RecordAnswer(state, attempt, answeredStatus, dispatchNumbers!);
                 }
 
-                var retryable = response is null || status == 429 || status >= 500 || unacknowledged;
+                var retryable = status == 0 || status == 429 || status >= 500 || unacknowledged;
                 if (!retryable)
                 {
-                    foreach (var index in state.PendingIndices())
+                    var post = _reserveReport();
+                    try
                     {
-                        if (!state.TryReject(index, DropReason.HttpError))
+                        foreach (var index in state.PendingIndices())
                         {
-                            continue;
+                            state.TryReject(index, DropReason.HttpError, _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture), null));
                         }
-
-                        _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture), null);
+                    }
+                    finally
+                    {
+                        post(new LogbirdDeliveryException($"Logbird HTTP {status}; batch dropped.", (HttpStatusCode)status));
                     }
 
-                    _report(new LogbirdDeliveryException($"Logbird HTTP {status}; batch dropped.", (HttpStatusCode)status));
                     return state.Complete();
                 }
 
@@ -393,16 +415,22 @@ internal sealed class BatchSender
                     {
                         // Never counted as delivered: report each event that is still unacknowledged.
                         var count = 0;
-                        foreach (var index in state.PendingIndices())
+                        var post = _reserveReport();
+                        try
                         {
-                            if (state.TryReject(index, DropReason.Unacknowledged))
+                            foreach (var index in state.PendingIndices())
                             {
-                                count++;
-                                _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.", null);
+                                if (state.TryReject(index, DropReason.Unacknowledged, _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.", null)))
+                                {
+                                    count++;
+                                }
                             }
                         }
+                        finally
+                        {
+                            post(count > 0 ? new LogbirdDeliveryException($"Logbird HTTP {status} did not acknowledge {count} event(s) after retries; they were dropped.", (HttpStatusCode)status) : null);
+                        }
 
-                        _report(new LogbirdDeliveryException($"Logbird HTTP {status} did not acknowledge {count} event(s) after retries; they were dropped.", (HttpStatusCode)status));
                         return state.Complete();
                     }
 
@@ -425,6 +453,13 @@ internal sealed class BatchSender
                 catch (OperationCanceledException)
                 {
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
+                }
+            }
+            finally
+            {
+                if (response is not null)
+                {
+                    DisposeQuietly(response);
                 }
             }
         }
@@ -546,7 +581,9 @@ internal sealed class BatchSender
 
     /// <summary>
     /// Reads a response body under a size cap. Cancellation disposes the response, which aborts a body read that the
-    /// stream itself would not cancel (as on .NET Framework), so a stalled body cannot outlive the deadline.
+    /// stream itself would not cancel (as on .NET Framework), so a stalled body cannot outlive the deadline. That disposal,
+    /// and the body stream's, are quiet: a response or stream that throws from Dispose neither throws into the code that
+    /// cancels nor replaces a body that was read in full.
     /// </summary>
     internal static async Task<byte[]> ReadBodyAsync(HttpResponseMessage response, int limit, CancellationToken cancellationToken)
     {
@@ -556,7 +593,7 @@ internal sealed class BatchSender
             return [];
         }
 
-        using (cancellationToken.Register(static state => ((HttpResponseMessage)state!).Dispose(), response))
+        using (cancellationToken.Register(static state => DisposeQuietly((HttpResponseMessage)state!), response))
         {
             return await ReadCappedAsync(response.Content, limit, cancellationToken).ConfigureAwait(false);
         }
@@ -571,30 +608,50 @@ internal sealed class BatchSender
         }
 
 #if NET8_0_OR_GREATER
-        using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 #else
-        using var stream = await content.ReadAsStreamAsync().ConfigureAwait(false);
+        var stream = await content.ReadAsStreamAsync().ConfigureAwait(false);
 #endif
-        using var buffer = new MemoryStream();
-        var chunk = new byte[16 * 1024];
-        while (true)
+        try
         {
+            using var buffer = new MemoryStream();
+            var chunk = new byte[16 * 1024];
+            while (true)
+            {
 #if NET8_0_OR_GREATER
-            var read = await stream.ReadAsync(chunk.AsMemory(), cancellationToken).ConfigureAwait(false);
+                var read = await stream.ReadAsync(chunk.AsMemory(), cancellationToken).ConfigureAwait(false);
 #else
-            var read = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken).ConfigureAwait(false);
+                var read = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken).ConfigureAwait(false);
 #endif
-            if (read == 0)
-            {
-                return buffer.ToArray();
-            }
+                if (read == 0)
+                {
+                    return buffer.ToArray();
+                }
 
-            if (buffer.Length + read > limit)
-            {
-                throw new InvalidDataException("The Logbird response is larger than expected.");
-            }
+                if (buffer.Length + read > limit)
+                {
+                    throw new InvalidDataException("The Logbird response is larger than expected.");
+                }
 
-            buffer.Write(chunk, 0, read);
+                buffer.Write(chunk, 0, read);
+            }
+        }
+        finally
+        {
+            DisposeQuietly(stream);
+        }
+    }
+
+    /// <summary>Disposes a response or stream of the transport's; a throwing Dispose never replaces the outcome.</summary>
+    internal static void DisposeQuietly(IDisposable disposable)
+    {
+        try
+        {
+            disposable.Dispose();
+        }
+        catch
+        {
+            // Transport cleanup: whatever it throws is not the outcome, and its message is not reported.
         }
     }
 
@@ -614,12 +671,28 @@ internal sealed class BatchSender
 
     private void Reject(State state, int[] attempt, JsonElement rejections)
     {
-        if (rejections.ValueKind != JsonValueKind.Array)
+        // An empty list (every successful answer) reserves nothing: a released place still holds notifier capacity until
+        // the drain reaches it, so successful batches would crowd real reports out behind a slow callback.
+        if (rejections.ValueKind != JsonValueKind.Array || rejections.GetArrayLength() == 0)
         {
             return;
         }
 
         var codes = new List<string>();
+        var post = _reserveReport();
+        try
+        {
+            RejectEach(state, attempt, rejections, codes);
+        }
+        finally
+        {
+            // Whatever settled before a failure is still reported.
+            post(codes.Count > 0 ? new LogbirdRejectedException(codes.Count, codes) : null);
+        }
+    }
+
+    private void RejectEach(State state, int[] attempt, JsonElement rejections, List<string> codes)
+    {
         foreach (var rejection in rejections.EnumerateArray())
         {
             if (rejection.ValueKind != JsonValueKind.Object
@@ -640,18 +713,12 @@ internal sealed class BatchSender
             var reason = Text(reasonElement);
             var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? SafeCode(Text(codeElement)) : "other";
             var index = attempt[(int)wire];
-            if (!state.TryReject(index, DropReason.Rejected))
+            if (!state.TryReject(index, DropReason.Rejected, _drop(state.Batch[index], DropReason.Rejected, reason, code)))
             {
                 continue;
             }
 
             codes.Add(code);
-            _drop(state.Batch[index], DropReason.Rejected, reason, code);
-        }
-
-        if (codes.Count > 0)
-        {
-            _report(new LogbirdRejectedException(codes.Count, codes));
         }
     }
 
@@ -924,8 +991,15 @@ internal sealed class BatchSender
 
         public bool IsSettled(long index) => !Batch[index].IsPending;
 
-        /// <summary>Settles an event as rejected or dropped. False when it was already settled or abandoned by shutdown.</summary>
-        public bool TryReject(int index, DropReason reason) => settle(Batch[index], () => countDrop?.Invoke(reason));
+        /// <summary>
+        /// Settles an event as rejected or dropped, counting it and posting its prepared report in the same step, so no
+        /// flush can see it settled before its report is posted. False when it was already settled or abandoned by shutdown.
+        /// </summary>
+        public bool TryReject(int index, DropReason reason, Action? report) => settle(Batch[index], () =>
+        {
+            countDrop?.Invoke(reason);
+            report?.Invoke();
+        });
 
         public void Deliver(int index)
         {

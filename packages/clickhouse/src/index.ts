@@ -1,5 +1,6 @@
 export * from './client';
 export { CSV_COLUMNS } from './export';
+export * from './field-mask';
 export * from './identity';
 export * from './maintenance-tag';
 export * from './migrations';

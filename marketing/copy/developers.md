@@ -4,6 +4,8 @@ description: Send audit events from TypeScript, Hono, TanStack Start, Nuxt or an
 path: /developers
 ---
 
+Page text renders from `apps/web/src/content/developers.ts`; edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Developers
 
 ## intro

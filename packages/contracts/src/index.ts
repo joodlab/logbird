@@ -1,6 +1,7 @@
 export * from './api';
 export * from './auth';
 export * from './console';
+export * from './console-routes';
 export * from './events';
 export * from './invitations';
 export * from './json';

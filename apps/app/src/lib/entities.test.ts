@@ -10,6 +10,7 @@ import {
   idFromFreeText,
   lookupType,
   resolveJump,
+  settledIdMatches,
 } from './entities';
 
 describe('entity match rank (the order Jump to lists entities in)', () => {
@@ -46,6 +47,13 @@ describe('the id that free text could be', () => {
     for (const id of ['biz_27', 'usr_131', 'article_27_2', 'crm-hourly-biz_7', '7']) expect(idFromFreeText(id), id).toBe(id);
     expect(idFromFreeText('"acme:27"')).toBe('acme:27');
     expect(idFromFreeText('"acme west"')).toBe('acme west');
+    // An escaped quote inside the quotes is part of the id, as the server reads it.
+    expect(idFromFreeText('"acme\\"27"')).toBe('acme"27');
+    // Spaces inside the quotes are part of the id, as the server reads it: never trimmed into another id.
+    expect(idFromFreeText('" a\\"b "')).toBe(' a"b ');
+    expect(idFromFreeText('"   "')).toBe('');
+    // A leading slash starts a regex to the server, never an id.
+    expect(idFromFreeText('/x/')).toBe('');
     for (const text of ['', 'tenant:biz_27', 'two words', '"a"b"', 'biz*', '-biz_27', '(biz)', 'AND', 'NOT'])
       expect(idFromFreeText(text), text).toBe('');
   });
@@ -126,5 +134,38 @@ describe('a record page history starts from the link when it carries the exact p
     expect(lookupType('target', 'order:archived:A1', 'order:archived')).toBe('order:archived');
     expect(lookupType('target', 'order:archived:A1', undefined)).toBeUndefined();
     expect(lookupType('actor', 'qa-user-1', undefined)).toBeUndefined();
+  });
+});
+
+describe('settledIdMatches (#324 A3, A4)', () => {
+  const tenant = { kind: 'tenant' as const, id: 'ACME"27', name: 'West Depot' };
+  const biz = { kind: 'tenant' as const, id: 'biz_27', name: 'Biz' };
+  it('offers nothing while the lookup has not settled, even with a cached hit', () => {
+    expect(settledIdMatches('biz_27', false, [biz])).toEqual([]);
+    expect(settledIdMatches('biz_27', true, [biz])).toEqual([biz]);
+  });
+  it('matches a quoted literal as written: a space inside the quotes is part of the id', () => {
+    expect(settledIdMatches('ACME"27 ', true, [tenant])).toEqual([]);
+    expect(settledIdMatches('ACME"27', true, [tenant])).toEqual([tenant]);
+    expect(idFromFreeText('"ACME\\"27 "')).toBe('ACME"27 ');
+  });
+});
+
+describe('idFromFreeText, as the server parses a bare word (#334)', () => {
+  it('takes any single literal word the parser reads, an apostrophe included', () => {
+    expect(idFromFreeText("o'brien")).toBe("o'brien");
+    expect(idFromFreeText('biz_27')).toBe('biz_27');
+    expect(idFromFreeText('  biz_27 ')).toBe('biz_27');
+  });
+  it('never takes a field, a negation, a wildcard, a regex, several words or an operator', () => {
+    for (const t of ['actor:x', '-x', 'foo*', '/x/', 'a b', 'AND', '(x)', '']) expect(idFromFreeText(t)).toBe('');
+  });
+});
+
+describe('idFromFreeText within the directory search limit (#334)', () => {
+  it('never offers a lookup the entity directory would refuse as too long', () => {
+    expect(idFromFreeText(`${'x'.repeat(1023)}'`)).toBe(`${'x'.repeat(1023)}'`);
+    expect(idFromFreeText(`${'x'.repeat(1024)}'`)).toBe('');
+    expect(idFromFreeText(`"${'y'.repeat(1025)}"`)).toBe('');
   });
 });

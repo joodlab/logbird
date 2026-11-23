@@ -204,21 +204,14 @@ internal static class Recording
         AuditEvent copy;
         try
         {
-            // The client's own depth and size limits apply before anything is copied: an event they would reject is dropped
-            // and reported here, under its id or a new one, without copying it or handing the caller's instance to any client.
-            var shape = JsonDepth.Measure(prepared, LogbirdClient.MaxEventBytes);
-            if (shape != JsonDepth.Shape.Ok)
+            // The client's own pre-copy checks (depth, and the 1 MiB memory guard before redaction) apply before anything is
+            // copied: an event they refuse is dropped and reported here, under its id or a new one, without copying it or
+            // handing the caller's instance to any client. The 256 KB limit is decided later by the client, on what it sends
+            // (after BeforeSend and redaction).
+            if (LogbirdClient.RefuseBeforeCopy(prepared) is { } refusal)
             {
                 var dropped = SafeId(prepared) ?? LogbirdClient.NewEventId();
-                if (shape == JsonDepth.Shape.TooLarge)
-                {
-                    client.Drop(DropReason.TooLarge, dropped, SafeAction(prepared), "the event exceeds 256 KB.");
-                }
-                else
-                {
-                    client.Drop(DropReason.Invalid, dropped, SafeAction(prepared), "the event is nested too deeply.");
-                }
-
+                client.Drop(refusal.Reason, dropped, SafeAction(prepared), refusal.Detail);
                 return dropped;
             }
 
@@ -308,22 +301,49 @@ internal sealed class RequestAuditLog(AuditSink sink, IHttpContextAccessor acces
         {
             var http = accessor.HttpContext;
             var feature = http is null ? null : RequestContext.GetOrCapture(http, options, Client);
+
+            // A request's carrier can always be written and read back unchanged (AuditCarrier.ToJson): a resolved party
+            // or an id that could not (a party without its id, a lone surrogate) is left out and reported, never changed.
+            var operationId = Kept(feature?.OperationId, "operation id");
+            var actor = http is null ? null : Resolve(options.ResolveActor ?? DefaultActor, http, "actor");
+            var impersonator = http is null || options.ResolveImpersonator is null ? null : Resolve(options.ResolveImpersonator, http, "impersonator");
+            var tenant = http is null ? null : Resolve(options.ResolveTenant ?? DefaultTenant, http, "tenant");
             return new AuditCarrier
             {
-                OperationId = feature?.OperationId ?? LogbirdClient.NewEventId(),
-                RequestId = feature?.RequestId,
-                TraceId = feature is null ? RequestContext.CurrentTraceId() : feature.TraceId,
-                ParentEventId = parentEventId,
-                Actor = http is null ? null : Resolve(options.ResolveActor ?? DefaultActor, http, "actor"),
-                Impersonator = http is null || options.ResolveImpersonator is null ? null : Resolve(options.ResolveImpersonator, http, "impersonator"),
-                Tenant = http is null ? null : Resolve(options.ResolveTenant ?? DefaultTenant, http, "tenant"),
+                OperationId = operationId ?? LogbirdClient.NewEventId(),
+                RequestId = Kept(feature?.RequestId, "request id"),
+                TraceId = Kept(feature is null ? RequestContext.CurrentTraceId() : feature.TraceId, "trace id"),
+                ParentEventId = Kept(parentEventId, "parent event id"),
+                Actor = actor is null || AuditCarrier.Writable(actor) ? actor : Left<AuditActor>("actor"),
+                Impersonator = impersonator is null || AuditCarrier.Writable(impersonator) ? impersonator : Left<AuditImpersonator>("impersonator"),
+                Tenant = tenant is null || AuditCarrier.Writable(tenant) ? tenant : Left<AuditTenant>("tenant"),
             };
         }
         catch (Exception e)
         {
             Client.Diagnostic("Logbird could not capture an audit carrier (" + e.GetType().Name + "); a new operation was started.");
-            return new AuditCarrier { OperationId = LogbirdClient.NewEventId(), ParentEventId = parentEventId };
+            return new AuditCarrier { OperationId = LogbirdClient.NewEventId(), ParentEventId = Kept(parentEventId, "parent event id") };
         }
+    }
+
+    /// <summary>A carrier id, or null (reported) when it holds a lone surrogate and could not be read back unchanged.</summary>
+    private string? Kept(string? id, string what)
+    {
+        if (AuditCarrier.Writable(id))
+        {
+            return id;
+        }
+
+        Client.Diagnostic("Logbird left the " + what + " out of an audit carrier: it holds a lone surrogate, which a carrier cannot carry unchanged.");
+        return null;
+    }
+
+    /// <summary>A resolved party the carrier leaves out (reported): without its id, or holding a lone surrogate.</summary>
+    private T? Left<T>(string what)
+        where T : class
+    {
+        Client.Diagnostic("Logbird left the " + what + " out of an audit carrier: it has no id (or an actor no type) or holds a lone surrogate, so a carrier could not carry it unchanged.");
+        return null;
     }
 
     private void Fill(AuditEvent e, AuditFill fill)

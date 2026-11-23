@@ -80,6 +80,16 @@ describe('masks', () => {
     expect(event.context.ip).toBe('203.0.113.1');
     expect(maskEvent(event, undefined)).toBe(event);
   });
+  it('masks an actor name that is the email too, ID-less or not, and keeps an ordinary name', () => {
+    for (const id of ['', 'u1']) {
+      const aliased = { ...event, actor: { id, type: '', name: ' lina@example.invalid', email: 'Lina@example.invalid' } } as AuditEvent;
+      const masked = maskEvent(aliased, ['actor_email']);
+      expect(masked.actor?.email).toMatch(/^masked:[0-9a-f]{24}$/);
+      expect(masked.actor?.name).toBe(masked.actor?.email);
+      expect(JSON.stringify(masked)).not.toMatch(/example\.invalid/i);
+    }
+    expect(maskEvent(event, ['actor_email']).actor?.name).toBe('Lina');
+  });
   it('hashes emails per project and case-insensitively', () => {
     const key = viewerTokenKey('z'.repeat(48));
     expect(maskedEmail('p1', 'A@example.invalid', key)).toBe(maskedEmail('p1', 'a@example.invalid', key));

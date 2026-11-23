@@ -4,6 +4,8 @@ description: Pangea Secure Audit Log is a hosted, tamperproof audit log with Mer
 path: /compare/pangea
 ---
 
+Page text renders from `apps/web/src/content/comparisons.ts` (the facts and sources) and `apps/web/src/content/compare.ts` (the page furniture); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Logbird and Pangea Secure Audit Log
 
 ## summary

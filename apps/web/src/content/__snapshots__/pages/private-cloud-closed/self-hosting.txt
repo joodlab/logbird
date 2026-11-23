@@ -1,0 +1,174 @@
+title: Self-host · Logbird
+description: Run Logbird on your own server with Docker Compose or Coolify. Bring your own Postgres, ClickHouse and Redis, add TLS, back it up.
+
+headings:
+h1 Your audit log, on your servers.
+h2 The quickstart is published when the repository opens.
+h2 What you need.
+h2 Pick the setup that fits what you already run.
+h3 Bundled Compose
+h3 Coolify
+h3 Bring your own databases
+h2 Automatic HTTPS, or the proxy you already run.
+h2 Operating Logbird
+h3 Sign-in is by emailed code.
+h3 Upgrade to a pinned release, after a backup.
+h4 Stop writes
+h4 Back up
+h4 Pin the new version
+h4 Pull, then start
+h4 Verify
+h2 What self-hosting doesn't include today.
+h2 Rather not run it yourself?
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Self-hosting
+Your audit log, on your servers.
+Logbird is MIT-licensed and self-hosts with Docker Compose. Run it on one VM and your events stay on your own servers. It's the same codebase Logbird Cloud will run.
+Tell me when the source opens
+Join the Cloud waitlist
+docker-compose.yml
+console
+api
+worker
+postgres
+clickhouse
+redis
+[sr-only] One Compose project runs the console, API, worker, Postgres, ClickHouse and Redis.
+Source on GitHub — coming soon.
+Quickstart
+The quickstart is published when the repository opens.
+On one VM: clone the repository, generate secrets, configure SMTP, start Logbird with Docker Compose and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.
+Self-host when the source opens
+Requirements
+What you need.
+Host
+A Linux host, or any machine that runs Linux containers, with Docker Engine and Compose 2.24.4 or newer.
+Email
+An SMTP provider for sign-in codes and invitations, for example Amazon SES, Postmark or Brevo.
+HTTPS
+A domain and ports 80 and 443 if you want automatic HTTPS.
+Starting size
+4 vCPU, 8 GB RAM and SSD storage. That is an initial allocation, not measured capacity. Leave disk for images as well as your data, ClickHouse merges and backups; building from source needs more headroom still.
+Access
+Sign-up is open by default: anyone who can reach the console can create an account. On an internet-facing instance, set AUTH_SIGNUP=restricted with your email domains; invitations keep working.
+Your product
+SDK or HTTP, ingest key
+[aria-hidden] →
+Logbird API
+Validates each event; its 202 lists the ones stored
+[aria-hidden] →
+ClickHouse
+Events, rollups, entity pages
+[aria-hidden] →
+Console and read API
+Your team, and your own backend
+Postgres · workspaces, projects, members, hashed keys
+Retention worker · deletes expired events every hour, on Redis or Dragonfly
+[sr-only] Your product sends events to the Logbird API, which writes them to ClickHouse. The console and the read API read from ClickHouse. Postgres stores workspaces, projects and hashed keys. A retention worker deletes expired events every hour.
+Ways to run it
+Pick the setup that fits what you already run.
+docker-compose.yml
+console
+api
+worker
+postgres
+clickhouse
+redis
+[sr-only] Bundled Compose stack
+Bundled Compose
+One Compose project runs Postgres, ClickHouse, Redis, the API, the worker and the console. Only the console port is published, on 127.0.0.1 by default. A one-off migration step runs before the API and worker start.
+Coolify proxy → your domain
+docker-compose.coolify.yml
+console
+api
+worker
+postgres
+clickhouse
+redis
+[sr-only] The same stack behind Coolify's proxy
+Coolify
+Point Coolify's Docker Compose build pack at docker-compose.coolify.yml. Coolify generates the secrets, pulls the published images and routes your domain to the console.
+docker-compose.external.yml
+console
+api
+worker
+migrate
+postgres
+clickhouse
+redis
+[sr-only] Logbird services in Compose, databases you run
+Bring your own databases
+Use your own Postgres, ClickHouse and Redis (or Dragonfly) with docker-compose.external.yml. Use ClickHouse 26.9. Logbird creates its own restricted query user and row policies.
+Upgrades and restores through Coolify are documented but not yet verified end to end.
+HTTPS
+Automatic HTTPS, or the proxy you already run.
+Set your domain in .env and run docker compose --profile tls up -d. Caddy gets and renews the certificate. Already run Nginx, Traefik or another proxy? Forward the whole origin to port 4600 and tell Logbird how many proxies sit in front, so rate limits and audit context see the real client address.
+Never expose the API server's own port. Everything goes through the console origin.
+Caddy, built in
+pre| # .env
+pre| APP_URL=https://audit.example.com
+pre| LOGBIRD_DOMAIN=audit.example.com
+pre| TRUST_PROXY=2
+pre|
+pre| docker compose --profile tls up -d
+[sr-only] Operating Logbird
+Email
+Sign-in is by emailed code.
+Logbird has no passwords. People sign in with a one-time code sent by email, so configure an SMTP provider. For a first local test you can log sign-in codes to the server log instead. Turn that off once SMTP works: anyone who can read the logs can sign in.
+Upgrades and backups
+Upgrade to a pinned release, after a backup.
+[aria-hidden] 1
+Stop writes
+Run every command in these steps with the installation's own Compose project, env file, -f files and profile (after a restore cutover, the restored project's). Block ingress and stop the console, server and worker. The worker gets five minutes to finish its current job: wait for the stop to complete, and check its logs if it had to be killed.
+[aria-hidden] 2
+Back up
+With writers stopped: matched Postgres (pg_dump) and ClickHouse (BACKUP DATABASE) backups and a SHA-256 checksum file. Keep the original env file; record the Git revision (git rev-parse HEAD) and the images (docker compose images).
+[aria-hidden] 3
+Pin the new version
+Check out the release tag vX.Y.Z, then set LOGBIRD_VERSION=X.Y.Z, without the v, in the env file the installation runs with (.env, or the one you cut over to after a restore): its value overrides the Compose default, and a LOGBIRD_VERSION or LOGBIRD_IMAGE_REGISTRY exported in your shell overrides the env file (unset it). Run docker compose config --images and check the full names: all four must be <registry>/logbird-<role>:X.Y.Z, with the registry you expect (the project's GHCR namespace by default). Built from source (docker-compose.build.yml)? Keep that override and build the four roles from the new revision instead; the image check doesn't apply.
+[aria-hidden] 4
+Pull, then start
+docker compose pull (skip it for a source build), then docker compose up -d --no-build. Migrations run first; if one fails, the new version doesn't start.
+[aria-hidden] 5
+Verify
+Readiness, sign-in, your events, settings and keys, and the retention runs, before you reopen ingress.
+docker compose down keeps your data. docker compose down -v permanently deletes the Compose-managed volumes, which hold the bundled Postgres, ClickHouse and Redis data.
+Restore into empty, separate storage first, and check counts before you switch over.
+Not there yet
+What self-hosting doesn't include today.
+High availability
+The Compose setup is a single VM. It has no failover.
+Production sizing guarantee
+There's no published sizing guarantee yet. Size from your own measurements.
+SSO
+Sign-in is by emailed code only. SSO is on the roadmap.
+Rather not run it yourself?
+Logbird Cloud will run the same codebase for you. It isn't open yet.
+Join the waitlist
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+Tell me when the source opens → /contact?interest=self-host
+Join the Cloud waitlist → /contact
+Self-host when the source opens → /contact?interest=self-host
+Join the waitlist → /contact
+Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]
+button type="button" aria-label="Copy code"

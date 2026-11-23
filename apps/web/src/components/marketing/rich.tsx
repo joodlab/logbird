@@ -2,8 +2,8 @@ import { Fragment } from 'react';
 import { THIRD_PARTY_QUOTE_ATTRIBUTE } from '../../lib/source-state';
 
 /**
- * Renders the inline marks the copy files use, `code`, **bold** and *emphasis*, so data modules can keep the wording of
- * marketing/copy/*.md verbatim. Nothing else is parsed: no links, no HTML.
+ * Renders the inline marks the content modules (src/content/) use in their wording: `code`, **bold** and *emphasis*.
+ * Nothing else is parsed: no links, no HTML.
  *
  * `thirdPartyQuotes` is for text about another product only (a comparison's competitor column and its sources): each
  * "double-quoted" passage is a quotation from that product's pages and is marked `data-third-party-quote`, which the

@@ -82,6 +82,34 @@ public class AuditCarrierJsonTests
     }
 
     [Fact]
+    public void A_carrier_holding_a_lone_surrogate_is_refused_on_write_not_changed()
+    {
+        // JSON cannot carry a lone surrogate: written, it would be read back as U+FFFD, a different id.
+        var lone = "op" + (char)0xD800;
+        foreach (var carrier in new[]
+        {
+            new AuditCarrier { OperationId = lone },
+            new AuditCarrier { RequestId = lone },
+            new AuditCarrier { TraceId = lone },
+            new AuditCarrier { ParentEventId = lone },
+            new AuditCarrier { Actor = AuditActor.User(lone) },
+            new AuditCarrier { Actor = AuditActor.User("user_42", name: "Fictional " + (char)0xDC00) },
+            new AuditCarrier { Actor = AuditActor.User("user_42", email: lone + "@example.invalid") },
+            new AuditCarrier { Impersonator = new AuditImpersonator("support_1") { Name = lone } },
+            new AuditCarrier { Tenant = new AuditTenant("acct_7") { Name = lone } },
+        })
+        {
+            Assert.Throws<InvalidOperationException>(() => carrier.ToJson());
+            Assert.Throws<InvalidOperationException>(() => carrier.ToJsonUtf8Bytes());
+        }
+
+        // A surrogate pair is a character like any other, and round-trips unchanged.
+        var paired = new AuditCarrier { OperationId = "op_\U0001F600", Actor = AuditActor.User("user_\U0001F600", name: "\U0001F600") };
+        Assert.Equal(paired, AuditCarrier.FromJson(paired.ToJson()));
+        Assert.Equal(paired, AuditCarrier.FromJson(paired.ToJsonUtf8Bytes()));
+    }
+
+    [Fact]
     public void An_empty_object_is_an_empty_carrier()
     {
         Assert.Equal(new AuditCarrier(), AuditCarrier.FromJson("{}"));

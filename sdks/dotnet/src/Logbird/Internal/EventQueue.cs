@@ -296,8 +296,10 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Actio
 
     /// <summary>
     /// Settles an event and counts it in one step under the queue lock, the lock flush waiters are added and completed
-    /// under, so no flush can see the event settled before it is counted. <paramref name="count"/> must only update
-    /// counters. Returns false when the event was already settled or abandoned.
+    /// under, so no flush can see the event settled before it is counted. <paramref name="count"/> runs under that lock: it
+    /// may update counters and post a prepared notification to the notifier (which only takes the notifier's own lock and
+    /// never runs host code inline), and must do nothing else. Returns false when the event was already settled or
+    /// abandoned.
     /// </summary>
     public bool Settle(QueuedEvent item, Action count)
     {

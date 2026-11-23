@@ -46,6 +46,7 @@ Maintainers with existing services can use those instead of Compose. Use an isol
 | `pnpm check` / `pnpm fix` | Check / apply Biome and Ultracite formatting |
 | `pnpm test` | Unit and service integration tests |
 | `pnpm build` | Build all packages and applications |
+| `pnpm openapi:export` / `pnpm openapi:check` | Regenerate `openapi/` from the running code / fail if the committed files differ |
 | `pnpm release:check` | Full checks plus API export drift verification |
 
 Before handoff, run `pnpm install`, `pnpm typecheck`, `pnpm check`, `pnpm test` and `pnpm build`. Exercise service-dependent behavior against real Postgres, ClickHouse and Redis with isolated fictional fixtures. Never reset a shared database or flush a shared cache. ClickHouse tests expect a migrated database; run `pnpm ch:migrate` separately. `CLICKHOUSE_TEST_MIGRATE=1` explicitly opts integration tests into migration execution against their configured database.
@@ -55,7 +56,9 @@ Before handoff, run `pnpm install`, `pnpm typecheck`, `pnpm check`, `pnpm test` 
 ## CI and service-dependent tests
 
 The required `Quality` job uses Node 22 and the pinned pnpm version to install with
-`--frozen-lockfile`, typecheck, run Biome, and run `pnpm test:unit`. PR titles must
+`--frozen-lockfile`, typecheck, run Biome, run `pnpm test:unit`, and run `pnpm openapi:check`. That last step exports
+the API in-process with placeholder settings (no services) and fails if the committed `openapi/` files differ. When it
+fails, run `pnpm openapi:export` and commit the result. PR titles must
 follow Conventional Commits; Gitleaks scans Git history on PRs and pushes.
 The Docker workflow builds the images on PRs that touch Dockerfiles or Compose files; only the tag-driven release workflow publishes them.
 The query bar's corpus test (`apps/app/src/components/query-input/query-corpus.test.tsx`, about ten minutes) runs in
@@ -93,6 +96,42 @@ or an ingest recovery that rebuilds rollups). Fixture setup and every other test
 their committed limits. Leave it unset (or `0`) otherwise; any other value is refused.
 Turbo hashes the variable, and CI uses the committed limits. A test that still times out
 with it set is a finding, not noise.
+
+## Page snapshots (marketing site)
+
+`apps/web/src/content/page-snapshots.test.ts` renders every page of the marketing site in each repository × Cloud
+state and compares it with committed text snapshots in `apps/web/src/content/__snapshots__/pages/<state>/`. One walk over
+each page's `<body>` lists its headings, visible text (one block per line, with screen-reader-only, `aria-hidden`,
+hidden and `noscript` text marked, image alt text and `<pre>` lines), links (text and href) and form controls (name,
+type, value, placeholder, label, state and text), in document order.
+
+- Each page's file has its title and description and all of those lines, with each run of lines from the shared shell
+  (the skip link, the header and the footer) replaced in place by one `[shell: … — see _shell.txt]` marker. Text
+  outside the shell, and the order of the regions, stay in the page file.
+- `_shell.txt` (one per state) holds the shell's lines once. Every page in the state must produce exactly those lines
+  and the same shell markup as the home page; the router's active-link marks are the only allowed difference, and they
+  must sit, complete, on exactly the links to the current page and its section.
+
+A change to any of that fails until the snapshots are updated: a header or footer wording change in the four
+`_shell.txt` files only. Styling, classes, layout, images without alt text and attributes outside the list above are
+not snapshotted (the shell's full markup is compared, not snapshotted).
+
+To update them after an intended change, run from the repository root:
+
+```sh
+pnpm --filter @logbird/web exec vitest run src/content/page-snapshots.test.ts --update
+```
+
+Put `--update` after the path (`-u` before it takes the path as its value). Then read `git diff` of the `.txt` files:
+only the changes you meant should appear, in every state they apply to. Commit the snapshots with the change.
+
+CI only verifies. The update refuses to run, and fails before anything is written, whenever vitest treats the run as CI:
+`CI` set to any non-empty value (`true`, `1` and `yes`, and also `0` and `false`, which vitest 4 counts as CI too), or a
+CI provider's own variable such as `GITHUB_ACTIONS`. Only an unset or empty `CI`, with no provider variable, allows it.
+
+In a pull request that changes copy, the snapshot diff is the review surface. The reviewer reads the diff, not just
+the module change. The author states in the PR body which sentences changed and why (a new claim names its source,
+usually in the page's brief under `marketing/copy/`).
 
 ## Issues, commits and pull requests
 

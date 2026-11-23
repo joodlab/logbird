@@ -1,0 +1,142 @@
+title: Customer-facing audit logs · Logbird
+description: Show each customer account its own history, inside your product and through your own backend: send the account with each event, authorize every read, render it with your components.
+
+headings:
+h1 Show each customer their own history.
+h2 Send the customer account with every event.
+h3 Add tenant to each event
+h2 A project read key reads the whole project.
+h2 Authorize every read in one place.
+h3 Nuxt: register your authorize() module
+h3 Build the query on the server
+h3 TanStack Start or any backend
+h2 Render it with your own components.
+h3 Vue: useAuditTrail
+h2 Scoped keys and viewer tokens.
+h2 Start with one event.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Use case · Customer-facing audit logs
+Show each customer their own history.
+Your customers' admins want to see who did what in their account. With Logbird, they see it inside your product, through your own backend, which decides what each user may read.
+Step one
+Send the customer account with every event.
+Each event names the account it belongs to in tenant. That is what lets your product show every account its own trail later.
+[aria-hidden] 1
+Add tenant to each event
+With the actor and the records it touched. Only action is required, but an event without tenant belongs to no account.
+An event
+pre| {
+pre|   "action": "booking.cancelled",
+pre|   "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
+pre|   "tenant": { "id": "biz_7", "name": "Azure Hotels" },
+pre|   "targets": [{ "type": "booking", "id": "bk_1042" }]
+pre| }
+The limit: Logbird records what your code sends. It can't work out later which account an event without tenant belonged to.
+Before you build the view
+A project read key reads the whole project.
+A query filter is not authorization. Your backend must check which customer account, and which records, the signed-in user may see, on every request, including each next page.
+Keys stay on your server. Never put an ingest or read key in a browser bundle or public configuration.
+The browser asks your backend. Your backend authenticates the request, decides the account, builds the query itself and only then reads from Logbird.
+Never trust the browser’s filter. A tenant or query the browser sends is a request, not a permission.
+Step two
+Authorize every read in one place.
+[aria-hidden] 1
+Nuxt: register your authorize() module
+The @logbird/nuxt module adds a history route that refuses every request until your authorize() hook returns a query. Point logbird.hooks at the file that holds it.
+nuxt.config.ts
+pre| // nuxt.config.ts. Set NUXT_LOGBIRD_INGEST_KEY and NUXT_LOGBIRD_READ_KEY on the server.
+pre| import { fileURLToPath } from 'node:url';
+pre|
+pre| export default defineNuxtConfig({
+pre|   modules: ['@logbird/nuxt'],
+pre|   logbird: {
+pre|     endpoint: process.env.LOGBIRD_ENDPOINT,
+pre|     hooks: fileURLToPath(new URL('./server/logbird.ts', import.meta.url)),
+pre|   },
+pre| });
+[aria-hidden] 2
+Build the query on the server
+Check the session, then build the query from the signed-in user's account. Only the query you return is forwarded, so a filter the browser sends can't widen it.
+server/logbird.ts
+pre| // server/logbird.ts: runs on your server for every history request and next page.
+pre| import type { LogbirdHooks } from '@logbird/nuxt';
+pre| import { trailQuery } from '@logbird/sdk/read';
+pre|
+pre| export default {
+pre|   authorize: async (event, query) => {
+pre|     const session = await getSession(event); // your own authentication
+pre|     const tenantId = session?.canViewHistory ? session.tenantId : undefined;
+pre|     // Denied, or no account to scope to: nothing is forwarded.
+pre|     if (typeof tenantId !== 'string' || !tenantId.trim()) return false;
+pre|     // Built from the user's account; the browser's filter is ignored.
+pre|     // trailQuery quotes the id for the query language.
+pre|     return trailQuery({
+pre|       tenant: tenantId,
+pre|       cursor: typeof query.cursor === 'string' ? query.cursor : undefined,
+pre|     });
+pre|   },
+pre| } satisfies LogbirdHooks;
+[aria-hidden] 3
+TanStack Start or any backend
+Call readAuditTrail with a query built by trailQuery in a server function, or call the read API from your backend with the read key, after the same check.
+Step three
+Render it with your own components.
+[aria-hidden] 1
+Vue: useAuditTrail
+It loads the events page by page, with loading, error, refresh and load-more states, and discards a stale response. The headless AuditTimeline passes the same state to your markup.
+pages/account/history.vue
+pre| <!-- pages/account/history.vue: Nuxt auto-imports useAuditTrail; it reads through the route above. -->
+pre| <script setup lang="ts">
+pre| const { data, error, nextCursor, loadMore } = useAuditTrail({});
+pre| </script>
+pre|
+pre| <template>
+pre|   <p v-if="error">The history couldn't be loaded.</p>
+pre|   <ol>
+pre|     <li v-for="item in data" :key="item.id">{{ item.timestamp }}: {{ item.description || item.action }}</li>
+pre|   </ol>
+pre|   <button v-if="nextCursor" type="button" @click="loadMore">Load more</button>
+pre| </template>
+[aria-hidden] Customer accountFull size
+[img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.]
+[img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.]
+Your team's view of one customer account in Logbird's console: its events in the last 24 hours and in all, and which support agents acted while signed in as the customer. Your customers see their own history in your product, rendered by your components. Select the image to open it full size.
+Or let Logbird enforce it
+Scoped keys and viewer tokens.
+Instead of building the query in your backend, give a scoped key or a viewer token one customer account. Logbird applies that scope to every read.
+Viewer tokens. Your server mints a token for one customer account and hands it to the browser. It expires after 15 minutes by default, one hour at most.
+Enforced by Logbird. The scope applies outside every query, on search, event detail, counts and export. Nothing in the query can widen it.
+Scoped server keys. A scoped read key reads one customer account's events. It can also be limited to events that name one record, to actions with given prefixes, or both.
+The limit: One customer account per scope, matched on the id Logbird stored. Logbird's query builders always apply the scope. ClickHouse checks the customer account as well once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade, and a source installation runs create-query-user once. A web page on another origin can read with a token only if that origin is listed on the key.
+Start with one event.
+Self-host Logbird today, or request access to Logbird Cloud, where sign-ups are limited to invited teams for now.
+Request access
+Self-host it
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+[img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.] [aria-label: Open the image full size: Customer account] → /media/tenant-summary-light-1160.webp?v=*
+[img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.] [aria-label: Open the image full size: Customer account] → /media/tenant-summary-dark-1160.webp?v=*
+Request access → /contact
+Self-host it → /self-hosting
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"

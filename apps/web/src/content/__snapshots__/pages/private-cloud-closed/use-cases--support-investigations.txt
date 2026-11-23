@@ -1,0 +1,91 @@
+title: Support investigations · Logbird
+description: Answer "what happened in this account?": open the account or the record, search its events, read who acted and what changed, and follow one operation from the request to its jobs.
+
+headings:
+h1 Answer "what happened in this account?"
+h2 Open the account or the record.
+h2 Narrow it down in one search.
+h2 Read who acted, what ran it, and what changed.
+h2 Follow one operation from the request to its jobs.
+h2 Know these before a customer asks.
+h2 Start with one event.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Use case · Support investigations
+Answer "what happened in this account?"
+When a customer asks why a booking changed or who removed a user, support and operations open the account or the record and read its events in order: who acted, what ran it, and the before and after values your code sends.
+Start from what the customer names
+Open the account or the record.
+Jump to (Ctrl K). Type a name to see matching entities, or an exact id to highlight it. For a record, its bare id is enough, such as bk_1042 for booking:bk_1042.
+Entity pages. Each customer account, actor, executor and record has its own page with a timeline of every event that mentions it.
+Done by support. When events name a support agent (impersonator), a customer account's page shows how many were done by support and lists up to six agents, by name or id.
+The limit: An account's page lists the events whose tenant id matches; a record's page lists the events that name it in targets. An event sent without them is on neither page, though search still finds it.
+Search
+Narrow it down in one search.
+The query language matches fields exactly, with prefixes, ranges and OR. The search bar suggests fields and values as you type, some values with counts from the events it checked. A guarded SQL WHERE expression is there when you need it.
+One account's failures. tenant:biz_7 outcome:failure
+One booking's history. record:booking:bk_1042
+Done by support. impersonator:*
+Bookings, last 7 days. action:booking.* occurredAt:>now-7d
+The limit: A search covers the time range you pick. When nothing matches, the explorer offers the id query if you typed a bare id that matches an entity; otherwise, when it finds matches outside your range, it offers to search all time. When counting is cut short, the total is a lower bound, shown as "≥ N" or "10,000+".
+[aria-hidden] ExplorerFull size
+[img: The explorer filtered to booking actions: a histogram of the last seven days and the matching events.]
+[img: The explorer filtered to booking actions: a histogram of the last seven days and the matching events.]
+Booking actions over the last seven days, with the matching events below the chart.
+One event
+Read who acted, what ran it, and what changed.
+Actor and impersonator. The actor is the identity the action used. When support acted for a customer, the customer stays the actor and the staff member is the impersonator.
+Executor. The API or worker that ran it, with the attempt number when your code sends it.
+Changes. The before and after values your code sends, the first 256 per event.
+Copy link. Share the event with a colleague who has access to the project.
+The limit: Logbird records what your code sends. It can't add an actor or a change that your event leaves out.
+[aria-hidden] Event detailFull size
+[img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.]
+[img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.]
+One event in the console: who caused it and what performed it, the customer account, the records it touched, the before and after value, and what caused it.
+Operations
+Follow one operation from the request to its jobs.
+One tree. The events that share an operation id: the request and the jobs it started. When its parent event is in the same operation, an event appears beneath it.
+Retries. Send the same operation id on each attempt, with its attempt number and outcome, to see which try succeeded.
+The limit: The tree holds only the events that carry its operation id: pass it into each job yourself, and the parent event to place a job under its cause.
+What Logbird doesn't do
+Know these before a customer asks.
+[aria-hidden] Question
+[aria-hidden] Answer
+[sr-only: Question: ] Does Logbird record who searched for or opened an event?
+[sr-only: Answer: ] No. Workspace activity records changes to projects, keys and members, exports and sign-ins, but not reads.
+[sr-only: Question: ] Does free text search the whole event?
+[sr-only: Answer: ] No. Free text searches the description and the actor, account and record names. Search other fields by name, such as metadata.channel:whatsapp.
+[sr-only: Question: ] Can Logbird show what happened before you started sending events?
+[sr-only: Answer: ] No. It holds only the events your code sent. If you already have older events, send them with their original time, up to 3,650 days back; an older time is stored as the time Logbird received it. The project's retention still applies.
+Take the product tour
+Start with one event.
+The source opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.
+Join the waitlist
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+[img: The explorer filtered to booking actions: a histogram of the last seven days and the matching events.] [aria-label: Open the image full size: Explorer] → /media/explorer-light-1440.webp?v=*
+[img: The explorer filtered to booking actions: a histogram of the last seven days and the matching events.] [aria-label: Open the image full size: Explorer] → /media/explorer-dark-1440.webp?v=*
+[img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.] [aria-label: Open the image full size: Event detail] → /media/event-detail-light-639.webp?v=*
+[img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.] [aria-label: Open the image full size: Event detail] → /media/event-detail-dark-639.webp?v=*
+Take the product tour → /product
+Join the waitlist → /contact
+Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

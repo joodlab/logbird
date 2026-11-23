@@ -77,6 +77,10 @@ Copy only allowlisted fields. Avoid request bodies, session objects, customer
 messages and full database rows. Prefer IDs over personal information.
 `redact()` deep copies the event and replaces matching object-key values and
 matching change fields' `before`/`after` values with `[redacted]`; keys remain.
+Keys match as substrings. Identifier fields (party ids and types, an executor's
+job id and attempt, each target's type and id) are never redacted; a pattern that
+matches a party's own key, such as `actor`, redacts its name, email and other
+fields and keeps its identifiers. The .NET SDK follows the same rules.
 Supplying `keys` replaces `DEFAULT_SECRET_KEYS`, so combine the patterns as above
 to retain default secret protection while adding personal-data fields.
 `changeFields` defaults to that same combined pattern. Inspect the stored raw

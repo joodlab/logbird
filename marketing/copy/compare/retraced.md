@@ -4,6 +4,8 @@ description: Retraced is an Apache-2.0 audit log service with an embeddable Reac
 path: /compare/retraced
 ---
 
+Page text renders from `apps/web/src/content/comparisons.ts` (the facts and sources) and `apps/web/src/content/compare.ts` (the page furniture); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Logbird and Retraced
 
 ## summary

@@ -17,7 +17,8 @@ import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histogramQuery } from '@/lib/api/queries';
-import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
+import { allTimeCheckNeedsAsking, otherDatesAction, otherDatesCheck, otherDatesLine } from '@/lib/empty-state';
+import { ENTITY_SECTIONS, entityQuery, idFromFreeText, sectionForKind, settledIdMatches } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
 import { andQuery, scopedQuery } from '@/lib/query-language';
@@ -331,38 +332,80 @@ function ProjectExplorer({
   // A bare word that is exactly an entity's id: free text searches names and descriptions, never ids.
   const word = lang === 'query' ? idFromFreeText(q) : '';
   const idLookup = useQuery({ ...entitySearchQuery(projectId, word), enabled: showsEmpty && Boolean(word) });
-  // Every kind with exactly this id (an actor and a tenant can share one): offer each.
-  // One per kind (the literal id first within a kind), so case variants of one kind never crowd out another kind.
-  const idMatches = word ? exactPerKind(idLookup.data?.entities, word) : [];
+  // A cached answer being refreshed is not settled yet: it may still find the id, or no longer find it (#239).
+  const idSettled = !word || ((idLookup.isSuccess || idLookup.isError) && !idLookup.isFetching);
+  // Every kind with exactly this id (an actor and a tenant can share one): offer each, once the lookup has settled, so a
+  // cached hit being refreshed gives no advice the refresh may take back. One per kind (the literal id first within a
+  // kind), so case variants of one kind never crowd out another kind. The id is the literal as written, spaces kept.
+  // Only from a lookup whose last read succeeded: a failed refresh keeps its older answer, which may no longer hold
+  // (#334). A successful partial answer can still confirm a hit.
+  const idMatches = settledIdMatches(word, idSettled && idLookup.status === 'success', idLookup.data?.entities);
   const idMatch = idMatches[0];
   // "a tenant id", or "the id of a tenant and an actor".
   const idPhrase =
     idMatches.length === 1 && idMatch
       ? `${articleFor(idMatch.kind)} ${kindNoun(idMatch.kind)} id`
       : `the id of ${idMatches.map((e) => `${articleFor(e.kind)} ${kindNoun(e.kind)}`).join(' and ')}`;
-  const idSettled = !word || idLookup.isSuccess || idLookup.isError;
-  // Whether anything older matches: only then is the range the reason, and only then is widening offered.
+  // Whether anything older matches: only then is the range the reason, and only then is widening offered. In SQL mode
+  // the check runs the reader's predicate over every partition, so it runs only when asked (#239).
+  // The searches the reader asked to check, each an expression and a range: a new search asks again, and going back to
+  // one already checked shows its answer without asking twice.
+  const [checksAsked, setChecksAsked] = useState<ReadonlySet<string>>(() => new Set());
+  const checkKey = JSON.stringify([effectiveQ, range]);
+  const sqlCheckAsked = !allTimeCheckNeedsAsking(lang, effectiveQ) || checksAsked.has(checkKey);
+  const widerWanted = showsEmpty && !complete && idSettled && !idMatch;
   const wider = useQuery({
     ...histogramQuery(projectId, ALL_RANGE, effectiveQ, lang),
-    enabled: showsEmpty && !complete && idSettled && !idMatch,
+    enabled: widerWanted && sqlCheckAsked,
   });
-  const olderMatches = current(wider)?.buckets.reduce((n, b) => n + b.total, 0);
+  // The check's answer counts only when it was run for this search: the all-time count is cached per expression, so an
+  // earlier check of the same expression in another range must not answer before the reader asks here (#239).
+  const checkRuns = widerWanted && sqlCheckAsked;
+  const olderMatches = checkRuns ? current(wider)?.buckets.reduce((n, b) => n + b.total, 0) : undefined;
+  const {
+    failed: checkFailed,
+    checking,
+    lookingUp,
+  } = otherDatesCheck({
+    showsEmpty,
+    complete,
+    idMatch: Boolean(idMatch),
+    idSettled,
+    checkRuns,
+    olderMatches,
+    isError: wider.isError,
+    isFetching: wider.isFetching,
+  });
+  const action = otherDatesAction({ failed: checkFailed, checking, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
   const widen =
-    olderMatches && olderMatches > 0 ? (
-      <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
-        Search all time
-      </Button>
-    ) : wider.isError ? (
+    action === 'retry' ? (
       <Button onClick={() => wider.refetch()} size="sm" variant="outline">
         Retry the check
       </Button>
+    ) : action === 'search-all-time' ? (
+      <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
+        Search all time
+      </Button>
+    ) : action === 'ask' ? (
+      <Button data-testid="check-all-time" onClick={() => setChecksAsked((asked) => new Set(asked).add(checkKey))} size="sm" variant="outline">
+        Check other dates
+      </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
-  const outside = wider.isError
-    ? 'Could not check other dates.'
-    : olderMatches
-      ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
-      : 'Remove a filter or change the query.';
+  // The word whose lookup this button is retrying: a retry still running for an earlier word (another observer, such as
+  // the command palette, can keep it alive) never locks the current word's button.
+  const [retryingWord, setRetryingWord] = useState<string | null>(null);
+  const retryingLookup = retryingWord !== null && retryingWord === word;
+  // The lookup settled without a full answer: it failed, or some entity kinds could not be searched.
+  const lookupIncomplete = Boolean(word) && idSettled && !idMatch && (idLookup.isError || Boolean(idLookup.data?.partial));
+  const outside = otherDatesLine({
+    failed: checkFailed,
+    checking,
+    lookingUp,
+    lookupIncomplete,
+    olderMatches,
+    needsAsking: widerWanted && !sqlCheckAsked,
+  });
 
   // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
   // so a search opened straight from a link still gets its offer once they arrive).
@@ -396,7 +439,9 @@ function ProjectExplorer({
             Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>. {outside}
           </>
-        ) : wider.isError ? (
+        ) : checking ? (
+          `No events in ${rangeInSentence(rangeName)}. ${outside}`
+        ) : checkFailed ? (
           `No events in ${rangeInSentence(rangeName)}. Could not check other dates.`
         ) : olderMatches ? (
           `No events in ${rangeInSentence(rangeName)}. ${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event is' : 'events are'} stored outside it.`
@@ -426,6 +471,22 @@ function ProjectExplorer({
         </Button>
       ) : null}
       {widen}
+      {/* Stays mounted while its own retry runs, so keyboard focus is not dropped; the line above says what it found. */}
+      {lookupIncomplete || retryingLookup ? (
+        <Button
+          aria-disabled={retryingLookup}
+          onClick={() => {
+            if (retryingLookup) return;
+            const retried = word;
+            setRetryingWord(retried);
+            void idLookup.refetch().finally(() => setRetryingWord((current) => (current === retried ? null : current)));
+          }}
+          size="sm"
+          variant="outline"
+        >
+          {retryingLookup ? 'Looking up…' : 'Try the lookup again'}
+        </Button>
+      ) : null}
     </EmptyState>
   );
 
@@ -571,7 +632,7 @@ function ProjectExplorer({
                 <CircleAlertIcon className="mt-px size-3.5 shrink-0 sm:mt-0" />
                 {/* Phones wrap: the actionable half of the sentence must not hide behind a hover-only title. */}
                 <span className="min-w-0 sm:truncate" data-testid="query-problem" title={queryProblemText(problem, q)}>
-                  <span className="font-medium">{reasonTitle(problem.details, problem.code)}</span>
+                  <span className="font-medium">{reasonTitle(problem.details, problem.code, problem.message)}</span>
                   {' · '}
                   {queryProblemText(problem, q)}
                 </span>

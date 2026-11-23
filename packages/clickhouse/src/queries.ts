@@ -176,10 +176,14 @@ export function toEvent(r: EventRow & { category?: string }): AuditEvent {
     outcome: r.outcome,
     severity: r.severity,
     description: r.description,
-    actor: r.actor_id || r.actor_type ? { id: r.actor_id, type: r.actor_type, name: r.actor_name, email: r.actor_email } : null,
+    // A party recorded by any field is recorded: a name or an email alone still says who it was.
+    actor:
+      r.actor_id || r.actor_type || r.actor_name || r.actor_email
+        ? { id: r.actor_id, type: r.actor_type, name: r.actor_name, email: r.actor_email }
+        : null,
     impersonator: r.impersonator_id ? { id: r.impersonator_id, name: r.impersonator_name } : null,
     executor:
-      r.executor_id || r.executor_type
+      r.executor_id || r.executor_type || r.executor_name
         ? { id: r.executor_id, type: r.executor_type, name: r.executor_name, jobId: r.job_id, attempt: r.job_attempt }
         : null,
     tenant: r.tenant_id ? { id: r.tenant_id, name: r.tenant_name } : null,
@@ -813,12 +817,21 @@ export async function listFields(ch: ClickHouseClient, p: string, q: RangeQuery)
     lastSeen: iso(r.last),
   }));
   for (const [key, col] of Object.entries(columns)) {
-    if (QUERY_FIELDS.find((f) => f.column === col)?.type === 'array' || key === 'env') continue;
+    // Of the array columns only `target` (target_ids) is reported: "At least one record it touched" is a recommended
+    // envelope field. An event carries it when it has a non-empty target id, exactly what the `target:*` filter matches.
+    const array = QUERY_FIELDS.find((f) => f.column === col)?.type === 'array';
+    if ((array && key !== 'target') || key === 'env') continue;
     const value = `toString(${col})`;
+    const ids = `arrayFilter(x -> x!='', ${col})`;
+    // Each row's share is over its own query's total (`count()`, as in metrics()), so events arriving between two
+    // queries never push a share past what that query saw.
+    const select = array
+      ? `count() total,countIf(notEmpty(${ids})) n,uniqArray(${ids}) distinct,groupUniqArrayArray(5)(${ids}) samples,maxOrNullIf(timestamp,notEmpty(${ids})) last`
+      : `count() total,countIf(${value}!='') n,uniqIf(${col},${value}!='') distinct,groupUniqArrayIf(5)(${value},${value}!='') samples,maxOrNullIf(timestamp,${value}!='') last`;
     const r = (
-      await read<{ n: number; distinct: number; samples: string[]; last: string | null }>(
+      await read<{ total: number; n: number; distinct: number; samples: string[]; last: string | null }>(
         ch,
-        `SELECT countIf(${value}!='') n,uniqIf(${col},${value}!='') distinct,groupUniqArrayIf(5)(${value},${value}!='') samples,maxOrNullIf(timestamp,${value}!='') last FROM events WHERE ${w.sql}`,
+        `SELECT ${select} FROM events WHERE ${w.sql}`,
         w.params,
       )
     )[0];
@@ -826,7 +839,7 @@ export async function listFields(ch: ClickHouseClient, p: string, q: RangeQuery)
       data.push({
         key,
         kind: 'core',
-        coverage: Number(r.n) / Math.max(1, m.events),
+        coverage: Number(r.n) / Math.max(1, Number(r.total)),
         distinctApprox: Number(r.distinct),
         samples: r.samples,
         lastSeen: r.last ? iso(r.last) : null,

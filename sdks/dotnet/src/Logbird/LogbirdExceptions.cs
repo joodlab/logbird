@@ -76,12 +76,15 @@ public sealed class LogbirdRejectedException : LogbirdDeliveryException
         : base($"{count} event(s) rejected by Logbird: {string.Join(", ", codes.Distinct())}.")
     {
         Count = count;
-        Codes = codes;
+        Codes = Internal.ReadOnly.List(codes);
     }
 
     /// <summary>How many events were rejected.</summary>
     public int Count { get; }
 
-    /// <summary>The rejection code of each event, for example <c>invalid_event</c> or <c>duplicate_id_conflict</c>.</summary>
+    /// <summary>
+    /// The rejection code of each event, for example <c>invalid_event</c> or <c>duplicate_id_conflict</c>. Read-only: a
+    /// copy, which a cast cannot change.
+    /// </summary>
     public IReadOnlyList<string> Codes { get; }
 }

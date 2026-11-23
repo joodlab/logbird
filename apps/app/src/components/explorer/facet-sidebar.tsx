@@ -78,6 +78,18 @@ interface FacetSidebarProps {
   className?: string;
 }
 
+/**
+ * What a facet row says. The actor and executor facets group by id, so their empty-id bucket holds every event
+ * recorded without one (by a name, an email or a type alone, or with no party at all): it reads "No actor ID", never the
+ * last name the bucket happened to see, which would credit all of them to one party (#333). Its filter is unchanged:
+ * `actor:""` matches exactly that bucket.
+ */
+export function facetValueLabel(field: string, value: string, label: string): { text: string; placeholder: boolean } {
+  if (value === '' && field === 'actor') return { text: 'No actor ID', placeholder: true };
+  if (value === '' && field === 'executor') return { text: 'No executor ID', placeholder: true };
+  return label ? { text: label, placeholder: false } : { text: '(none)', placeholder: true };
+}
+
 /** How a facet reads and edits the query, per language. */
 interface FacetOps {
   activeCount: (q: string) => number;
@@ -243,6 +255,7 @@ function FacetGroup({
   const dimmed = stale || facet.isPlaceholderData || failed;
 
   const renderRow = (v: { value: string; label: string; count: number }, presenceRow = false) => {
+    const shown = facetValueLabel(spec.field, v.value, v.label);
     const included = ops.included(q, v.value, presenceRow);
     const excluded = ops.excluded(q, v.value, presenceRow);
     return (
@@ -258,7 +271,7 @@ function FacetGroup({
           title={
             presenceRow
               ? `${v.label} — click for only these events, ${altClickLabel(isMac)} to hide them`
-              : `${spec.named && v.label !== v.value ? `${v.label} (${v.value})` : v.label} — click to filter, ${altClickLabel(isMac)} to exclude`
+              : `${spec.named && v.value && v.label !== v.value ? `${v.label} (${v.value})` : shown.text} — click to filter, ${altClickLabel(isMac)} to exclude`
           }
           type="button"
         >
@@ -275,13 +288,13 @@ function FacetGroup({
                 'min-w-0 truncate',
                 spec.mono && 'font-mono text-[12px]',
                 presenceRow && 'font-medium',
-                !v.label && 'text-muted-foreground italic',
+                shown.placeholder && !presenceRow && 'text-muted-foreground italic',
               )}
               dir="auto"
             >
-              {v.label || '(none)'}
+              {presenceRow ? v.label : shown.text}
             </span>
-            {!presenceRow && spec.named && v.label && v.label !== v.value ? (
+            {!presenceRow && spec.named && v.value && v.label && v.label !== v.value ? (
               <span className="min-w-0 shrink-[3] truncate font-mono text-[10.5px] text-muted-foreground">{v.value}</span>
             ) : null}
           </span>
@@ -300,7 +313,7 @@ function FacetGroup({
             render={
               <Button
                 // A stable name plus aria-pressed (the APG toggle pattern): "Hide what support did, toggle button, pressed".
-                aria-label={presenceRow ? (spec.presence?.hide ?? `Hide: ${spec.label}`) : `Exclude ${v.label || '(none)'}`}
+                aria-label={presenceRow ? (spec.presence?.hide ?? `Hide: ${spec.label}`) : `Exclude ${shown.text}`}
                 aria-pressed={excluded}
                 className={cn(
                   'absolute end-1 text-muted-foreground opacity-0 hover:bg-background hover:text-outcome-failure focus-visible:opacity-100 group-hover/facet:opacity-100 dark:hover:bg-background',

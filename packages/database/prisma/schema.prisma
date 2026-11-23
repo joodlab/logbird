@@ -153,6 +153,7 @@ model Project {
   views          SavedView[]
   retentionRuns  RetentionRun[]
   webhookEndpoints WebhookEndpoint[]
+  webhookClaimRotation WebhookClaimRotation?
 
   @@unique([organizationId, slug])
   @@index([exportDeleteStartedAt, id])
@@ -371,16 +372,43 @@ model WebhookEndpoint {
   disabledReason String?
   disabledAt DateTime?
   filterQuery String @default("")
+  filterReviewRequired Boolean @default(false)
+  filterReviewNoticeClaimedAt DateTime?
+  // Null: confirm a filter stored before webhook delivery. invalid_filter: the stored filter cannot run.
+  filterReviewReason String?
   scopeTenantId String?
   scopeTargetType String?
   scopeTargetId String?
+  scopeMask String[] @default([])
+  scopeReviewRequired Boolean @default(false)
   createdById String?
   createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   secrets WebhookSecret[]
+  cursorReceivedAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
+  cursorEventId String?
+  cursorReviewRequired Boolean @default(false)
+  cursorVerifiedFloor DateTime?
+  scanAttemptedAt DateTime?
+  lastScannedAt DateTime?
+  secretOverlapWarnedAt DateTime?
+  consecutiveFailures Int @default(0)
+  failingSince DateTime?
+  deliveries WebhookDelivery[]
+  disableNotices WebhookDisableNotice[]
 
   @@index([projectId])
+  @@index([enabled, lastScannedAt, id])
+  @@index([enabled, scanAttemptedAt, id])
+}
+
+// When a worker last claimed a webhook delivery for the project. Claims serve the least recently claimed project first,
+// and a project without a row (never claimed, or claimed only before this table existed) before all others.
+model WebhookClaimRotation {
+  projectId String @id
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lastClaimedAt DateTime
 }
 
 model WebhookSecret {
@@ -392,4 +420,58 @@ model WebhookSecret {
   expiresAt DateTime?
 
   @@index([endpointId])
+}
+
+model WebhookDelivery {
+  id String @id @default(cuid())
+  endpointId String
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  eventId String
+  // Null identifies a synthetic test. The receive clock pins the original event identity on resend.
+  receivedAt DateTime?
+  // Legacy deliveries and test pings derive their signed ID from eventId.
+  webhookId String?
+  createdAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
+  status String @default("pending")
+  nextAttemptAt DateTime? @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
+  leaseUntil DateTime?
+  attemptNumber Int @default(0)
+  windowAttempts Int @default(0)
+  retryUntil DateTime?
+  expiresAt DateTime
+  attempts WebhookAttempt[]
+
+  @@unique([endpointId, eventId, receivedAt])
+  @@index([endpointId, id])
+  @@index([endpointId, status, nextAttemptAt, id])
+  @@index([expiresAt])
+}
+
+model WebhookAttempt {
+  deliveryId String
+  delivery WebhookDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  number Int
+  startedAt DateTime
+  status String
+  latencyMs Int?
+  responseCode Int?
+  responseBody String?
+  error String?
+
+  @@id([deliveryId, number])
+  @@index([startedAt])
+}
+
+model WebhookDisableNotice {
+  id String @id @default(cuid())
+  endpointId String
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  recipientId String
+  reason String
+  createdAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
+  nextAttemptAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
+
+  @@index([endpointId])
+  @@index([nextAttemptAt])
+  @@index([createdAt])
 }

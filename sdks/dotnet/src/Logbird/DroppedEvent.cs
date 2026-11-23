@@ -18,7 +18,15 @@ public enum DropReason
     /// <summary>The server answered a permanent HTTP error (a 4xx other than 429), for example an invalid key.</summary>
     HttpError = 2,
 
-    /// <summary>The serialized event is larger than 256 KB.</summary>
+    /// <summary>
+    /// The event as sent (after <see cref="LogbirdOptions.BeforeSend"/> and redaction) is larger than 256 KB of UTF-8 JSON.
+    /// Separately, an event whose data measures more than 1 MiB before redaction is refused without being copied, whatever
+    /// redaction would have removed: copying an unbounded tree to redact it could exhaust the host's memory. That guard
+    /// counts one byte per UTF-16 code unit of every text the event carries (fields, context, targets, change fields,
+    /// metadata keys and values), plus JSON punctuation and the digits of parsed numbers: a lower bound of the JSON's size,
+    /// so it never refuses an event whose JSON would be under 1 MiB. <see cref="DroppedEvent.MayBeStored"/> is false: the
+    /// event was never sent.
+    /// </summary>
     TooLarge = 3,
 
     /// <summary>
@@ -28,7 +36,19 @@ public enum DropReason
     /// </summary>
     Shutdown = 4,
 
-    /// <summary>The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw.</summary>
+    /// <summary>
+    /// The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw, or its metadata
+    /// or a change value nests JSON deeper than 1,000 levels (a value that is part of a larger tree of yours also counts
+    /// the parents it has there), checked on the event as given (before
+    /// <see cref="LogbirdOptions.BeforeSend"/> and redaction: a deep part they would remove still counts, because walking it
+    /// is the risk). The limit keeps System.Text.Json's internal recursion (a node looks its options up through its parents)
+    /// within the stack, where an overflow would end the host process; it is tested on a 256 KB thread stack. It is the
+    /// number the server uses for exact numbers, but the server applies it differently: to the objects and arrays of the
+    /// whole event, and only when the event holds, anywhere, a number a double cannot keep exactly. So a deeper tree in an
+    /// event without such a number, which the server would store, is refused here; and because a change value sits three
+    /// levels into the event, a change value whose objects or arrays nest more than 997 levels (a leaf at level 999 or
+    /// deeper), in an event holding such a number, is rejected by the server (<see cref="Rejected"/>).
+    /// </summary>
     Invalid = 5,
 
     // 6 is not used: it was an SDK-side identifier refusal, removed before the first release. The SDK sends identifiers
@@ -49,28 +69,115 @@ public sealed class DroppedEvent
 {
     private readonly byte[]? _json;
 
+    /// <summary>
+    /// The longest <see cref="Id"/> and <see cref="Action"/> reported whole, in UTF-16 code units. A longer id is cut and
+    /// identified by <see cref="IdFingerprint"/> instead, which keeps what a pending notification holds small.
+    /// </summary>
+    public const int MaxIdLength = 256;
+
+    /// <summary>The longest <see cref="Detail"/> reported whole, in UTF-16 code units.</summary>
+    public const int MaxDetailLength = 1_024;
+
     internal DroppedEvent(DropReason reason, string? id, string action, byte[]? json, string? detail, string? code = null, bool mayBeStored = false)
     {
         Reason = reason;
-        Id = id;
-        Action = action;
+        var truncated = false;
+        if (id is not null && id.Length > MaxIdLength)
+        {
+            IdFingerprint = Fingerprint(id);
+        }
+
+        Id = Bounded(id, MaxIdLength, ref truncated);
+        Action = Bounded(action, MaxIdLength, ref truncated)!;
         _json = json;
-        Detail = detail;
+        Detail = Bounded(detail, MaxDetailLength, ref truncated);
         Code = code;
         MayBeStored = mayBeStored;
+        Truncated = truncated;
     }
 
     /// <summary>Why the event was dropped.</summary>
     public DropReason Reason { get; }
 
-    /// <summary>The event id, when one was assigned.</summary>
+    /// <summary>
+    /// The event id as the event carried it, or <see langword="null"/> when it had none yet (see <see cref="Json"/>). An id
+    /// of at most <see cref="MaxIdLength"/> code units is exactly as given; a longer one (an id the server refuses, or one
+    /// padded with whitespace) is cut there, <see cref="Truncated"/> is set, and <see cref="IdFingerprint"/> identifies the
+    /// whole id, so two ids that share their first 256 code units are never mistaken for each other.
+    /// </summary>
     public string? Id { get; }
 
-    /// <summary>The event action.</summary>
+    /// <summary>
+    /// When <see cref="Id"/> was cut, the fingerprint of the whole id (<see cref="Fingerprint(string)"/>); otherwise
+    /// <see langword="null"/>. To correlate the drop with your own records, compute the fingerprint of each of your ids
+    /// longer than <see cref="MaxIdLength"/> and compare.
+    /// </summary>
+    public string? IdFingerprint { get; }
+
+    /// <summary>The event action, cut past <see cref="MaxIdLength"/> code units (the server takes at most 200; see <see cref="Truncated"/>).</summary>
     public string Action { get; }
 
-    /// <summary>The server's reason for a <see cref="DropReason.Rejected"/> event, or another short explanation.</summary>
+    /// <summary>
+    /// The server's reason for a <see cref="DropReason.Rejected"/> event, or another short explanation. At most
+    /// <see cref="MaxDetailLength"/> code units: a longer one is cut there, and <see cref="Truncated"/> says so.
+    /// </summary>
     public string? Detail { get; }
+
+    /// <summary>
+    /// Whether <see cref="Id"/>, <see cref="Action"/> or <see cref="Detail"/> was cut to its limit (never inside a surrogate
+    /// pair). <see langword="false"/> means every field is exactly as given. A cut <see cref="Id"/> comes with
+    /// <see cref="IdFingerprint"/>.
+    /// </summary>
+    public bool Truncated { get; }
+
+    /// <summary>
+    /// The fingerprint <see cref="IdFingerprint"/> reports for an id: the SHA-256 of its UTF-16 code units (little-endian,
+    /// so a lone surrogate counts exactly), as 64 lowercase hexadecimal characters. It is the same on every platform and
+    /// SDK version.
+    /// </summary>
+    /// <param name="id">The whole event id.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null.</exception>
+    public static string Fingerprint(string id)
+    {
+        Internal.Guard.NotNull(id, nameof(id));
+
+        // Hashed in fixed-size chunks, so fingerprinting an oversized id never copies it whole.
+        using var sha = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        var chunk = new byte[4096];
+        var filled = 0;
+        foreach (var c in id)
+        {
+            chunk[filled++] = (byte)c;
+            chunk[filled++] = (byte)(c >> 8);
+            if (filled == chunk.Length)
+            {
+                sha.AppendData(chunk, 0, filled);
+                filled = 0;
+            }
+        }
+
+        sha.AppendData(chunk, 0, filled);
+        var hash = sha.GetHashAndReset();
+        var text = new StringBuilder(hash.Length * 2);
+        foreach (var b in hash)
+        {
+            text.Append(b.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return text.ToString();
+    }
+
+    private static string? Bounded(string? value, int max, ref bool truncated)
+    {
+        if (value is null || value.Length <= max)
+        {
+            return value;
+        }
+
+        truncated = true;
+        var length = char.IsHighSurrogate(value[max - 1]) ? max - 1 : max;
+        return value.Substring(0, length);
+    }
 
     /// <summary>
     /// The server's code for a <see cref="DropReason.Rejected"/> event, for example <c>invalid_event</c> or
@@ -90,8 +197,12 @@ public sealed class DroppedEvent
     public bool MayBeStored { get; }
 
     /// <summary>
-    /// The exact JSON that was (or would have been) sent, as UTF-8, after redaction. Empty when the event was dropped
-    /// before it was serialized. Persist it to replay the event later with the same id.
+    /// The exact JSON that was (or would have been) sent, as UTF-8, after redaction. Persist it to replay the event later
+    /// with the same id. Empty when the event was dropped before it was serialized: <see cref="DropReason.TooLarge"/> and
+    /// <see cref="DropReason.Invalid"/> (and <see cref="DropReason.Shutdown"/> for an event tracked after shutdown) can be.
+    /// <see cref="Id"/> then identifies the event only if it already had one: an id you set, or the one <c>Track</c>
+    /// assigned. An event without an id of its own that is refused before <c>Track</c> assigns one (tracked after
+    /// shutdown, or refused by the first size and depth check) is reported with both empty.
     /// </summary>
     public ReadOnlyMemory<byte> Json => _json ?? ReadOnlyMemory<byte>.Empty;
 

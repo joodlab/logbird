@@ -7,10 +7,15 @@ import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } f
 import { runReceiptIndexCompaction } from './receipt-index-compaction';
 import { clickhouse, enforceProjectRetention } from './retention';
 import { enforceRetention } from './retention-sweep';
+import { webhookSigningConfig } from './webhook-config';
+import { startWebhookQueues } from './webhook-queues';
 
 // An unsupported ClickHouse fails here, naming its version, instead of on the first read (#268).
 await assertSupportedClickHouse(clickhouse);
+const signing = webhookSigningConfig(env);
+if (!signing.key) console.error(JSON.stringify({ level: 'error', event: signing.event, message: signing.message }));
 await probeIngestRecovery(clickhouse);
+const closeWebhookQueues = await startWebhookQueues(clickhouse, signing.key);
 const worker = new Worker(
   retentionQueueName,
   async (job) => {
@@ -112,14 +117,14 @@ await compactionQueue.upsertJobScheduler(
 // Startup sweep uses the same locked recovery path as hourly and on-demand jobs.
 for (const run of await prisma.retentionRun.findMany({ where: { status: 'running' }, distinct: ['projectId'], select: { projectId: true } }))
   await retentionQueue.add('retention.project', { projectId: run.projectId });
-console.log(JSON.stringify({ level: 'info', event: 'worker.ready' }));
+console.log(JSON.stringify({ level: 'info', event: 'worker.ready', webhookDelivery: signing.key ? 'ready' : 'unavailable' }));
 let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
   // Cancel the owned PostgreSQL backend before waiting for workers; Redis hints are abortable too.
   compactionAbort.abort();
-  await Promise.all([worker.close(), receiptWorker.close(), compactionWorker.close()]);
+  await Promise.all([worker.close(), receiptWorker.close(), compactionWorker.close(), closeWebhookQueues()]);
   await Promise.all([receiptQueue.close(), compactionQueue.close()]);
   const results = await Promise.allSettled([closeRetentionQueue(), closeProjectLocks(), clickhouse.close(), prisma.$disconnect()]);
   if (results.some((r) => r.status === 'rejected')) process.exitCode = 1;

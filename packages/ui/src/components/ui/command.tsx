@@ -188,6 +188,9 @@ function CommandShortcut({
   )
 }
 
+/** cmdk's own scoring, for a palette that scores some rows itself and the rest as usual. */
+export { defaultFilter } from "cmdk"
+
 export {
   Command,
   CommandDialog,

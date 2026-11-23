@@ -254,6 +254,51 @@ public class IngestRoundTripTests(ITestOutputHelper output)
     }
 
     [LiveFact]
+    public async Task Size_and_depth_are_decided_on_what_the_server_stores()
+    {
+        // Step-4 A05. A 270,000-character secret is replaced by default redaction, so what is sent is small and the event
+        // is stored; the size limit applies to what is sent. Metadata nested to the client's limit (the leaf at level 1,000)
+        // is stored and read back whole.
+        var secretId = LogbirdClient.NewEventId();
+        var deepId = LogbirdClient.NewEventId();
+        await using (var client = new LogbirdClient(LiveServer.Options()))
+        {
+            client.Track(new AuditEvent("limits.redacted_secret") { Id = secretId, Metadata = { ["token"] = new string('s', 270_000) } });
+            client.Track(new AuditEvent("limits.deep") { Id = deepId, Metadata = { ["tree"] = DeepChain(997) } });
+            Assert.True(await client.FlushAsync());
+            Assert.Equal(0, client.Stats.Dropped);
+        }
+
+        using var reader = LiveServer.Reader();
+        var secret = await LiveServer.WaitForEventAsync(reader, secretId);
+        Assert.Equal("[redacted]", secret.Payload.GetProperty("metadata").GetProperty("token").GetString());
+
+        var deep = await LiveServer.WaitForEventAsync(reader, deepId);
+        var node = deep.Payload.GetProperty("metadata").GetProperty("tree");
+        var levels = 0;
+        while (node.TryGetProperty("n", out var next))
+        {
+            node = next;
+            levels++;
+        }
+
+        Assert.Equal(997, levels);
+        Assert.Equal(1, node.GetProperty("leaf").GetInt32());
+        output.WriteLine($"server {await LiveServer.ServerVersionAsync()}: a 270,000-character redacted secret was stored as [redacted]; metadata 1,000 levels deep was stored and read back whole");
+    }
+
+    private static JsonNode DeepChain(int depth)
+    {
+        JsonNode node = new JsonObject { ["leaf"] = 1 };
+        for (var i = 0; i < depth; i++)
+        {
+            node = new JsonObject { ["n"] = node };
+        }
+
+        return node;
+    }
+
+    [LiveFact]
     public async Task Large_integers_and_decimals_round_trip_with_exact_digits()
     {
         // Servers before 0.2.0 round integers above 2^53 in the stored payload and attributes (issue #168, fixed by #184).

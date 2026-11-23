@@ -5,6 +5,7 @@ import { keys } from './keys';
 
 export * from './generated/client';
 export * from './ingest-receipts';
+export * from './membership-roles';
 export * from './receipt-index-maintenance';
 
 const databaseUrl = keys().DATABASE_URL;
@@ -49,8 +50,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  *  - gate (key 1): writer preference — maintenance holds it while waiting for in-flight ingests to drain, and
  *    ingest must pass it (momentary shared try-lock) before taking the data lock, so a steady ingest stream
  *    cannot starve maintenance.
- * Every acquisition is a non-blocking try with a bounded retry loop: a long purge makes callers fail fast with
- * ProjectBusyError (503 + Retry-After) instead of queueing pooled connections.
+ * Both locks use bounded retries.
  */
 export async function withProjectLock<T>(
   projectId: string,
@@ -106,16 +106,34 @@ export async function withProjectLock<T>(
 }
 export const closeProjectLocks = () => projectLocks.end();
 
-/** Replaces the existing project lookup: acceptance follows every active fence, with no extra round trip.
- * The caller holds the shared project lock, so an export cannot register a new fence until INSERT settles.
- */
-export async function findIngestProject(db: import('./generated/client').Prisma.TransactionClient, projectId: string) {
-  const rows = await db.$queryRaw<{ id: string; organizationId: string; acceptedAt: Date }[]>`
-    SELECT p.id,p."organizationId",greatest(clock_timestamp(),
+/** Only receipt assignment and registration contend with discovery. Keep ClickHouse I/O outside this transaction. */
+export function withIngestReceiptGate<T>(
+  projectId: string,
+  mode: 'shared' | 'exclusive',
+  work: (tx: import('./generated/client').Prisma.TransactionClient) => Promise<T>,
+) {
+  return prisma.$transaction(
+    async (tx) => {
+      if (mode === 'shared') await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${projectId}, 2))`;
+      else {
+        // Bound both the wait for receipt registration and the watermark query while writers queue behind it.
+        await tx.$executeRaw`SET LOCAL statement_timeout = '1s'`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${projectId}, 2))`;
+      }
+      return work(tx);
+    },
+    { isolationLevel: 'ReadCommitted', ...(mode === 'shared' ? { maxWait: 60_000, timeout: 60_000 } : {}) },
+  );
+}
+
+/** The separate project data lock prevents a new export fence until the insert settles. */
+export async function ingestReceiptClock(db: import('./generated/client').Prisma.TransactionClient, projectId: string) {
+  const [row] = await db.$queryRaw<{ acceptedAt: Date }[]>`
+    SELECT greatest(clock_timestamp(),
       (SELECT (max("receivedBefore") AT TIME ZONE 'UTC') + interval '1 millisecond' FROM "ExportLease"
-       WHERE "projectId"=p.id AND "expiresAt">(clock_timestamp() AT TIME ZONE 'UTC'))) AS "acceptedAt"
-    FROM "Project" p WHERE p.id=${projectId}`;
-  return rows[0] ?? null;
+       WHERE "projectId"=${projectId} AND "expiresAt">(clock_timestamp() AT TIME ZONE 'UTC'))) AS "acceptedAt"`;
+  if (!row) throw new Error('Ingest receipt clock unavailable');
+  return row.acceptedAt;
 }
 
 /** Call only while holding the project lock. Old clients/runs fall back to startedAt. */

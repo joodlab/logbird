@@ -24,9 +24,10 @@ Logbird.LogbirdOptions
   OnError = null
   QueueFullBehavior = QueueFullBehavior.DropOldest
   Redaction =
+    AddedKeys = ReadOnlyArray []
     ChangeFields = null
     Enabled = true
-    Keys = Regex "passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key" options IgnoreCase, CultureInvariant timeout infinite
+    Keys = Regex "[pP][aA][sS][sS][wW]([oO][rR])?[dD]|[sS][eE][cC][rR][eE][tT]|[tT][oO][kK][eE][nN]|[oO][tT][pP]|[aA][pP][iI][-_]?[kK][eE][yY]|[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]|[cC][oO][oO][kK][iI][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[pP][rR][iI][vV][aA][tT][eE][-_]?[kK][eE][yY]" options CultureInvariant timeout infinite
     Replacement = "[redacted]"
   RequestTimeout = TimeSpan 00:00:30
   ShutdownTimeout = TimeSpan 00:00:10
@@ -40,7 +41,8 @@ Logbird.LogbirdReadOptions
   Timeout = TimeSpan 00:00:30
 
 Logbird.RedactionOptions
+  AddedKeys = ReadOnlyArray []
   ChangeFields = null
   Enabled = true
-  Keys = Regex "passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key" options IgnoreCase, CultureInvariant timeout infinite
+  Keys = Regex "[pP][aA][sS][sS][wW]([oO][rR])?[dD]|[sS][eE][cC][rR][eE][tT]|[tT][oO][kK][eE][nN]|[oO][tT][pP]|[aA][pP][iI][-_]?[kK][eE][yY]|[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]|[cC][oO][oO][kK][iI][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[pP][rR][iI][vV][aA][tT][eE][-_]?[kK][eE][yY]" options CultureInvariant timeout infinite
   Replacement = "[redacted]"

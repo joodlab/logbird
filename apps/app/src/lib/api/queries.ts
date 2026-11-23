@@ -4,6 +4,7 @@ import { authClient } from '@/lib/auth-client';
 import { entityMatchRank } from '@/lib/entities';
 import { isBudgetLimit, isOverBudget } from '@/lib/query-budget';
 import { resolveRange } from '@/lib/range';
+import { retentionRefetchDelay } from '@/lib/retention';
 import { api, langParam } from './client';
 import { ApiRequestError, isBusyError, isTimeoutError, withDeadline } from './errors';
 
@@ -124,6 +125,9 @@ export const retentionQuery = (projectId: string, preview?: number) =>
     queryKey: [...keys.project(projectId), 'retention', preview ?? null] as const,
     queryFn: ({ signal }) => api.projects.retention(projectId, preview, signal),
     retry: shouldRetry,
+    // An open page follows the schedule: fetched again right after the next purge is due, and while it is late or
+    // running, so it never keeps saying "in 1 min." or "overdue" after the worker has moved on (#318).
+    refetchInterval: (query) => retentionRefetchDelay(query.state.data),
   });
 
 export const overviewQuery = (projectId: string, range: string, q = '') =>
@@ -291,6 +295,14 @@ export const suggestQuery = (projectId: string, field: string, prefix: string) =
     queryFn: ({ signal }) => api.suggest(projectId, { field, prefix: prefix || undefined, limit: SUGGEST_LIMIT }, signal),
     staleTime: 60_000,
     retry: false,
+  });
+
+/** The project's webhook endpoints. Owners and admins only: a member gets 403 (never retried). */
+export const webhooksQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'webhooks'] as const,
+    queryFn: ({ signal }) => api.webhooks.list(projectId, signal),
+    retry: shouldRetry,
   });
 
 /**

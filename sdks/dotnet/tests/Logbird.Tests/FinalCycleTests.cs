@@ -92,18 +92,26 @@ public class FinalCycleTests
     }
 
     [Fact]
-    public void Only_id_is_exempt_on_entities_and_only_type_and_id_on_targets()
+    public void Identifier_fields_are_kept_whatever_the_pattern_and_other_party_fields_are_not()
     {
-        var redactor = new Redactor(new Regex("type|id"));
+        // The parties' identifier and classification fields (Redactor.IdentifierFields) are structural; a matching name,
+        // email or extra field is redacted. An executor's attempt stays a number, as the server requires.
+        var redactor = new Redactor(new Regex("type|id|jobId|attempt|name"));
         var result = redactor.Redact(JsonNode.Parse("""
-            { "id": "e", "action": "a", "actor": { "type": "user", "id": "u" }, "executor": { "type": "worker", "id": "w" },
-              "targets": [{ "type": "invoice", "id": "i" }] }
+            { "id": "e", "action": "a", "actor": { "type": "user", "id": "u", "name": "Fictional" },
+              "executor": { "type": "worker", "id": "w", "jobId": "j", "attempt": 2, "name": "billing" },
+              "targets": [{ "type": "invoice", "id": "i", "name": "INV-1" }] }
             """)!.AsObject());
-        Assert.Equal("[redacted]", (string?)result["actor"]!["type"]);
+        Assert.Equal("user", (string?)result["actor"]!["type"]);
         Assert.Equal("u", (string?)result["actor"]!["id"]);
-        Assert.Equal("[redacted]", (string?)result["executor"]!["type"]);
+        Assert.Equal("[redacted]", (string?)result["actor"]!["name"]);
+        Assert.Equal("worker", (string?)result["executor"]!["type"]);
+        Assert.Equal("j", (string?)result["executor"]!["jobId"]);
+        Assert.Equal(2, (int)result["executor"]!["attempt"]!);
+        Assert.Equal("[redacted]", (string?)result["executor"]!["name"]);
         Assert.Equal("invoice", (string?)result["targets"]![0]!["type"]);
         Assert.Equal("i", (string?)result["targets"]![0]!["id"]);
+        Assert.Equal("[redacted]", (string?)result["targets"]![0]!["name"]);
     }
 
     [Fact]
@@ -247,18 +255,21 @@ public class FinalCycleTests
             };
         }), new FakeServer());
         var numbers = new JsonArray();
-        for (var i = 0; i < 300_000; i++)
+        for (var i = 0; i < 600_000; i++)
         {
             numbers.Add((JsonNode)i);
         }
 
+        // The array is over the 1 MiB memory guard: refused before any copy. The 300 KB action is under it: the hook sees
+        // the event, and what it returns is too large.
         client.Track(new AuditEvent("numbers") { Metadata = { ["n"] = numbers } });
         client.Track(new AuditEvent(new string('a', 300 * 1024)));
         Assert.True(await client.FlushAsync());
-        Assert.Equal(0, copies);
+        Assert.Equal(1, copies);
         Assert.All(drops, d => Assert.Equal(DropReason.TooLarge, d.Reason));
         Assert.Equal(2, drops.Count);
-        Assert.All(drops, d => Assert.True(d.Action.Length <= 256));
+        Assert.All(drops, d => Assert.True(d.Action.Length <= DroppedEvent.MaxIdLength));
+        Assert.Single(drops, d => d.Truncated && d.Action.Length == DroppedEvent.MaxIdLength);
     }
 
     [Fact]
