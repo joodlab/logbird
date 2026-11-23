@@ -53,6 +53,7 @@ import {
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/webhooks')({
   head: () => ({ meta: [{ title: 'Webhooks · Logbird' }] }),
+  staticData: { crumb: 'Webhooks' },
   component: WebhooksSettings,
 });
 
@@ -266,7 +267,8 @@ function EndpointCard({
   const busy = [toggle, remove, confirmFilter, test].some((m) => m.isPending && m.failureCount > 0);
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-lg border p-4" data-testid="webhook-endpoint">
-      <div className="flex min-w-0 items-start justify-between gap-3">
+      {/* On a phone the state badge goes under the address, which then keeps the whole width. */}
+      <div className="flex min-w-0 items-start justify-between gap-3 max-sm:flex-col max-sm:gap-1.5">
         <div className="flex min-w-0 flex-col gap-0.5">
           <p className="truncate font-mono text-sm">
             {host}
