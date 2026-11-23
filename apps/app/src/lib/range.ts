@@ -4,7 +4,7 @@
  * "<isoFrom>..<isoTo>" window (what drag-to-zoom and the custom picker produce).
  */
 
-import { formatClock, formatDate, formatMonthDay, formatOffset, isRepeatedWallTime, localDayKey, zoneOffsetMs } from './format';
+import { formatClock, formatClockPrecise, formatDate, formatMonthDay, formatOffset, isRepeatedWallTime, localDayKey, zoneOffsetMs } from './format';
 import { consoleTimeZone, shortZoneLabel } from './time-zone';
 
 export const RANGE_PRESETS = [
@@ -141,7 +141,15 @@ export function rangeLabel(range: string): string {
   // Across a clock change (02:45 – 02:00 when the clocks go back) each end names its offset, so the window never reads backwards.
   // Inside a repeated hour the clock alone is ambiguous too.
   const withOffsets = zoneOffsetMs(r.fromMs) !== zoneOffsetMs(r.toMs) || isRepeatedWallTime(r.fromMs) || isRepeatedWallTime(r.toMs);
-  const clock = (ms: number) => (withOffsets ? `${formatClock(ms)} (${formatOffset(ms)})` : formatClock(ms));
+  // A span shorter than a minute (a one-event operation opens a 1 ms window) gets seconds, or milliseconds when the
+  // seconds still match, so its two ends never read the same (#197).
+  const precise =
+    formatClock(r.fromMs) !== formatClock(r.toMs)
+      ? formatClock
+      : formatClockPrecise(r.fromMs, 'second') !== formatClockPrecise(r.toMs, 'second')
+        ? (ms: number) => formatClockPrecise(ms, 'second')
+        : (ms: number) => formatClockPrecise(ms, 'millisecond');
+  const clock = (ms: number) => (withOffsets ? `${precise(ms)} (${formatOffset(ms)})` : precise(ms));
   return localDayKey(r.fromMs) === localDayKey(r.toMs)
     ? `${day(r.fromMs)}, ${clock(r.fromMs)} – ${clock(r.toMs)}${inZone}`
     : `${day(r.fromMs)} ${clock(r.fromMs)} – ${day(r.toMs)} ${clock(r.toMs)}${inZone}`;
