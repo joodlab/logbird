@@ -424,7 +424,10 @@ function ClampedTitle({ text }: { text: string }) {
           facts below stay reachable on a phone. */}
       <div className={cn('w-full', open && 'max-h-[40svh] overflow-y-auto')}>
         <SheetTitle
-          className={cn('font-semibold text-[17px] leading-snug tracking-tight [overflow-wrap:anywhere]', !open && 'line-clamp-3')} dir="auto" ref={ref}>
+          className={cn('font-semibold text-[17px] leading-snug tracking-tight [overflow-wrap:anywhere]', !open && 'line-clamp-3')}
+          dir="auto"
+          ref={ref}
+        >
           {text}
         </SheetTitle>
       </div>
