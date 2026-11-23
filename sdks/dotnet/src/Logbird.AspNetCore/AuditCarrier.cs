@@ -19,7 +19,8 @@ public sealed record AuditCarrier
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// The carrier names an actor, impersonator or tenant without its id (or an actor without its type), which
-    /// <see cref="FromJson(string)"/> would refuse. A carrier from <see cref="IAuditLog.Carrier"/> never does.
+    /// <see cref="FromJson(string)"/> would refuse. A request's <see cref="IAuditLog.Carrier"/> never does; a job's keeps the
+    /// parties of the carrier it was started with, so a carrier built or read outside these methods can still fail here.
     /// </exception>
     public string ToJson() => JsonSerializer.Serialize(Writable(), AuditCarrierJsonContext.Default.AuditCarrier);
 
