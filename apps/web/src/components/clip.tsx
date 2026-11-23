@@ -1,6 +1,7 @@
 import { PauseIcon, PlayIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { mediaUrl } from '../lib/asset-url';
+import { shared } from '../content/shared';
+import { clipUrls } from '../lib/asset-url';
 import { clips } from '../lib/media-manifest';
 export function Clip({ id }: { id: string }) {
   const entry = clips.find((item) => item.id === id);
@@ -39,12 +40,13 @@ export function Clip({ id }: { id: string }) {
   if (!entry) {
     throw new Error(`Unknown clip: ${id}`);
   }
+  const urls = clipUrls(entry.id);
   return (
     <div className="clip relative">
       <video
         ref={ref}
-        src={mediaUrl(`${entry.id}.webm`, `${entry.id}.webm`)}
-        poster={mediaUrl(`${entry.id}-poster.webp`, `${entry.id}-poster`)}
+        src={urls.video}
+        poster={urls.poster}
         muted
         playsInline
         loop
@@ -56,7 +58,7 @@ export function Clip({ id }: { id: string }) {
       <button
         className="absolute end-3 bottom-3 inline-flex size-11 items-center justify-center rounded-full border bg-background/90 text-foreground shadow-sm backdrop-blur hover:bg-background"
         type="button"
-        aria-label={playing ? 'Pause video' : 'Play video'}
+        aria-label={playing ? shared.pauseVideo : shared.playVideo}
         onClick={() => {
           const video = ref.current;
           if (!video) {

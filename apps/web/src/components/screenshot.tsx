@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { mediaUrl } from '../lib/asset-url';
+import { phoneVariantId, screenshotSrcSet, screenshotUrl } from '../lib/asset-url';
 import { imageWidths, type ScreenshotEntry, screenshots, type Variant } from '../lib/media-manifest';
 
 const FORMATS = ['avif', 'webp'] as const;
@@ -8,9 +8,6 @@ const FORMATS = ['avif', 'webp'] as const;
 const EAGER_VISIBLE =
   "document.currentScript.previousElementSibling.querySelectorAll('img').forEach(function(i){if(i.getClientRects().length)i.loading='eager'})";
 const PHONE = '(max-width: 639px)';
-
-const srcSet = (id: string, theme: 'light' | 'dark', format: string, widths: number[]) =>
-  widths.map((width) => `${mediaUrl(`${id}-${theme}-${width}.${format}`, `${id}/${theme}`)} ${width}w`).join(', ');
 
 function ThemePicture({
   entry,
@@ -38,7 +35,7 @@ function ThemePicture({
   const pick = (variant: Variant) => (theme === 'dark' && variant.dark ? 'dark' : 'light');
   const desktopTheme = pick(entry);
   const widths = imageWidths(entry.width);
-  const fullSize = mediaUrl(`${entry.id}-${desktopTheme}-${widths.at(-1)}.webp`, `${entry.id}/${desktopTheme}`);
+  const fullSize = screenshotUrl(entry.id, desktopTheme, widths.at(-1), 'webp');
   const picture = (
     <picture className={zoomLabel ? undefined : className}>
       {entry.phone
@@ -48,14 +45,14 @@ function ThemePicture({
               key={`phone-${format}`}
               media={PHONE}
               sizes="100vw"
-              srcSet={srcSet(`${entry.id}-phone`, pick(entry.phone as Variant), format, [(entry.phone as Variant).width])}
+              srcSet={screenshotSrcSet(phoneVariantId(entry.id), pick(entry.phone as Variant), format, [(entry.phone as Variant).width])}
               type={`image/${format}`}
               width={entry.phone?.width}
             />
           ))
         : null}
       {FORMATS.map((format) => (
-        <source key={format} sizes={sizes} srcSet={srcSet(entry.id, desktopTheme, format, widths)} type={`image/${format}`} />
+        <source key={format} sizes={sizes} srcSet={screenshotSrcSet(entry.id, desktopTheme, format, widths)} type={`image/${format}`} />
       ))}
       <img
         alt={entry.alt}

@@ -4,6 +4,7 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-r
 import { type ReactNode, Suspense } from 'react';
 import { NotFound } from '../components/not-found';
 import { SiteFooter, SiteHeader } from '../components/site-shell';
+import { shell } from '../content/shell';
 import { brandUrl, manifestUrl } from '../lib/asset-url';
 import appCss from '../styles.css?url';
 export const THEME_KEY = 'logbird.site.theme';
@@ -58,7 +59,7 @@ function RootComponent() {
   return (
     <ThemeProvider storageKey={THEME_KEY} defaultTheme="system">
       <a className="skip-link" href="#main">
-        Skip to content
+        {shell.skipLink}
       </a>
       <SiteHeader />
       <main id="main" tabIndex={-1}>

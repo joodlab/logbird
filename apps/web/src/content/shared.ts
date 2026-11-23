@@ -30,6 +30,9 @@ export function sharedContent(site: SiteState) {
     openFullSize: 'Open the image full size',
     /** The visible hint in a zoomable capture's window bar, beside the image rather than over it. */
     fullSizeHint: 'Full size',
+    /** The play/pause button of a looping clip (components/clip.tsx), by what it does next. */
+    playVideo: 'Play video',
+    pauseVideo: 'Pause video',
     /** The header's link to the repository, shown only while it is public. */
     githubNav: site.githubUrl ? { label: 'GitHub', href: site.githubUrl } : undefined,
     /** The closing call to action at the bottom of most pages. */

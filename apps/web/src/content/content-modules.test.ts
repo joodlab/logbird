@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseAst } from 'vite';
 import { describe, expect, it } from 'vitest';
@@ -12,8 +12,10 @@ import { complianceEvidenceContent } from './use-cases/compliance-evidence';
 /**
  * Pages render the typed content modules in this folder, so each claim has one source (#250). A file that has moved holds
  * layout only, and this test fails on a prose literal in it: visible JSX text with a letter, a string of two or more
- * words, a template's text, or any string given to a wording prop (title, label, caption…). Class names, `sizes` and `cn`/`cx` arguments
- * are layout. Files join MOVED as their pages move; the last step lists every route file and marketing component.
+ * words, a template's text, or any string given to a wording prop (title, label, caption…). Class names, `sizes`,
+ * `cn`/`cx` arguments, React keys, ids and aria references, DOM-query selectors and error messages are layout. Every
+ * route file and every component has moved (group 6 moved the shell, the form and the last components), and MOVED must
+ * list each one: a new file joins it in the change that adds it.
  */
 const MOVED = [
   'routes/index.tsx',
@@ -54,6 +56,21 @@ const MOVED = [
   'components/marketing/blog-article.tsx',
   'routes/404.tsx',
   'components/not-found.tsx',
+  'routes/__root.tsx',
+  'components/site-shell.tsx',
+  'components/waitlist-form.tsx',
+  'components/clip.tsx',
+  'components/screenshot.tsx',
+  'components/marketing/button-link.tsx',
+  'components/marketing/callout.tsx',
+  'components/marketing/code.tsx',
+  'components/marketing/faq.tsx',
+  'components/marketing/frame.tsx',
+  'components/marketing/rich.tsx',
+  'components/marketing/section.tsx',
+  'components/marketing/security-contact.tsx',
+  'components/marketing/stacked-table.tsx',
+  'components/marketing/wordmark.tsx',
 ];
 
 /** Props and keys whose string value is always wording, even one word. */
@@ -73,6 +90,7 @@ const PASS_THROUGH = new Set([
 ]);
 /** Attributes (and object keys) whose value is layout or a reference, whatever it looks like: classes, styles, ids. */
 const LAYOUT_ATTRIBUTES = new Set([
+  'key',
   'className',
   'sizes',
   'style',
@@ -92,8 +110,10 @@ const LAYOUT_ATTRIBUTES = new Set([
   'points',
   'transform',
 ]);
-const LAYOUT_KEYS = new Set(['className', 'style', 'sizes']);
+const LAYOUT_KEYS = new Set(['className', 'style', 'sizes', 'aria-describedby', 'aria-labelledby', 'aria-controls']);
 const LAYOUT_CALLS = new Set(['cn', 'cx']);
+/** Methods whose string argument is a CSS selector or an element id (`form.querySelector(…)`), never shown. */
+const DOM_QUERIES = new Set(['querySelector', 'querySelectorAll', 'getElementById', 'closest', 'matches']);
 /** A prop named like wording (`frameTitle`, `requiredBadge`, `codeCaption`…) is wording too. */
 const WORDING_NAME = /(title|label|badge|caption|text|heading|lead|note|description|eyebrow|prompt)$/i;
 /** Two words, the first of at least two letters ("Join a team", "Retrace every step"). */
@@ -112,6 +132,9 @@ const nameOf = (node: unknown): string | undefined => {
   if (node.type === 'JSXNamespacedName') return `${nameOf(node.namespace)}:${nameOf(node.name)}`;
   return undefined;
 };
+/** The method a call invokes: `cn(…)` → cn, `form?.querySelector(…)` → querySelector. */
+const calleeName = (callee: unknown): string | undefined =>
+  isNode(callee) && callee.type === 'MemberExpression' ? nameOf(callee.property) : nameOf(callee);
 
 /** Prose literals in `source`, as `line: "text"`. */
 function proseLiterals(source: string, file = 'file.tsx'): string[] {
@@ -126,7 +149,10 @@ function proseLiterals(source: string, file = 'file.tsx'): string[] {
           (up.type === 'JSXAttribute' && LAYOUT_ATTRIBUTES.has(nameOf(up.name) ?? '')) ||
           // As an object key only class names and styles are layout: a `role`, `type` or `id` key in data can be visible text.
           (up.type === 'Property' && LAYOUT_KEYS.has(nameOf(up.key) ?? '')) ||
-          (up.type === 'CallExpression' && LAYOUT_CALLS.has(nameOf(up.callee) ?? '')),
+          (up.type === 'CallExpression' && LAYOUT_CALLS.has(nameOf(up.callee) ?? '')) ||
+          (up.type === 'CallExpression' && DOM_QUERIES.has(calleeName(up.callee) ?? '')) ||
+          // An error's message is for developers: a render that throws fails the build, it is never shown.
+          ((up.type === 'NewExpression' || up.type === 'CallExpression') && nameOf(up.callee) === 'Error'),
       ) ||
       (classVariable >= 0 && !ancestors.slice(classVariable).some((up) => up.type === 'ObjectExpression' || up.type === 'ArrayExpression'));
     // A module specifier is a path, not words.
@@ -194,6 +220,16 @@ describe('content modules', () => {
       "const planClass = { className: 'grid gap-2', label: 'Plans' };",
       "const flow = [{ name: 'API', role: 'Validates each event' }];",
       'const E = () => <Envelope frameTitle="POST /v1/events" requiredBadge="required" />;',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'const F = () => <source key={`phone-${format}`} />;',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'const radio = form?.querySelector(`input[name="interest"][value="${value}"]`);',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'if (!entry) throw new Error(`Unknown clip: ${id}`);',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      "const field = { 'aria-describedby': `${name}-error`, hint: `Copied ${what}` };",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'window.alert(`Copied ${what}`);',
     ].join('\n');
     expect(proseLiterals(sample)).toEqual([
       'file.tsx:4: "The explorer"',
@@ -215,7 +251,30 @@ describe('content modules', () => {
       // Props named like wording are wording.
       'file.tsx:18: "POST /v1/events"',
       'file.tsx:18: "required"',
+      // Lines 19–21: a React key, a DOM query's selector and an error message are never shown. Line 22: an aria
+      // reference key is layout, a sibling key's sentence is not; line 23: other calls' arguments can be visible.
+      'file.tsx:22: "Copied"',
+      'file.tsx:23: "Copied"',
     ]);
+  });
+
+  it('MOVED lists every route file and every component', () => {
+    const src = fileURLToPath(new URL('../', import.meta.url));
+    const files = ['routes', 'components', 'components/marketing'].flatMap((dir) =>
+      readdirSync(`${src}${dir}`)
+        .filter((name) => name.endsWith('.tsx') && !name.includes('.test.'))
+        .map((name) => `${dir}/${name}`),
+    );
+    expect(files.length).toBeGreaterThan(50);
+    expect(
+      files.filter((file) => !MOVED.includes(file)),
+      'add these files to MOVED',
+    ).toEqual([]);
+    // MOVED may also name a file outside those folders that renders words (lib/legal-facts.tsx), but only one that exists.
+    expect(
+      MOVED.filter((file) => !existsSync(`${src}${file}`)),
+      'MOVED names files that do not exist',
+    ).toEqual([]);
   });
 
   it('moved route files and components hold layout, not prose', () => {
