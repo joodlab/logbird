@@ -64,8 +64,8 @@ internal sealed class ClickHouseCheck : IDisposable
             var tag = selfTestTag + "-" + attempt.ToString(CultureInfo.InvariantCulture);
             var id = "soak-selftest-" + Guid.NewGuid().ToString("N");
             await QueryAsync(
-                "INSERT INTO events (project_id, event_id, timestamp, received_at, action, attributes) SELECT {p:String}, {id:String}, toDateTime64({t:String}, 3, 'UTC'), toDateTime64({t:String}, 3, 'UTC'), 'soak.selftest', map('metadata.soakRun', {r:String}) FROM numbers(2) SETTINGS optimize_on_insert = 0",
-                ("p", _projectId), ("id", id), ("t", when), ("r", tag)).ConfigureAwait(false);
+                "INSERT INTO events (project_id, event_id, timestamp, received_at, action, attributes) SELECT {p:String}, {id:String}, toDateTime64({t:String}, 3, 'UTC'), toDateTime64({t:String}, 3, 'UTC'), 'soak.selftest', map('metadata.soakRun', {r:String}) FROM numbers(2)",
+                ("p", _projectId), ("id", id), ("t", when), ("r", tag), ("!optimize_on_insert", "0")).ConfigureAwait(false);
             if (await DuplicatedIdsAsync(tag).ConfigureAwait(false) == 1)
             {
                 return true;
@@ -80,7 +80,9 @@ internal sealed class ClickHouseCheck : IDisposable
         var url = new StringBuilder(_baseUrl);
         foreach (var (name, value) in parameters)
         {
-            url.Append("&param_").Append(name).Append('=').Append(Uri.EscapeDataString(value));
+            // A name starting with '!' is a ClickHouse setting for this query; the others are query parameters.
+            url.Append('&').Append(name.Length > 0 && name[0] == (char)33 ? name.Substring(1) : "param_" + name)
+                .Append('=').Append(Uri.EscapeDataString(value));
         }
 
         using var content = new StringContent(sql, Encoding.UTF8, "text/plain");
