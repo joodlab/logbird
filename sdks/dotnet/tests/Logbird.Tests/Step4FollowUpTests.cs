@@ -513,10 +513,10 @@ public class Step4FollowUpTests
     }
 
     [Fact]
-    public void A_child_whose_keys_do_not_tell_its_rule_keeps_its_own_options()
+    public void A_child_whose_keys_do_not_tell_its_rule_is_copied_case_sensitive()
     {
         // An explicitly case-sensitive child holding only the Kelvin sign, under a case-insensitive parent: no key tells the
-        // rule, so the child's own options decide, and later writes of "Plan" and "plan" stay two fields, as on the source.
+        // rule, so the copy is case-sensitive, and later writes of "Plan" and "plan" stay two fields, as on the source.
         var child = new JsonObject(new JsonNodeOptions()) { [((char)0x212A).ToString()] = 1 };
         var parent = new JsonObject(CaseInsensitive) { ["child"] = child };
 
@@ -531,12 +531,38 @@ public class Step4FollowUpTests
         clonedChild["plan"] = 3;
         Assert.Equal(3, clonedChild.Count);
 
-        // And the other way: an explicitly case-insensitive empty child under a case-sensitive parent stays insensitive.
+        // An undecided copy never merges, even of an explicitly case-insensitive empty child: a write keeps both keys
+        // rather than overwriting one.
         var insensitive = new JsonObject(CaseInsensitive);
         var copied = (JsonObject)((JsonObject)JsonTree.Clone(new JsonObject { ["child"] = insensitive })!)["child"]!;
         copied["Plan"] = 2;
         copied["plan"] = 3;
-        Assert.Single(copied);
+        Assert.Equal(2, copied.Count);
+    }
+
+    [Fact]
+    public void A_child_filled_while_detached_stays_case_sensitive_under_a_case_insensitive_ancestor()
+    {
+        // Filled with a key that has no case while detached, its dictionary is case-sensitive; attached later under a
+        // case-insensitive grandparent, its Options report that grandparent's rule. The copy must not merge "Plan" and "plan".
+        var child = new JsonObject { ["1"] = 1 };
+        var parent = new JsonObject { ["child"] = child };
+        var grandparent = new JsonObject(CaseInsensitive) { ["parent"] = parent };
+        Assert.True(child.Options!.Value.PropertyNameCaseInsensitive);
+        child["Plan"] = 2;
+        child["plan"] = 3;
+        Assert.Equal(3, child.Count);
+        Assert.True(child.Remove("Plan") && child.Remove("plan"));
+
+        var copiedChild = (JsonObject)((JsonObject)((JsonObject)JsonTree.Clone(grandparent)!)["parent"]!)["child"]!;
+        copiedChild["Plan"] = 2;
+        copiedChild["plan"] = 3;
+        Assert.Equal(3, copiedChild.Count);
+
+        var clonedChild = (JsonObject)((JsonObject)new AuditEvent("x") { Metadata = grandparent }.Clone().Metadata["parent"]!)["child"]!;
+        clonedChild["Plan"] = 2;
+        clonedChild["plan"] = 3;
+        Assert.Equal(3, clonedChild.Count);
     }
 
     [Fact]
