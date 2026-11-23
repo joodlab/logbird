@@ -308,17 +308,8 @@ jobs:
               exit 1
             fi
           done
-          NUPKG="$RUNNER_TEMP/nupkg"
-          PACKED_VERSION="$RELEASE_VERSION"
           # Logbird.AspNetCore calls Logbird's internals, so it must depend on exactly the Logbird packed with it (#208).
-          logbird_version="$(unzip -p "$NUPKG/Logbird.$PACKED_VERSION.nupkg" Logbird.nuspec | grep -o '<version>[^<]*</version>' | head -1 | sed 's/<[^>]*>//g')"
-          dependencies="$(unzip -p "$NUPKG/Logbird.AspNetCore.$PACKED_VERSION.nupkg" Logbird.AspNetCore.nuspec | grep -o '<dependency id="Logbird" version="[^"]*"' | sort -u)"
-          expected="<dependency id=\"Logbird\" version=\"[$logbird_version]\""
-          if [ -z "$logbird_version" ] || [ "$dependencies" != "$expected" ]; then
-            echo "::error::Logbird.AspNetCore must depend on exactly Logbird [$logbird_version]; its nuspec has: ${dependencies:-no Logbird dependency}"
-            exit 1
-          fi
-          echo "Logbird.AspNetCore depends on exactly Logbird [$logbird_version]"
+          python3 check-packages.py "$RUNNER_TEMP/nupkg" "$RELEASE_VERSION"
       - name: Push Logbird, then wait until nuget.org serves it
         if: steps.gate.outputs.publish == 'true'
         env:
