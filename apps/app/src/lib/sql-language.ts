@@ -253,7 +253,8 @@ const SQL_ESCAPES: Record<string, string> = { a: '\x07', b: '\b', e: '\x1b', f: 
 /** Escaped characters ClickHouse writes without their backslash; for any other printable one it keeps it (`\z`, `\%`). */
 const SQL_BARE_ESCAPES = new Set(['\\', "'", '"', '`', '/']);
 const utf8 = new TextEncoder();
-const utf8Text = new TextDecoder();
+// A leading byte-order mark is data in a literal (ClickHouse keeps all three bytes), never something to strip.
+const utf8Text = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /**
  * The text of a single-quoted literal's body, decoded in one pass as ClickHouse decodes it: `\'` and `''` are each one
@@ -276,6 +277,11 @@ export function unquoteSql(raw: string): string {
         continue;
       }
       const next = String.fromCodePoint(raw.codePointAt(i + 1) as number);
+      if (next === 'N') {
+        // ClickHouse reads `\N` as nothing at all (its NULL marker in text formats).
+        i += 2;
+        continue;
+      }
       const decoded = SQL_ESCAPES[next] ?? next;
       const control = decoded.length === 1 && (decoded.charCodeAt(0) < 0x20 || decoded.charCodeAt(0) === 0x7f);
       text(SQL_BARE_ESCAPES.has(decoded) || control ? decoded : `\\${decoded}`);
@@ -435,7 +441,8 @@ export function sqlString(value: string): string {
   return `'${value.replace(/[\\']/g, '\\$&').replaceAll('\r', '\\r')}'`;
 }
 
-/** A literal's body exactly as `sqlString` writes it: a CR stays the escape ``, never a raw CR a textarea turns into LF. */
+/** A literal's body exactly as `sqlString` writes it: a CR stays the escape `
+`, never a raw CR a textarea turns into LF. */
 export const sqlLiteralBody = (value: string) => sqlString(value).slice(1, -1);
 
 /**
