@@ -17,7 +17,8 @@ import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histogramQuery } from '@/lib/api/queries';
-import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
+import { allTimeCheckNeedsAsking, otherDatesCheck, otherDatesLine } from '@/lib/empty-state';
+import { ENTITY_SECTIONS, entityQuery, idFromFreeText, sectionForKind, settledIdMatches } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
 import { andQuery, scopedQuery } from '@/lib/query-language';
@@ -331,38 +332,64 @@ function ProjectExplorer({
   // A bare word that is exactly an entity's id: free text searches names and descriptions, never ids.
   const word = lang === 'query' ? idFromFreeText(q) : '';
   const idLookup = useQuery({ ...entitySearchQuery(projectId, word), enabled: showsEmpty && Boolean(word) });
-  // Every kind with exactly this id (an actor and a tenant can share one): offer each.
-  // One per kind (the literal id first within a kind), so case variants of one kind never crowd out another kind.
-  const idMatches = word ? exactPerKind(idLookup.data?.entities, word) : [];
+  // A cached answer being refreshed is not settled yet: it may still find the id, or no longer find it (#239).
+  const idSettled = !word || ((idLookup.isSuccess || idLookup.isError) && !idLookup.isFetching);
+  // Every kind with exactly this id (an actor and a tenant can share one): offer each, once the lookup has settled, so a
+  // cached hit being refreshed gives no advice the refresh may take back. One per kind (the literal id first within a
+  // kind), so case variants of one kind never crowd out another kind. The id is the literal as written, spaces kept.
+  const idMatches = settledIdMatches(word, idSettled, idLookup.data?.entities);
   const idMatch = idMatches[0];
   // "a tenant id", or "the id of a tenant and an actor".
   const idPhrase =
     idMatches.length === 1 && idMatch
       ? `${articleFor(idMatch.kind)} ${kindNoun(idMatch.kind)} id`
       : `the id of ${idMatches.map((e) => `${articleFor(e.kind)} ${kindNoun(e.kind)}`).join(' and ')}`;
-  const idSettled = !word || idLookup.isSuccess || idLookup.isError;
-  // Whether anything older matches: only then is the range the reason, and only then is widening offered.
+  // Whether anything older matches: only then is the range the reason, and only then is widening offered. In SQL mode
+  // the check runs the reader's predicate over every partition, so it runs only when asked (#239).
+  // The searches the reader asked to check, each an expression and a range: a new search asks again, and going back to
+  // one already checked shows its answer without asking twice.
+  const [checksAsked, setChecksAsked] = useState<ReadonlySet<string>>(() => new Set());
+  const checkKey = JSON.stringify([effectiveQ, range]);
+  const sqlCheckAsked = !allTimeCheckNeedsAsking(lang, effectiveQ) || checksAsked.has(checkKey);
+  const widerWanted = showsEmpty && !complete && idSettled && !idMatch;
   const wider = useQuery({
     ...histogramQuery(projectId, ALL_RANGE, effectiveQ, lang),
-    enabled: showsEmpty && !complete && idSettled && !idMatch,
+    enabled: widerWanted && sqlCheckAsked,
   });
-  const olderMatches = current(wider)?.buckets.reduce((n, b) => n + b.total, 0);
+  // The check's answer counts only when it was run for this search: the all-time count is cached per expression, so an
+  // earlier check of the same expression in another range must not answer before the reader asks here (#239).
+  const checkRuns = widerWanted && sqlCheckAsked;
+  const olderMatches = checkRuns ? current(wider)?.buckets.reduce((n, b) => n + b.total, 0) : undefined;
+  const {
+    failed: checkFailed,
+    checking,
+    lookingUp,
+  } = otherDatesCheck({
+    showsEmpty,
+    complete,
+    idMatch: Boolean(idMatch),
+    idSettled,
+    checkRuns,
+    olderMatches,
+    isError: wider.isError,
+    isFetching: wider.isFetching,
+  });
   const widen =
-    olderMatches && olderMatches > 0 ? (
+    olderMatches && olderMatches > 0 && !checking ? (
       <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
         Search all time
       </Button>
-    ) : wider.isError ? (
+    ) : checkFailed ? (
       <Button onClick={() => wider.refetch()} size="sm" variant="outline">
         Retry the check
       </Button>
+    ) : widerWanted && !sqlCheckAsked ? (
+      <Button data-testid="check-all-time" onClick={() => setChecksAsked((asked) => new Set(asked).add(checkKey))} size="sm" variant="outline">
+        Check other dates
+      </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
-  const outside = wider.isError
-    ? 'Could not check other dates.'
-    : olderMatches
-      ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
-      : 'Remove a filter or change the query.';
+  const outside = otherDatesLine({ failed: checkFailed, checking, lookingUp, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
 
   // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
   // so a search opened straight from a link still gets its offer once they arrive).
@@ -396,7 +423,9 @@ function ProjectExplorer({
             Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>. {outside}
           </>
-        ) : wider.isError ? (
+        ) : checking ? (
+          `No events in ${rangeInSentence(rangeName)}. ${outside}`
+        ) : checkFailed ? (
           `No events in ${rangeInSentence(rangeName)}. Could not check other dates.`
         ) : olderMatches ? (
           `No events in ${rangeInSentence(rangeName)}. ${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event is' : 'events are'} stored outside it.`

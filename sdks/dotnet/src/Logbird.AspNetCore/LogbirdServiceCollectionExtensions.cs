@@ -78,12 +78,13 @@ public static class LogbirdServiceCollectionExtensions
         configureRequests?.Invoke(requestOptions);
         services.AddHttpContextAccessor();
 
-        // A long-lived client: connections are recycled by the handler, and redirects are never followed by this handler
-        // (they could forward the audit body to another origin). The factory's request loggers are removed: their
+        // A long-lived client: connections are recycled by the handler, redirects are never followed (they could forward
+        // the audit body to another origin) and no proxy is used (it would receive the ingest key; a host that needs one
+        // configures this named client's primary handler itself). The factory's request loggers are removed: their
         // structured state carries the raw headers, the Authorization header (the ingest key) included, on .NET 8.
         // Redaction stays on for any logger a host adds back.
         services.AddHttpClient(LogbirdHttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
-            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false })
+            .ConfigurePrimaryHttpMessageHandler(CreatePrimaryHandler)
             .SetHandlerLifetime(Timeout.InfiniteTimeSpan)
             .RemoveAllLoggers()
             .RedactLoggedHeaders(static _ => true);
@@ -158,6 +159,13 @@ public static class LogbirdServiceCollectionExtensions
     // Names the setting but never echoes its value: a misplaced key or URL with credentials must not reach startup logs.
     private static ArgumentException Invalid(string key, string expected)
         => new($"Logbird configuration: '{key}' must be {expected}. The value is not shown.");
+
+    /// <summary>
+    /// The primary handler of the SDK's named client: connections recycled every five minutes, redirects never followed,
+    /// and no proxy (a system or environment proxy would read the ingest key on an HTTP endpoint, or behind TLS interception).
+    /// </summary>
+    internal static HttpMessageHandler CreatePrimaryHandler()
+        => new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false, UseProxy = false };
 }
 
 /// <summary>Adds the Logbird request context to the pipeline.</summary>

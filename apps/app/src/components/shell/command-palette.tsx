@@ -35,6 +35,7 @@ import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries'
 import { ENTITY_SECTIONS, entityMatchRank, entityQuery, exactPerKind, isExactId, resolveJump, sectionForKind } from '@/lib/entities';
 import { formatTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
+import { paletteEntityValue, paletteFilter, paletteKeyedValue, paletteValue } from './palette-filter';
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 
@@ -67,11 +68,11 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   // Enter opens the agent's page rather than a free-text search that cannot find what they did as a customer.
   const [highlighted, setHighlighted] = useState('');
   const firstAgent = agents.data?.[0];
-  const firstAgentValue = firstAgent ? `support ${firstAgent.value} ${firstAgent.label}` : '';
+  const firstAgentValue = firstAgent ? paletteValue('support', firstAgent.value, firstAgent.label) : '';
   const trimmed = search.trim();
   // Entities whose id is exactly what was typed (`biz_27`, or a record's bare id): opened directly from Jump to.
   const exact = exactPerKind(found, trimmed);
-  const openValue = (e: { kind: string; id: string }) => `${trimmed} open ${e.kind} ${e.id}`;
+  const openValue = (e: { kind: string; id: string }) => paletteValue('jump', 'open', e.kind, e.id);
   const firstExact = exact[0];
   const firstExactValue = firstExact ? openValue(firstExact) : '';
   // Highlight an exact id once its lookup lands, else a matching support agent, so Enter opens what was meant rather
@@ -165,7 +166,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   return (
     <CommandDialog
       className="sm:max-w-xl"
-      commandProps={{ value: highlighted, onValueChange: setHighlighted }}
+      commandProps={{ value: highlighted, onValueChange: setHighlighted, filter: paletteFilter(others, search) }}
       description="Navigate, jump to an entity, event or operation, switch project or theme."
       onOpenChange={(next) => {
         onOpenChange(next);
@@ -190,7 +191,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               <CommandItem
                 key={a.value}
                 onSelect={() => go(() => navigate({ to: '/p/$projectId/support/$agentId', params: { projectId, agentId: a.value } }))}
-                value={`support ${a.value} ${a.label}`}
+                value={paletteValue('support', a.value, a.label)}
               >
                 <EntityAvatar id={a.value} name={a.label || a.value} size="sm" />
                 <span className="truncate">{a.label || a.value}</span>
@@ -218,26 +219,26 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               );
             })}
             {looksLikeEvent ? (
-              <CommandItem onSelect={() => openByShape('event')} value={`event ${trimmed}`}>
+              <CommandItem onSelect={() => openByShape('event')} value={paletteValue('jump', 'event', trimmed)}>
                 <FileSearchIcon />
                 Open event <span className="font-mono text-xs">{trimmed}</span>
               </CommandItem>
             ) : null}
             {looksLikeOperation ? (
-              <CommandItem onSelect={() => openByShape('operation')} value={`operation ${trimmed}`}>
+              <CommandItem onSelect={() => openByShape('operation')} value={paletteValue('jump', 'operation', trimmed)}>
                 <GitBranchIcon />
                 Open operation <span className="font-mono text-xs">{trimmed}</span>
               </CommandItem>
             ) : null}
             {/* Free text searches names and descriptions, never ids: an exact id searches its own events instead. */}
             {firstExact ? (
-              <CommandItem onSelect={searchEvents} value={`search ${trimmed}`}>
+              <CommandItem onSelect={searchEvents} value={paletteValue('jump', 'search', trimmed)}>
                 <SearchIcon />
                 <span className="shrink-0 whitespace-nowrap">Search events for</span>
                 <span className="min-w-0 truncate font-mono text-xs">{entityQuery(firstExact.kind, firstExact.id, firstExact.type)}</span>
               </CommandItem>
             ) : (
-              <CommandItem onSelect={searchEvents} value={`search ${trimmed}`}>
+              <CommandItem onSelect={searchEvents} value={paletteValue('jump', 'search', trimmed)}>
                 <SearchIcon />
                 <span className="shrink-0 whitespace-nowrap">Search events for</span>
                 <span className="min-w-0 truncate font-mono text-xs">{trimmed}</span>
@@ -262,7 +263,8 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                       }),
                     )
                   }
-                  value={`${e.kind} ${e.id} ${e.name} ${debounced}`}
+                  // Scored by paletteFilter: entity rows keep the server's rank order and are never dropped.
+                  value={paletteEntityValue(e)}
                 >
                   <EntityAvatar icon={e.kind === 'actor' && e.type === 'user' ? undefined : Icon} id={e.id} name={e.name || e.id} size="sm" />
                   <span className="truncate">{e.name || e.id}</span>
@@ -279,7 +281,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             <CommandItem
               className="text-muted-foreground"
               onSelect={() => go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: 'impersonator:*' } }))}
-              value={`${trimmed} support agents unavailable`}
+              value={paletteValue('notice', 'support agents unavailable')}
             >
               <VenetianMaskIcon />
               Couldn't search support agents. Try the explorer filter.
@@ -364,7 +366,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                     }),
                   )
                 }
-                value={`view ${view.name}`}
+                value={paletteKeyedValue('view', view.name, view.id)}
               >
                 <BookmarkIcon />
                 {view.name}
@@ -378,7 +380,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               <CommandItem
                 key={p.id}
                 onSelect={() => go(() => navigate({ to: '/p/$projectId', params: { projectId: p.id } }))}
-                value={`project ${p.name}`}
+                value={paletteKeyedValue('project', p.name, p.id)}
               >
                 <EntityAvatar id={p.id} name={p.name} size="sm" square />
                 {p.name}

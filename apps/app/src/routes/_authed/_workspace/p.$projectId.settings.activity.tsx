@@ -2,6 +2,7 @@ import { createFileRoute, notFound, redirect } from '@tanstack/react-router';
 import { z } from 'zod';
 import { ApiRequestError } from '@/lib/api/errors';
 import { projectQuery } from '@/lib/api/queries';
+import { PROJECT_MISSING } from '@/lib/project-listed';
 
 /**
  * Moved to Workspace settings (/workspace/activity): links and bookmarks to the old project URL still land there, with their range, query and open event.
@@ -15,10 +16,10 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
     try {
       project = await context.queryClient.fetchQuery({ ...projectQuery(params.projectId), staleTime: 0 });
     } catch (error) {
-      if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) throw notFound();
+      if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) throw notFound({ data: PROJECT_MISSING });
       throw error;
     }
-    if (project.organizationId !== context.workspace.id) throw notFound();
+    if (project.organizationId !== context.workspace.id) throw notFound({ data: PROJECT_MISSING });
     throw redirect({ to: '/workspace/activity', search: (prev) => ({ ...prev, ...search }), replace: true });
   },
 });

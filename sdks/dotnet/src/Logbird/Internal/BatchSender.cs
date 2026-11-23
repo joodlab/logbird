@@ -245,7 +245,9 @@ internal sealed class BatchSender
             // The status counts as soon as the headers arrived, even when the body could not be read afterwards.
             var answeredStatus = response is null ? headersStatus.Value : (int)response.StatusCode;
 
-            using (response)
+            // The response is disposed quietly on every exit: a throwing Dispose must not change an outcome already
+            // recorded (accepted events are settled before this block ends).
+            try
             {
                 if (stop.IsCancellationRequested)
                 {
@@ -453,6 +455,13 @@ internal sealed class BatchSender
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
                 }
             }
+            finally
+            {
+                if (response is not null)
+                {
+                    DisposeQuietly(response);
+                }
+            }
         }
     }
 
@@ -572,7 +581,9 @@ internal sealed class BatchSender
 
     /// <summary>
     /// Reads a response body under a size cap. Cancellation disposes the response, which aborts a body read that the
-    /// stream itself would not cancel (as on .NET Framework), so a stalled body cannot outlive the deadline.
+    /// stream itself would not cancel (as on .NET Framework), so a stalled body cannot outlive the deadline. That disposal,
+    /// and the body stream's, are quiet: a response or stream that throws from Dispose neither throws into the code that
+    /// cancels nor replaces a body that was read in full.
     /// </summary>
     internal static async Task<byte[]> ReadBodyAsync(HttpResponseMessage response, int limit, CancellationToken cancellationToken)
     {
@@ -582,7 +593,7 @@ internal sealed class BatchSender
             return [];
         }
 
-        using (cancellationToken.Register(static state => ((HttpResponseMessage)state!).Dispose(), response))
+        using (cancellationToken.Register(static state => DisposeQuietly((HttpResponseMessage)state!), response))
         {
             return await ReadCappedAsync(response.Content, limit, cancellationToken).ConfigureAwait(false);
         }
@@ -597,30 +608,50 @@ internal sealed class BatchSender
         }
 
 #if NET8_0_OR_GREATER
-        using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 #else
-        using var stream = await content.ReadAsStreamAsync().ConfigureAwait(false);
+        var stream = await content.ReadAsStreamAsync().ConfigureAwait(false);
 #endif
-        using var buffer = new MemoryStream();
-        var chunk = new byte[16 * 1024];
-        while (true)
+        try
         {
+            using var buffer = new MemoryStream();
+            var chunk = new byte[16 * 1024];
+            while (true)
+            {
 #if NET8_0_OR_GREATER
-            var read = await stream.ReadAsync(chunk.AsMemory(), cancellationToken).ConfigureAwait(false);
+                var read = await stream.ReadAsync(chunk.AsMemory(), cancellationToken).ConfigureAwait(false);
 #else
-            var read = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken).ConfigureAwait(false);
+                var read = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken).ConfigureAwait(false);
 #endif
-            if (read == 0)
-            {
-                return buffer.ToArray();
-            }
+                if (read == 0)
+                {
+                    return buffer.ToArray();
+                }
 
-            if (buffer.Length + read > limit)
-            {
-                throw new InvalidDataException("The Logbird response is larger than expected.");
-            }
+                if (buffer.Length + read > limit)
+                {
+                    throw new InvalidDataException("The Logbird response is larger than expected.");
+                }
 
-            buffer.Write(chunk, 0, read);
+                buffer.Write(chunk, 0, read);
+            }
+        }
+        finally
+        {
+            DisposeQuietly(stream);
+        }
+    }
+
+    /// <summary>Disposes a response or stream of the transport's; a throwing Dispose never replaces the outcome.</summary>
+    internal static void DisposeQuietly(IDisposable disposable)
+    {
+        try
+        {
+            disposable.Dispose();
+        }
+        catch
+        {
+            // Transport cleanup: whatever it throws is not the outcome, and its message is not reported.
         }
     }
 
