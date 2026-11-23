@@ -253,6 +253,17 @@ export type EndpointState = {
   todo: string;
 };
 
+/**
+ * Which resent deliveries have settled, from a read of the endpoint's pending deliveries: a resend is settled once it
+ * is no longer pending. When the pending list has more pages than were read, a resend missing from the first page is
+ * not known to be settled yet, so it stays watched.
+ */
+export function settledResends(watching: ReadonlySet<string>, pending: { ids: readonly string[]; complete: boolean }): string[] {
+  if (!pending.complete) return [];
+  const stillPending = new Set(pending.ids);
+  return [...watching].filter((id) => !stillPending.has(id));
+}
+
 /** Every state the API reports for an endpoint, holds first. A held endpoint delivers nothing and loses nothing. */
 export function endpointStates(e: WebhookEndpoint): EndpointState[] {
   const states: EndpointState[] = [];

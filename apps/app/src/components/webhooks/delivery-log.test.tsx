@@ -5,7 +5,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 
-const { resend, failedPing } = vi.hoisted(() => ({
+const { resend, failedPing, deliveries, pendingIds } = vi.hoisted(() => ({
+  // What the pending list holds (the resend watcher reads it); everything else answers with the one failed ping.
+  pendingIds: { current: [] as string[] },
+  deliveries: vi.fn(async (_p: string, _e: string, query: { status?: string }) => ({ data: [], nextCursor: null }) as unknown),
   resend: vi.fn(async (_projectId: string, _endpointId: string, _deliveryId: string) => ({})),
   // A finished test ping: the only kind of row that offers "Send again" without a router link.
   failedPing: {
@@ -22,10 +25,16 @@ const { resend, failedPing } = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/api/client', () => ({
-  api: { webhooks: { deliveries: vi.fn(async () => ({ data: [failedPing], nextCursor: null })), resend } },
+  api: { webhooks: { deliveries, resend } },
 }));
 
 import { DeliveryLog } from './delivery-log';
+
+deliveries.mockImplementation(async (_p: string, _e: string, query: { status?: string }) =>
+  query.status === 'pending'
+    ? { data: pendingIds.current.map((id) => ({ ...failedPing, id, status: 'pending' })), nextCursor: null }
+    : { data: [failedPing], nextCursor: null },
+);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
@@ -114,3 +123,22 @@ it('shows every status again after a resend, so a Failed filter never hides the 
   const all = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'All');
   expect(all?.getAttribute('aria-pressed')).toBe('true');
 });
+
+it('keeps following a resend until it is no longer pending, even when no loaded row shows it pending', async () => {
+  const again = await open(null);
+  pendingIds.current = ['qa-delivery-1'];
+  const allReads = () => deliveries.mock.calls.filter(([, , q]) => !(q as { status?: string }).status).length;
+  await act(async () => {
+    again.click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+  // The resend is still pending: the watcher reads the pending list.
+  expect(deliveries.mock.calls.some(([, , q]) => (q as { status?: string }).status === 'pending')).toBe(true);
+  const before = allReads();
+  // It settles (no longer pending): within the next poll the log reloads to show how it ended.
+  pendingIds.current = [];
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 3400));
+  });
+  expect(allReads()).toBeGreaterThan(before);
+}, 10_000);

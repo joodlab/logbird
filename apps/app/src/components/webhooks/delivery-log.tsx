@@ -6,16 +6,25 @@ import { Button } from '@logbird/ui/components/ui/button';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@logbird/ui/components/ui/sheet';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ChevronDownIcon, HistoryIcon, Loader2Icon, RotateCcwIcon } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { toast } from 'sonner';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { keys as queryKeys } from '@/lib/api/queries';
 import { formatTerm } from '@/lib/query-language';
-import { ATTEMPT_STATUS_LABEL, attemptWhy, DELIVERY_STATUS_LABEL, displayUrl, isHoldRefusal, webhookErrorCopy, webhookRetry } from '@/lib/webhooks';
+import {
+  ATTEMPT_STATUS_LABEL,
+  attemptWhy,
+  DELIVERY_STATUS_LABEL,
+  displayUrl,
+  isHoldRefusal,
+  settledResends,
+  webhookErrorCopy,
+  webhookRetry,
+} from '@/lib/webhooks';
 
 type Delivery = Awaited<ReturnType<typeof api.webhooks.deliveries>>['data'][number];
 const FILTERS = [
@@ -55,6 +64,26 @@ export function DeliveryLog({
     refetchInterval: (query) => (open && query.state.data?.pages.some((p) => p.data.some((d) => d.status === 'pending')) ? 3000 : false),
   });
   const rows = log.data?.pages.flatMap((p) => p.data) ?? [];
+  // Resends still on their way. A resent delivery keeps its id and place, so it can sit below the loaded pages, where
+  // the log's own polling cannot see it: while any is outstanding, the endpoint's pending deliveries are read every few
+  // seconds, and once a resent one is no longer pending the log reloads to show how it ended.
+  const queryClient = useQueryClient();
+  // Each resend with the time it was queued: only a read of the pending list made after that can say it settled.
+  const [watching, setWatching] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const watch = useQuery({
+    queryKey: [...deliveriesKey(projectId, endpoint.id, 'pending'), 'resend-watch'],
+    queryFn: ({ signal }) => api.webhooks.deliveries(projectId, endpoint.id, { status: 'pending' }, signal),
+    enabled: open && watching.size > 0,
+    refetchInterval: 3000,
+  });
+  useEffect(() => {
+    if (!watch.data || watch.isFetching) return;
+    const readAfter = new Set([...watching].filter(([, queuedAt]) => queuedAt < watch.dataUpdatedAt).map(([id]) => id));
+    const settled = settledResends(readAfter, { ids: watch.data.data.map((d) => d.id), complete: !watch.data.nextCursor });
+    if (settled.length === 0) return;
+    setWatching((current) => new Map([...current].filter(([id]) => !settled.includes(id))));
+    queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'deliveries'] });
+  }, [watch.data, watch.dataUpdatedAt, watch.isFetching, watching, queryClient, projectId, endpoint.id]);
   const { host, path } = displayUrl(endpoint.url);
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
@@ -113,7 +142,10 @@ export function DeliveryLog({
                   key={d.id}
                   // A resend is pending until it settles: a filter that hides pending deliveries (Failed, Delivered) would
                   // hide it and stop the log from following it, so show every status again.
-                  onResent={() => setStatus('')}
+                  onResent={(id) => {
+                    setStatus('');
+                    setWatching((current) => new Map(current).set(id, Date.now()));
+                  }}
                   projectId={projectId}
                 />
               ))}
@@ -146,8 +178,8 @@ function DeliveryRow({
   endpoint: Pick<WebhookEndpoint, 'id' | 'filterWarning'>;
   delivery: Delivery;
   blocked: boolean;
-  /** Called once a resend is queued, so the log can show it while it is pending. */
-  onResent?: () => void;
+  /** Called once a resend is queued (with the delivery's id), so the log can follow it until it settles. */
+  onResent?: (deliveryId: string) => void;
 }) {
   const endpointId = endpoint.id;
   const ids = useId();
@@ -158,7 +190,7 @@ function DeliveryRow({
     ...webhookRetry,
     onSuccess: () => {
       toast.success('Queued again', { description: 'It is sent within seconds; this log updates when it is.' });
-      onResent?.();
+      onResent?.(delivery.id);
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpointId, 'deliveries'] });
     },
     onError: (error) => {

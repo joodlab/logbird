@@ -63,7 +63,8 @@ export function EndpointStates({
               )}
             </>
           ) : state.key === 'scope' ? (
-            <Button className="self-start" onClick={onEdit} size="sm" variant="outline">
+            // The scope dialog edits the filter too: no edit while a filter confirmation is in flight.
+            <Button className="self-start" disabled={confirming} onClick={onEdit} size="sm" variant="outline">
               Edit the scope
             </Button>
           ) : state.key === 'cursor' ? (

@@ -19,6 +19,7 @@ import {
   scopeOf,
   scopeSummary,
   sendBlockedCopy,
+  settledResends,
   storedScope,
   validateWebhookForm,
   webhookErrorCopy,
@@ -296,5 +297,14 @@ describe('combined holds', () => {
       expect(cursor?.lost).toMatch(/Nothing is sent while the hold above lasts/);
       expect(cursor?.lost).not.toMatch(/still go out/);
     }
+  });
+});
+
+describe('settledResends', () => {
+  it('settles a resend once the pending list no longer holds it, and waits while that list has more pages', () => {
+    const watching = new Set(['d1', 'd2']);
+    expect(settledResends(watching, { ids: ['d2'], complete: true })).toEqual(['d1']);
+    expect(settledResends(watching, { ids: [], complete: true })).toEqual(['d1', 'd2']);
+    expect(settledResends(watching, { ids: ['d9'], complete: false })).toEqual([]);
   });
 });

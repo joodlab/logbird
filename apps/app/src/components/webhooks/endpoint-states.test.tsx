@@ -52,3 +52,11 @@ it('offers no edit while a filter confirmation is in flight, which would overwri
   document.body.innerHTML = '';
   expect(render(endpoint('webhook_filter_review_required'), false).disabled['Edit the filter']).toBe(false);
 });
+
+it('locks "Edit the scope" too while a filter confirmation is in flight (its dialog edits the filter)', () => {
+  const both = { ...endpoint('webhook_filter_review_required'), scopeWarning: 'webhook_invalid_scope' } as WebhookEndpoint;
+  expect(render(both, true).disabled['Edit the scope']).toBe(true);
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  expect(render(both, false).disabled['Edit the scope']).toBe(false);
+});
