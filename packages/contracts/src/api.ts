@@ -233,7 +233,7 @@ export const entityListQuerySchema = z.object({
    * bare id counts as its id), then by `sort`, so an exact id always leads whatever the limit. One or two characters
    * match only ids and names that start with them.
    */
-  q: z.string().max(1024).optional(),
+  q: z.string().max(200).optional(),
   type: z.string().optional(),
   /** events: most active first (then most recently seen); lastSeen: most recent first; name: A→Z. */
   sort: entitySortSchema.default('events'),
