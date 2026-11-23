@@ -293,21 +293,67 @@ public class HardeningFollowUpTests
     public async Task A_caller_that_already_cancelled_sends_nothing()
     {
         var sent = 0;
-        using var reader = Reader(Server020((_, _) =>
+        var handler = new Answer(request =>
         {
             Interlocked.Increment(ref sent);
-            return Task.FromResult(Json("{}"));
-        }));
-
-        // The version is read first, so the calls below reach the request itself.
-        await reader.FacetsAsync(new FacetQuery("outcome")).ContinueWith(_ => { });
-        sent = 0;
+            return Task.FromResult(request.RequestUri!.AbsolutePath == "/openapi.json" ? Json(Version020) : Json("{}"));
+        });
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.SearchAsync(new EventSearch(), cancelled.Token));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.MintViewerTokenAsync(new ViewerScope("biz_1"), cancellationToken: cancelled.Token));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Jsonl), new MemoryStream(), cancelled.Token));
-        Assert.Equal(0, Volatile.Read(ref sent));
+
+        // On a fresh client (no version read yet, so not even the version is asked for) and on one that already read it.
+        foreach (var warm in new[] { false, true })
+        {
+            using var reader = Reader(handler);
+            if (warm)
+            {
+                await reader.FacetsAsync(new FacetQuery("outcome")).ContinueWith(_ => { });
+            }
+
+            Interlocked.Exchange(ref sent, 0);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.SearchAsync(new EventSearch(), cancelled.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.SearchAsync(new EventSearch { Query = "record:\"invoice:inv_1\"" }, cancelled.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.FacetsAsync(new FacetQuery("outcome"), cancelled.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.MintViewerTokenAsync(new ViewerScope("biz_1"), cancellationToken: cancelled.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Jsonl), new MemoryStream(), cancelled.Token));
+            Assert.Equal(0, Volatile.Read(ref sent));
+        }
+    }
+
+    /// <summary>A body whose disposal blocks until released.</summary>
+    private sealed class BlockingDisposeContent(ManualResetEventSlim release) : StringContent("{}", Encoding.UTF8, "application/json")
+    {
+        protected override void Dispose(bool disposing)
+        {
+            release.Wait();
+            base.Dispose(disposing);
+        }
+    }
+
+    [Fact]
+    public async Task A_response_whose_disposal_blocks_cannot_hold_a_cancelled_call()
+    {
+        var release = new ManualResetEventSlim();
+        try
+        {
+            await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+            {
+                for (var i = 0; i < 20; i++)
+                {
+                    using var caller = new CancellationTokenSource();
+                    using var reader = Reader(new Answer(_ =>
+                    {
+                        caller.Cancel();
+                        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new BlockingDisposeContent(release) });
+                    }));
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.SearchAsync(new EventSearch(), caller.Token));
+                }
+            });
+        }
+        finally
+        {
+            release.Set();
+        }
     }
 
     [Fact]

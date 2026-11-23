@@ -135,7 +135,9 @@ public sealed class LogbirdReadClient : IDisposable
         // One probe for all callers: created once, started once, and not tied to any caller's token (each caller waits under
         // its own, so cancelling one search never fails another). A probe that fails, finds no readable version, or finds a
         // version older than 0.2.0 forgets itself when it completes, even if no caller is still waiting, so the next call
-        // asks again (a long-lived client sees a server upgraded after its first call).
+        // asks again (a long-lived client sees a server upgraded after its first call). A caller that already cancelled
+        // starts no probe: it sends nothing at all.
+        cancellationToken.ThrowIfCancellationRequested();
         var probe = Volatile.Read(ref _serverVersion);
         if (probe is null)
         {
@@ -651,7 +653,8 @@ public sealed class LogbirdReadClient : IDisposable
             },
             CancellationToken.None);
         // A late result is disposed as soon as it exists, even while a cancellation callback still blocks; the token
-        // source is disposed only once both the attempt and its cancellation are done.
+        // source is disposed only once both the attempt and its cancellation are done. Queued, never inline: a response
+        // whose disposal blocks must not hold this call's outcome.
         _ = work.ContinueWith(
             late =>
             {
@@ -662,7 +665,7 @@ public sealed class LogbirdReadClient : IDisposable
                 }
             },
             CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
+            TaskContinuationOptions.None,
             TaskScheduler.Default);
         _ = Task.WhenAll(cancelled, work).ContinueWith(
             all =>
