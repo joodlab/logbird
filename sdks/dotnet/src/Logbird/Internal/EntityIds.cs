@@ -3,14 +3,16 @@ using System.Collections.Generic;
 namespace Logbird.Internal;
 
 /// <summary>
-/// The SDK's look at entity identifiers before sending: actor, impersonator, executor and tenant ids, and each target's
-/// type and id. Identifiers are sent exactly as given (never trimmed, truncated or repaired), and the SDK never refuses
-/// an event because of one: the server decides. The SDK only warns, before the event is stored, about a property a server
-/// may index differently from what was sent. Logbird up to 0.2.x stores the payload as sent and indexes a repaired copy:
-/// <list type="bullet">
+/// The SDK's look at entity identifiers before an event is queued: actor, impersonator, executor and tenant ids, and each
+/// target's type and id. Identifiers are sent exactly as given (never trimmed, truncated or repaired), and the SDK never
+/// refuses an event because of one: the server decides. The SDK only warns about a property a server may index
+/// differently from what was sent; the warnings are raised after the event is queued, on the notification thread, so the
+/// event may already be on its way. Logbird up to 0.2.x stores the payload as sent and indexes a repaired copy, in this
+/// order (packages/clickhouse/src/normalize.ts):
+/// <list type="number">
 /// <item>surrounding whitespace trimmed;</item>
-/// <item>an id cut to 256 UTF-16 code units, a target type to 64;</item>
-/// <item>a lone surrogate replaced with U+FFFD;</item>
+/// <item>each lone surrogate replaced with U+FFFD;</item>
+/// <item>cut to at most 256 UTF-16 code units (64 for a target type), never splitting a surrogate pair;</item>
 /// <item>only the first 64 targets indexed.</item>
 /// </list>
 /// A server with the exact-identifier rule (issue #269) may instead reject an event it cannot index as given; that
@@ -18,7 +20,7 @@ namespace Logbird.Internal;
 /// </summary>
 internal static class EntityIds
 {
-    /// <summary>The longest id Logbird up to 0.2.x indexes as given; a longer one is indexed cut to this length.</summary>
+    /// <summary>The longest trimmed id Logbird up to 0.2.x indexes whole; a longer one is indexed cut to at most this length.</summary>
     public const int IndexedIdLength = 256;
 
     /// <summary>The longest target type Logbird up to 0.2.x indexes as given.</summary>
@@ -80,20 +82,24 @@ internal static class EntityIds
             return;
         }
 
-        // A target past the indexed ones is in the stored payload only: the event-wide warning says so, and whitespace keeps
-        // its own message for it.
+        // The server trims before it measures, so the length that matters is the trimmed one.
+        var trimmed = EventJson.JsTrim(value!);
         var indexed = targetIndex < IndexedTargets;
-        if (indexed && value!.Length > indexedLength)
+        if (trimmed.Length > indexedLength)
         {
-            warnings.Add($"{field} is longer than {indexedLength} UTF-16 code units: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it cut to {indexedLength}, so search and entity pages show the shortened value" + LaterServer);
+            warnings.Add(indexed
+                ? $"{field} is longer than {indexedLength} UTF-16 code units once trimmed: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it cut to at most {indexedLength} (never splitting a surrogate pair), so search and entity pages show the shortened value" + LaterServer
+                : $"{field} is longer than {indexedLength} UTF-16 code units once trimmed: sent exactly as given; Logbird up to 0.2.x indexes only the first {IndexedTargets} targets, so this one is kept in the stored payload only" + LaterServer);
         }
 
-        if (indexed && HasLoneSurrogate(value!))
+        if (HasLoneSurrogate(value!))
         {
-            warnings.Add($"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it with U+FFFD in its place" + LaterServer);
+            warnings.Add(indexed
+                ? $"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it with U+FFFD in place of each lone surrogate (before the length cut)" + LaterServer
+                : $"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x indexes only the first {IndexedTargets} targets, so this one is kept in the stored payload only" + LaterServer);
         }
 
-        if (EventJson.JsTrim(value!).Length != value!.Length)
+        if (trimmed.Length != value!.Length)
         {
             warnings.Add(WhitespaceReason(field, targetIndex));
         }

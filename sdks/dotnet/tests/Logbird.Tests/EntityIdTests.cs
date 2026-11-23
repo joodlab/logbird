@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace Logbird.Tests;
 
@@ -20,22 +21,24 @@ public class EntityIdTests
 
     private sealed class Harness : IAsyncDisposable
     {
-        public Harness(FakeServer? server = null)
+        public Harness(FakeServer? server = null, Action<LogbirdOptions>? configure = null)
         {
             Server = server ?? new FakeServer();
-            Client = new LogbirdClient(
-                new LogbirdOptions
-                {
-                    Endpoint = Endpoint,
-                    IngestKey = "lb_ingest_fictional",
-                    FlushInterval = TimeSpan.FromHours(1),
-                    OnError = Errors.Enqueue,
-                    OnDrop = Drops.Enqueue,
-                },
-                new HttpClient(Server));
+            var options = new LogbirdOptions
+            {
+                Endpoint = Endpoint,
+                IngestKey = "lb_ingest_fictional",
+                FlushInterval = TimeSpan.FromHours(1),
+                OnError = Errors.Enqueue,
+                OnDrop = Drops.Enqueue,
+            };
+            configure?.Invoke(options);
+            Client = new LogbirdClient(options, new HttpClient(Server), Logger);
         }
 
         public FakeServer Server { get; }
+
+        public CapturingLogger Logger { get; } = new();
 
         public LogbirdClient Client { get; }
 
@@ -70,10 +73,26 @@ public class EntityIdTests
     }
 
     private static string TooLong(string field, int max)
-        => $"{field} is longer than {max} UTF-16 code units: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it cut to {max}, so search and entity pages show the shortened value" + LaterServer;
+        => $"{field} is longer than {max} UTF-16 code units once trimmed: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it cut to at most {max} (never splitting a surrogate pair), so search and entity pages show the shortened value" + LaterServer;
 
     private static string Surrogate(string field)
-        => $"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it with U+FFFD in its place" + LaterServer;
+        => $"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it with U+FFFD in place of each lone surrogate (before the length cut)" + LaterServer;
+
+    private static string PayloadOnly(string subject)
+        => subject + ": sent exactly as given; Logbird up to 0.2.x indexes only the first 64 targets, so this one is kept in the stored payload only" + LaterServer;
+
+    internal sealed class CapturingLogger : ILogger
+    {
+        public ConcurrentQueue<string> Lines { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Lines.Enqueue(formatter(state, exception));
+    }
 
     [Theory]
     [MemberData(nameof(IndexedDifferently))]
@@ -90,6 +109,99 @@ public class EntityIdTests
         Assert.Equal(expected, warning.Reason);
         Assert.Equal("Logbird warning about an event it is sending: " + expected, warning.Message);
         Assert.Equal(new LogbirdStats(2, 2, 0, 0, 0, 0, 0, Warnings: 1), h.Client.Stats);
+
+        // The logger gets the same message, which names the field and never carries the value.
+        Assert.Contains("Logbird: Logbird warning about an event it is sending: " + expected, h.Logger.Lines);
+        Assert.All(h.Logger.Lines, line => Assert.DoesNotContain("aaaaaaaaaa", line, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_length_that_counts_is_the_trimmed_one()
+    {
+        // 256 code units plus surrounding whitespace: the server trims first, so it indexes all 256 and only the whitespace
+        // is worth a warning.
+        await using var h = new Harness();
+        h.Client.Track(new AuditEvent("x") { Actor = AuditActor.User(" " + new string('a', 256) + " ") });
+        Assert.True(await h.Client.FlushAsync());
+        var warning = Assert.Single(h.Errors.OfType<LogbirdEventWarning>());
+        Assert.StartsWith("surrounding whitespace in actor.id:", warning.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_target_past_the_64th_gets_its_own_warnings_too()
+    {
+        await using var h = new Harness();
+        var e = new AuditEvent("x");
+        for (var i = 0; i < 64; i++)
+        {
+            e.Target("record", "r" + i);
+        }
+
+        e.Target(new string('t', 65), "r" + Lone(0xD800));
+        h.Client.Track(e);
+        Assert.True(await h.Client.FlushAsync());
+        Assert.Equal(
+            [
+                PayloadOnly("targets[64].type is longer than 64 UTF-16 code units once trimmed"),
+                PayloadOnly("targets[64].id contains a lone surrogate"),
+                "the event has 65 targets: all are sent; Logbird up to 0.2.x stores them all but indexes only the first 64, so the others are in the stored payload only" + LaterServerTargets,
+            ],
+            h.Errors.OfType<LogbirdEventWarning>().Select(w => w.Reason));
+        Assert.Equal(65, h.Server.Requests.Single().Events.Single().GetProperty("targets").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task An_event_replaced_by_BeforeSend_is_inspected_and_sent_exactly()
+    {
+        var longId = new string('b', 300);
+        await using var h = new Harness(configure: o => o.BeforeSend = e => new AuditEvent("replaced") { Id = e.Id, Actor = AuditActor.User(longId) });
+        h.Client.Track(new AuditEvent("original") { Actor = AuditActor.User("user_ok") });
+        Assert.True(await h.Client.FlushAsync());
+        var sent = h.Server.Requests.Single().Events.Single();
+        Assert.Equal("replaced", sent.GetProperty("action").GetString());
+        Assert.Equal(longId, sent.GetProperty("actor").GetProperty("id").GetString());
+        Assert.Equal([TooLong("actor.id", 256)], h.Errors.OfType<LogbirdEventWarning>().Select(w => w.Reason));
+        Assert.Contains("Logbird: Logbird warning about an event it is sending: " + TooLong("actor.id", 256), h.Logger.Lines);
+    }
+
+    [Fact]
+    public async Task All_warnings_about_one_event_arrive_even_when_there_are_more_than_the_notification_queue_holds()
+    {
+        // 1,500 padded target ids on one event, more than the 1,000-notification queue: they travel as one notification, so
+        // none is lost and the flush returns after all of them ran.
+        await using var h = new Harness(configure: o => o.MaxQueueSize = 1);
+        var e = new AuditEvent("x");
+        for (var i = 0; i < 1500; i++)
+        {
+            e.Target("record", " r" + i);
+        }
+
+        h.Client.Track(e);
+        Assert.True(await h.Client.FlushAsync());
+        Assert.Equal(1501, h.Errors.OfType<LogbirdEventWarning>().Count());
+        Assert.Equal(1501, h.Client.Stats.Warnings);
+        Assert.Equal(0, h.Client.NotificationsLost);
+        Assert.Equal(1501, h.Logger.Lines.Count(line => line.StartsWith("Logbird: Logbird warning about an event it is sending:", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task A_long_list_of_empty_targets_is_measured_before_it_is_copied()
+    {
+        // 14,000 empty targets carry no text but at least 19 bytes of JSON each: over 256 KB, refused before serializing.
+        await using var h = new Harness();
+        var e = new AuditEvent("x");
+        for (var i = 0; i < 14_000; i++)
+        {
+            e.Target(string.Empty, string.Empty);
+        }
+
+        h.Client.Track(e);
+        Assert.True(await h.Client.FlushAsync());
+        var drop = Assert.Single(h.Drops);
+        Assert.Equal(DropReason.TooLarge, drop.Reason);
+        Assert.Null(drop.Code);
+        Assert.True(drop.Json.IsEmpty);
+        Assert.Empty(h.Server.Requests);
     }
 
     [Fact]
@@ -154,6 +266,8 @@ public class EntityIdTests
         h.Client.Track(e);
         Assert.True(await h.Client.FlushAsync());
         Assert.Empty(h.Drops);
+        Assert.Empty(h.Errors.OfType<LogbirdEventWarning>());
+        Assert.Equal(0, h.Client.Stats.Warnings);
         Assert.Equal(1, h.Client.Stats.Delivered);
     }
 

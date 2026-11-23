@@ -132,11 +132,12 @@ is refused. Keys and the ClickHouse login come only from the environment:
 # dotenv fills in only what your shell has not set, so pass explicitly whatever differs from .env for the server under
 # test, for example DATABASE_URL=<its scratch database> before each command (and its own endpoint below).
 # local-only.mjs then refuses unless DATABASE_URL, CLICKHOUSE_URL and REDIS_URL all point at this machine, before the
-# fixture script writes anything.
+# fixture script writes anything. The fixture file, by contrast, is loaded with -o: its fresh keys and project id must win
+# over any LOGBIRD_IT_* left in your shell, so the soak writes to the project that delete removes.
 F=/path/outside/the/repo/soak.env
 pnpm exec dotenv -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
   pnpm exec dotenv -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
-pnpm exec dotenv -e .env -e "$F" -- sh -c '
+pnpm exec dotenv -e .env -- pnpm exec dotenv -o -e "$F" -- sh -c '
   export LOGBIRD_SOAK_INGEST_KEY="$LOGBIRD_IT_INGEST_KEY" LOGBIRD_SOAK_READ_KEY="$LOGBIRD_IT_READ_KEY"
   export LOGBIRD_SOAK_PROJECT_ID="$LOGBIRD_IT_PROJECT_ID" LOGBIRD_SOAK_CLICKHOUSE_URL="$CLICKHOUSE_URL"
   export LOGBIRD_SOAK_CLICKHOUSE_USER="$CLICKHOUSE_USER" LOGBIRD_SOAK_CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD"

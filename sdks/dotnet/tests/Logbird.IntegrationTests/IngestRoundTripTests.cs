@@ -334,6 +334,9 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         var version = await LiveServer.ServerVersionAsync();
         output.WriteLine($"server {version}");
 
+        // Logbird up to 0.2.x stores every one of these and indexes a repaired copy; a later server may reject them.
+        var repairs = version < new Version(0, 3);
+
         // The SDK refused nothing: any drop is the server's own rejection, with its code.
         Assert.All(drops, d => Assert.Equal(DropReason.Rejected, d.Reason));
         using var reader = LiveServer.Reader();
@@ -345,6 +348,8 @@ public class IngestRoundTripTests(ITestOutputHelper output)
             var rejected = drops.FirstOrDefault(d => d.Id == id);
             if (rejected is not null)
             {
+                Assert.False(repairs, $"Logbird {version} stores this kind of identifier, but it rejected {kind}");
+                Assert.Equal("invalid_entity_id", rejected.Code);
                 output.WriteLine($"{kind}: rejected by the server, code {rejected.Code}; SDK warning: {warned[0]}");
                 continue;
             }
@@ -359,32 +364,44 @@ public class IngestRoundTripTests(ITestOutputHelper output)
                     sent = Describe(payload.GetProperty("tenant").GetProperty("id").GetString());
                     indexed = Describe(stored.Event.Tenant?.Id);
                     Assert.Equal(auditEvent.Tenant!.Id, payload.GetProperty("tenant").GetProperty("id").GetString());
+                    Assert.True(!repairs || stored.Event.Tenant?.Id == new string('t', 256), $"{kind}: indexed {indexed}");
                     break;
                 case "long-target-type":
                     sent = Describe(payload.GetProperty("targets")[0].GetProperty("type").GetString());
                     indexed = Describe(stored.Event.Targets.Count > 0 ? stored.Event.Targets[0].Type : null);
                     Assert.Equal(auditEvent.Targets[0].Type, payload.GetProperty("targets")[0].GetProperty("type").GetString());
+                    Assert.True(!repairs || stored.Event.Targets[0].Type == new string('y', 64), $"{kind}: indexed {indexed}");
                     break;
                 case "long-target-id":
                     sent = Describe(payload.GetProperty("targets")[0].GetProperty("id").GetString());
                     indexed = Describe(stored.Event.Targets.Count > 0 ? stored.Event.Targets[0].Id : null);
                     Assert.Equal(auditEvent.Targets[0].Id, payload.GetProperty("targets")[0].GetProperty("id").GetString());
+                    Assert.True(!repairs || stored.Event.Targets[0].Id == new string('z', 256), $"{kind}: indexed {indexed}");
                     break;
                 case "targets-300":
                     sent = payload.GetProperty("targets").GetArrayLength() + " targets";
                     indexed = stored.Event.Targets.Count + " targets";
                     Assert.Equal(300, payload.GetProperty("targets").GetArrayLength());
+                    Assert.True(!repairs || stored.Event.Targets.Count == 64, $"{kind}: indexed {indexed}");
                     break;
                 case "lone-surrogate":
                     // The payload keeps the lone surrogate: JSON.stringify writes it as an escape.
                     sent = payload.GetProperty("actor").GetProperty("id").GetRawText();
                     indexed = Describe(stored.Event.Actor?.Id);
                     Assert.Equal("\"user" + backslash + "ud800x\"", sent);
+                    Assert.True(!repairs || stored.Event.Actor?.Id == "user" + ((char)0xFFFD).ToString() + "x", $"{kind}: indexed {indexed}");
+                    break;
+                case "long-actor":
+                    sent = Describe(payload.GetProperty("actor").GetProperty("id").GetString());
+                    indexed = Describe(stored.Event.Actor?.Id);
+                    Assert.Equal(auditEvent.Actor!.Id, payload.GetProperty("actor").GetProperty("id").GetString());
+                    Assert.True(!repairs || stored.Event.Actor?.Id == new string('u', 256), $"{kind}: indexed {indexed}");
                     break;
                 default:
                     sent = Describe(payload.GetProperty("actor").GetProperty("id").GetString());
                     indexed = Describe(stored.Event.Actor?.Id);
                     Assert.Equal(auditEvent.Actor!.Id, payload.GetProperty("actor").GetProperty("id").GetString());
+                    Assert.True(!repairs || stored.Event.Actor?.Id == "user_42", $"{kind}: indexed {indexed}");
                     break;
             }
 
@@ -392,7 +409,7 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         }
 
         // Opt-in until the server's exact-identifier rule ships: Logbird up to 0.2.x indexes the id trimmed (issue #269).
-        if (Environment.GetEnvironmentVariable("LOGBIRD_IT_ENTITY_IDS") == "1")
+        if (Environment.GetEnvironmentVariable("LOGBIRD_IT_ENTITY_IDS") == "1" && !drops.Any(d => d.Id == ids["whitespace"]))
         {
             var stored = await LiveServer.WaitForEventAsync(reader, ids["whitespace"]);
             Assert.Equal(" user_42 ", stored.Event.Actor?.Id);

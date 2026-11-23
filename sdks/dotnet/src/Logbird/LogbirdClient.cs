@@ -277,7 +277,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             }
 
             // Identifiers are sent exactly as given and the server decides: the SDK never refuses an event for one. A property
-            // a server may index differently from what is sent is reported as a warning once the event is queued.
+            // a server may index differently from what is sent is reported as a warning once the event is queued (on the
+            // notification thread, so the event may already be on its way).
             var identifierWarnings = _identifierWarnings ??= [];
             identifierWarnings.Clear();
             EntityIds.Inspect(source, identifierWarnings);
@@ -306,10 +307,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (added is not null)
             {
-                foreach (var reason in identifierWarnings)
+                if (identifierWarnings.Count > 0)
                 {
-                    // Field names, limits and fixed text only: the message never carries event data.
-                    Warn(eventId, eventAction, reason, "Logbird warning about an event it is sending: " + reason);
+                    // Field names, limits and fixed text only: the message never carries event data. One notification per
+                    // event, so an event with many fields cannot crowd other notifications out of the bounded queue.
+                    var reasons = identifierWarnings.ToArray();
+                    WarnAll(eventId, eventAction, reasons, "Logbird warning about an event it is sending: ");
                 }
 
                 Interlocked.Increment(ref _tracked);
@@ -886,6 +889,19 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     {
         Interlocked.Increment(ref _warnings);
         Report(new LogbirdEventWarning(id, action, reason, message));
+    }
+
+    /// <summary>Several warnings about one event, counted each and delivered in order as a single notification.</summary>
+    private void WarnAll(string id, string action, string[] reasons, string messagePrefix)
+    {
+        Interlocked.Add(ref _warnings, reasons.Length);
+        Notify(() =>
+        {
+            foreach (var reason in reasons)
+            {
+                ReportCore(new LogbirdEventWarning(id, action, reason, messagePrefix + reason), log: true);
+            }
+        });
     }
 
     internal long NotificationsLost => Interlocked.Read(ref _notificationsLost);
