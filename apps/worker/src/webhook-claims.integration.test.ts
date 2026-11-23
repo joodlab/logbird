@@ -42,6 +42,7 @@ const projects = [
   'p21',
   'p22',
   'p23',
+  'p24',
 ].map((name) => `qa-webhook-claims-${name}-${runId}`);
 const secretKey = Buffer.alloc(32, 9);
 const received: { path: string; id: string }[] = [];
@@ -630,8 +631,10 @@ it('rolls the fair-phase statement back as a whole when it fails, and claims nor
       expect(await attempts(row.id)).toBe(0);
       expect(sent(row.eventId)).toBe(0);
     }
-    expect(await rotation(first)).toBeNull();
-    expect(await rotation(second)).toBeNull();
+    // No lease, attempt or claim leaked from the rolled-back statement. Both projects claimed nothing after their claims
+    // failed, so both were moved to the back of the rotation (#330): neither can stay first while it keeps failing.
+    expect(await rotation(first)).not.toBeNull();
+    expect(await rotation(second)).not.toBeNull();
     expect(errors.mock.calls.map(([message]) => String(message))).toContainEqual(expect.stringContaining('webhook.claim_fair_failed'));
     // Only the first project's row fails. The fair statement claimed the second project's row too, and that write rolled
     // back with it: the per-project retry claims the second row exactly once.
@@ -639,8 +642,8 @@ it('rolls the fair-phase statement back as a whole when it fails, and claims nor
     await deliverWebhooks(ch, { ...options(), concurrency: 2 }, [first, second]);
     expect(sent(other.eventId)).toBe(1);
     expect(await attempts(other.id)).toBe(1);
-    expect(await rotation(second)).not.toBeNull();
-    expect(await rotation(first)).toBeNull();
+    // The second project's claim stamped its rotation after the first project, which failed again, was moved back.
+    expect((await rotation(second))?.lastClaimedAt.getTime()).toBeGreaterThanOrEqual((await rotation(first))?.lastClaimedAt.getTime() ?? 0);
     expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: failing.id } })).toMatchObject({ attemptNumber: 0, leaseUntil: null });
   } finally {
     errors.mockRestore();
@@ -830,4 +833,48 @@ it('dispatches what it claimed when the budget runs out mid-pass and leaves the 
   await deliverWebhooks(ch, { ...options(), concurrency: 2 }, project);
   expect(sent(waitingRow.eventId)).toBe(1);
   expect(sent(claimedRow.eventId)).toBe(1);
+});
+
+it('a project whose claims keep failing cannot take every pass: a healthy project ranked behind it is sent by the second pass', {
+  timeout: 60_000,
+}, async () => {
+  const failingProject = projects[22] ?? '';
+  const healthyProject = projects[23] ?? '';
+  const { now } = await webhookCursorClock(prisma);
+  // The failing project has never been claimed (no rotation row), so it ranks first; the healthy one was claimed an hour ago.
+  await prisma.webhookClaimRotation.create({ data: { projectId: healthyProject, lastClaimedAt: new Date(+now - 3_600_000) } });
+  const failingRows: Awaited<ReturnType<typeof ping>>[] = [];
+  const failingIds: string[] = [];
+  for (let index = 0; index < 10; index++) {
+    const hook = await endpoint(failingProject, `starve-failing-${index}`);
+    failingIds.push(hook.id);
+    failingRows.push(await ping(hook.id, `starve-failing-${index}`, new Date(+now - 300_000 + index)));
+  }
+  const healthyRow = await ping((await endpoint(healthyProject, 'starve-healthy')).id, 'starve-healthy', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  // Test hook: every statement that scans the failing project's endpoints times out (300 ms). Its fallback (the project
+  // claim, then ten endpoint retries) needs well over the 2 s budget used here, so it ends every attempt on the budget.
+  const failing = { ...options(), concurrency: 2, claimTimeoutMs: 300, claimBudgetMs: 2000, claimScanDelay: { endpointIds: failingIds, seconds: 2 } };
+  const errors = vi.spyOn(console, 'error');
+  try {
+    await deliverWebhooks(ch, failing, [failingProject, healthyProject]);
+    // Pass 1: the failing project, ranked first, used the whole budget.
+    expect(logged(errors, 'webhook.claim_budget_spent')).toHaveLength(1);
+    expect(sent(healthyRow.eventId)).toBe(0);
+    // Pass 2: the failing project was moved to the back, so the healthy project is tried first and sent.
+    await deliverWebhooks(ch, failing, [failingProject, healthyProject]);
+    expect(sent(healthyRow.eventId)).toBe(1);
+  } finally {
+    errors.mockRestore();
+  }
+  for (const row of failingRows)
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+      status: 'pending',
+      attemptNumber: 0,
+      leaseUntil: null,
+    });
+  expect(await prisma.webhookAttempt.count({ where: { deliveryId: { in: failingRows.map(({ id }) => id) } } })).toBe(0);
+  // Its rows stay eligible: once its scans are healthy again, it is claimed.
+  await deliverWebhooks(ch, { ...options(), concurrency: 10, perEndpoint: 1 }, failingProject);
+  expect(failingRows.map((row) => sent(row.eventId))).toEqual(failingRows.map(() => 1));
 });

@@ -82,6 +82,26 @@ function sqlState(error: unknown) {
   return typeof code === 'string' ? code : undefined;
 }
 
+/**
+ * Give a project its turn without a claim: stamp its rotation as a claim would, so ranking puts it behind every project not
+ * tried since. Used when its claim failed and nothing was claimed. A failure here is logged and costs nothing else; the
+ * project then keeps its place for one more pass.
+ */
+async function moveToBack(scope: PassScope, projectId: string) {
+  try {
+    await prisma.$transaction([
+      prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', ${`${scope.timeoutMs}ms`}, true)`,
+      prisma.$executeRaw`
+        INSERT INTO "WebhookClaimRotation" ("projectId", "lastClaimedAt")
+        VALUES (${projectId}, (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
+        ON CONFLICT ("projectId") DO UPDATE
+          SET "lastClaimedAt" = greatest("WebhookClaimRotation"."lastClaimedAt", EXCLUDED."lastClaimedAt")`,
+    ]);
+  } catch (error) {
+    console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_rotation_failed', projectId, sqlState: sqlState(error) }));
+  }
+}
+
 const scanSleep = (scope: PassScope) =>
   scope.scanDelay
     ? Prisma.sql`AND CASE WHEN e.id = ANY(${scope.scanDelay.endpointIds}::text[]) THEN (SELECT true FROM pg_sleep(${scope.scanDelay.seconds}) WHERE e.id IS NOT NULL) ELSE true END`
@@ -320,7 +340,9 @@ async function invalidScopedEndpoints(now: Date, projects?: string[]) {
  * 10 endpoints, oldest due row first), so one endpoint's scan cannot block a sibling. The fallback's endpoint listing has
  * the same statement timeout. A pass starts no claim statement after its claim budget (10 s; normal passes take
  * milliseconds), so statements that keep timing out cannot use up the dispatch budget of rows already claimed; the budget
- * typically binds only when claim statements fail or time out, outside the conditions of the bound above. Only a failure before any claim
+ * typically binds only when claim statements fail or time out, outside the conditions of the bound above. A project
+ * whose claim failed and that claimed nothing is moved to the back of the rotation like a claimed one, so with F projects
+ * failing at once every other project with a due row is tried within F + 1 passes: a failing project cannot starve them. Only a failure before any claim
  * (holding scopes, ranking) fails the pass. These bounds hold for row locks Logbird itself creates; see the self-hosting
  * guide for transactions held by other clients.
  */
@@ -387,8 +409,16 @@ export async function claimWebhookDeliveries(
         JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, claimed: claims.length, sqlState: sqlState(error) }),
       );
     }
-    // Retry the project one endpoint at a time, each in its own statement and with its own timeout, so an endpoint whose
-    // scan fails or times out (for example behind rows another transaction holds) cannot keep its siblings from claiming.
+    const count = await claimByEndpoint(project, limit);
+    // A claim advances the project's rotation. A project whose claim failed and whose retries claimed nothing (they failed,
+    // timed out or ran into the budget) moves to the back as well, so it cannot be tried first again, and use the budget
+    // again, before every other project with due rows has had its turn.
+    if (!count) await moveToBack(scope, project);
+    return count;
+  };
+  // Retry the project one endpoint at a time, each in its own statement and with its own timeout, so an endpoint whose
+  // scan fails or times out (for example behind rows another transaction holds) cannot keep its siblings from claiming.
+  const claimByEndpoint = async (project: string, limit: number) => {
     let count = 0;
     let endpoints: string[] = [];
     if (spent()) return count;
