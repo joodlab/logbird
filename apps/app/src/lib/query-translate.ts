@@ -5,14 +5,23 @@
  * Only constructs with an unambiguous SQL equivalent are translated; anything else (free text, phrases,
  * the `description` text field) returns null so the caller can ask instead of guessing.
  */
-import { decodeRecordPair, QUERY_DIALECT_PREFIX, queryFieldName, readQueryValue, scanBareRecordValue } from '@logbird/contracts';
+import {
+  decodeRecordPair,
+  parseQueryExpression,
+  QUERY_DIALECT_PREFIX,
+  type QueryAtom,
+  QueryError,
+  type QueryExpression,
+  type QuerySyntaxToken,
+  readQueryValue,
+  scanBareRecordValue,
+} from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 import { type QueryToken, tokenize } from './query-language';
 import { sqlString } from './sql-language';
 
 const SQL_OPS: Record<string, string> = { '>': '>', '>=': '>=', '<': '<', '<=': '<=' };
 const QUOTED_VALUE = /^"(?:[^"\\]|\\[\s\S])*"$/;
-const BARE_VALUE = /^[^\s()"<>[\]{}]+$/;
 
 type Target = { ref: string; type: 'string' | 'number' | 'date' | 'array' } | { ref: string; type: 'attr'; key: string };
 
@@ -33,8 +42,11 @@ const RELATIVE = /^now(?:([+-])(\d+)([smhdw]))?(\/d)?$/;
 /** Units as elapsed time, as the server counts them: a day is 86,400 s even across a daylight-saving change. */
 const RELATIVE_SECONDS = { s: 1, m: 60, h: 3600, d: 86_400, w: 604_800 } as const;
 const DAY_MS = 86_400_000;
-/** Instants SQL mode computes exactly as the server does (`toStartOfDay` and DateTime64 stop short of 1970 and 2299). */
-const SQL_INSTANTS = { from: Date.UTC(1970, 0, 2), to: Date.UTC(2200, 0, 1) };
+/**
+ * Instants SQL mode computes exactly as the server does. `toStartOfDay` returns a DateTime, which clamps outside
+ * 1970-01-01 … 2106-02-07, so relative dates are only translated well inside that window.
+ */
+const SQL_INSTANTS = { from: Date.UTC(1970, 0, 2), to: Date.UTC(2106, 0, 1) };
 
 /**
  * The SQL instant for a date bound, or null when the two modes could disagree on it: a value the server rejects, or a
@@ -72,14 +84,10 @@ function comparison(t: Target, op: string, value: string): string | null {
   }
   const n = Number(value);
   if (!SERVER_NUMBER.test(value) || !Number.isFinite(n)) return null;
-  return `${t.type === 'attr' ? `toFloat64OrNull(${t.ref})` : t.ref} ${op} ${String(n)}`;
-}
-
-/** A range bound as the server reads it: open for an unescaped star (quoted or not), else its decoded value. */
-function rangeBound(raw: string): { open: boolean; value: string } | null {
-  if (raw.startsWith('"') && !QUOTED_VALUE.test(raw)) return null;
-  const { value, wildcard } = readQueryValue(raw);
-  return { open: wildcard && value === '*', value };
+  // The server binds every number as Float64. An integer literal is read as an integer type, which keeps digits a Float64
+  // drops, so integers beyond 2^53 are written in exponent form (a Float64 literal) to compare the same way.
+  const literal = Number.isInteger(n) && !Number.isSafeInteger(n) ? n.toExponential() : String(n);
+  return `${t.type === 'attr' ? `toFloat64OrNull(${t.ref})` : t.ref} ${op} ${literal}`;
 }
 
 function presence(t: Target): string {
@@ -104,6 +112,21 @@ function equals(t: Target, value: string, wildcard: boolean | undefined): string
   if (t.type === 'number' || t.type === 'date') return comparison(t, '=', value);
   if (t.type === 'array') return `has(${t.ref}, ${sqlString(value)})`;
   return `${t.ref} = ${sqlString(value)}`;
+}
+
+/** A regex match, only where the server compiles one the same way (text fields) and only for a regex it accepts. */
+function regexMatch(t: Target, source: string): string | null {
+  // On number and date fields the server reads a regex's text as a number or date, not as a pattern.
+  if (t.type === 'number' || t.type === 'date') return null;
+  try {
+    const pattern = new RegExp(source);
+    if ([...pattern.source.matchAll(/(?<!\\)\{(\d+)(?:,(\d*))?\}/g)].some((m) => Number(m[1]) > 1000 || Number(m[2] ?? 0) > 1000)) return null;
+    if (/\(\?[=!<]|\\[1-9]|\(\?>/.test(source)) return null;
+  } catch {
+    return null;
+  }
+  const re = sqlString(`^(?:${source})$`);
+  return t.type === 'array' ? `arrayExists(x -> match(x, ${re}), ${t.ref})` : `match(${t.ref}, ${re})`;
 }
 
 function recordValueToSql(raw: string): string | null {
@@ -138,78 +161,88 @@ function recordTermToSql(token: QueryToken, raw: string): string | null {
   return parts?.every(Boolean) ? `(${parts.join(' OR ')})` : null;
 }
 
-function isBareValue(raw: string): boolean {
-  return BARE_VALUE.test(raw) && !/^(?:AND|OR|NOT|TO)(?=:|$)|&&|\|\|/.test(raw) && !QUERY_DIALECT_PREFIX.test(raw);
+type FieldAtom = Extract<QueryAtom, { kind: 'field' }>;
+
+/** One value as the server compiles it with `=`: a regex token matches, anything else is `equals`. */
+function memberSql(t: Target, token: QuerySyntaxToken): string | null {
+  return token.kind === 'regex' ? regexMatch(t, token.value) : equals(t, token.value, token.wildcard);
 }
 
-function isSimpleOperand(token: QueryToken, raw: string, start: number): boolean {
-  if (token.valueKind === 'quoted') return QUOTED_VALUE.test(raw);
-  return token.valueKind === 'plain' && isBareValue(raw) && !(raw.startsWith('-') && /\s/.test(token.raw[start - 1] ?? ''));
-}
-
-function termToSql(token: QueryToken): string | null {
-  const start = (token.valueStart ?? token.start) - token.start;
-  const raw = token.raw.slice(start);
-  const value = token.value ?? '';
-  if (token.field === 'record') return recordTermToSql(token, raw);
-  if (token.field === '_exists_') {
-    if (!isSimpleOperand(token, raw, start) || (token.valueKind === 'plain' && raw.includes(':'))) return null;
-    const field = queryFieldName(raw);
-    if (field === 'record') return 'notEmpty(target_ids)';
-    const target = targetFor(field);
+/**
+ * One field term, with every value taken from the server's own parse (`atom`): what it joined, decoded and treated as
+ * a wildcard is what is translated, so the console's lexer can never change a value's meaning on the way to SQL.
+ */
+function termToSql(token: QueryToken, atom: FieldAtom): string | null {
+  if (atom.value.kind === 'presence') {
+    if (atom.field === 'record') return 'notEmpty(target_ids)';
+    const target = targetFor(atom.field);
     return target ? attributePredicate(target, presence(target)) : null;
   }
-  const t = targetFor(token.field ?? '');
+  if (atom.field === 'record') return recordTermToSql(token, token.raw.slice((token.valueStart ?? token.start) - token.start));
+  const t = targetFor(atom.field);
   if (!t) return null;
-  switch (token.valueKind) {
-    case 'plain':
-    case 'quoted':
-      return isSimpleOperand(token, raw, start) ? attributePredicate(t, equals(t, value, token.wildcard)) : null;
-    case 'compare': {
-      const operand = raw.slice(token.op?.length ?? 0);
-      if (/^\s+-/.test(operand)) return null;
-      return comparison(t, SQL_OPS[token.op ?? '>'] ?? '>', value);
-    }
+  const { value } = atom;
+  switch (value.kind) {
+    case 'value':
+      return attributePredicate(t, memberSql(t, value.token));
+    case 'compare':
+      if (value.token.kind === 'regex' || value.token.wildcard) return null;
+      return comparison(t, SQL_OPS[value.op] ?? '>', value.token.value);
     case 'range': {
-      const m = /^([[{])\s*(\S+)\s+TO\s+(\S+)\s*([\]}])$/.exec(value);
-      if (!m || t.type === 'string' || t.type === 'array') return null;
-      const [, open, rawLo = '*', rawHi = '*', close] = m;
-      // Bounds read as the server reads them, each compared on its own (a number and a date can share a range).
-      const lo = rangeBound(rawLo);
-      const hi = rangeBound(rawHi);
-      if (lo === null || hi === null) return null;
+      const { lower, upper } = value;
+      if (lower.kind === 'regex' || upper.kind === 'regex') return null;
+      // Each bound as the server compiles it: open for an unescaped star, otherwise compared on its own.
+      const openLower = lower.wildcard && lower.value === '*';
+      const openUpper = upper.wildcard && upper.value === '*';
+      if (openLower && openUpper) return attributePredicate(t, presence(t));
       const parts = [
-        lo.open ? '' : comparison(t, open === '[' ? '>=' : '>', lo.value),
-        hi.open ? '' : comparison(t, close === ']' ? '<=' : '<', hi.value),
+        openLower ? '' : comparison(t, value.open === '[' ? '>=' : '>', lower.value),
+        openUpper ? '' : comparison(t, value.close === ']' ? '<=' : '<', upper.value),
       ];
       if (parts.includes(null)) return null;
-      return parts.filter(Boolean).join(' AND ') || null;
-    }
-    case 'regex': {
-      if (!/^\/(?:[^/\\]|\\[\s\S])*\/$/.test(value)) return null;
-      const body = value.slice(1, -1).replaceAll('\\/', '/');
-      const re = sqlString(`^(?:${body})$`);
-      return t.type === 'array' ? `arrayExists(x -> match(x, ${re}), ${t.ref})` : attributePredicate(t, `match(${t.ref}, ${re})`);
+      return parts.filter(Boolean).join(' AND ');
     }
     case 'group': {
-      const members = groupMembers(value);
-      if (!members || members.some((m) => !QUOTED_VALUE.test(m) && (/^[-/]/.test(m) || !isBareValue(m)))) return null;
-      const values = members.map(readQueryValue);
-      if (values.some((v) => v.wildcard)) {
-        const each = values.map((v) => equals(t, v.value, v.wildcard));
-        return each.every(Boolean) ? attributePredicate(t, `(${each.join(' OR ')})`) : null;
-      }
-      if (t.type === 'array') return `hasAny(${t.ref}, [${values.map(({ value: member }) => sqlString(member)).join(', ')}])`;
-      if (t.type === 'number' || t.type === 'date') {
-        // The server ORs one comparison per member for these fields.
-        const each = values.map(({ value: member }) => comparison(t, '=', member));
-        return each.every(Boolean) ? `(${each.join(' OR ')})` : null;
-      }
-      return attributePredicate(t, `${t.ref} IN (${values.map(({ value: member }) => sqlString(member)).join(', ')})`);
+      const { members } = value;
+      const plain = members.every((m) => m.kind === 'value' && !m.wildcard);
+      if (plain && t.type === 'array') return `hasAny(${t.ref}, [${members.map((m) => sqlString(m.value)).join(', ')}])`;
+      if (plain && (t.type === 'string' || t.type === 'attr'))
+        return attributePredicate(t, `${t.ref} IN (${members.map((m) => sqlString(m.value)).join(', ')})`);
+      // Otherwise the server ORs one predicate per member.
+      const each = members.map((m) => memberSql(t, m));
+      return each.every(Boolean) ? attributePredicate(t, `(${each.join(' OR ')})`) : null;
     }
     default:
       return null;
   }
+}
+
+/**
+ * The server's parse of `q` as field atoms keyed by where each ends, or null when the server would refuse the query, it
+ * holds free text (never translated), or it exceeds the compiler's 64-term limit.
+ */
+function serverFieldAtoms(q: string): Map<number, FieldAtom> | null {
+  let expression: QueryExpression;
+  try {
+    expression = parseQueryExpression(q);
+  } catch (error) {
+    if (error instanceof QueryError) return null;
+    throw error;
+  }
+  const atoms = new Map<number, FieldAtom>();
+  let terms = 0;
+  let text = false;
+  const visit = (node: QueryAtom) => {
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else if (node.kind === 'text') text = true;
+    else {
+      atoms.set(node.end, node);
+      terms += node.value.kind === 'group' ? node.value.members.length : 1;
+    }
+  };
+  for (const branch of expression) for (const part of branch) visit(part.atom);
+  return text || terms > 64 ? null : atoms;
 }
 
 /**
@@ -218,6 +251,10 @@ function termToSql(token: QueryToken): string | null {
  */
 export function translateQueryToSql(q: string): string | null {
   if (!q.trim()) return '';
+  // The server's parse decides what each field term is; the console's tokens only carry the Boolean structure, and they
+  // must name exactly the same field terms over exactly the same text, or nothing is translated.
+  const atoms = serverFieldAtoms(q);
+  if (!atoms) return null;
   const out: string[] = [];
   let needsAnd = false;
   let pendingNot = false;
@@ -252,7 +289,10 @@ export function translateQueryToSql(q: string): string | null {
       continue;
     }
     if (tok.kind !== 'field') return null;
-    const sql = termToSql(tok);
+    const atom = atoms.get(tok.end);
+    if (!atom || (atom.value.kind === 'presence' ? tok.field !== '_exists_' : atom.field !== tok.field)) return null;
+    atoms.delete(tok.end);
+    const sql = termToSql(tok, atom);
     if (!sql) return null;
     if (needsAnd) out.push('AND');
     const negate = pendingNot !== tok.negated;
@@ -267,6 +307,6 @@ export function translateQueryToSql(q: string): string | null {
     pendingNot = false;
     needsAnd = true;
   }
-  if (!needsAnd || depth !== 0) return null;
+  if (!needsAnd || depth !== 0 || atoms.size > 0) return null;
   return out.map((part, i) => (i === 0 || part === ')' || out[i - 1]?.endsWith('(') ? part : ` ${part}`)).join('');
 }

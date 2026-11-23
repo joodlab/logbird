@@ -193,6 +193,9 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
           ['record:(page:12 OR site:12) occurredAt:<now-1d', []],
           ['record:(page:12 OR site:12) occurredAt:["2020-01-01" TO now-1d]', []],
           ['record:(page:12 OR site:12) occurredAt:["2020-01-01" TO now+1m]', ['paired', 'separate']],
+          // An absolute lower bound after the fixtures excludes them too (both bounds really constrain).
+          ['record:(page:12 OR site:12) occurredAt:["2099-01-01" TO *]', []],
+          ['attr.note:* outcome:[* TO *]', ['no-targets']],
           // A dash right after `)` belongs to the field name (`-action`), which no event has: not NOT action.
           ['(outcome:failure)-action:booked', []],
         ] as const) {
