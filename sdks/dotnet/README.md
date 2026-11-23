@@ -316,7 +316,8 @@ EventDetail? detail = await reader.GetAsync(eventId);   // null when it does not
 ```
 
 Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
-cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. The limit is per request, not per
+cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. For an export, the limit covers only
+the wait for its headers, not the download. The limit is per request, not per
 call: a first call that also reads the server's version, or a `SearchAllAsync` iteration, makes several requests, each
 with its own limit. Cancelling your token throws `OperationCanceledException`, and a call whose token is already
 cancelled sends nothing. A search, detail or facet answer is checked against the server's contract before it is read:

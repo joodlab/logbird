@@ -56,7 +56,8 @@ public sealed class LogbirdReadOptions
 /// may see the tenant or record before you search, on every request including next-page requests.
 /// </para>
 /// <para>
-/// Each HTTP request ends within <see cref="LogbirdReadOptions.Timeout"/> (<c>unreachable</c> past it), and every call
+/// Each HTTP request ends within <see cref="LogbirdReadOptions.Timeout"/> (<c>unreachable</c> past it; for an export, the
+/// limit covers only the wait for its headers, not the download), and every call
 /// ends when your token is cancelled (<see cref="OperationCanceledException"/>), except that an export also waits for
 /// a write to your destination stream that ignores the token; a call whose token is already cancelled sends nothing. A search, detail or facet answer is checked against the server's contract before it is read: a
 /// required member that is missing, or <c>null</c> where the contract allows none, throws <c>invalid_response</c> instead
