@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { trailQuery } from '../../../../../packages/sdk/src/read';
 import { quietHrefWarnings, renderPages } from '../../test/render-pages';
 import { SITE } from '../site';
 import { complianceEvidence } from './compliance-evidence';
+import { authorize as authorizeSample, customerAuditLogsContent } from './customer-audit-logs';
 
 /** The use-case pages, as they render: the rules the maintainer set for each, and a sound structure for the shared layout. */
 const plain = (html: string) =>
@@ -54,7 +56,7 @@ describe('use-case pages', () => {
       // The first screen says where the history is shown and who decides what each user reads.
       expect(hero).toContain('inside your product, through your own backend');
       // The limit is its own section, before the steps that read and render.
-      const limitAt = text.indexOf('A read key reads the whole project.');
+      const limitAt = text.indexOf('A project read key reads the whole project.');
       expect(limitAt).toBeGreaterThan(-1);
       expect(limitAt).toBeLessThan(text.indexOf('Authorize every read in one place.'));
       // Scoped read access appears, as the last section, exactly when SCOPED_READ_LIVE is on.
@@ -67,4 +69,53 @@ describe('use-case pages', () => {
       expect(html).toMatch(/<a aria-label="Open the image full size: Customer account"[^>]*href="\/media\/tenant-account-/);
     }
   }, 60_000);
+});
+
+/**
+ * Runs the page's Nuxt authorize() sample as written, with the SDK's real trailQuery and a stubbed getSession: a sample
+ * that forwarded a query without the tenant term for some session would be the worst example this page could show.
+ */
+describe('the customer page scoped section', () => {
+  it('is the last section when scoped read access is live, and absent before', () => {
+    const ids = (scopedReadLive: boolean) => customerAuditLogsContent({ ...SITE, scopedReadLive }).sections.map((section) => section.id);
+    expect(ids(true).at(-1)).toBe('scoped');
+    expect(ids(false)).not.toContain('scoped');
+  });
+});
+
+describe('the customer page authorize() sample', () => {
+  type Hooks = { authorize: (event: unknown, query: Record<string, unknown>) => Promise<false | { q?: string; cursor?: string }> };
+  const load = (session: unknown): Hooks => {
+    const body = authorizeSample
+      .replace(/^import .*$/gm, '')
+      .replace('export default {', 'return {')
+      .replace('} satisfies LogbirdHooks;', '};');
+    return new Function('trailQuery', 'getSession', body)(trailQuery, async () => session) as Hooks;
+  };
+  const browser = { q: 'tenant:"someone-else"', cursor: 'next-page' };
+
+  it('refuses a request without a session, without permission, or without a non-empty tenant id', async () => {
+    for (const session of [
+      null,
+      undefined,
+      {},
+      { canViewHistory: false, tenantId: 'biz_7' },
+      { canViewHistory: true },
+      { canViewHistory: true, tenantId: '' },
+      { canViewHistory: true, tenantId: '   ' },
+      { canViewHistory: true, tenantId: 7 },
+    ]) {
+      expect(await load(session).authorize({}, browser), JSON.stringify(session)).toBe(false);
+    }
+  });
+
+  it("forwards only the signed-in account's tenant term, quoted, with the cursor, ignoring the browser's filter", async () => {
+    const trusted = await load({ canViewHistory: true, tenantId: 'biz_7' }).authorize({}, browser);
+    expect(trusted).toMatchObject({ q: 'tenant:"biz_7"', cursor: 'next-page' });
+    const quoted = await load({ canViewHistory: true, tenantId: 'a" OR tenant:"b' }).authorize({}, {});
+    expect(quoted).not.toBe(false);
+    const q = (quoted as { q?: string }).q;
+    expect(q).toBe(trailQuery({ tenant: 'a" OR tenant:"b' }).q);
+    expect(q).not.toBe('tenant:"a" OR tenant:"b"');
+  });
 });

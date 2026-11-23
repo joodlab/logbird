@@ -14,7 +14,7 @@ const event = `{
   "targets": [{ "type": "booking", "id": "bk_1042" }]
 }`;
 
-const config = `// nuxt.config.ts. Set NUXT_LOGBIRD_READ_KEY on the server only.
+const config = `// nuxt.config.ts. Set NUXT_LOGBIRD_INGEST_KEY and NUXT_LOGBIRD_READ_KEY on the server.
 import { fileURLToPath } from 'node:url';
 
 export default defineNuxtConfig({
@@ -25,18 +25,21 @@ export default defineNuxtConfig({
   },
 });`;
 
-const authorize = `// server/logbird.ts: runs on your server for every history request and next page.
+/** Exported so use-cases.test.ts can run the sample's authorize() against the real trailQuery. */
+export const authorize = `// server/logbird.ts: runs on your server for every history request and next page.
 import type { LogbirdHooks } from '@logbird/nuxt';
 import { trailQuery } from '@logbird/sdk/read';
 
 export default {
   authorize: async (event, query) => {
     const session = await getSession(event); // your own authentication
-    if (!session?.canViewHistory) return false; // denied: nothing is forwarded
+    const tenantId = session?.canViewHistory ? session.tenantId : undefined;
+    // Denied, or no account to scope to: nothing is forwarded.
+    if (typeof tenantId !== 'string' || !tenantId.trim()) return false;
     // Built from the user's account; the browser's filter is ignored.
     // trailQuery quotes the id for the query language.
     return trailQuery({
-      tenant: session.tenantId,
+      tenant: tenantId,
       cursor: typeof query.cursor === 'string' ? query.cursor : undefined,
     });
   },
@@ -89,7 +92,7 @@ export function customerAuditLogsContent(site: SiteState): UseCase {
       {
         id: 'before',
         eyebrow: 'Before you build the view',
-        title: 'A read key reads the whole project.',
+        title: 'A project read key reads the whole project.',
         lead: 'A query filter is not authorization. Your backend must check which customer account, and which records, the signed-in user may see, on every request, including each next page.',
         points: [
           { title: 'Keys stay on your server', body: 'Never put an ingest or read key in a browser bundle or public configuration.' },
