@@ -166,21 +166,30 @@ function WorkspaceActivity() {
             Activity action catalogue
           </a>
         </p>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative w-full sm:max-w-xs">
-            <SearchIcon className="-translate-y-1/2 pointer-events-none absolute start-3 top-1/2 size-4 text-muted-foreground" />
-            <Input
-              aria-label="Search workspace activity"
-              className="ps-9"
-              onChange={(e) => {
-                setDraft(e.target.value);
-                committer.edit(e.target.value);
-              }}
-              placeholder="Search activity…"
-              ref={searchInput}
-              size="sm"
-              value={draft}
-            />
+        {/* Search and the count on one row, the area chips on a full-width row below: eight areas never fit beside the
+            search box, and wrapping them under it left a ragged second line (audit P12). */}
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative w-full sm:max-w-xs">
+              <SearchIcon className="-translate-y-1/2 pointer-events-none absolute start-3 top-1/2 size-4 text-muted-foreground" />
+              <Input
+                aria-label="Search workspace activity"
+                className="ps-9"
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  committer.edit(e.target.value);
+                }}
+                placeholder="Search activity…"
+                ref={searchInput}
+                size="sm"
+                value={draft}
+              />
+            </div>
+            <span className="text-muted-foreground text-xs sm:ms-auto">
+              {pages ? `${formatSearchTotal(activityTotal)} ${activityTotal.count === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}` : null}
+              {/* Below md the table has no column header: name the zone here (and switch it). */}
+              <TimeZoneInline className="md:hidden" />
+            </span>
           </div>
           <fieldset className="flex flex-wrap gap-1.5">
             <legend className="sr-only">Filter by area</legend>
@@ -200,11 +209,6 @@ function WorkspaceActivity() {
               </FilterChip>
             ))}
           </fieldset>
-          <span className="text-muted-foreground text-xs sm:ms-auto">
-            {pages ? `${formatSearchTotal(activityTotal)} ${activityTotal.count === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}` : null}
-            {/* Below md the table has no column header: name the zone here (and switch it). */}
-            <TimeZoneInline className="md:hidden" />
-          </span>
         </div>
       </div>
       <div className="flex min-h-[420px] flex-1 flex-col">

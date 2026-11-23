@@ -51,7 +51,7 @@ import {
   roundsLargeNumbers,
   unlinkedPartyLabel,
 } from '@/lib/events';
-import { formatTimeMs } from '@/lib/format';
+import { formatDuration, formatTimeMs } from '@/lib/format';
 import { andQuery, formatTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
@@ -392,6 +392,47 @@ function FilterButton({ term, onFilter }: { term: string; onFilter?: (term: stri
   );
 }
 
+/**
+ * The drawer's title, at most three lines: a producer description can run to paragraphs and push the event's facts
+ * below the fold. "Show all" expands it when it overflows. The clamp is visual only, so screen readers read it whole.
+ */
+function ClampedTitle({ text }: { text: string }) {
+  const ref = useRef<HTMLHeadingElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: measure again when the text changes
+  useEffect(() => {
+    setOpen(false);
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text]);
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <SheetTitle className={cn('font-semibold text-[17px] leading-snug tracking-tight', !open && 'line-clamp-3')} dir="auto" ref={ref}>
+        {text}
+      </SheetTitle>
+      {overflows || open ? (
+        <button
+          aria-expanded={open}
+          className="rounded-sm text-muted-foreground text-xs underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+          onClick={() => setOpen((v) => !v)}
+          type="button"
+        >
+          {open ? 'Show less' : 'Show all'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** How long after it happened an event was received, never negative (a clock ahead of ours reads 0). */
+const receivedAfterMs = (e: Pick<AuditEvent, 'receivedAt' | 'timestamp'>) => Math.max(0, Date.parse(e.receivedAt) - Date.parse(e.timestamp));
+
 function KV({
   label,
   value,
@@ -399,6 +440,7 @@ function KV({
   term,
   onFilter,
   copy = true,
+  title,
 }: {
   label: string;
   value: string;
@@ -406,6 +448,8 @@ function KV({
   term?: string;
   onFilter?: (t: string) => void;
   copy?: boolean;
+  /** The exact value behind a rounded one, on hover (non-copy values only). */
+  title?: string;
 }) {
   if (!value) return null;
   return (
@@ -418,7 +462,9 @@ function KV({
           {copy ? (
             <CopyValue className={mono ? undefined : 'font-sans text-[13px]'} value={value} />
           ) : (
-            <span className={cn(mono ? 'break-all font-mono text-[12px]' : '[overflow-wrap:anywhere]')}>{value}</span>
+            <span className={cn(mono ? 'break-all font-mono text-[12px]' : '[overflow-wrap:anywhere]')} title={title}>
+              {value}
+            </span>
           )}
         </span>
         <span className="flex items-center">{term ? <FilterButton onFilter={onFilter} term={term} /> : null}</span>
@@ -569,9 +615,7 @@ function EventDetailBody({
           <TypePill>{e.environment}</TypePill>
           {e.source ? <TypePill tone="brand">via {e.source}</TypePill> : null}
         </div>
-        <SheetTitle className="font-semibold text-[17px] leading-snug tracking-tight" dir="auto">
-          {eventSentence(e)}
-        </SheetTitle>
+        <ClampedTitle text={eventSentence(e)} />
         <SheetDescription className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
           <ActionName action={e.action} className="text-[12.5px]" />
           <span className="text-muted-foreground">
@@ -833,11 +877,13 @@ function EventDetailBody({
             <KV label="Trace" onFilter={onFilter} term={formatTerm('trace', ctx.traceId)} value={ctx.traceId} />
             <KV label="IP" value={ctx.ip} />
             <KV label="User agent" mono={false} value={ctx.userAgent} />
+            {/* "1 m after", not "60136 ms after": the delay reads at a glance; the exact milliseconds are on hover. */}
             <KV
               copy={false}
               label="Received"
               mono={false}
-              value={`${formatTimeMs(e.receivedAt)} (${Math.max(0, Date.parse(e.receivedAt) - Date.parse(e.timestamp))} ms after it happened)`}
+              title={`${receivedAfterMs(e)} ms after it happened`}
+              value={`${formatTimeMs(e.receivedAt)} (${formatDuration(receivedAfterMs(e))} after it happened)`}
             />
             <KV copy={false} label="Conformance" mono={false} value={`${e.conformance}% of the recommended envelope`} />
             <KV copy={false} label="SDK" value={[e.sdk, e.schemaVersion ? `schema v${e.schemaVersion}` : ''].filter(Boolean).join(' · ')} />

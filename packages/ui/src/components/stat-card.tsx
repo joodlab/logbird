@@ -26,13 +26,15 @@ export function DeltaBadge({
   delta,
   goodWhen = 'up',
   kind = 'relative',
+  className,
 }: {
   delta: number | null | undefined;
   goodWhen?: 'up' | 'down' | 'neutral';
   kind?: 'relative' | 'points';
+  className?: string;
 }) {
   if (delta === undefined) return null;
-  if (delta === null) return <span className="text-muted-foreground text-xs">new</span>;
+  if (delta === null) return <span className={cn('text-muted-foreground text-xs', className)}>new</span>;
   const flat = Math.abs(delta) < (kind === 'points' ? 0.0005 : 0.005);
   const up = delta > 0;
   const good = goodWhen === 'neutral' || flat ? null : (up && goodWhen === 'up') || (!up && goodWhen === 'down');
@@ -44,6 +46,7 @@ export function DeltaBadge({
         good === null && 'text-muted-foreground',
         good === true && 'bg-outcome-success/10 text-outcome-success-foreground',
         good === false && 'bg-outcome-failure/10 text-outcome-failure-foreground',
+        className,
       )}
       title={
         kind === 'points'
@@ -69,13 +72,22 @@ export function StatCard({ label, value, delta, goodWhen = 'up', deltaKind, hint
       onClick={onClick}
       type={onClick ? 'button' : undefined}
     >
-      {/* Fixed-height header so values line up whether or not a card has a delta badge. */}
+      {/* Fixed-height header so values line up whether or not a card has a delta badge. On a phone (two narrow cards
+          per row) the badge sits beside the value instead, so the label keeps the whole width ("Active actors", not
+          "Active acto…"). */}
       <div className="flex h-5 items-center justify-between gap-2">
         <span className="truncate text-muted-foreground text-xs">{label}</span>
-        {loading ? null : <DeltaBadge delta={delta} goodWhen={goodWhen} kind={deltaKind} />}
+        {loading ? null : <DeltaBadge className="max-sm:hidden" delta={delta} goodWhen={goodWhen} kind={deltaKind} />}
       </div>
       {/* h-8: the line height of text-2xl, so the card keeps its height when the value arrives. */}
-      {loading ? <Skeleton className="h-8 w-24" /> : <div className="font-semibold text-2xl tabular-nums tracking-tight">{value}</div>}
+      {loading ? (
+        <Skeleton className="h-8 w-24" />
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <div className="font-semibold text-2xl tabular-nums tracking-tight">{value}</div>
+          <DeltaBadge className="sm:hidden" delta={delta} goodWhen={goodWhen} kind={deltaKind} />
+        </div>
+      )}
       {hint ? <div className="text-muted-foreground text-xs">{hint}</div> : null}
       {footer}
     </Comp>
