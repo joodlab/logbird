@@ -7,9 +7,11 @@ It requires, reading each package's manifest as XML:
   file name, both with the same version (and the expected version, when given);
 - dependency groups for exactly the target frameworks Logbird.AspNetCore ships (its lib/<tfm>/ folders, matched by exact
   name), each with exactly one Logbird dependency, at exactly that version ([x.y.z]) and with exclude="Build,Analyzers";
-- in both packages, exactly one <icon> in the nuspec namespace, naming by its exact relative path (case included) a file
-  the package carries, whose bytes are those of the repository's logbird-icon.png; that file itself must be a complete,
-  valid 128x128 PNG (every chunk's CRC, IHDR first, IEND last, and image data that inflates to exactly 128 rows).
+- in both packages, exactly one <icon> element anywhere in the nuspec, a direct child of <metadata> in the nuspec
+  namespace, naming by its exact relative path (case included; no drive, root, empty, "." or ".." segment) a file the
+  package carries, whose bytes are those of the repository's logbird-icon.png; that file itself must be a complete,
+  valid 128x128 PNG (every chunk's CRC, IHDR first, IEND last, image data that inflates to exactly 128 rows, each row
+  starting with a valid filter type 0 to 4).
 
 NuGet package ids are case-insensitive, so ids are compared case-insensitively everywhere.
 
@@ -82,19 +84,26 @@ def check_png(data, label):
     row = 1 + (width * CHANNELS[color] * depth + 7) // 8
     if len(pixels) != row * height:
         raise SystemExit(f"{label}: the image data holds {len(pixels)} bytes, not {height} rows of {row}")
+    # Filter method 0 defines filter types 0 to 4 at the start of every row; anything else cannot be decoded.
+    bad = [line for line in range(height) if pixels[line * row] > 4]
+    if bad:
+        raise SystemExit(f"{label}: row {bad[0]} has filter type {pixels[bad[0] * row]}, not 0 to 4")
 
 
 def check_icon(package, root, metadata):
     """Exactly one <icon> in the nuspec namespace names, exactly, a file whose bytes are the repository icon's."""
     namespace = root.tag[: root.tag.index("}") + 1] if root.tag.startswith("{") else ""
     icons = [child for child in metadata if child.tag == f"{namespace}icon"]
-    foreign = [child for child in metadata if local(child.tag) == "icon" and child.tag != f"{namespace}icon"]
-    if len(icons) != 1 or foreign:
-        raise SystemExit(f"{package.name}: expected exactly one <icon> in the nuspec namespace, found {len(icons)} (and {len(foreign)} elsewhere)")
+    everywhere = [element for element in root.iter() if local(element.tag) == "icon"]
+    if len(icons) != 1 or len(everywhere) != 1:
+        raise SystemExit(
+            f"{package.name}: expected exactly one <icon> element in the nuspec, a child of <metadata> in its namespace; "
+            f"found {len(icons)} there and {len(everywhere)} in all")
     # NuGet resolves the icon by its exact relative path; only the directory separator may differ (NU5046 for case).
     icon = (icons[0].text or "").strip().replace("\\", "/")
-    if not icon or icon.startswith("/"):
-        raise SystemExit(f"{package.name}: <icon> must name a relative path, not {icon!r}")
+    segments = icon.split("/")
+    if not icon or icon.startswith("/") or ":" in icon or any(part in ("", ".", "..") for part in segments):
+        raise SystemExit(f"{package.name}: <icon> must name a plain relative path inside the package, not {icon!r}")
     with zipfile.ZipFile(package) as archive:
         if icon not in archive.namelist():
             raise SystemExit(f"{package.name}: <icon> names {icon}, which the package does not carry under that exact name")
