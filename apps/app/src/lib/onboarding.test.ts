@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
-import { firstEventCopy } from './onboarding';
+import { firstEventCopy, firstEventToast } from './onboarding';
 
 const list = vi.fn();
 vi.mock('@/lib/api/client', () => ({ api: { projects: { list: () => list() } } }));
@@ -48,5 +48,23 @@ describe('firstEventCopy', () => {
     // Another Logbird-generated source is not called a console test.
     expect(firstEventCopy('logbird-import').cardTitle).toBe('Event from Logbird received — now send one from your backend');
     expect(firstEventCopy(null, false).cardTitle).toBe('First event received');
+  });
+
+  it('never asks for a backend event in the toast once the backend has sent one (#238)', () => {
+    const copy = firstEventCopy('logbird-test', true, true);
+    expect(copy.toastTitle).toBe('Console test received');
+    expect(copy.toastDescription).toBe('Your backend has sent events since: your integration works.');
+    expect(copy.cardTitle).toBe('Console test received — your backend has sent events since');
+    expect(Object.values(copy).join(' ')).not.toMatch(/send one from your backend/i);
+  });
+
+  it('builds the arrival toast from the setup state the card reads', () => {
+    const test = { source: 'logbird-test' } as never;
+    expect(firstEventToast({ firstEvent: test, lastEventAt: '2026-11-23T10:00:00.000Z' }).description).toBe(
+      'Your backend has sent events since: your integration works.',
+    );
+    expect(firstEventToast({ firstEvent: test, lastEventAt: null }).description).toBe(
+      'Logbird is receiving events. Send one from your backend to check your integration.',
+    );
   });
 });

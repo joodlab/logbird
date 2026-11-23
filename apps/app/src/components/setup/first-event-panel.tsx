@@ -11,8 +11,7 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowRightIcon, CheckIcon, DatabaseIcon, Loader2Icon, PanelRightOpenIcon, Rows3Icon, SendIcon, Trash2Icon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { useState } from 'react';
 import { ActionName } from '@/components/action-name';
 import { AdminOnly } from '@/components/admin-gate';
 import { EventSheet } from '@/components/explorer/event-sheet';
@@ -26,6 +25,7 @@ import { useCan } from '@/lib/permissions';
 import { formatTerm } from '@/lib/query-language';
 import { curlSnippet, dotnetSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 import { useSessionKey } from './api-key-step';
+import { useFirstArrival } from './use-first-arrival';
 import { useInvalidateSetup, useSampleData, useTestEvent } from './use-setup';
 
 /** How often the first-event step polls setup while nothing has arrived. */
@@ -70,20 +70,7 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
   const invalidate = useInvalidateSetup(projectId);
 
   // Celebrate only when the event arrives while this panel is watching.
-  const sawEmpty = useRef<boolean | null>(null);
-  const [celebrate, setCelebrate] = useState(false);
-  useEffect(() => {
-    if (!data) return;
-    if (sawEmpty.current === null) sawEmpty.current = !data.ingest.firstEventAt;
-    else if (sawEmpty.current && data.ingest.firstEventAt) {
-      sawEmpty.current = false;
-      setCelebrate(true);
-      invalidate();
-      // A console test proves the pipeline, not the integration: say so instead of "your integration works".
-      const copy = firstEventCopy(data.ingest.firstEvent?.source);
-      toast.success(copy.toastTitle, { description: copy.toastDescription });
-    }
-  }, [data, invalidate]);
+  const celebrate = useFirstArrival(data, invalidate);
 
   if (setup.isPending) return <Skeleton className="h-40 w-full" />;
   if (setup.isError && !data) return <ErrorState error={setup.error} onRetry={() => setup.refetch()} size="sm" />;
