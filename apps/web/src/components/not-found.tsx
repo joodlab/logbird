@@ -1,6 +1,7 @@
-// This file is the root route's first import. Its first imports must stay the shared ButtonLink and LogStack modules: if
-// a module of the entry chunk runs before them (the sorted order puts ../content first), rolldown folds their chunks into
-// the entry and every page's preload list changes.
+// The root route (__root.tsx) imports this file first among its relative imports, after four package imports. This
+// file's first imports must stay the shared ButtonLink and LogStack modules: if a module of the entry chunk runs before
+// them (the sorted order puts ../content first), rolldown folds their chunks into the entry and every page's preload list
+// changes.
 // biome-ignore assist/source/organizeImports: the words load after the shared components, keeping the chunk graph
 import { ButtonLink } from './marketing/button-link';
 import { LogStack } from './marketing/log-stack';
