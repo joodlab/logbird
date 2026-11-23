@@ -27,7 +27,11 @@ export function collectAssetUrls(html: string, pageUrl: string, allowedOrigins: 
   const add = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
-    const url = new URL(value, pageUrl);
+    const url = URL.parse(value, pageUrl);
+    if (!url) {
+      if (ASSET_LIKE.test(value)) problems.push({ path: pageUrl, problem: `an asset reference is not a URL (${value})` });
+      return;
+    }
     if (!ASSET.test(url.pathname)) {
       if (ASSET_LIKE.test(url.pathname)) problems.push({ path: url.href, problem: `resolves outside the site's asset directories (${value})` });
       return;
@@ -63,24 +67,53 @@ export function collectAssetUrls(html: string, pageUrl: string, allowedOrigins: 
 
 /**
  * The icon URLs a web app manifest names, as absolute URLs resolved against the manifest's URL; an icon on another host,
- * or a manifest that does not parse, is a problem.
+ * a manifest that does not parse or is not an object with an `icons` list, and an icon without a usable `src` are
+ * problems.
  */
 export function manifestIconUrls(manifest: string, manifestUrl: string, allowedOrigins: string[] = [manifestUrl]) {
   const origins = new Set(allowedOrigins.map((origin) => new URL(origin).origin));
   const urls: string[] = [];
   const problems: AssetProblem[] = [];
-  let parsed: { icons?: { src: string }[] };
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(manifest) as { icons?: { src: string }[] };
+    parsed = JSON.parse(manifest);
   } catch {
     return { urls, problems: [{ path: manifestUrl, problem: 'the web manifest does not parse' }] };
   }
-  for (const icon of parsed.icons ?? []) {
-    const url = new URL(icon.src, manifestUrl);
+  const icons = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as { icons?: unknown }).icons : undefined;
+  if (!Array.isArray(icons)) return { urls, problems: [{ path: manifestUrl, problem: 'the web manifest has no icons list' }] };
+  for (const icon of icons) {
+    const src = icon && typeof icon === 'object' ? (icon as { src?: unknown }).src : undefined;
+    const url = typeof src === 'string' ? URL.parse(src, manifestUrl) : null;
+    if (!url) {
+      problems.push({ path: manifestUrl, problem: `a manifest icon has no usable src (${JSON.stringify(src) ?? 'none'})` });
+      continue;
+    }
     if (!origins.has(url.origin)) problems.push({ path: url.href, problem: `manifest icon on ${url.origin}, not the site's origin` });
     urls.push(url.href);
   }
   return { urls, problems };
+}
+
+/**
+ * Reads a web manifest's icons for the comparison, the way compareAssets fetches files: no redirect followed (a
+ * redirect could serve a different manifest than the one compared), and any status other than 200, a failed fetch or an
+ * unreadable body is a problem, so its icons can never be skipped silently.
+ */
+export async function fetchManifestIcons(manifestUrl: string, allowedOrigins: string[], fetcher: typeof fetch = fetch) {
+  try {
+    const response = await fetcher(manifestUrl, { redirect: 'manual' });
+    if (response.status !== 200) {
+      const location = response.headers.get('location');
+      return {
+        urls: [],
+        problems: [{ path: manifestUrl, problem: `icons not read: answered ${response.status}${location ? ` to ${location}` : ''}` }],
+      };
+    }
+    return manifestIconUrls(await response.text(), manifestUrl, allowedOrigins);
+  } catch (error) {
+    return { urls: [], problems: [{ path: manifestUrl, problem: `icons not read: ${(error as Error).message}` }] };
+  }
 }
 
 /** The content type each kind of file must be served with; a fallback HTML page under an image URL fails. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectAssetUrls, compareAssets, manifestIconUrls } from './live-assets';
+import { collectAssetUrls, compareAssets, fetchManifestIcons, manifestIconUrls } from './live-assets';
 
 const base = 'http://127.0.0.1:4750';
 const publicOrigin = 'https://site.example.test';
@@ -74,6 +74,58 @@ describe('live asset check', () => {
       urls: [],
       problems: [{ path: `${base}/site.webmanifest`, problem: 'the web manifest does not parse' }],
     });
+  });
+
+  it('reports a manifest that is not an object with an icons list, and icons without a usable src', () => {
+    const at = `${base}/site.webmanifest`;
+    for (const manifest of ['null', '[]', '"x"', '{}', '{"icons":null}']) {
+      expect(manifestIconUrls(manifest, at, [base])).toEqual({ urls: [], problems: [{ path: at, problem: 'the web manifest has no icons list' }] });
+    }
+    expect(manifestIconUrls('{"icons":[null,{"src":7},{"src":"http://["},{"src":"/brand/a.png?v=aaaaaaaaaa"}]}', at, [base])).toEqual({
+      urls: [`${base}/brand/a.png?v=aaaaaaaaaa`],
+      problems: [
+        { path: at, problem: 'a manifest icon has no usable src (none)' },
+        { path: at, problem: 'a manifest icon has no usable src (7)' },
+        { path: at, problem: 'a manifest icon has no usable src ("http://[")' },
+      ],
+    });
+  });
+
+  it('reads manifest icons without following redirects, and reports a redirect, a failed fetch and an unreadable body', async () => {
+    const at = `${base}/site.webmanifest?v=bbbbbbbbbb`;
+    const manifest = '{"icons":[{"src":"/brand/logbird-favicon.svg"}]}';
+    const answer = (respond: () => Response | Promise<Response>) =>
+      (async (_input: URL | RequestInfo, init?: RequestInit) => {
+        expect(init?.redirect).toBe('manual');
+        return respond();
+      }) as typeof fetch;
+    expect(
+      await fetchManifestIcons(
+        at,
+        [base],
+        answer(() => new Response(manifest)),
+      ),
+    ).toEqual({
+      urls: [`${base}/brand/logbird-favicon.svg`],
+      problems: [],
+    });
+    const redirect = answer(() => new Response(null, { status: 302, headers: { location: '/empty.webmanifest' } }));
+    expect((await fetchManifestIcons(at, [base], redirect)).problems).toEqual([
+      { path: at, problem: 'icons not read: answered 302 to /empty.webmanifest' },
+    ]);
+    const refused = answer(() => Promise.reject(new Error('connect ECONNREFUSED')));
+    expect((await fetchManifestIcons(at, [base], refused)).problems).toEqual([{ path: at, problem: 'icons not read: connect ECONNREFUSED' }]);
+    const broken = answer(() => {
+      const body = new ReadableStream({ pull: (controller) => controller.error(new Error('body reset')) });
+      return new Response(body);
+    });
+    expect((await fetchManifestIcons(at, [base], broken)).problems).toEqual([{ path: at, problem: 'icons not read: body reset' }]);
+  });
+
+  it('reports an asset reference that is not a URL', () => {
+    expect(collectAssetUrls('<img src="http://[/media/a.webp">', base, [base]).problems).toEqual([
+      { path: base, problem: 'an asset reference is not a URL (http://[/media/a.webp)' },
+    ]);
   });
 
   it('reports an asset URL on another host', () => {
