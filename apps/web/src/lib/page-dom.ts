@@ -1,6 +1,6 @@
 /**
  * A small, dependency-free reader for the HTML React renders on the server (well-formed: every element closed, void
- * elements known), for tests that compare page text with the copy files (copy-sync.test.ts). It builds an element
+ * elements known), for the live asset check (live-assets.ts, check:live). It builds an element
  * tree and gives each element's visible text, with a space wherever a block element starts or ends.
  */
 export interface PageElement {

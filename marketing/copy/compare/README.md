@@ -4,6 +4,8 @@ description: Fair, sourced comparisons of Logbird with Retraced, WorkOS Audit Lo
 path: /compare
 ---
 
+Page text renders from `apps/web/src/content/compare.ts` (the cards from `apps/web/src/content/comparisons.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Compare
 
 ## intro

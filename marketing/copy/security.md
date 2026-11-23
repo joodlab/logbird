@@ -4,6 +4,8 @@ description: How Logbird isolates projects, stores keys, guards SQL, deletes exp
 path: /security
 ---
 
+Page text renders from `apps/web/src/content/security.ts` (the scoped-read limits from `apps/web/src/content/scoped-read-limits.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Security and data handling
 
 ## intro

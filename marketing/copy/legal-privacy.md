@@ -4,12 +4,16 @@ description: What the Logbird website and Logbird Cloud collect, why, who proces
 path: /legal/privacy
 ---
 
+Page text renders from `apps/web/src/content/legal-privacy.ts` (the frame both legal pages share from `apps/web/src/content/legal.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Privacy policy
 
-The page text lives in `apps/web/src/routes/legal.privacy.tsx`, which renders real text whether or not the operator
-facts below are set. **Every statement must stay true to the code.** This file records where each one comes from;
-re-check the source before you change a sentence, and update the effective date (`EFFECTIVE_DATE` in
-`apps/web/src/lib/legal-facts.tsx`) with every substantive edit.
+The page text lives in `apps/web/src/content/legal-privacy.ts`, with the frame and the stand-in wording for unset
+operator facts in `apps/web/src/content/legal.ts`; the facts themselves are constants and settings in
+`apps/web/src/lib/legal-facts.tsx`. The page renders real text whether or not the operator facts below are set. The
+text is owner-approved: change no word without the owner. **Every statement must stay true to the code.** This file
+records where each one comes from; re-check the source before you change a sentence, and update the effective date
+(`EFFECTIVE_DATE` in `apps/web/src/lib/legal-facts.tsx`) with every substantive edit.
 
 ## Owner facts (settings, not copy)
 

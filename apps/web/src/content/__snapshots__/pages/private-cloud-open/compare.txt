@@ -1,0 +1,75 @@
+title: Compare · Logbird
+description: Fair, sourced comparisons of Logbird with Retraced, WorkOS Audit Logs, Pangea Secure Audit Log and Bemi, including when to choose them.
+
+headings:
+h1 How Logbird compares.
+h2 Each tool answers a different question.
+h3 Retraced
+h3 WorkOS Audit Logs
+h3 Pangea Secure Audit Log
+h3 Bemi
+h2 Our rules for these pages.
+h2 Start with one event.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Compare
+How Logbird compares.
+There's more than one good way to keep an audit trail. These pages compare Logbird with other tools, using only facts we could check in their official docs, pricing pages and repositories. Each page says where the other tool is the better fit. We checked every fact about the other tools on 7 November 2026 and list every source. If something has changed, tell us and we'll fix it.
+Which tool fits
+Each tool answers a different question.
+Retraced
+An open-source (Apache-2.0) audit log service with an embeddable React viewer. Self-hosted.
+Fits when: You want to embed an audit log viewer in your own React app, in a self-hosted Apache-2.0 service.
+Logbird and Retraced compared
+WorkOS Audit Logs
+A hosted audit log API with an Admin Portal viewer for your customers' IT admins, and streaming to SIEM tools.
+Fits when: Your enterprise customers' IT admins need a ready-made portal and SIEM streams today, and you'd rather not run any infrastructure.
+Logbird and WorkOS Audit Logs compared
+Pangea Secure Audit Log
+A hosted, tamperproof audit log with cryptographic proofs. Part of CrowdStrike since September 2025.
+Fits when: You need cryptographic proof that audit events haven't been changed.
+Logbird and Pangea Secure Audit Log compared
+Bemi
+Different category
+A different category: automatic change capture for Postgres. Records every row change without instrumenting your code.
+Fits when: You want every Postgres row change captured automatically, without instrumenting your code.
+Logbird and Bemi compared
+Logbird
+Fits when: your events must stay on your own servers, you want to send any event shape, and your team needs an operator console to answer "what happened?".
+How we compare
+Our rules for these pages.
+Official sources only: product docs, pricing pages, licence files and repositories.
+Each claim about another tool lists its sources, with the date we checked them. Logbird cells describe the current release.
+Anything we couldn't verify is left out of the tables and listed as unverified.
+No logos. Product names are used only to identify the products, as their owners write them.
+We say where Logbird has gaps, too.
+All product names are trademarks of their respective owners. Logbird isn't affiliated with or endorsed by any of them.
+Start with one event.
+The source opens soon. Request access to Logbird Cloud, where sign-ups are limited to invited teams for now, and we'll tell you when you can self-host.
+Request access
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+Logbird and Retraced compared → /compare/retraced
+Logbird and WorkOS Audit Logs compared → /compare/workos-audit-logs
+Logbird and Pangea Secure Audit Log compared → /compare/pangea
+Logbird and Bemi compared → /compare/bemi
+Request access → /contact
+Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

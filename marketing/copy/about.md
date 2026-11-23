@@ -4,6 +4,8 @@ description: Logbird is an open-source audit log for teams who owe their custome
 path: /about
 ---
 
+Page text renders from `apps/web/src/content/about.ts`; edit it there. This file is the brief: jobs, sources and owner notes.
+
 # About
 
 ## intro
