@@ -2,7 +2,7 @@ import { siteDecision } from '../../app/server/site-paths';
 import { siteConfigFrom } from '../src/env';
 import { inlineScripts, scriptHash, scriptSources } from '../src/lib/csp';
 import { OBFUSCATED_EMAIL } from '../src/lib/email-off';
-import { collectAssetUrls, compareAssets, manifestIconUrls } from '../src/lib/live-assets';
+import { bodyText, collectAssetUrls, compareAssets, manifestIconUrls } from '../src/lib/live-assets';
 import { securityHeaders } from '../src/lib/security-headers';
 import { prerenderPaths } from '../src/lib/site-map';
 import { loadPublicEnv } from './public-env';
@@ -180,16 +180,23 @@ for (const path of consoleOwned) {
   }
   rows.push({ path: `console ${path}`, status: response.status, inline: '-', uncovered: '-', url: response.headers.get('content-type') ?? '-' });
 }
-// The manifest's own icons are fixed-name files too.
-for (const manifest of [...assetUrls].filter((url) => new URL(url).pathname === '/site.webmanifest')) {
-  // A failed manifest fetch is reported by compareAssets below; its icons can only be read when it answers.
-  const response = await fetch(manifest).catch(() => undefined);
-  if (!response?.ok) continue;
-  const icons = manifestIconUrls(await response.text(), response.url, [base, publicOrigin]);
-  for (const icon of icons.urls) assetUrls.add(icon);
-  for (const { path, problem } of icons.problems) problems.push(`${manifest}: ${path}: ${problem}`);
+// The manifest's own icons are fixed-name files too. They are read from the very bodies compared (as written and
+// uncached), never from a separate request that could answer differently; a manifest with no 200 body has already
+// failed the comparison.
+const manifests = [...assetUrls].filter((url) => new URL(url).pathname === '/site.webmanifest');
+const manifestBodies = new Map<string, Buffer[]>();
+const assetProblems = await compareAssets(manifests, fetch, manifestBodies);
+const manifestProblems = new Set<string>();
+for (const manifest of manifests) {
+  for (const body of manifestBodies.get(manifest) ?? []) {
+    const icons = manifestIconUrls(bodyText(body), manifest, [base, publicOrigin]);
+    for (const icon of icons.urls) assetUrls.add(icon);
+    for (const { path, problem } of icons.problems) manifestProblems.add(`${path}: ${problem}`);
+  }
 }
-const assetProblems = await compareAssets(assetUrls);
+// Appended one by one: spreading a long list into push() could exceed the argument limit and lose the report.
+for (const problem of manifestProblems) problems.push(problem);
+for (const problem of await compareAssets([...assetUrls].filter((url) => !manifests.includes(url)))) assetProblems.push(problem);
 for (const { path, problem } of assetProblems) problems.push(`${path}: ${problem}`);
 rows.push({
   path: `assets ${assetUrls.size} URLs`,
