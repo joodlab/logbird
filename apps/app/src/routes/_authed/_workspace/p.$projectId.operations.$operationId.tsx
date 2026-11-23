@@ -11,13 +11,13 @@ import { GitBranchIcon, Rows3Icon, SearchXIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { z } from 'zod';
 import { ActionName } from '@/components/action-name';
-import { EntityLink } from '@/components/entity-link';
 import { EventSheet } from '@/components/explorer/event-sheet';
+import { OperationParties } from '@/components/operation-parties';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { operationQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
-import { eventSentence } from '@/lib/events';
+import { distinctParties, eventSentence } from '@/lib/events';
 import { formatDuration, formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { formatTerm } from '@/lib/query-language';
@@ -105,8 +105,7 @@ function OperationPage() {
   const spanRange = times.length ? absoluteRange(t0, t1 + 1) : undefined;
   const titleEvent = nodes[0]?.event ?? unplaced[0];
   const failures = events.filter((e) => e.outcome === 'failure' || e.outcome === 'denied').length;
-  const executors = [...new Map(events.filter((e) => e.executor?.id).map((e) => [e.executor?.id, e.executor])).values()];
-  const actors = [...new Map(events.filter((e) => e.actor).map((e) => [e.actor?.id, e.actor])).values()];
+  const executors = distinctParties(events.map((e) => e.executor));
   const selectedId = search.ev;
   // The drawer steps through the tree, then any events the tree could not place.
   const ordered = [...nodes.map((n) => n.event), ...unplaced];
@@ -215,22 +214,8 @@ function OperationPage() {
         ))}
       </dl>
 
-      {actors.length > 0 || executors.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground text-xs">Caused by</span>
-            {actors
-              .slice(0, 4)
-              .map((a) => (a ? <EntityLink id={a.id} key={a.id} kind="actor" name={a.name} projectId={projectId} type={a.type} /> : null))}
-          </span>
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground text-xs">Performed by</span>
-            {executors.map((x) =>
-              x ? <EntityLink id={x.id} key={x.id} kind="executor" meta={x.type} name={x.name} projectId={projectId} type={x.type} /> : null,
-            )}
-          </span>
-        </div>
-      ) : null}
+      {/* Both parties, always once the events are in: one the events did not name says so, as in the event drawer. */}
+      {events.length > 0 ? <OperationParties events={events} projectId={projectId} /> : null}
 
       <section aria-label="Causation tree" className="overflow-hidden rounded-xl border bg-card shadow-xs">
         <div className="grid grid-cols-[minmax(0,1fr)] border-b bg-muted/30 text-[11px] text-muted-foreground uppercase tracking-wider md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">

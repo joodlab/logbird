@@ -90,6 +90,12 @@ describe('OPS-22 events that say nothing', () => {
     expect(parentActor([actor('Root'), { actor: null }, actor('Scheduler')])?.name).toBe('Scheduler');
     expect(parentActor([actor('Root'), { actor: null }])?.name).toBe('Root');
     expect(parentActor([])).toBeNull();
+    // The direct parent recorded only an email: it is the nearest actor, not the named grandparent.
+    const emailOnly = { actor: { type: '', id: '', name: '', email: 'lina@example.test' } } as Pick<AuditEvent, 'actor'>;
+    expect(parentActor([actor('Omar'), emailOnly])?.email).toBe('lina@example.test');
+    // A type alone names nobody: skip it.
+    const typeOnly = { actor: { type: 'user', id: '', name: '', email: '' } } as Pick<AuditEvent, 'actor'>;
+    expect(parentActor([actor('Omar'), typeOnly])?.name).toBe('Omar');
   });
 });
 

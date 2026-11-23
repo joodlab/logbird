@@ -154,7 +154,13 @@ export function maskEvent(event: AuditEvent, mask: ReadScope['mask']): AuditEven
   const masked: AuditEvent = { ...event, context: { ...event.context }, attributes: { ...event.attributes } };
   if (mask.includes('ip')) masked.context.ip = '';
   if (mask.includes('user_agent')) masked.context.userAgent = '';
-  if (mask.includes('actor_email') && masked.actor) masked.actor = { ...masked.actor, email: maskedEmail(event.projectId, masked.actor.email) };
+  if (mask.includes('actor_email') && masked.actor) {
+    const { email, name } = masked.actor;
+    const hidden = maskedEmail(event.projectId, email);
+    // A producer that used the address as the display name too: the name would show what the mask hides. Same value.
+    const nameIsEmail = Boolean(email) && name.trim().toLowerCase() === email.trim().toLowerCase();
+    masked.actor = { ...masked.actor, email: hidden, name: nameIsEmail ? hidden : name };
+  }
   for (const preset of mask) for (const key of ch.MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];
   return masked;
 }

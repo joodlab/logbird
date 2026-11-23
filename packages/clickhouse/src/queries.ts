@@ -176,10 +176,14 @@ export function toEvent(r: EventRow & { category?: string }): AuditEvent {
     outcome: r.outcome,
     severity: r.severity,
     description: r.description,
-    actor: r.actor_id || r.actor_type ? { id: r.actor_id, type: r.actor_type, name: r.actor_name, email: r.actor_email } : null,
+    // A party recorded by any field is recorded: a name or an email alone still says who it was.
+    actor:
+      r.actor_id || r.actor_type || r.actor_name || r.actor_email
+        ? { id: r.actor_id, type: r.actor_type, name: r.actor_name, email: r.actor_email }
+        : null,
     impersonator: r.impersonator_id ? { id: r.impersonator_id, name: r.impersonator_name } : null,
     executor:
-      r.executor_id || r.executor_type
+      r.executor_id || r.executor_type || r.executor_name
         ? { id: r.executor_id, type: r.executor_type, name: r.executor_name, jobId: r.job_id, attempt: r.job_attempt }
         : null,
     tenant: r.tenant_id ? { id: r.tenant_id, name: r.tenant_name } : null,
