@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 
 namespace Logbird.Tests;
 
@@ -17,6 +18,21 @@ public class ApiDecisionTests
 
         var empty = default(LogbirdStats);
         Assert.Equal(0, empty.Tracked + empty.Delivered + empty.Rejected + empty.Dropped + empty.Filtered + empty.FailedSends + empty.QueueLength + empty.Warnings);
+    }
+
+    [Fact]
+    public async Task The_documented_test_double_is_indistinguishable_from_a_real_snapshot_with_no_counts()
+    {
+        // A client that has counted nothing returns a snapshot equal to default(LogbirdStats), with the same text.
+        await using var client = new LogbirdClient(
+            new LogbirdOptions { Endpoint = new Uri("https://audit.example.invalid/"), IngestKey = "lb_ingest_fictional", FlushInterval = TimeSpan.FromHours(1) },
+            new System.Net.Http.HttpClient(new FakeServer()));
+        var real = client.Stats;
+        Assert.Equal(default(LogbirdStats), real);
+        Assert.True(default(LogbirdStats).Equals(real));
+        Assert.Equal(default(LogbirdStats).GetHashCode(), real.GetHashCode());
+        Assert.Equal(default(LogbirdStats).ToString(), real.ToString());
+        Assert.Equal(default(LogbirdStats), new LogbirdStats(0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     [Fact]
