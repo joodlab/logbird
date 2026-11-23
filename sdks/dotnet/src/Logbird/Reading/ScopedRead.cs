@@ -75,7 +75,9 @@ public sealed class ViewerScope
     /// <summary>Fields to hide. Any mask also hides the original payload (event detail returns no payload).</summary>
     public ViewerMask Mask { get; init; }
 
-    /// <summary>Lists no values (tenant and target ids), so logging this object cannot leak them.</summary>
+    /// <summary>
+    /// <c>ToString()</c> lists no values (tenant and target ids), so writing this object as text cannot leak them. A structured logger that serializes its properties still sees them.
+    /// </summary>
     public override string ToString() => nameof(ViewerScope);
 
     /// <summary>The most action prefixes a scope may name.</summary>

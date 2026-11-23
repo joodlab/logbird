@@ -68,7 +68,12 @@ public sealed class LogbirdOptions
     /// </summary>
     public int MaxQueueSize { get; set; } = 10_000;
 
-    /// <summary>Which event to drop when the queue is full. Defaults to <see cref="Logbird.QueueFullBehavior.DropOldest"/>.</summary>
+    /// <summary>
+    /// Which event to drop when the queue is full. Defaults to <see cref="Logbird.QueueFullBehavior.DropOldest"/>, which
+    /// keeps the most recent activity (the events closest to the end of an outage) at the cost of the oldest queued ones;
+    /// <see cref="Logbird.QueueFullBehavior.DropNewest"/> keeps what is already queued and drops each new event while the
+    /// queue stays full. Either way the dropped event is counted and passed to <see cref="OnDrop"/> with its JSON.
+    /// </summary>
     public QueueFullBehavior QueueFullBehavior { get; set; } = QueueFullBehavior.DropOldest;
 
     /// <summary>

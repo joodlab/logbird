@@ -16,8 +16,9 @@ in [Logbird](https://github.com/joodlab/logbird). The client is built to sit ins
 - **Retries never duplicate.** Each event gets a stable id (UUIDv7) when you track it. A retry resends identical
   bytes, and Logbird stores one event per id.
 
-Targets .NET 8 and later (trimming and Native AOT compatible) and .NET Standard 2.0, so .NET Framework 4.6.2+
-applications can use it too. Dependencies: `System.Text.Json` and `Microsoft.Extensions.Logging.Abstractions`. A .NET
+Targets .NET 8 and later (trimming and Native AOT compatible) and .NET Standard 2.0, so .NET Framework applications
+can use it too: the .NET Standard build is tested on .NET Framework 4.8. Dependencies: `System.Text.Json` and
+`Microsoft.Extensions.Logging.Abstractions`. A .NET
 Framework project also needs a reference to `System.Net.Http` (`<Reference Include="System.Net.Http" />`).
 
 New to Logbird? [Logbird for .NET](https://github.com/joodlab/logbird/blob/master/docs/sdk-dotnet.md) walks through a
@@ -140,12 +141,17 @@ var options = new LogbirdOptions
 {
     // ...
     MaxQueueSize = 10_000,                        // events kept in memory while Logbird is unreachable
-    QueueFullBehavior = QueueFullBehavior.DropOldest,
+    QueueFullBehavior = QueueFullBehavior.DropOldest, // when full: drop the oldest queued event (DropNewest keeps the
+                                                      // queued history and drops the incoming event instead)
     OnError = error => logger.LogWarning("Audit delivery problem: {Message}", error.Message),
     OnDrop = dropped => outbox.Save(dropped.Id, dropped.JsonText),   // optional: keep it for replay
 };
 ```
 
+- **When the queue is full**, `QueueFullBehavior` decides which event goes: `DropOldest` (the default) keeps the most
+  recent activity, the events closest to an outage's end, at the cost of the oldest queued ones; `DropNewest` keeps
+  what is already queued and drops each new event while the queue stays full. Either way the dropped event is
+  counted and passed to `OnDrop` with its JSON, so you can replay it from your own record.
 - Network errors, 429 and 5xx are retried with exponential backoff and `Retry-After`, up to `MaxRetries` (5) and
   five minutes per batch. Each request is limited by `RequestTimeout` (30 seconds), even if a custom HTTP handler
   ignores cancellation. If a batch still fails, it goes back to the front of the queue and is tried again later.
@@ -194,10 +200,14 @@ var options = new LogbirdOptions
 audit log. A request can reach the server and store the event while its answer is lost on the way back. Each
 `DroppedEvent` says which case it is in `MayBeStored`:
 
-- **`true`**: the event was put on the wire at least once and no answer settled it. The server may have stored it.
-- **`false`**: the event was never sent, or every answer the server gave for it said it was not stored.
+- **`true`**: delivery was attempted and storage cannot be ruled out. It is set when a request carrying the event is
+  started, before anything is known about what reached the server, so it is conservative (it can be true for a request
+  that failed before any byte left the process), and it stays true unless an answer settled the event. The server may
+  have stored it.
+- **`false`**: no request carrying the event was ever started, or every answer the server gave for it said it was not
+  stored.
 
-`MayBeStored` follows what happened on the wire, not the reason. These are the values each reason can have:
+`MayBeStored` follows what happened to the event's requests, not the reason. These are the values each reason can have:
 
 An answer "says it was not stored" when it is a 4xx, 429 included. No answer (a network error or a timeout), a 5xx, a
 redirect, or a success that does not acknowledge the event leaves the outcome **unresolved**. Once a request carrying an
@@ -228,7 +238,10 @@ not confirmed until it is acknowledged.
   `OnDrop` notification was skipped because the notification queue was full.
 - When `MayBeStored` is `true`, resend the same bytes later. A lookup that misses right after the drop proves nothing,
   because a write the server already accepted can still become visible later. Resend rather than treat the event as
-  lost.
+  lost. Decide by `MayBeStored` for every reason, not by the reason: a `QueueFull` event that was sent before it was
+  evicted can be `true` too.
+- Do not resend a record older than the project's retention period: once retention has deleted an event, a resend
+  stores it again.
 - When it is `false`, the event is not stored. For `Rejected`, act on `Code`: fix the event, or for
   `duplicate_id_conflict` send a correction with a new id. For `TooLarge` and `Invalid`, fix the event. For
   `QueueFull`, `Shutdown` and `HttpError` (once the cause, such as the key, is fixed), resend it.
@@ -464,7 +477,7 @@ signatures in constant time. It passes the same test vectors as the TypeScript S
 | Runtime | Build used |
 | --- | --- |
 | .NET 8, 9, 10 and later | `net8.0` (trimming and Native AOT compatible) |
-| .NET Framework 4.6.2+ (tested on 4.8) | `netstandard2.0` |
+| .NET Framework 4.8 (tested) | `netstandard2.0` |
 
 The wire format follows the TypeScript SDK byte for byte for the same input: field names, the envelope's field order
 (an event built in TypeScript with its properties in a different order serializes them in that order, which the server
