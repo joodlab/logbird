@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./record-selector": "./src/record-selector.ts"
+    "./record-selector": "./src/record-selector.ts",
+    "./query-syntax": "./src/query-syntax.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -19,6 +19,11 @@
     },
     "test": {
       "dependsOn": ["setup", "^setup", "^build"],
+      "env": [
+        "LOGBIRD_TEST_SLOW_STORE",
+        "LOGBIRD_QUERY_CORPUS",
+        "LOGBIRD_QUERY_CORPUS_SHARD"
+      ],
       "outputs": ["coverage/**"]
     }
   }

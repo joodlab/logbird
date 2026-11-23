@@ -74,6 +74,20 @@ describe('rangeLabel', () => {
     expect(label).toContain('2016');
     expect(label).toContain('2026');
   });
+
+  it('never shows the same time at both ends of a short span (#197)', () => {
+    // A one-event operation opens a 1 ms window: milliseconds tell the ends apart.
+    const ms = rangeLabel('2026-11-23T10:15:30.000Z..2026-11-23T10:15:30.001Z');
+    expect(ms).toMatch(/\d{2}:\d{2}:\d{2}\.000 – \d{2}:\d{2}:\d{2}\.001/);
+    // Within one minute: seconds.
+    const s = rangeLabel('2026-11-23T10:15:05.000Z..2026-11-23T10:15:50.000Z');
+    expect(s).toMatch(/\d{2}:\d{2}:05 – \d{2}:\d{2}:50/);
+    expect(s).not.toMatch(/\./);
+    // A different day already tells the ends apart: minutes only, even at the same clock time.
+    expect(rangeLabel('2026-11-23T10:15:00.000Z..2026-11-24T10:15:00.000Z')).not.toMatch(/:\d{2}:\d{2}/);
+    // Minutes apart: unchanged, minutes only.
+    expect(rangeLabel('2026-11-23T10:15:00.000Z..2026-11-23T10:45:00.000Z')).not.toMatch(/:\d{2}:\d{2}/);
+  });
 });
 
 describe('admittedRange with stored rows older than the admission window', () => {

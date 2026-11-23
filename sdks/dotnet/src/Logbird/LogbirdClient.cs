@@ -104,10 +104,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private long _warnings;
     private long _notificationsLost;
     private long _callbackFailures;
-    private readonly long[] _droppedByReason = new long[DropReasonCount];
 
     [ThreadStatic]
-    private static List<string>? _whitespaceFields;
+    private static List<EntityIds.Warning>? _identifierWarnings;
+
+    /// <summary>The capacity of this thread's reusable warning list, or null when it has none (for tests).</summary>
+    internal static int? IdentifierWarningCapacity => _identifierWarnings?.Capacity;
 
     /// <summary>Creates a client.</summary>
     /// <param name="options">Settings. They are read once; later changes have no effect.</param>
@@ -137,7 +139,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _onError = options.OnError;
         _onDrop = options.OnDrop;
         _logger = logger ?? NullLogger.Instance;
-        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Interlocked.Add(ref _notificationsLost, lost), () => Interlocked.Increment(ref _callbackFailures));
+        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Count(ref _notificationsLost, ref LogbirdMetrics.NotificationsLostTotal, lost), () => Count(ref _callbackFailures, ref LogbirdMetrics.CallbackFailuresTotal));
         List<string>? identifierFields = null;
         try
         {
@@ -165,7 +167,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         var http = httpClient ?? (_ownedHttp = CreateHttpClient());
         _queue = new EventQueue(options.MaxQueueSize, options.QueueFullBehavior, OnEvicted);
         _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay,
-            delivered: () => Interlocked.Increment(ref _delivered),
+            delivered: () => Count(ref _delivered, ref LogbirdMetrics.DeliveredTotal),
             countDrop: CountDrop,
             settle: (item, count) => _queue!.Settle(item, count));
         _loop = Task.Run(RunAsync);
@@ -210,7 +212,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
         if (InsideLogbird.Value)
         {
-            Interlocked.Increment(ref _filtered);
+            Count(ref _filtered, ref LogbirdMetrics.FilteredTotal);
             return auditEvent?.Id;
         }
 
@@ -253,7 +255,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 var result = _beforeSend(copy);
                 if (result is null)
                 {
-                    Interlocked.Increment(ref _filtered);
+                    Count(ref _filtered, ref LogbirdMetrics.FilteredTotal);
                     return id ?? auditEvent?.Id;
                 }
 
@@ -276,16 +278,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 id = UuidV7.NewId();
             }
 
-            // Identifiers are sent exactly as given. One Logbird would not index as given is refused here by the SDK and the
-            // event is not sent; surrounding whitespace is sent as given and reported once the event is queued.
-            var whitespace = _whitespaceFields ??= [];
-            whitespace.Clear();
-            if (EntityIds.Validate(source, whitespace) is { } invalidEntity)
-            {
-                Drop(DropReason.InvalidEntityId, id, action, null, invalidEntity);
-                Report(new LogbirdDeliveryException("An audit event was dropped: " + invalidEntity));
-                return id ?? auditEvent?.Id;
-            }
+            // Identifiers are sent exactly as given and the server decides: the SDK never refuses an event for one. A property
+            // a server may index differently from what is sent is reported as a warning once the event is queued (on the
+            // notification thread, so the event may already be on its way).
+            var identifierWarnings = _identifierWarnings ??= [];
+            identifierWarnings.Clear();
+            EntityIds.Inspect(source, identifierWarnings);
 
             var node = EventJson.ToJsonObject(source, id, occurredAt, environment, defaultSource, fullEnvelope);
             _redactor?.RedactInPlace(node);
@@ -311,14 +309,15 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (added is not null)
             {
-                foreach (var field in whitespace)
+                if (identifierWarnings.Count > 0)
                 {
-                    // Field names and fixed text only: the message never carries event data.
-                    var reason = EntityIds.WhitespaceReason(field);
-                    Warn(eventId, eventAction, reason, "Logbird warning about an event it is sending: " + reason);
+                    // Field names, limits and fixed text only: the message never carries event data. One notification per
+                    // event, so an event with many fields cannot crowd other notifications out of the bounded queue; the
+                    // warnings wait in it as compact records and are formatted only when delivered.
+                    WarnAll(eventId, eventAction, identifierWarnings.ToArray());
                 }
 
-                Interlocked.Increment(ref _tracked);
+                Count(ref _tracked, ref LogbirdMetrics.TrackedTotal);
                 if (count == 1)
                 {
                     Interlocked.Exchange(ref _firstQueuedAtTicks, _clock.Elapsed.Ticks);
@@ -332,12 +331,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (overflow is not null)
             {
-                if (added is not null)
-                {
-                }
-
                 overflow.TrySettle();
-                Drop(DropReason.QueueFull, overflow.Id, overflow.Action, overflow.Json, "The queue is full.");
+                Drop(DropReason.QueueFull, overflow.Id, overflow.Action, overflow.Json, "The queue is full.", mayBeStored: overflow.MayBeStored);
                 LogQueueFull();
             }
         }
@@ -351,6 +346,13 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         finally
         {
+            // A rare event with many identifier warnings must not keep a large reusable list alive on this thread,
+            // however it ended (queued, dropped, refused or failed).
+            if (_identifierWarnings is { Capacity: > 256 })
+            {
+                _identifierWarnings = null;
+            }
+
             InsideLogbird.Value = false;
         }
 
@@ -383,7 +385,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
         if (InsideLogbird.Value)
         {
-            Interlocked.Increment(ref _filtered);
+            Count(ref _filtered, ref LogbirdMetrics.FilteredTotal);
             return;
         }
 
@@ -393,7 +395,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     /// <summary>
     /// For a host whose own shutdown budget ran out: stops accepting events at once and, on the thread pool, stops the
-    /// sender (no further attempt or retry starts) and then reports everything still unsent, once each, instead of
+    /// sender (no further attempt or retry starts) and then reports everything not yet delivered, once each, instead of
     /// waiting for <see cref="LogbirdOptions.ShutdownTimeout"/>. The caller does not wait for the report; the returned
     /// task completes when it is done. A late response is ignored.
     /// </summary>
@@ -507,7 +509,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     /// <summary>
     /// Stops accepting events and sends what is queued, waiting at most <see cref="LogbirdOptions.ShutdownTimeout"/>
-    /// (plus up to two seconds for a cancelled request to unwind). Events still unsent afterwards, including a batch
+    /// (plus up to two seconds for a cancelled request to unwind). Events not yet delivered afterwards, including a batch
     /// whose request has not returned, are reported once each through <see cref="LogbirdOptions.OnDrop"/>; a late
     /// response is then ignored. Never throws.
     /// </summary>
@@ -580,7 +582,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     }
 
     /// <summary>
-    /// Shutdown takes ownership of everything unsent, the in-flight batch included, and reports each event exactly
+    /// Shutdown takes ownership of everything not yet delivered, the in-flight batch included, and reports each event exactly
     /// once. A late response for an abandoned batch is ignored.
     /// </summary>
     private void AbandonRemaining()
@@ -601,12 +603,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             // In-flight events already left the queue-length gauge when they were dequeued.
             foreach (var item in inFlight)
             {
-                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
+                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before delivery was confirmed.", mayBeStored: item.MayBeStoredWhenAbandoned);
             }
 
             foreach (var item in queued)
             {
-                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
+                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before delivery was confirmed.", mayBeStored: item.MayBeStoredWhenAbandoned);
             }
 
             var abandoned = queued.Count + inFlight.Count;
@@ -622,7 +624,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             if (abandoned > 0)
             {
                 Notify(() => LogShutdownDropped(_logger, abandoned));
-                Report(new LogbirdDeliveryException($"{abandoned} audit event(s) were not sent before shutdown."), log: false);
+                Report(new LogbirdDeliveryException($"{abandoned} audit event(s) were not delivered before shutdown."), log: false);
             }
         }
         catch (Exception e)
@@ -796,7 +798,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (result.Failure is { } failure)
             {
-                Interlocked.Increment(ref _failedSends);
+                Count(ref _failedSends, ref LogbirdMetrics.FailedSendsTotal);
                 _consecutiveFailures++;
                 var backoff = TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, Math.Min(_consecutiveFailures - 1, 6))));
                 if (backoff < _flushInterval)
@@ -866,7 +868,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     /// <summary>Accounts an event evicted from a full queue. Runs under the queue lock: counters and a posted notification only.</summary>
     private void OnEvicted(QueuedEvent item)
     {
-        Drop(DropReason.QueueFull, item.Id, item.Action, item.Json, "The queue is full.");
+        Drop(DropReason.QueueFull, item.Id, item.Action, item.Json, "The queue is full.", mayBeStored: item.MayBeStored);
         LogQueueFull();
     }
 
@@ -874,8 +876,16 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         => value is null || value.Length <= max ? value : value.Substring(0, max);
 
     // The sender counted the drop when it settled the event (under the queue lock); this only notifies.
-    private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail)
-        => Drop(reason, item.Id, item.Action, item.Json, detail, counted: true);
+    // A rejection is the server's answer about this event's content, which an earlier request would have met too: it was
+    // not stored. Two codes say nothing about content: stored_event_unreadable (something with this id is stored and cannot
+    // be compared) and unverified_after_parse_failure (this request was not checked). For them an earlier lost answer
+    // keeps the outcome unknown.
+    private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail, string? code)
+        => Drop(reason, item.Id, item.Action, item.Json, detail, counted: true, code: code, mayBeStored: reason switch
+        {
+            DropReason.Rejected => code is "stored_event_unreadable" or "unverified_after_parse_failure" && item.AnswerLost,
+            _ => item.MayBeStored,
+        });
 
     // A server reason can quote the event's values; the message and log line keep only its leading field or code.
     private void OnSenderWarning(QueuedEvent item, string reason)
@@ -890,33 +900,50 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     private void Warn(string id, string action, string reason, string message)
     {
-        Interlocked.Increment(ref _warnings);
+        Count(ref _warnings, ref LogbirdMetrics.WarningsTotal);
         Report(new LogbirdEventWarning(id, action, reason, message));
+    }
+
+    /// <summary>
+    /// The SDK's identifier warnings about one event: counted each now, delivered in inspection order as a single
+    /// notification, and formatted only then.
+    /// </summary>
+    private void WarnAll(string id, string action, EntityIds.Warning[] warnings)
+    {
+        Count(ref _warnings, ref LogbirdMetrics.WarningsTotal, warnings.Length);
+        Notify(() =>
+        {
+            foreach (var warning in warnings)
+            {
+                var reason = EntityIds.Describe(warning);
+                ReportCore(new LogbirdEventWarning(id, action, reason, "Logbird warning about an event it is sending: " + reason), log: true);
+            }
+        });
+    }
+
+    /// <summary>Counts on this client's Stats and on the process-wide totals the meters read.</summary>
+    private static void Count(ref long own, ref long total, long amount = 1)
+    {
+        Interlocked.Add(ref own, amount);
+        Interlocked.Add(ref total, amount);
     }
 
     internal long NotificationsLost => Interlocked.Read(ref _notificationsLost);
 
     internal long CallbackFailures => Interlocked.Read(ref _callbackFailures);
 
-    internal void AddDroppedByReason(long[] totals)
-    {
-        for (var i = 0; i < totals.Length && i < _droppedByReason.Length; i++)
-        {
-            totals[i] += Interlocked.Read(ref _droppedByReason[i]);
-        }
-    }
 
     /// <summary>Counts a drop (counters only, so it can run under the queue lock).</summary>
     private void CountDrop(DropReason reason)
     {
-        if ((int)reason >= 0 && (int)reason < _droppedByReason.Length)
+        if ((int)reason >= 0 && (int)reason < LogbirdMetrics.DroppedTotals.Length)
         {
-            Interlocked.Increment(ref _droppedByReason[(int)reason]);
+            Interlocked.Increment(ref LogbirdMetrics.DroppedTotals[(int)reason]);
         }
 
         if (reason == DropReason.Rejected)
         {
-            Interlocked.Increment(ref _rejected);
+            Count(ref _rejected, ref LogbirdMetrics.RejectedTotal);
         }
         else
         {
@@ -924,7 +951,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
     }
 
-    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, bool counted = false)
+    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, bool counted = false, string? code = null, bool mayBeStored = false)
     {
         if (!counted)
         {
@@ -935,7 +962,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         {
             // Display fields are bounded (an oversized action or id must not be kept whole in the backlog); the JSON, when
             // kept, carries the event for replay.
-            var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024));
+            var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024), code, mayBeStored);
             Notify(() => onDrop(dropped));
         }
     }
@@ -956,7 +983,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             }
             catch
             {
-                Interlocked.Increment(ref _callbackFailures);
+                Count(ref _callbackFailures, ref LogbirdMetrics.CallbackFailuresTotal);
             }
         }
 
@@ -971,7 +998,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         catch
         {
-            Interlocked.Increment(ref _callbackFailures);
+            Count(ref _callbackFailures, ref LogbirdMetrics.CallbackFailuresTotal);
         }
     }
 
@@ -997,7 +1024,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     [LoggerMessage(EventId = 3, Level = LogLevel.Warning, Message = "Logbird queue is full; audit events are being dropped ({Dropped} dropped so far)")]
     private static partial void LogQueueFullWarning(ILogger logger, long dropped);
 
-    [LoggerMessage(EventId = 4, Level = LogLevel.Error, Message = "Logbird shut down with {Count} unsent audit event(s)")]
+    [LoggerMessage(EventId = 4, Level = LogLevel.Error, Message = "Logbird shut down with {Count} undelivered audit event(s)")]
     private static partial void LogShutdownDropped(ILogger logger, int count);
 
     /// <summary>A drop the SDK itself decided; its message is SDK-owned and safe to forward as it is.</summary>

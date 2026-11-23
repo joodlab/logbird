@@ -7,8 +7,10 @@ in [Logbird](https://github.com/joodlab/logbird). The client is built to sit ins
   batches; no network call happens on your thread.
 - **It never breaks your application.** Nothing Logbird does throws into your code. Problems go to a callback, your
   `ILogger` and the `Logbird` meter.
-- **It does not lose events silently.** Every event that will not be stored (queue full, rejected by the server,
-  unsent at shutdown) is counted, and passed to `OnDrop` together with its JSON so you can save it and send it again.
+- **It does not lose events silently.** Every event the SDK stops trying to deliver (queue full, rejected by the
+  server, undelivered at shutdown) is counted, and passed to `OnDrop` together with its JSON, so you can save it and send
+  it again. `DroppedEvent.MayBeStored` says whether the server may already have it
+  ([What a dropped event means](#what-a-dropped-event-means)).
   The callbacks run on a bounded background queue: if they fall more than `MaxQueueSize` notifications behind,
   further ones are skipped and counted, while the counters keep every event.
 - **Retries never duplicate.** Each event gets a stable id (UUIDv7) when you track it. A retry resends identical
@@ -91,15 +93,30 @@ one, and `AuditChange.Secret("password")` records that a secret changed without 
 ### Identifiers
 
 Actor, impersonator, executor and tenant ids and each target's type and id are **sent exactly as you give them**:
-never trimmed, truncated or converted, so `"user_42"` and `" user_42 "` reach Logbird as different strings. Logbird
-servers up to 0.2.x keep each as sent in the stored payload but index both as the same actor `user_42`, so a search for
-`" user_42 "` does not find the event ([#269](https://github.com/joodlab/logbird/issues/269)). They also index only the
-first 64 targets of an event. Before sending, the client checks every identifier:
+never trimmed, truncated, repaired or converted, so `"user_42"` and `" user_42 "` reach Logbird as different strings.
+**The SDK never refuses an event because of an identifier: the server decides.** Logbird servers up to 0.2.x store the
+payload exactly as sent and index a repaired copy: the id is trimmed, then each lone surrogate becomes U+FFFD, then it is
+cut ([#269](https://github.com/joodlab/logbird/issues/269)). The client warns when an identifier will be indexed
+differently:
 
-- One that Logbird would not index as given is refused by the SDK, and the event is not sent: it is dropped with
-  `DropReason.InvalidEntityId` (reason `invalid_entity_id`). That is an identifier longer than 256 UTF-16 code units (64
-  for a target type) or containing a lone surrogate, or more than 256 targets on one event.
-- Surrounding whitespace is sent as given and reported as a `LogbirdEventWarning` through `OnError` and the logger.
+| Sent | Logbird up to 0.2.x indexes |
+| --- | --- |
+| Surrounding whitespace, `" user_42 "` | trimmed, `user_42`: a search for `" user_42 "` does not find the event |
+| An id longer than 256 UTF-16 code units once trimmed (a target type longer than 64) | cut to at most 256 (64), never splitting a surrogate pair |
+| A lone surrogate | U+FFFD in place of each lone surrogate, before the cut |
+| More than 64 targets | the first 64; the others, and their identifiers, are in the stored payload only |
+
+- Each case is reported as a `LogbirdEventWarning` through `OnError` and the logger, and counted in
+  `Stats.Warnings`. The warning names the field and the limit, never the value.
+- One field gets at most one warning, naming every property it has.
+- The client inspects the event before queueing it, but the warnings are raised afterwards on the notification thread,
+  so the event may already be on its way when your callback runs. The client's identifier warnings about one event are
+  one notification: when the notification queue accepts it, they are delivered together, in field order; when the
+  queue is full, it is skipped and counted on `logbird.notifications.lost` like any other notification. A server
+  warning about the same event arrives separately, after the server answered.
+- A server that applies the exact-identifier rule may reject such an event instead (code `invalid_entity_id`). That
+  rejection is the drop: `DropReason.Rejected`, with the server's code in `DroppedEvent.Code` and its reason in
+  `DroppedEvent.Detail`, like any other per-event rejection.
 - An empty string is not checked and is sent as `""`; Logbird treats an empty id as no id when it indexes the event.
 
 Identifiers are strings in this SDK. For a numeric id, pass an integer's invariant text, for example
@@ -133,7 +150,9 @@ var options = new LogbirdOptions
   five minutes per batch. Each request is limited by `RequestTimeout` (30 seconds), even if a custom HTTP handler
   ignores cancellation. If a batch still fails, it goes back to the front of the queue and is tried again later.
 - When the server rejects single events in a batch (for example an invalid id), only those events are dropped
-  (`DropReason.Rejected`, with the server's reason in `Detail`). The rest of the batch is stored.
+  (`DropReason.Rejected`, with the server's code in `Code` and its reason in `Detail`). The other events are not
+  affected: those the answer acknowledges are stored, and those it leaves unresolved (a 503 `ingest_pending`) are
+  retried.
 - A success response counts only for events it acknowledges (accepted by id, or rejected by index). If something in
   front of Logbird answers 2xx without acknowledging events, they are retried with the same bytes and, once the retry
   budget is spent, dropped with `DropReason.Unacknowledged`; they are never counted as delivered.
@@ -145,7 +164,8 @@ var options = new LogbirdOptions
   `MaxQueueSize` (at least 1,000) notifications behind, further notifications are skipped and counted on the
   `logbird.notifications.lost` meter; the counters below still record every event. `FlushAsync` returns after the
   callbacks for what it settled have run.
-- `client.Stats` gives counts of tracked, delivered, rejected, dropped, filtered and warned events. The `Logbird` meter
+- `client.Stats` gives counts of tracked, delivered, rejected, dropped, filtered and warned events, as a snapshot only
+  the SDK fills (a test double for `ILogbirdClient` can return `default(LogbirdStats)`, every count zero). The `Logbird` meter
   publishes the same counts for OpenTelemetry (`logbird.events.*`, `logbird.batches.failed`, `logbird.queue.length`,
   `logbird.notifications.lost`). The instruments are observable: a listener reads the counters when it collects, on its
   own thread, so a slow or failing exporter never runs on your request path.
@@ -153,10 +173,61 @@ var options = new LogbirdOptions
   It never throws. Without a generic host (console apps, .NET Framework services), call
   `client.Flush(TimeSpan.FromSeconds(10))` or `Dispose()` before the process exits. Both run on the thread pool and
   cannot deadlock on a UI or ASP.NET synchronization context.
-- Disposing sends what is queued, waiting at most `ShutdownTimeout` (10 seconds). Events still unsent afterwards,
-  including a batch whose request has not returned, go to `OnDrop` once each with `DropReason.Shutdown`. A late
+- Disposing sends what is queued, waiting at most `ShutdownTimeout` (10 seconds). Events not yet delivered
+  afterwards, including a batch whose request has not returned, go to `OnDrop` once each with `DropReason.Shutdown`
+  (`MayBeStored` is true for that batch). A late
   response is then ignored. If that event did reach the server, replaying it from `OnDrop` is still safe, because
   its id is the same.
+
+### What a dropped event means
+
+"Dropped" means the SDK stopped trying to deliver the event. It does **not** always mean the event is absent from the
+audit log. A request can reach the server and store the event while its answer is lost on the way back. Each
+`DroppedEvent` says which case it is in `MayBeStored`:
+
+- **`true`**: the event was put on the wire at least once and no answer settled it. The server may have stored it.
+- **`false`**: the event was never sent, or every answer the server gave for it said it was not stored.
+
+`MayBeStored` follows what happened on the wire, not the reason. These are the values each reason can have:
+
+An answer "says it was not stored" when it is a 4xx, 429 included. No answer (a network error or a timeout), a 5xx, a
+redirect, or a success that does not acknowledge the event leaves the outcome **unresolved**. Once a request carrying an
+event has had an unresolved outcome, a later "not stored" answer cannot clear it: the earlier request may have stored the
+event. Only a rejection about the event's own content settles it as not stored, because the earlier request would have
+met the same rejection.
+
+| `Reason` | Why | `MayBeStored` |
+| --- | --- | --- |
+| `Rejected` | The server rejected this event (see `Code` and `Detail`) | `false`, except `true` for `stored_event_unreadable` or `unverified_after_parse_failure` when an earlier request carrying it had an unresolved outcome |
+| `TooLarge` | The serialized event is larger than 256 KB | always `false` |
+| `Invalid` | The event could not be prepared, for example `BeforeSend` threw | always `false` |
+| `QueueFull` | Evicted from a full queue | `false` if it was never sent, or every answer said it was not stored; `true` if a request carrying it had an unresolved outcome |
+| `HttpError` | A 4xx other than 429, or a redirect | `false` if every answer said it was not stored; `true` if an earlier request had an unresolved outcome, or the final answer was a redirect |
+| `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if it was never sent, or every answer said it was not stored; `true` if it was in flight without a "not stored" answer, or an earlier request had an unresolved outcome |
+| `Unacknowledged` | A success response never acknowledged it | always `true` |
+
+**Resending is safe.** The server deduplicates by event id: the same event sent again (`DroppedEvent.Json`, byte for
+byte, with its id and timestamp) is stored at most once. A resend is still an ordinary delivery that can fail, so it is
+not confirmed until it is acknowledged.
+
+**If your application must not lose events:**
+
+- Keep your own record of the event (an outbox row, see below) until you have confirmed that the server holds this
+  event: `LogbirdReadClient.GetEventAsync(id)` returns it, and its stored payload (`EventDetail.Payload`) matches your record.
+  The id alone is not enough, because a different event can be stored under the same id. Neither is a `FlushAsync`
+  that returned `true`: it means every event it covered was settled, and a settled event can be a rejection whose
+  `OnDrop` notification was skipped because the notification queue was full.
+- When `MayBeStored` is `true`, resend the same bytes later. A lookup that misses right after the drop proves nothing,
+  because a write the server already accepted can still become visible later. Resend rather than treat the event as
+  lost.
+- When it is `false`, the event is not stored. For `Rejected`, act on `Code`: fix the event, or for
+  `duplicate_id_conflict` send a correction with a new id. For `TooLarge` and `Invalid`, fix the event. For
+  `QueueFull`, `Shutdown` and `HttpError` (once the cause, such as the key, is fixed), resend it.
+- `DroppedEvent.Json` is empty when the event was never serialized: a `TooLarge` event, an event dropped as `Invalid`
+  before serialization, or one tracked after shutdown began. Rebuild those from your own record.
+
+The drop counters (`Stats.Dropped`, `Stats.Rejected` and the `logbird.events.dropped` meter by `reason`) count every
+dropped event either way. `MayBeStored` is reported per event, on the `DroppedEvent` passed to `OnDrop`.
 
 The queue lives in memory, so a crash loses events that were not yet sent. If an event must survive a crash, save
 it in your database in the same transaction as the change (an outbox) with its `Id` (`LogbirdClient.NewEventId()`)
@@ -242,8 +313,18 @@ await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: inv
     Console.WriteLine($"{e.Timestamp:u} {e.Actor?.Name} {e.Action}");
 }
 
-EventDetail? detail = await reader.GetAsync(eventId);   // null when it does not exist
+EventDetail? detail = await reader.GetEventAsync(eventId);   // null when it does not exist
 ```
+
+Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
+cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. For an export, the limit covers only
+the wait for its headers, not the download. The limit is per request, not per
+call: a first call that also reads the server's version, or a `SearchAllAsync` iteration, makes several requests, each
+with its own limit. Cancelling your token throws `OperationCanceledException`, and a call whose token is already
+cancelled sends nothing. A search, detail or facet answer is checked against the server's contract before it is read:
+a required member that is missing, or `null` where the contract allows none, throws `invalid_response` instead of
+reading as an empty page (optional members may be absent). A search, detail, facet or viewer-token answer over 64 MiB
+throws `response_too_large`; exports are streamed and have no size limit.
 
 `SearchAllAsync` follows cursors until the last page. Logbird's cursors are keyset-ordered and never repeat; as a guard
 against a misbehaving server, the client stops with `LogbirdApiException` (`pagination_stalled`) if a cursor repeats within
@@ -283,9 +364,12 @@ await using var file = File.Create("audit.csv");
 await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
 ```
 
-- A scope names a tenant and, optionally, one target (type and id together), action prefixes and masks (`Ip`,
+- A scope names a tenant and, optionally, one target (type and id together), 1 to 20 action prefixes and masks (`Ip`,
   `UserAgent`, `ActorEmail`; any mask also hides the original payload). Ids must be as Logbird stored them; the client
-  rejects a scope that could never match before sending it.
+  rejects a scope that could never match before sending it. The client sends a copy of your scope, so changing your
+  list afterwards changes nothing, and the granted scope's prefixes are read-only.
+- A token lives a whole number of seconds, from 60 seconds to 1 hour (15 minutes when you pass no lifetime). A
+  fraction of a second throws `ArgumentException` rather than being dropped.
 - A browser can use a viewer token only from an origin listed in the minting key's **embed origins** (set when the key
   is created, as `https://host[:port]`, lowercase, no path). From any other origin every read answers
   `403 origin_not_allowed`. A server-to-server call sends no `Origin` and is not affected.
@@ -294,8 +378,15 @@ await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
 - `FacetsAsync` counts events by a stored field (such as `action`, `outcome`, `tenant`, `target.type`) or an attribute
   (`attr.<path>`), optionally split by a second. Virtual selectors such as `record` work in `Query` but cannot be
   counted. `ExportAsync` streams CSV, JSONL or JSONL with payloads (`JsonlEvidence`, refused for a masked scope) into
-  your stream. Queries are at most 4,096 characters. The read `Timeout` covers the start of an export; pass a
-  cancellation token to bound the download.
+  your stream. Queries are at most 4,096 characters. The read `Timeout` covers the wait for the export's headers; pass a
+  cancellation token to bound the download. The token is passed to your stream's writes too, so a stream whose write
+  ignores it holds the export until that write returns.
+- Only the requested export is written. A success status other than 200 (such as a `206` partial answer), or a 200
+  without the requested content type (`text/csv` for CSV, `application/x-ndjson` for JSONL; such as a proxy's HTML
+  page), throws `invalid_response`; an HTTP error keeps the server's code (such as `masked_export`). Either way nothing
+  is written. A download that fails part way throws `unreachable` and leaves a partial file. An exception from your
+  stream itself (for example a full disk) reaches you unchanged, never as a network failure; one caused by your
+  cancellation is reported as the cancellation.
 
 ## Verify webhooks
 

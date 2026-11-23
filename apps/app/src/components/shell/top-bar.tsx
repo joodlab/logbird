@@ -59,13 +59,10 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         {sections.map((s, i) => {
           const last = i === sections.length - 1 && !dynamicCrumb;
           return (
-            // Section crumbs ("Actors", "Settings") stay whole; only the page's own name truncates.
-            <span className={cn('flex min-w-0 items-center gap-1', !last && 'sm:shrink-0')} key={s.id}>
-              {i === 0 && !params.projectId ? null : (
-                <ChevronRightIcon
-                  className={i === 0 ? 'hidden size-3.5 shrink-0 text-muted-foreground/60 sm:block' : 'size-3.5 shrink-0 text-muted-foreground/60'}
-                />
-              )}
+            // Section crumbs ("Actors", "Settings") stay whole; only the page's own name truncates. On a phone only the
+            // page's own name shows: a section cut to "R…" helps nobody, and the sidebar is one tap away.
+            <span className={cn('flex min-w-0 items-center gap-1', !last && 'shrink-0 max-sm:hidden')} key={s.id}>
+              {i === 0 && !params.projectId ? null : <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 max-sm:hidden" />}
               {last ? (
                 <span aria-current="page" className="truncate font-medium">
                   {s.label}
@@ -84,7 +81,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         })}
         {dynamicCrumb ? (
           <span className="flex min-w-0 items-center gap-1">
-            <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
+            <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 max-sm:hidden" />
             <span aria-current="page" className="truncate font-medium">
               {dynamicCrumb}
             </span>
@@ -94,7 +91,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <div className="flex shrink-0 items-center gap-2">
         {showRange ? (
           <TimeRangePicker
-            className="w-auto max-w-[min(60vw,15rem)]"
+            className="w-auto max-w-[min(60vw,15rem)] md:max-w-48 lg:max-w-[min(40vw,28rem)]"
             // An entity page with no range chosen shows its whole History; the range scopes only the summary (stats,
             // support split, activity chart). The picker says so; picking a range narrows the History too.
             label={rangeButtonLabel(range, wholeHistory, typeof window !== 'undefined' && window.innerWidth < 640)}
@@ -108,7 +105,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         ) : null}
         <Button
           aria-label="Open command palette"
-          className="w-(--control-size-compact) justify-start gap-2 px-0 font-normal text-muted-foreground max-sm:justify-center sm:w-52 sm:px-2.5 sm:pe-1.5"
+          className="w-(--control-size-compact) justify-start gap-2 px-0 font-normal text-muted-foreground max-sm:justify-center sm:w-40 sm:px-2.5 sm:pe-1.5 lg:w-52"
           onClick={onOpenPalette}
           size="sm"
           variant="outline"

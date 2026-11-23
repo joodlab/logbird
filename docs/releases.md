@@ -229,6 +229,21 @@ publishes a package:
   (it refuses one only while an earlier one is still being validated), and the
   deterministic build makes it the same symbols.
 
+The job also refuses to publish a version that could break the last published one unseen. Before packing, it asks
+nuget.org for the latest version of each package published before the release version, and fails when one exists and
+`PackageValidationBaselineVersion` (`sdks/dotnet/Directory.Build.props`) is unset or older than it. Before the first
+publication it passes with a notice. Versions at or above the release version are ignored, so rerunning a release that
+pushed one package but not the other still passes. Package validation then compares the new packages with that version and fails on
+any breaking change. See `sdks/dotnet/CONTRIBUTING.md` for what each check catches.
+
+In the release that publishes a version to nuget.org, also:
+
+1. Move every line of each package's `PublicAPI.Unshipped.txt` into its `PublicAPI.Shipped.txt`
+   (`sdks/dotnet/src/Logbird/` and `sdks/dotnet/src/Logbird.AspNetCore/`), leaving only `#nullable enable` in
+   `Unshipped`, so the published surface is the shipped record. A `*REMOVED*` line is not moved: delete it together
+   with the Shipped line it names.
+2. In the next release after it, set `PackageValidationBaselineVersion` to the version just published.
+
 Before the first publication, an owner:
 
 1. Asks nuget.org to reserve the `Logbird` ID prefix for the publishing account, so

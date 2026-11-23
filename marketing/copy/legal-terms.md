@@ -4,10 +4,15 @@ description: The terms for using the Logbird website and Logbird Cloud during ea
 path: /legal/terms
 ---
 
+Page text renders from `apps/web/src/content/legal-terms.ts` (the frame both legal pages share from `apps/web/src/content/legal.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Terms of service
 
-The page text lives in `apps/web/src/routes/legal.terms.tsx` and covers the website and Logbird Cloud during early
-access. The open-source software is MIT-licensed and the terms say they don't limit anything the licence allows.
+The page text lives in `apps/web/src/content/legal-terms.ts`, with the frame and the stand-in wording for unset
+operator facts in `apps/web/src/content/legal.ts`; the facts themselves are constants and settings in
+`apps/web/src/lib/legal-facts.tsx`. The text is owner-approved: change no word without the owner. The terms cover the
+website and Logbird Cloud during early access. The open-source software is MIT-licensed and the terms say they don't
+limit anything the licence allows.
 
 ## Owner facts (settings, not copy)
 
@@ -31,7 +36,7 @@ access. The open-source software is MIT-licensed and the terms say they don't li
 ## Code facts behind the terms
 
 - Early access with restricted sign-up: `AUTH_SIGNUP=restricted` (`packages/auth/src/signup-policy.ts`).
-- No billing or plan code exists; site copy says pricing isn't set (`apps/web/src/routes/cloud.tsx`).
+- No billing or plan code exists; site copy says pricing isn't set (`apps/web/src/content/pricing.ts`).
 - Customers choose retention per project and can export events (CSV, JSONL) from the console
   (`apps/server/src/data-routes.ts`).
 - Account deletion and complete workspace-data deletion are handled by request (#130). An owner-only

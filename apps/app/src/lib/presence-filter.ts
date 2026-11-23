@@ -48,7 +48,8 @@ function queryAdapter(field: string): Adapter {
   });
   return {
     terms: (q) => own(q).map(term),
-    remove: (q, test) => removeTokens(q, (t) => isOwn(t) && test(term(t))),
+    // A term without a polarity of its own (inside `NOT (a b)`) is never one of the group's states.
+    remove: (q, test) => removeTokens(q, (t) => isOwn(t) && !t.unpolarized && test(term(t))),
     add: (q, t) => andQuery(q, t.value === null ? presenceTerm(field, t.negated) : formatTerm(field, t.value, t.negated)),
   };
 }
@@ -88,7 +89,8 @@ function unwrapParens(conjunct: string): string {
 
 /** Reads one top-level `col = '…'` / `col != '…'` conjunct (redundant parentheses allowed) back as a presence term. */
 export function parsePresenceSql(conjunct: string, column: string): PresenceTerm | null {
-  const m = new RegExp(`^${escapeRegExp(column)}\\s*(!=|<>|=)\\s*'((?:[^'\\\\]|\\\\.)*)'$`).exec(unwrapParens(conjunct));
+  // The literal as ClickHouse reads it: backslash escapes (newlines included) and doubled apostrophes.
+  const m = new RegExp(`^${escapeRegExp(column)}\\s*(!=|<>|=)\\s*'((?:[^'\\\\]|\\\\[\\s\\S]|'')*)'$`).exec(unwrapParens(conjunct));
   if (!m) return null;
   const notEqual = m[1] !== '=';
   const value = unquoteSql(m[2] ?? '');

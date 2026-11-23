@@ -1,29 +1,31 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { ButtonLink } from '../components/marketing/button-link';
 import { PageHero, Section } from '../components/marketing/section';
+import { blog } from '../content/blog';
 import { newestFirst, posts, publicationDate } from '../lib/publications';
 import { pageHead } from '../lib/seo';
-import { isReady } from '../lib/site-map';
 
 export const Route = createFileRoute('/blog/')({ head: () => pageHead('/blog'), component: BlogIndex });
 
-// Copy: marketing/copy/blog.md. Posts come from publications.ts, added only once the owner publishes them.
+// Words: content/blog.ts. Posts come from publications.ts, added only once the owner publishes them. This file is layout
+// only (content-modules.test.ts).
 function BlogIndex() {
+  const { hero } = blog;
   return (
     <>
       <PageHero
         actions={
           <ButtonLink to="/changelog" variant="outline">
-            Changelog and build log
+            {hero.changelog}
           </ButtonLink>
         }
-        eyebrow="Blog"
-        lead={`Longer posts on how Logbird works and why: the decisions, the guarantees, and the limits.${isReady('/changelog') ? ' For day-by-day progress, see the changelog.' : ''}`}
-        title="Notes from building Logbird."
+        eyebrow={hero.eyebrow}
+        lead={hero.lead}
+        title={hero.title}
       />
       <Section labelledBy="posts-title">
         <h2 className="sr-only" id="posts-title">
-          Posts
+          {blog.postsTitle}
         </h2>
         {posts.length ? (
           <ol className="flex flex-col divide-y border-y">
@@ -42,7 +44,7 @@ function BlogIndex() {
             ))}
           </ol>
         ) : (
-          <p className="panel p-6 text-muted-foreground">No posts yet. The first one is on its way.</p>
+          <p className="panel p-6 text-muted-foreground">{blog.empty}</p>
         )}
       </Section>
     </>

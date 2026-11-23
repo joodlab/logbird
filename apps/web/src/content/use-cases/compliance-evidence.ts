@@ -44,7 +44,8 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
           id: 'event-detail',
           label: 'Event detail',
           caption:
-            'One event in the console: who caused it and what performed it, the customer account, the records it touched, the before and after value, and what caused it.',
+            'One event in the console: who caused it and what performed it, the customer account, the records it touched, the before and after value, and what caused it. Select the image to open it full size.',
+          zoom: true,
         },
       },
       {
@@ -95,7 +96,7 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
             body: 'Set `file` to the name of the file you downloaded, compute its SHA-256 and size, and compare them with the export’s completed record.',
             code: {
               title: 'Linux and macOS',
-              code: 'file="logbird-events-EXPORT_ID-evidence.jsonl"  # the file you downloaded\nsha256sum "$file"       # Linux\nshasum -a 256 "$file"   # macOS\nwc -c < "$file"         # size in bytes',
+              code: '# The file you downloaded\nfile="logbird-events-EXPORT_ID-evidence.jsonl"\n\n# SHA-256 on Linux\nsha256sum "$file"\n\n# SHA-256 on macOS\nshasum -a 256 "$file"\n\n# Size in bytes\nwc -c < "$file"',
               language: 'bash',
             },
           },
@@ -115,7 +116,7 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
             body: 'Then compare both values with the completed export record.',
             code: {
               title: 'PowerShell',
-              code: '$file = "logbird-events-EXPORT_ID-evidence.jsonl"  # the file you downloaded\nGet-FileHash -Algorithm SHA256 $file\n(Get-Item $file).Length  # size in bytes',
+              code: '# The file you downloaded\n$file = "logbird-events-EXPORT_ID-evidence.jsonl"\n\nGet-FileHash -Algorithm SHA256 $file\n\n# Size in bytes\n(Get-Item $file).Length',
               language: 'text',
             },
           },

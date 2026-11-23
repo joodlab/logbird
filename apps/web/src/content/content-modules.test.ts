@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { renderPages } from '../test/render-pages';
 import { evidenceLimits } from './evidence-limits';
 import { homeContent, homeMetaFor } from './home';
+import { scopedReadLimits, scopedReadLimitText } from './scoped-read-limits';
 import { SITE, type SiteState } from './site';
 import { complianceEvidenceContent } from './use-cases/compliance-evidence';
 
@@ -23,8 +24,36 @@ const MOVED = [
   'routes/pricing.tsx',
   'components/marketing/use-case.tsx',
   'routes/use-cases.compliance-evidence.tsx',
+  'routes/use-cases.customer-audit-logs.tsx',
+  'routes/use-cases.support-investigations.tsx',
   'components/marketing/self-host-cta.tsx',
   'components/marketing/steps.tsx',
+  'routes/compare.index.tsx',
+  'routes/compare.bemi.tsx',
+  'routes/compare.pangea.tsx',
+  'routes/compare.retraced.tsx',
+  'routes/compare.workos-audit-logs.tsx',
+  'components/marketing/comparison-page.tsx',
+  'components/marketing/capture-lanes.tsx',
+  'routes/developers.tsx',
+  'routes/open-source.tsx',
+  'components/marketing/feature-row.tsx',
+  'routes/about.tsx',
+  'routes/contact.tsx',
+  'routes/changelog.tsx',
+  'routes/product.tsx',
+  'routes/cloud.tsx',
+  'routes/security.tsx',
+  'routes/self-hosting.tsx',
+  'routes/legal.privacy.tsx',
+  'routes/legal.terms.tsx',
+  'components/marketing/legal-document.tsx',
+  'lib/legal-facts.tsx',
+  'routes/blog.index.tsx',
+  'routes/blog.$slug.tsx',
+  'components/marketing/blog-article.tsx',
+  'routes/404.tsx',
+  'components/not-found.tsx',
 ];
 
 /** Props and keys whose string value is always wording, even one word. */
@@ -332,6 +361,70 @@ describe('evidence limits', () => {
       if (path === '/security') continue;
       expect(text, path).toContain(evidenceLimits.shortenRetention);
       expect(text, path).toContain(evidenceLimits.exportMatch);
+    }
+  }, 60_000);
+});
+
+describe('scoped read limits', () => {
+  const text = (html: string) =>
+    html
+      .replace(/<[^>]+>/g, '')
+      .replaceAll('&#x27;', "'")
+      .replaceAll('&quot;', '"');
+  const shown = (value: string) => value.replaceAll('`', '');
+
+  // The approved wording, pinned here rather than read from the module under test (maintainer, #270 and #286), so an
+  // edit to scoped-read-limits.ts fails this test until the copy is re-approved.
+  const APPROVED = {
+    scope: 'One customer account per scope, matched on the id Logbird stored.',
+    layers:
+      "Logbird's query builders always apply the scope. ClickHouse checks the customer account as well once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade, and a source installation runs create-query-user once.",
+    origins: 'A web page on another origin can read with a token only if that origin is listed on the key.',
+  };
+
+  it('the module holds the approved wording', () => {
+    expect(shown(scopedReadLimits.scope)).toBe(APPROVED.scope);
+    expect(shown(scopedReadLimits.layers)).toBe(APPROVED.layers);
+    expect(shown(scopedReadLimits.origins)).toBe(APPROVED.origins);
+    expect(shown(scopedReadLimitText)).toBe(`${APPROVED.scope} ${APPROVED.layers} ${APPROVED.origins}`);
+    expect(scopedReadLimits.enforced).toEqual({ label: 'How it is enforced', to: '/security', hash: 'scoped-reads' });
+  });
+
+  it('with scoped read access on, the landing page shows the first sentence and the link; /security § Scoped reads shows all three', async () => {
+    const scoped = homeContent({ ...SITE, scopedReadLive: true }).customers.scoped;
+    expect(scoped.limit).toBe(APPROVED.scope);
+    expect(homeContent({ ...SITE, scopedReadLive: false }).customers.access.limitLink).toBeUndefined();
+    expect(SITE.scopedReadLive).toBe(true);
+    const pages = await renderPages(['/', '/security', '/use-cases/customer-audit-logs']);
+    const page = (path: string) => pages.find((entry) => entry.path === path)?.html ?? '';
+    // Landing: exactly the scope sentence and the link in the limit box, not the layers or origins sentences.
+    const box = /<strong[^>]*>The limit<\/strong>([\s\S]*?)<\/p>/.exec(page('/'))?.[1] ?? '';
+    expect(text(box).replace(/\s+/g, ' ').trim()).toBe(`: ${APPROVED.scope} How it is enforced`);
+    expect(box).toMatch(/<a[^>]*href="\/security#scoped-reads"[^>]*>How it is enforced<\/a>/);
+    expect(text(page('/'))).not.toContain(APPROVED.layers);
+    // /security: the anchored block holds exactly the three sentences, under their titles.
+    const block = /<section[^>]*id="scoped-reads"[^>]*>([\s\S]*?)<\/section>/.exec(page('/security'))?.[1] ?? '';
+    for (const sentence of Object.values(APPROVED)) expect(text(block)).toContain(sentence);
+    // The customer page: the whole limit, in order.
+    expect(text(page('/use-cases/customer-audit-logs'))).toContain(`${APPROVED.scope} ${APPROVED.layers} ${APPROVED.origins}`);
+  }, 60_000);
+
+  it('each code block that scrolls sideways is a titled keyboard stop, with its own copy button before the scroll area', async () => {
+    const [page] = await renderPages(['/use-cases/compliance-evidence']);
+    const html = page?.html ?? '';
+    // One match per block: its title bar (with the copy button) and then its <pre>.
+    const blocks = [...html.matchAll(/<div class="site-code[^"]*">([\s\S]*?)<\/pre>/g)].map(([, inner]) => inner ?? '');
+    expect(blocks.length).toBe(2);
+    for (const block of blocks) {
+      const copyAt = block.indexOf('aria-label="Copy code"');
+      const preAt = block.indexOf('<pre');
+      expect(copyAt, 'copy button in this block').toBeGreaterThan(-1);
+      expect(preAt).toBeGreaterThan(copyAt);
+      const pre = /<pre([^>]*)>/.exec(block)?.[1] ?? '';
+      expect(pre).toMatch(/tabindex="0"/i);
+      expect(pre).toMatch(/title="[^"]+ code"/);
+      expect(pre).toContain('overflow-x-auto');
+      expect(pre).not.toContain('whitespace-pre-wrap');
     }
   }, 60_000);
 });

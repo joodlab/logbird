@@ -1,7 +1,14 @@
 # @logbird/web — the marketing site
 
 TanStack Start, every page prerendered to static HTML, packaged for Cloudflare Workers with static assets. It reuses
-`@logbird/ui` (tokens, theme, highlighter). Copy lives in `marketing/copy/`; change wording there first.
+`@logbird/ui` (tokens, theme, highlighter). Page text renders from the typed modules in `src/content/<module>.ts`; edit
+wording there. Until they move into modules too, a few shared components still own their words: the contact form's
+labels, options and messages (`src/components/waitlist-form.tsx`), the header and footer (`src/components/site-shell.tsx`)
+and a few component labels. Each brief names where its page's words live. The files in `marketing/copy/` are the
+briefs: section jobs, sources and owner notes, not the page text.
+`src/content/page-snapshots.test.ts` pins every rendered page (and the shared header and footer once per state); review
+its snapshot diff with any wording change. How to update the snapshots, and what a copy PR states, is in
+[CONTRIBUTING.md, "Page snapshots"](../../CONTRIBUTING.md#page-snapshots-marketing-site).
 
 ## Commands
 
@@ -84,8 +91,12 @@ Acme workspace and StayDesk project). `scripts/media.ts` encodes AVIF/WebP (640/
 into `public/media` (ignored). `<Screenshot>` renders one lazy `<picture>` per theme; the pre-paint theme class hides the
 other, so only one image downloads and nothing swaps after hydration. Below 640 px an entry's phone capture replaces the
 shrunken desktop one. Sources are compact WebP files in normal Git. Turbo hashes `marketing/media/**` for this
-package's build, so replacing a capture rebuilds the media. Media URLs are stable (not content-hashed), so `/media/*`
-is cached for a day with stale-while-revalidate, never `immutable`.
+package's build, so replacing a capture rebuilds the media. Media file names are stable, so every URL to a media, brand,
+manifest or OG file carries its content version (`?v=`, `src/lib/asset-url.ts`, versions in `src/lib/asset-versions.ts`):
+a replaced file gets a new URL, and `/media/*` can be cached for a day with stale-while-revalidate without serving old
+bytes. After a capture, a brand file, the encoder or the OG card design changes, run `pnpm assets:versions` and commit
+the result; the media build and `asset-versions.test.ts` refuse stale versions, and `check:live` compares every such URL
+as written with an uncached fetch after a deploy.
 
 OG cards (`scripts/og.ts`, Satori + Resvg, local fonts) render one 1200×630 PNG per manifest slug into `public/og`.
 

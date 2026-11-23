@@ -1,0 +1,518 @@
+#nullable enable
+Logbird.AuditActor
+Logbird.AuditActor.<Clone>$() -> Logbird.AuditActor!
+Logbird.AuditActor.AuditActor(string! Type, string! Id) -> void
+Logbird.AuditActor.Deconstruct(out string! Type, out string! Id) -> void
+Logbird.AuditActor.Email.get -> string?
+Logbird.AuditActor.Email.init -> void
+Logbird.AuditActor.Equals(Logbird.AuditActor? other) -> bool
+Logbird.AuditActor.Id.get -> string!
+Logbird.AuditActor.Id.init -> void
+Logbird.AuditActor.Name.get -> string?
+Logbird.AuditActor.Name.init -> void
+Logbird.AuditActor.Type.get -> string!
+Logbird.AuditActor.Type.init -> void
+Logbird.AuditChange
+Logbird.AuditChange.After.get -> System.Text.Json.Nodes.JsonNode?
+Logbird.AuditChange.AuditChange(string! field, System.Text.Json.Nodes.JsonNode? before, System.Text.Json.Nodes.JsonNode? after) -> void
+Logbird.AuditChange.Before.get -> System.Text.Json.Nodes.JsonNode?
+Logbird.AuditChange.Field.get -> string!
+Logbird.AuditChange.HasAfter.get -> bool
+Logbird.AuditChange.HasBefore.get -> bool
+Logbird.AuditContext
+Logbird.AuditContext.AuditContext() -> void
+Logbird.AuditContext.Ip.get -> string?
+Logbird.AuditContext.Ip.set -> void
+Logbird.AuditContext.OperationId.get -> string?
+Logbird.AuditContext.OperationId.set -> void
+Logbird.AuditContext.ParentEventId.get -> string?
+Logbird.AuditContext.ParentEventId.set -> void
+Logbird.AuditContext.RequestId.get -> string?
+Logbird.AuditContext.RequestId.set -> void
+Logbird.AuditContext.TraceId.get -> string?
+Logbird.AuditContext.TraceId.set -> void
+Logbird.AuditContext.UserAgent.get -> string?
+Logbird.AuditContext.UserAgent.set -> void
+Logbird.AuditEvent
+Logbird.AuditEvent.Action.get -> string!
+Logbird.AuditEvent.Action.set -> void
+Logbird.AuditEvent.Actor.get -> Logbird.AuditActor?
+Logbird.AuditEvent.Actor.set -> void
+Logbird.AuditEvent.AuditEvent(string! action) -> void
+Logbird.AuditEvent.Change(string! field, System.Text.Json.Nodes.JsonNode? before, System.Text.Json.Nodes.JsonNode? after) -> Logbird.AuditEvent!
+Logbird.AuditEvent.Changes.get -> System.Collections.Generic.IList<Logbird.AuditChange!>!
+Logbird.AuditEvent.Changes.set -> void
+Logbird.AuditEvent.Clone() -> Logbird.AuditEvent!
+Logbird.AuditEvent.Context.get -> Logbird.AuditContext!
+Logbird.AuditEvent.Context.set -> void
+Logbird.AuditEvent.Description.get -> string?
+Logbird.AuditEvent.Description.set -> void
+Logbird.AuditEvent.Environment.get -> string?
+Logbird.AuditEvent.Environment.set -> void
+Logbird.AuditEvent.Executor.get -> Logbird.AuditExecutor?
+Logbird.AuditEvent.Executor.set -> void
+Logbird.AuditEvent.Id.get -> string?
+Logbird.AuditEvent.Id.set -> void
+Logbird.AuditEvent.Impersonator.get -> Logbird.AuditImpersonator?
+Logbird.AuditEvent.Impersonator.set -> void
+Logbird.AuditEvent.Metadata.get -> System.Text.Json.Nodes.JsonObject!
+Logbird.AuditEvent.Metadata.set -> void
+Logbird.AuditEvent.OccurredAt.get -> System.DateTimeOffset?
+Logbird.AuditEvent.OccurredAt.set -> void
+Logbird.AuditEvent.Outcome.get -> string?
+Logbird.AuditEvent.Outcome.set -> void
+Logbird.AuditEvent.SchemaVersion.get -> string?
+Logbird.AuditEvent.SchemaVersion.set -> void
+Logbird.AuditEvent.Severity.get -> string?
+Logbird.AuditEvent.Severity.set -> void
+Logbird.AuditEvent.Source.get -> string?
+Logbird.AuditEvent.Source.set -> void
+Logbird.AuditEvent.Target(string! type, string! id, string? name = null) -> Logbird.AuditEvent!
+Logbird.AuditEvent.Targets.get -> System.Collections.Generic.IList<Logbird.AuditTarget!>!
+Logbird.AuditEvent.Targets.set -> void
+Logbird.AuditEvent.Tenant.get -> Logbird.AuditTenant?
+Logbird.AuditEvent.Tenant.set -> void
+Logbird.AuditEvent.WithMetadata(string! key, System.Text.Json.Nodes.JsonNode? value) -> Logbird.AuditEvent!
+Logbird.AuditExecutor
+Logbird.AuditExecutor.<Clone>$() -> Logbird.AuditExecutor!
+Logbird.AuditExecutor.Attempt.get -> int?
+Logbird.AuditExecutor.Attempt.init -> void
+Logbird.AuditExecutor.AuditExecutor(string! Type) -> void
+Logbird.AuditExecutor.Deconstruct(out string! Type) -> void
+Logbird.AuditExecutor.Equals(Logbird.AuditExecutor? other) -> bool
+Logbird.AuditExecutor.Id.get -> string?
+Logbird.AuditExecutor.Id.init -> void
+Logbird.AuditExecutor.JobId.get -> string?
+Logbird.AuditExecutor.JobId.init -> void
+Logbird.AuditExecutor.Name.get -> string?
+Logbird.AuditExecutor.Name.init -> void
+Logbird.AuditExecutor.Type.get -> string!
+Logbird.AuditExecutor.Type.init -> void
+Logbird.AuditImpersonator
+Logbird.AuditImpersonator.<Clone>$() -> Logbird.AuditImpersonator!
+Logbird.AuditImpersonator.AuditImpersonator(string! Id) -> void
+Logbird.AuditImpersonator.Deconstruct(out string! Id) -> void
+Logbird.AuditImpersonator.Equals(Logbird.AuditImpersonator? other) -> bool
+Logbird.AuditImpersonator.Id.get -> string!
+Logbird.AuditImpersonator.Id.init -> void
+Logbird.AuditImpersonator.Name.get -> string?
+Logbird.AuditImpersonator.Name.init -> void
+Logbird.AuditOutcome
+Logbird.AuditSeverity
+Logbird.AuditTarget
+Logbird.AuditTarget.<Clone>$() -> Logbird.AuditTarget!
+Logbird.AuditTarget.AuditTarget(string! Type, string! Id) -> void
+Logbird.AuditTarget.Deconstruct(out string! Type, out string! Id) -> void
+Logbird.AuditTarget.Equals(Logbird.AuditTarget? other) -> bool
+Logbird.AuditTarget.Id.get -> string!
+Logbird.AuditTarget.Id.init -> void
+Logbird.AuditTarget.Name.get -> string?
+Logbird.AuditTarget.Name.init -> void
+Logbird.AuditTarget.Type.get -> string!
+Logbird.AuditTarget.Type.init -> void
+Logbird.AuditTenant
+Logbird.AuditTenant.<Clone>$() -> Logbird.AuditTenant!
+Logbird.AuditTenant.AuditTenant(string! Id) -> void
+Logbird.AuditTenant.Deconstruct(out string! Id) -> void
+Logbird.AuditTenant.Equals(Logbird.AuditTenant? other) -> bool
+Logbird.AuditTenant.Id.get -> string!
+Logbird.AuditTenant.Id.init -> void
+Logbird.AuditTenant.Name.get -> string?
+Logbird.AuditTenant.Name.init -> void
+Logbird.DropReason
+Logbird.DropReason.HttpError = 2 -> Logbird.DropReason
+Logbird.DropReason.Invalid = 5 -> Logbird.DropReason
+Logbird.DropReason.QueueFull = 0 -> Logbird.DropReason
+Logbird.DropReason.Rejected = 1 -> Logbird.DropReason
+Logbird.DropReason.Shutdown = 4 -> Logbird.DropReason
+Logbird.DropReason.TooLarge = 3 -> Logbird.DropReason
+Logbird.DropReason.Unacknowledged = 7 -> Logbird.DropReason
+Logbird.DroppedEvent
+Logbird.DroppedEvent.Action.get -> string!
+Logbird.DroppedEvent.Code.get -> string?
+Logbird.DroppedEvent.Detail.get -> string?
+Logbird.DroppedEvent.Id.get -> string?
+Logbird.DroppedEvent.Json.get -> System.ReadOnlyMemory<byte>
+Logbird.DroppedEvent.JsonText.get -> string!
+Logbird.DroppedEvent.MayBeStored.get -> bool
+Logbird.DroppedEvent.Reason.get -> Logbird.DropReason
+Logbird.EventDetail
+Logbird.EventDetail.ChildCount.get -> long
+Logbird.EventDetail.ChildCount.init -> void
+Logbird.EventDetail.Event.get -> Logbird.StoredEvent!
+Logbird.EventDetail.Event.init -> void
+Logbird.EventDetail.EventDetail() -> void
+Logbird.EventDetail.OperationSize.get -> long
+Logbird.EventDetail.OperationSize.init -> void
+Logbird.EventDetail.Parents.get -> System.Collections.Generic.IReadOnlyList<Logbird.StoredEvent!>!
+Logbird.EventDetail.Parents.init -> void
+Logbird.EventDetail.Payload.get -> System.Text.Json.JsonElement
+Logbird.EventDetail.Payload.init -> void
+Logbird.EventPage
+Logbird.EventPage.EventPage() -> void
+Logbird.EventPage.Events.get -> System.Collections.Generic.IReadOnlyList<Logbird.StoredEvent!>!
+Logbird.EventPage.Events.init -> void
+Logbird.EventPage.NextCursor.get -> string?
+Logbird.EventPage.NextCursor.init -> void
+Logbird.EventPage.TookMs.get -> double
+Logbird.EventPage.TookMs.init -> void
+Logbird.EventPage.Total.get -> long
+Logbird.EventPage.Total.init -> void
+Logbird.EventPage.TotalExact.get -> bool?
+Logbird.EventPage.TotalExact.init -> void
+Logbird.EventSearch
+Logbird.EventSearch.<Clone>$() -> Logbird.EventSearch!
+Logbird.EventSearch.Cursor.get -> string?
+Logbird.EventSearch.Cursor.init -> void
+Logbird.EventSearch.Equals(Logbird.EventSearch? other) -> bool
+Logbird.EventSearch.EventSearch() -> void
+Logbird.EventSearch.From.get -> System.DateTimeOffset?
+Logbird.EventSearch.From.init -> void
+Logbird.EventSearch.Limit.get -> int?
+Logbird.EventSearch.Limit.init -> void
+Logbird.EventSearch.Order.get -> Logbird.SortOrder?
+Logbird.EventSearch.Order.init -> void
+Logbird.EventSearch.Query.get -> string?
+Logbird.EventSearch.Query.init -> void
+Logbird.EventSearch.To.get -> System.DateTimeOffset?
+Logbird.EventSearch.To.init -> void
+Logbird.ExportFormat
+Logbird.ExportFormat.Csv = 0 -> Logbird.ExportFormat
+Logbird.ExportFormat.Jsonl = 1 -> Logbird.ExportFormat
+Logbird.ExportFormat.JsonlEvidence = 2 -> Logbird.ExportFormat
+Logbird.ExportQuery
+Logbird.ExportQuery.ExportQuery(Logbird.ExportFormat format) -> void
+Logbird.ExportQuery.Format.get -> Logbird.ExportFormat
+Logbird.ExportQuery.From.get -> System.DateTimeOffset?
+Logbird.ExportQuery.From.init -> void
+Logbird.ExportQuery.Query.get -> string?
+Logbird.ExportQuery.Query.init -> void
+Logbird.ExportQuery.To.get -> System.DateTimeOffset?
+Logbird.ExportQuery.To.init -> void
+Logbird.FacetGroup
+Logbird.FacetGroup.Count.get -> long
+Logbird.FacetGroup.Count.init -> void
+Logbird.FacetGroup.FacetGroup() -> void
+Logbird.FacetGroup.Label.get -> string!
+Logbird.FacetGroup.Label.init -> void
+Logbird.FacetGroup.Value.get -> string!
+Logbird.FacetGroup.Value.init -> void
+Logbird.FacetQuery
+Logbird.FacetQuery.By.get -> string?
+Logbird.FacetQuery.By.init -> void
+Logbird.FacetQuery.ByLimit.get -> int?
+Logbird.FacetQuery.ByLimit.init -> void
+Logbird.FacetQuery.FacetQuery(string! field) -> void
+Logbird.FacetQuery.Field.get -> string!
+Logbird.FacetQuery.From.get -> System.DateTimeOffset?
+Logbird.FacetQuery.From.init -> void
+Logbird.FacetQuery.Limit.get -> int?
+Logbird.FacetQuery.Limit.init -> void
+Logbird.FacetQuery.Query.get -> string?
+Logbird.FacetQuery.Query.init -> void
+Logbird.FacetQuery.To.get -> System.DateTimeOffset?
+Logbird.FacetQuery.To.init -> void
+Logbird.FacetResult
+Logbird.FacetResult.By.get -> string?
+Logbird.FacetResult.By.init -> void
+Logbird.FacetResult.FacetResult() -> void
+Logbird.FacetResult.Field.get -> string!
+Logbird.FacetResult.Field.init -> void
+Logbird.FacetResult.OtherCount.get -> long
+Logbird.FacetResult.OtherCount.init -> void
+Logbird.FacetResult.Values.get -> System.Collections.Generic.IReadOnlyList<Logbird.FacetValue!>!
+Logbird.FacetResult.Values.init -> void
+Logbird.FacetValue
+Logbird.FacetValue.Count.get -> long
+Logbird.FacetValue.Count.init -> void
+Logbird.FacetValue.FacetValue() -> void
+Logbird.FacetValue.Groups.get -> System.Collections.Generic.IReadOnlyList<Logbird.FacetGroup!>?
+Logbird.FacetValue.Groups.init -> void
+Logbird.FacetValue.GroupsOtherCount.get -> long?
+Logbird.FacetValue.GroupsOtherCount.init -> void
+Logbird.FacetValue.Label.get -> string!
+Logbird.FacetValue.Label.init -> void
+Logbird.FacetValue.Value.get -> string!
+Logbird.FacetValue.Value.init -> void
+Logbird.ILogbirdClient
+Logbird.ILogbirdClient.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Logbird.ILogbirdClient.Stats.get -> Logbird.LogbirdStats
+Logbird.ILogbirdClient.Track(Logbird.AuditEvent! auditEvent) -> void
+Logbird.LogbirdApiException
+Logbird.LogbirdApiException.Code.get -> string!
+Logbird.LogbirdApiException.LogbirdApiException(System.Net.HttpStatusCode? statusCode, string! code, string! message, System.Exception? innerException = null) -> void
+Logbird.LogbirdApiException.ServerMessage.get -> string?
+Logbird.LogbirdApiException.StatusCode.get -> System.Net.HttpStatusCode?
+Logbird.LogbirdClient
+Logbird.LogbirdClient.Dispose() -> void
+Logbird.LogbirdClient.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Logbird.LogbirdClient.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Logbird.LogbirdClient.LogbirdClient(Logbird.LogbirdOptions! options, System.Net.Http.HttpClient? httpClient = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Logbird.LogbirdClient.Stats.get -> Logbird.LogbirdStats
+Logbird.LogbirdClient.Track(Logbird.AuditEvent! auditEvent) -> void
+Logbird.LogbirdClientExtensions
+Logbird.LogbirdDeliveryException
+Logbird.LogbirdDeliveryException.LogbirdDeliveryException(string! message) -> void
+Logbird.LogbirdDeliveryException.LogbirdDeliveryException(string! message, System.Exception! innerException) -> void
+Logbird.LogbirdDeliveryException.LogbirdDeliveryException(string! message, System.Net.HttpStatusCode statusCode) -> void
+Logbird.LogbirdDeliveryException.StatusCode.get -> System.Net.HttpStatusCode?
+Logbird.LogbirdEventWarning
+Logbird.LogbirdEventWarning.Action.get -> string!
+Logbird.LogbirdEventWarning.EventId.get -> string!
+Logbird.LogbirdEventWarning.Reason.get -> string!
+Logbird.LogbirdOptions
+Logbird.LogbirdOptions.AllowInsecureHttp.get -> bool
+Logbird.LogbirdOptions.AllowInsecureHttp.set -> void
+Logbird.LogbirdOptions.BatchSize.get -> int
+Logbird.LogbirdOptions.BatchSize.set -> void
+Logbird.LogbirdOptions.BeforeSend.get -> System.Func<Logbird.AuditEvent!, Logbird.AuditEvent?>?
+Logbird.LogbirdOptions.BeforeSend.set -> void
+Logbird.LogbirdOptions.Enabled.get -> bool
+Logbird.LogbirdOptions.Enabled.set -> void
+Logbird.LogbirdOptions.Endpoint.get -> System.Uri?
+Logbird.LogbirdOptions.Endpoint.set -> void
+Logbird.LogbirdOptions.Environment.get -> string?
+Logbird.LogbirdOptions.Environment.set -> void
+Logbird.LogbirdOptions.FlushInterval.get -> System.TimeSpan
+Logbird.LogbirdOptions.FlushInterval.set -> void
+Logbird.LogbirdOptions.IngestKey.get -> string?
+Logbird.LogbirdOptions.IngestKey.set -> void
+Logbird.LogbirdOptions.LogbirdOptions() -> void
+Logbird.LogbirdOptions.MaxQueueSize.get -> int
+Logbird.LogbirdOptions.MaxQueueSize.set -> void
+Logbird.LogbirdOptions.MaxRetries.get -> int
+Logbird.LogbirdOptions.MaxRetries.set -> void
+Logbird.LogbirdOptions.OnDrop.get -> System.Action<Logbird.DroppedEvent!>?
+Logbird.LogbirdOptions.OnDrop.set -> void
+Logbird.LogbirdOptions.OnError.get -> System.Action<System.Exception!>?
+Logbird.LogbirdOptions.OnError.set -> void
+Logbird.LogbirdOptions.QueueFullBehavior.get -> Logbird.QueueFullBehavior
+Logbird.LogbirdOptions.QueueFullBehavior.set -> void
+Logbird.LogbirdOptions.Redaction.get -> Logbird.RedactionOptions!
+Logbird.LogbirdOptions.Redaction.set -> void
+Logbird.LogbirdOptions.RequestTimeout.get -> System.TimeSpan
+Logbird.LogbirdOptions.RequestTimeout.set -> void
+Logbird.LogbirdOptions.ShutdownTimeout.get -> System.TimeSpan
+Logbird.LogbirdOptions.ShutdownTimeout.set -> void
+Logbird.LogbirdOptions.Source.get -> string?
+Logbird.LogbirdOptions.Source.set -> void
+Logbird.LogbirdReadClient
+Logbird.LogbirdReadClient.Dispose() -> void
+Logbird.LogbirdReadClient.ExportAsync(Logbird.ExportQuery! query, System.IO.Stream! destination, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+Logbird.LogbirdReadClient.FacetsAsync(Logbird.FacetQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.FacetResult!>!
+Logbird.LogbirdReadClient.GetEventAsync(string! eventId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.EventDetail?>!
+Logbird.LogbirdReadClient.LogbirdReadClient(Logbird.LogbirdReadOptions! options, System.Net.Http.HttpClient? httpClient = null) -> void
+Logbird.LogbirdReadClient.MintViewerTokenAsync(Logbird.ViewerScope! scope, System.TimeSpan? lifetime = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.ViewerToken!>!
+Logbird.LogbirdReadClient.SearchAllAsync(Logbird.EventSearch? search = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Logbird.StoredEvent!>!
+Logbird.LogbirdReadClient.SearchAsync(Logbird.EventSearch? search = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.EventPage!>!
+Logbird.LogbirdReadOptions
+Logbird.LogbirdReadOptions.AllowInsecureHttp.get -> bool
+Logbird.LogbirdReadOptions.AllowInsecureHttp.set -> void
+Logbird.LogbirdReadOptions.Endpoint.get -> System.Uri?
+Logbird.LogbirdReadOptions.Endpoint.set -> void
+Logbird.LogbirdReadOptions.LogbirdReadOptions() -> void
+Logbird.LogbirdReadOptions.MaxPages.get -> int?
+Logbird.LogbirdReadOptions.MaxPages.set -> void
+Logbird.LogbirdReadOptions.ReadKey.get -> string?
+Logbird.LogbirdReadOptions.ReadKey.set -> void
+Logbird.LogbirdReadOptions.Timeout.get -> System.TimeSpan
+Logbird.LogbirdReadOptions.Timeout.set -> void
+Logbird.LogbirdRejectedException
+Logbird.LogbirdRejectedException.Codes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Logbird.LogbirdRejectedException.Count.get -> int
+Logbird.LogbirdStats
+Logbird.LogbirdStats.Delivered.get -> long
+Logbird.LogbirdStats.Dropped.get -> long
+Logbird.LogbirdStats.FailedSends.get -> long
+Logbird.LogbirdStats.Filtered.get -> long
+Logbird.LogbirdStats.LogbirdStats() -> void
+Logbird.LogbirdStats.QueueLength.get -> int
+Logbird.LogbirdStats.Rejected.get -> long
+Logbird.LogbirdStats.Tracked.get -> long
+Logbird.LogbirdStats.Warnings.get -> long
+Logbird.QueueFullBehavior
+Logbird.QueueFullBehavior.DropNewest = 1 -> Logbird.QueueFullBehavior
+Logbird.QueueFullBehavior.DropOldest = 0 -> Logbird.QueueFullBehavior
+Logbird.RedactionOptions
+Logbird.RedactionOptions.AddKeys(params string![]! names) -> Logbird.RedactionOptions!
+Logbird.RedactionOptions.ChangeFields.get -> System.Text.RegularExpressions.Regex?
+Logbird.RedactionOptions.ChangeFields.set -> void
+Logbird.RedactionOptions.Enabled.get -> bool
+Logbird.RedactionOptions.Enabled.set -> void
+Logbird.RedactionOptions.Keys.get -> System.Text.RegularExpressions.Regex!
+Logbird.RedactionOptions.Keys.set -> void
+Logbird.RedactionOptions.RedactionOptions() -> void
+Logbird.RedactionOptions.Replacement.get -> string!
+Logbird.RedactionOptions.Replacement.set -> void
+Logbird.Redactor
+Logbird.Redactor.Redact(System.Text.Json.Nodes.JsonObject! eventJson) -> System.Text.Json.Nodes.JsonObject!
+Logbird.Redactor.Redactor(System.Text.RegularExpressions.Regex? keys = null, System.Text.RegularExpressions.Regex? changeFields = null, string? replacement = null) -> void
+Logbird.SortOrder
+Logbird.SortOrder.Ascending = 1 -> Logbird.SortOrder
+Logbird.SortOrder.Descending = 0 -> Logbird.SortOrder
+Logbird.StoredChange
+Logbird.StoredChange.<Clone>$() -> Logbird.StoredChange!
+Logbird.StoredChange.After.get -> string!
+Logbird.StoredChange.After.init -> void
+Logbird.StoredChange.Before.get -> string!
+Logbird.StoredChange.Before.init -> void
+Logbird.StoredChange.Deconstruct(out string! Field, out string! Before, out string! After) -> void
+Logbird.StoredChange.Equals(Logbird.StoredChange? other) -> bool
+Logbird.StoredChange.Field.get -> string!
+Logbird.StoredChange.Field.init -> void
+Logbird.StoredChange.StoredChange(string! Field, string! Before, string! After) -> void
+Logbird.StoredEvent
+Logbird.StoredEvent.Action.get -> string!
+Logbird.StoredEvent.Action.init -> void
+Logbird.StoredEvent.Actor.get -> Logbird.AuditActor?
+Logbird.StoredEvent.Actor.init -> void
+Logbird.StoredEvent.Attributes.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Logbird.StoredEvent.Attributes.init -> void
+Logbird.StoredEvent.Category.get -> string!
+Logbird.StoredEvent.Category.init -> void
+Logbird.StoredEvent.Changes.get -> System.Collections.Generic.IReadOnlyList<Logbird.StoredChange!>!
+Logbird.StoredEvent.Changes.init -> void
+Logbird.StoredEvent.Conformance.get -> double
+Logbird.StoredEvent.Conformance.init -> void
+Logbird.StoredEvent.Context.get -> Logbird.AuditContext!
+Logbird.StoredEvent.Context.init -> void
+Logbird.StoredEvent.Description.get -> string!
+Logbird.StoredEvent.Description.init -> void
+Logbird.StoredEvent.Environment.get -> string!
+Logbird.StoredEvent.Environment.init -> void
+Logbird.StoredEvent.Executor.get -> Logbird.AuditExecutor?
+Logbird.StoredEvent.Executor.init -> void
+Logbird.StoredEvent.Id.get -> string!
+Logbird.StoredEvent.Id.init -> void
+Logbird.StoredEvent.Impersonator.get -> Logbird.AuditImpersonator?
+Logbird.StoredEvent.Impersonator.init -> void
+Logbird.StoredEvent.Outcome.get -> string!
+Logbird.StoredEvent.Outcome.init -> void
+Logbird.StoredEvent.ProjectId.get -> string!
+Logbird.StoredEvent.ProjectId.init -> void
+Logbird.StoredEvent.ReceivedAt.get -> System.DateTimeOffset
+Logbird.StoredEvent.ReceivedAt.init -> void
+Logbird.StoredEvent.SchemaVersion.get -> string!
+Logbird.StoredEvent.SchemaVersion.init -> void
+Logbird.StoredEvent.Sdk.get -> string!
+Logbird.StoredEvent.Sdk.init -> void
+Logbird.StoredEvent.Severity.get -> string!
+Logbird.StoredEvent.Severity.init -> void
+Logbird.StoredEvent.Source.get -> string?
+Logbird.StoredEvent.Source.init -> void
+Logbird.StoredEvent.StoredEvent() -> void
+Logbird.StoredEvent.Targets.get -> System.Collections.Generic.IReadOnlyList<Logbird.AuditTarget!>!
+Logbird.StoredEvent.Targets.init -> void
+Logbird.StoredEvent.Tenant.get -> Logbird.AuditTenant?
+Logbird.StoredEvent.Tenant.init -> void
+Logbird.StoredEvent.Timestamp.get -> System.DateTimeOffset
+Logbird.StoredEvent.Timestamp.init -> void
+Logbird.ViewerMask
+Logbird.ViewerMask.ActorEmail = 4 -> Logbird.ViewerMask
+Logbird.ViewerMask.Ip = 1 -> Logbird.ViewerMask
+Logbird.ViewerMask.None = 0 -> Logbird.ViewerMask
+Logbird.ViewerMask.UserAgent = 2 -> Logbird.ViewerMask
+Logbird.ViewerScope
+Logbird.ViewerScope.ActionPrefixes.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Logbird.ViewerScope.ActionPrefixes.init -> void
+Logbird.ViewerScope.Mask.get -> Logbird.ViewerMask
+Logbird.ViewerScope.Mask.init -> void
+Logbird.ViewerScope.Target.get -> Logbird.ViewerScopeTarget?
+Logbird.ViewerScope.Target.init -> void
+Logbird.ViewerScope.TenantId.get -> string!
+Logbird.ViewerScope.ViewerScope(string! tenantId) -> void
+Logbird.ViewerScopeTarget
+Logbird.ViewerScopeTarget.Id.get -> string!
+Logbird.ViewerScopeTarget.Type.get -> string!
+Logbird.ViewerScopeTarget.ViewerScopeTarget(string! type, string! id) -> void
+Logbird.ViewerToken
+Logbird.ViewerToken.ExpiresAt.get -> System.DateTimeOffset
+Logbird.ViewerToken.Scope.get -> Logbird.ViewerScope!
+Logbird.ViewerToken.Token.get -> string!
+Logbird.WebhookFailure
+Logbird.WebhookFailure.InvalidPayload = 4 -> Logbird.WebhookFailure
+Logbird.WebhookFailure.InvalidTimestamp = 1 -> Logbird.WebhookFailure
+Logbird.WebhookFailure.MissingHeader = 0 -> Logbird.WebhookFailure
+Logbird.WebhookFailure.NoMatchingSignature = 3 -> Logbird.WebhookFailure
+Logbird.WebhookFailure.TimestampOutOfTolerance = 2 -> Logbird.WebhookFailure
+Logbird.WebhookHeaders
+Logbird.WebhookVerificationException
+Logbird.WebhookVerificationException.Reason.get -> Logbird.WebhookFailure
+Logbird.WebhookVerificationException.WebhookVerificationException(Logbird.WebhookFailure reason) -> void
+Logbird.WebhookVerifier
+Logbird.WebhookVerifier.Verify(byte[]! payload, string? webhookId, string? webhookTimestamp, string? webhookSignature, System.DateTimeOffset? now = null) -> System.Text.Json.JsonElement
+Logbird.WebhookVerifier.Verify(string! payload, System.Func<string!, string?>! getHeader, System.DateTimeOffset? now = null) -> System.Text.Json.JsonElement
+Logbird.WebhookVerifier.Verify(string! payload, string? webhookId, string? webhookTimestamp, string? webhookSignature, System.DateTimeOffset? now = null) -> System.Text.Json.JsonElement
+Logbird.WebhookVerifier.WebhookVerifier(System.Collections.Generic.IEnumerable<string!>! secrets, System.TimeSpan? tolerance = null) -> void
+Logbird.WebhookVerifier.WebhookVerifier(string! secret, System.TimeSpan? tolerance = null) -> void
+const Logbird.AuditOutcome.Denied = "denied" -> string!
+const Logbird.AuditOutcome.Failure = "failure" -> string!
+const Logbird.AuditOutcome.Partial = "partial" -> string!
+const Logbird.AuditOutcome.Success = "success" -> string!
+const Logbird.AuditOutcome.Unknown = "unknown" -> string!
+const Logbird.AuditSeverity.Critical = "critical" -> string!
+const Logbird.AuditSeverity.Info = "info" -> string!
+const Logbird.AuditSeverity.Notice = "notice" -> string!
+const Logbird.AuditSeverity.Warning = "warning" -> string!
+const Logbird.Redactor.DefaultReplacement = "[redacted]" -> string!
+const Logbird.WebhookHeaders.Id = "webhook-id" -> string!
+const Logbird.WebhookHeaders.Signature = "webhook-signature" -> string!
+const Logbird.WebhookHeaders.Timestamp = "webhook-timestamp" -> string!
+override Logbird.AuditActor.Equals(object? obj) -> bool
+override Logbird.AuditActor.GetHashCode() -> int
+override Logbird.AuditActor.ToString() -> string!
+override Logbird.AuditExecutor.Equals(object? obj) -> bool
+override Logbird.AuditExecutor.GetHashCode() -> int
+override Logbird.AuditExecutor.ToString() -> string!
+override Logbird.AuditImpersonator.Equals(object? obj) -> bool
+override Logbird.AuditImpersonator.GetHashCode() -> int
+override Logbird.AuditImpersonator.ToString() -> string!
+override Logbird.AuditTarget.Equals(object? obj) -> bool
+override Logbird.AuditTarget.GetHashCode() -> int
+override Logbird.AuditTarget.ToString() -> string!
+override Logbird.AuditTenant.Equals(object? obj) -> bool
+override Logbird.AuditTenant.GetHashCode() -> int
+override Logbird.AuditTenant.ToString() -> string!
+override Logbird.EventSearch.Equals(object? obj) -> bool
+override Logbird.EventSearch.GetHashCode() -> int
+override Logbird.EventSearch.ToString() -> string!
+override Logbird.LogbirdStats.ToString() -> string!
+override Logbird.StoredChange.Equals(object? obj) -> bool
+override Logbird.StoredChange.GetHashCode() -> int
+override Logbird.StoredChange.ToString() -> string!
+override Logbird.ViewerScope.ToString() -> string!
+override Logbird.ViewerToken.ToString() -> string!
+static Logbird.AuditActor.ApiKey(string! id, string? name = null) -> Logbird.AuditActor!
+static Logbird.AuditActor.Service(string! id, string? name = null) -> Logbird.AuditActor!
+static Logbird.AuditActor.System(string! id, string? name = null) -> Logbird.AuditActor!
+static Logbird.AuditActor.User(string! id, string? name = null, string? email = null) -> Logbird.AuditActor!
+static Logbird.AuditActor.operator !=(Logbird.AuditActor? left, Logbird.AuditActor? right) -> bool
+static Logbird.AuditActor.operator ==(Logbird.AuditActor? left, Logbird.AuditActor? right) -> bool
+static Logbird.AuditChange.Removed(string! field, System.Text.Json.Nodes.JsonNode? before) -> Logbird.AuditChange!
+static Logbird.AuditChange.Secret(string! field) -> Logbird.AuditChange!
+static Logbird.AuditChange.Set(string! field, System.Text.Json.Nodes.JsonNode? after) -> Logbird.AuditChange!
+static Logbird.AuditExecutor.Api(string? id = null, string? name = null) -> Logbird.AuditExecutor!
+static Logbird.AuditExecutor.Worker(string! id, string? jobId = null, int? attempt = null, string? name = null) -> Logbird.AuditExecutor!
+static Logbird.AuditExecutor.operator !=(Logbird.AuditExecutor? left, Logbird.AuditExecutor? right) -> bool
+static Logbird.AuditExecutor.operator ==(Logbird.AuditExecutor? left, Logbird.AuditExecutor? right) -> bool
+static Logbird.AuditImpersonator.operator !=(Logbird.AuditImpersonator? left, Logbird.AuditImpersonator? right) -> bool
+static Logbird.AuditImpersonator.operator ==(Logbird.AuditImpersonator? left, Logbird.AuditImpersonator? right) -> bool
+static Logbird.AuditTarget.operator !=(Logbird.AuditTarget? left, Logbird.AuditTarget? right) -> bool
+static Logbird.AuditTarget.operator ==(Logbird.AuditTarget? left, Logbird.AuditTarget? right) -> bool
+static Logbird.AuditTenant.operator !=(Logbird.AuditTenant? left, Logbird.AuditTenant? right) -> bool
+static Logbird.AuditTenant.operator ==(Logbird.AuditTenant? left, Logbird.AuditTenant? right) -> bool
+static Logbird.EventSearch.ForTrail(string? targetId = null, string? actorId = null, string? tenantId = null, string? query = null, System.DateTimeOffset? from = null, System.DateTimeOffset? to = null, int? limit = null, string? cursor = null, string? targetType = null) -> Logbird.EventSearch!
+static Logbird.EventSearch.ForTrail(string? targetId, string? actorId, string? tenantId, string? query, System.DateTimeOffset? from, System.DateTimeOffset? to, int? limit, string? cursor) -> Logbird.EventSearch!
+static Logbird.EventSearch.Quote(string! value) -> string!
+static Logbird.EventSearch.operator !=(Logbird.EventSearch? left, Logbird.EventSearch? right) -> bool
+static Logbird.EventSearch.operator ==(Logbird.EventSearch? left, Logbird.EventSearch? right) -> bool
+static Logbird.LogbirdClient.NewEventId() -> string!
+static Logbird.LogbirdClient.Version.get -> string!
+static Logbird.LogbirdClientExtensions.Flush(this Logbird.ILogbirdClient! client, System.TimeSpan timeout) -> bool
+static Logbird.LogbirdClientExtensions.FlushAsync(this Logbird.ILogbirdClient! client, System.TimeSpan timeout) -> System.Threading.Tasks.Task<bool>!
+static Logbird.Redactor.IdentifierFields.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static Logbird.StoredChange.operator !=(Logbird.StoredChange? left, Logbird.StoredChange? right) -> bool
+static Logbird.StoredChange.operator ==(Logbird.StoredChange? left, Logbird.StoredChange? right) -> bool
+static Logbird.WebhookVerifier.GenerateSecret() -> string!
+static Logbird.WebhookVerifier.Sign(string! id, long timestamp, string! payload, params string![]! secrets) -> string!
+static readonly Logbird.Redactor.DefaultSecretKeys -> System.Text.RegularExpressions.Regex!

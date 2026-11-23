@@ -157,18 +157,23 @@ public class IngestRoundTripTests(ITestOutputHelper output)
             client.Track(new AuditEvent("rejection.conflict") { Id = conflictId, Context = { OperationId = operation } });
             client.Track(new AuditEvent("rejection.sibling") { Context = { OperationId = operation } }.Target("record", "after"));
             Assert.True(await client.FlushAsync());
-            Assert.Equal(new LogbirdStats(5, 3, 2, 0, 0, 0, 0), client.Stats);
+            var stats = client.Stats;
+            Assert.Equal((5L, 3L, 2L, 0L, 0L, 0L, 0, 0L), (stats.Tracked, stats.Delivered, stats.Rejected, stats.Dropped, stats.Filtered, stats.FailedSends, stats.QueueLength, stats.Warnings));
         }
 
         Assert.Equal(["rejection.bad-id", "rejection.conflict"], drops.Select(d => d.Action).OrderBy(a => a, StringComparer.Ordinal));
         Assert.All(drops, d => Assert.Equal(DropReason.Rejected, d.Reason));
         Assert.Contains(drops, d => d.Detail!.StartsWith("duplicate_id_conflict", StringComparison.Ordinal));
+
+        // The server's own code reaches the drop.
+        Assert.Contains(drops, d => d.Action == "rejection.conflict" && d.Code == "duplicate_id_conflict");
+        Assert.Contains(drops, d => d.Action == "rejection.bad-id" && d.Code == "invalid_event_id");
         using var reader = LiveServer.Reader();
         Assert.Equal(3, await LiveServer.CountAsync(reader, $"operation:\"{operation}\"", 3));
         Assert.Equal("rejection.original", (await LiveServer.WaitForEventAsync(reader, conflictId)).Event.Action);
         foreach (var drop in drops)
         {
-            output.WriteLine($"{drop.Action}: {drop.Detail}");
+            output.WriteLine($"{drop.Action}: code {drop.Code}; {drop.Detail}");
         }
     }
 
@@ -285,11 +290,26 @@ public class IngestRoundTripTests(ITestOutputHelper output)
     }
 
     [LiveFact]
-    public async Task Identifiers_are_sent_exactly_and_whitespace_is_reported()
+    public async Task Identifiers_are_sent_exactly_and_the_server_decides()
     {
-        var id = LogbirdClient.NewEventId();
+        // Every kind of identifier the SDK used to refuse, plus surrounding whitespace. The SDK sends each exactly as given
+        // and warns; the server stores it (Logbird up to 0.2.x, indexing a repaired copy) or rejects it (a server with the
+        // exact-identifier rule), and a rejection is the drop with the server's code. Nothing is refused by the SDK.
+        var backslash = ((char)92).ToString();
+        var lone = "user" + ((char)0xD800).ToString() + "x";
+        var kinds = new (string Kind, AuditEvent Event, string Field)[]
+        {
+            ("whitespace", new AuditEvent("identity.whitespace") { Actor = AuditActor.User(" user_42 ") }, "actor.id"),
+            ("long-actor", new AuditEvent("identity.long-actor") { Actor = AuditActor.User(new string('u', 300)) }, "actor.id"),
+            ("long-tenant", new AuditEvent("identity.long-tenant") { Tenant = new AuditTenant(new string('t', 257)) }, "tenant.id"),
+            ("long-target-type", new AuditEvent("identity.long-target-type").Target(new string('y', 65), "r1"), "targets[0].type"),
+            ("long-target-id", new AuditEvent("identity.long-target-id").Target("record", new string('z', 257)), "targets[0].id"),
+            ("lone-surrogate", new AuditEvent("identity.lone-surrogate") { Actor = AuditActor.User(lone) }, "actor.id"),
+            ("targets-300", Many(300), "300 targets"),
+        };
         var warnings = new ConcurrentQueue<LogbirdEventWarning>();
         var drops = new ConcurrentQueue<DroppedEvent>();
+        var ids = new Dictionary<string, string>();
         await using (var client = new LogbirdClient(LiveServer.Options(o =>
         {
             o.OnError = e =>
@@ -302,22 +322,115 @@ public class IngestRoundTripTests(ITestOutputHelper output)
             o.OnDrop = drops.Enqueue;
         })))
         {
-            client.Track(new AuditEvent("identity.checked") { Id = id, Actor = AuditActor.User(" user_42 ") }.Target("invoice", "inv_1"));
-            client.Track(new AuditEvent("identity.too-long") { Actor = AuditActor.User(new string('u', 257)) });
+            foreach (var (kind, auditEvent, _) in kinds)
+            {
+                auditEvent.Id = LogbirdClient.NewEventId();
+                ids[kind] = auditEvent.Id;
+                client.Track(auditEvent);
+            }
+
             Assert.True(await client.FlushAsync());
         }
 
-        Assert.Contains(warnings, w => w.EventId == id && w.Reason.Contains("actor.id"));
-        Assert.Equal(DropReason.InvalidEntityId, Assert.Single(drops).Reason);
+        var version = await LiveServer.ServerVersionAsync();
+        output.WriteLine($"server {version}");
+
+        // Logbird up to 0.2.x stores every one of these and indexes a repaired copy; a later server may reject them.
+        var repairs = version < new Version(0, 3);
+
+        // The SDK refused nothing: any drop is the server's own rejection, with its code.
+        Assert.All(drops, d => Assert.Equal(DropReason.Rejected, d.Reason));
         using var reader = LiveServer.Reader();
-        var stored = await LiveServer.WaitForEventAsync(reader, id);
-        output.WriteLine($"server {await LiveServer.ServerVersionAsync()} stored actor id \"{stored.Event.Actor?.Id}\"; warnings: {string.Join(" | ", warnings.Select(w => w.Reason))}");
+        foreach (var (kind, auditEvent, field) in kinds)
+        {
+            var id = ids[kind];
+            var warned = warnings.Where(w => w.EventId == id).Select(w => w.Reason).ToArray();
+            Assert.Contains(warned, r => r.Contains(kind == "targets-300" ? "the event has 300 targets" : field, StringComparison.Ordinal));
+            var rejected = drops.FirstOrDefault(d => d.Id == id);
+            if (rejected is not null)
+            {
+                Assert.False(repairs, $"Logbird {version} stores this kind of identifier, but it rejected {kind}");
+                Assert.Equal("invalid_entity_id", rejected.Code);
+                output.WriteLine($"{kind}: rejected by the server, code {rejected.Code}; SDK warning: {warned[0]}");
+                continue;
+            }
+
+            var stored = await LiveServer.WaitForEventAsync(reader, id);
+            var payload = stored.Payload;
+            string sent;
+            string indexed;
+            switch (kind)
+            {
+                case "long-tenant":
+                    sent = Describe(payload.GetProperty("tenant").GetProperty("id").GetString());
+                    indexed = Describe(stored.Event.Tenant?.Id);
+                    Assert.Equal(auditEvent.Tenant!.Id, payload.GetProperty("tenant").GetProperty("id").GetString());
+                    Assert.True(!repairs || stored.Event.Tenant?.Id == new string('t', 256), $"{kind}: indexed {indexed}");
+                    break;
+                case "long-target-type":
+                    sent = Describe(payload.GetProperty("targets")[0].GetProperty("type").GetString());
+                    indexed = Describe(stored.Event.Targets.Count > 0 ? stored.Event.Targets[0].Type : null);
+                    Assert.Equal(auditEvent.Targets[0].Type, payload.GetProperty("targets")[0].GetProperty("type").GetString());
+                    Assert.True(!repairs || stored.Event.Targets[0].Type == new string('y', 64), $"{kind}: indexed {indexed}");
+                    break;
+                case "long-target-id":
+                    sent = Describe(payload.GetProperty("targets")[0].GetProperty("id").GetString());
+                    indexed = Describe(stored.Event.Targets.Count > 0 ? stored.Event.Targets[0].Id : null);
+                    Assert.Equal(auditEvent.Targets[0].Id, payload.GetProperty("targets")[0].GetProperty("id").GetString());
+                    Assert.True(!repairs || stored.Event.Targets[0].Id == new string('z', 256), $"{kind}: indexed {indexed}");
+                    break;
+                case "targets-300":
+                    sent = payload.GetProperty("targets").GetArrayLength() + " targets";
+                    indexed = stored.Event.Targets.Count + " targets";
+                    Assert.Equal(300, payload.GetProperty("targets").GetArrayLength());
+                    Assert.True(!repairs || stored.Event.Targets.Count == 64, $"{kind}: indexed {indexed}");
+                    break;
+                case "lone-surrogate":
+                    // The payload keeps the lone surrogate: JSON.stringify writes it as an escape.
+                    sent = payload.GetProperty("actor").GetProperty("id").GetRawText();
+                    indexed = Describe(stored.Event.Actor?.Id);
+                    Assert.Equal("\"user" + backslash + "ud800x\"", sent);
+                    Assert.True(!repairs || stored.Event.Actor?.Id == "user" + ((char)0xFFFD).ToString() + "x", $"{kind}: indexed {indexed}");
+                    break;
+                case "long-actor":
+                    sent = Describe(payload.GetProperty("actor").GetProperty("id").GetString());
+                    indexed = Describe(stored.Event.Actor?.Id);
+                    Assert.Equal(auditEvent.Actor!.Id, payload.GetProperty("actor").GetProperty("id").GetString());
+                    Assert.True(!repairs || stored.Event.Actor?.Id == new string('u', 256), $"{kind}: indexed {indexed}");
+                    break;
+                default:
+                    sent = Describe(payload.GetProperty("actor").GetProperty("id").GetString());
+                    indexed = Describe(stored.Event.Actor?.Id);
+                    Assert.Equal(auditEvent.Actor!.Id, payload.GetProperty("actor").GetProperty("id").GetString());
+                    Assert.True(!repairs || stored.Event.Actor?.Id == "user_42", $"{kind}: indexed {indexed}");
+                    break;
+            }
+
+            output.WriteLine($"{kind}: stored; payload {sent}; indexed {indexed}; SDK warning: {warned[0]}");
+        }
 
         // Opt-in until the server's exact-identifier rule ships: Logbird up to 0.2.x indexes the id trimmed (issue #269).
-        if (Environment.GetEnvironmentVariable("LOGBIRD_IT_ENTITY_IDS") == "1")
+        if (Environment.GetEnvironmentVariable("LOGBIRD_IT_ENTITY_IDS") == "1" && !drops.Any(d => d.Id == ids["whitespace"]))
         {
+            var stored = await LiveServer.WaitForEventAsync(reader, ids["whitespace"]);
             Assert.Equal(" user_42 ", stored.Event.Actor?.Id);
         }
+
+        static AuditEvent Many(int count)
+        {
+            var e = new AuditEvent("identity.targets-300");
+            for (var i = 0; i < count; i++)
+            {
+                e.Target("record", "r" + i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            return e;
+        }
+
+        static string Describe(string? value)
+            => value is null ? "(none)"
+                : value.Length > 24 ? $"{value.Length} code units, starting \"{value.Substring(0, 8)}\""
+                : "\"" + value.Replace(((char)0xFFFD).ToString(), "U+FFFD", StringComparison.Ordinal) + "\"";
     }
 
     [LiveFact(requires: "LOGBIRD_IT_LOAD")]

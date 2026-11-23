@@ -66,6 +66,49 @@ export function entityQuery(kind: EntityKind, id: string, targetType?: string): 
 }
 
 /**
+ * Whether a profile's all-time count is mentions rather than events. The server reads a record's count from the rollup
+ * when its id holds one colon, and the rollup counts each time an event names the record (twice if it lists it twice);
+ * with more colons it counts the events themselves (`ambiguousTarget` in packages/clickhouse/src/queries.ts).
+ */
+export function countsMentions(kind: EntityKind, id: string): boolean {
+  return kind === 'target' && id.indexOf(':') === id.lastIndexOf(':');
+}
+
+/** The record type to look a record up by: the link's, when it belongs to the id, else the only one a one-colon id has. */
+export function lookupType(kind: EntityKind, id: string, linkedType: string | undefined): string | undefined {
+  if (kind !== 'target') return undefined;
+  if (linkedType !== undefined && id.startsWith(`${linkedType}:`)) return linkedType;
+  return countsMentions(kind, id) ? id.slice(0, id.indexOf(':')) : undefined;
+}
+
+type SeenBounds = { firstSeen: string; lastSeen: string };
+
+/**
+ * The default history window: the union of every source that has answered (the directory's quick first and last seen,
+ * the profile's). The first to answer starts the history at once; a later one can only widen it, so the history never
+ * leaves out an event the page reports (a late-arriving older event, a directory read cached before it). Null until one
+ * answers.
+ */
+export function historyBounds(...sources: (SeenBounds | null | undefined)[]): SeenBounds | null {
+  const known = sources.filter((s): s is SeenBounds => Boolean(s));
+  if (!known.length) return null;
+  const earliest = known.reduce((a, b) => (Date.parse(b.firstSeen) < Date.parse(a.firstSeen) ? b : a));
+  const latest = known.reduce((a, b) => (Date.parse(b.lastSeen) > Date.parse(a.lastSeen) ? b : a));
+  return { firstSeen: earliest.firstSeen, lastSeen: latest.lastSeen };
+}
+
+/**
+ * The filter an entity page's history runs under, or '' while it is not known yet. A record's filter needs its type: a
+ * link that carries the exact pair (`?targetType=`, consistent with the id) already has it, so the history starts at
+ * once; otherwise it comes with the profile (#220). Other entities never wait.
+ */
+export function entityBaseQuery(kind: EntityKind, id: string, linkedType: string | undefined, profileType: string | undefined): string {
+  if (kind !== 'target') return entityQuery(kind, id);
+  const type = linkedType !== undefined && id.startsWith(`${linkedType}:`) ? linkedType : profileType;
+  return type === undefined ? '' : entityQuery(kind, id, type);
+}
+
+/**
  * How well an entity matches what was typed, best first, the same order the server ranks a search by: 0 the exact id
  * as typed, 1 the id in another case, 2 id prefix, 3 name prefix, 4 id or name contains it, 5 a fuzzy match only. A record's bare id (`article_27_2` for
  * `article:article_27_2`) counts as its id.

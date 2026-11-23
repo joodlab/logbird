@@ -4,6 +4,8 @@ description: Notes on building an open-source audit log: design decisions, guara
 path: /blog
 ---
 
+Page text renders from `apps/web/src/content/blog.ts` (the index) and `apps/web/src/content/blog-post.ts` (a post's frame; a post's own words are its entry in `apps/web/src/lib/publications.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Blog
 
 ## index-intro

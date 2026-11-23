@@ -4,6 +4,8 @@ description: Search every event, follow actors, tenants, workers and records, an
 path: /product
 ---
 
+Page text renders from `apps/web/src/content/product.ts` (the roadmap section from `apps/web/src/content/roadmap.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Product tour
 
 ## intro
@@ -190,7 +192,7 @@ path: /product
   <!-- source: docs/SPEC.md §1.4, §4, §5 retention preview, §6 (retentionDays=90), §7.1; packages/contracts/src/api.ts RETENTION_OPTIONS -->
 - **limit line:** Retention deletes are permanent. There's no archive and no undo. The count can change
   between preview and deletion.
-- **visual:** `marketing/media/staydesk/retention-light.webp` (manifest id `retention`: the 30-day preview; nothing was confirmed).
+- **visual:** `marketing/media/staydesk/retention-light.webp` (manifest id `retention`, light and dark: the current window, the policies and the purge status).
 
 ## workspace-activity
 

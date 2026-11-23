@@ -1,3 +1,5 @@
+import { Maximize2Icon } from 'lucide-react';
+import { shared } from '../../content/shared';
 import { cx as cn } from '../../lib/cx';
 import { Clip } from '../clip';
 import { Screenshot } from '../screenshot';
@@ -9,6 +11,8 @@ export function ScreenshotFrame({
   sizes = '(min-width: 1152px) 1104px, calc(100vw - 2rem)',
   className,
   label,
+  zoomLabel,
+  priority,
 }: {
   id: string;
   caption?: string;
@@ -16,6 +20,10 @@ export function ScreenshotFrame({
   className?: string;
   /** Text in the window bar, e.g. the console page shown. */
   label?: string;
+  /** Makes the image open full size (its accessible name); for detailed captures that are small on a phone. */
+  zoomLabel?: string;
+  /** The page's largest image above the fold (see Screenshot). */
+  priority?: boolean;
 }) {
   return (
     <figure className={cn('flex flex-col gap-3', className)}>
@@ -25,8 +33,14 @@ export function ScreenshotFrame({
           <i />
           <i />
           {label ? <span className="ms-2 truncate font-mono text-[11px] text-muted-foreground">{label}</span> : null}
+          {zoomLabel ? (
+            <span className="ms-auto inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+              <Maximize2Icon aria-hidden="true" className="size-3" />
+              {shared.fullSizeHint}
+            </span>
+          ) : null}
         </div>
-        <Screenshot id={id} sizes={sizes} />
+        <Screenshot id={id} priority={priority} sizes={sizes} zoomLabel={zoomLabel} />
       </div>
       {caption ? <figcaption className="text-muted-foreground text-sm">{caption}</figcaption> : null}
     </figure>

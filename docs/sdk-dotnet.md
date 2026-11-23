@@ -153,7 +153,8 @@ Audit logging never takes your application down with it:
   loop sends batches every second.
 - **Failures are retried** with backoff (network errors, 429, 5xx). Each retried event keeps its exact bytes and id, so
   the server never stores an event twice.
-- **The queue is bounded** (`MaxQueueSize`, 10,000 events by default). If Logbird stays unreachable long enough to fill
+- **The queue is bounded** (`MaxQueueSize`, 10,000 events by default, counting the events waiting to be sent; the batch
+  being sent comes on top, and `Stats.QueueLength` counts both). If Logbird stays unreachable long enough to fill
   it, the oldest events are dropped and each drop is reported.
 - **Every event the running client gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`,
   `Rejected`, `Shutdown`, …): rejections by the server on the `logbird.events.rejected` counter, everything else on
@@ -190,7 +191,7 @@ the same id and content and you can confirm it by the id you stored.
 
 `Track` only queues an event, and a successful `FlushAsync` means each event was stored *or* given up on, so neither
 proves an event was stored. Keep each outbox row until you have confirmed its event, for example by reading it back by
-id with `LogbirdReadClient.GetAsync`, and resend it, exactly as stored, until then. Resending an event the server
+id with `LogbirdReadClient.GetEventAsync`, and resend it, exactly as stored, until then. Resending an event the server
 still holds is always safe (an exact retry), but do not resend rows older than the project's retention period: once
 retention has deleted an event, a resend would store it again. Decide yourself what happens to a row that is never
 confirmed (for example alert and keep it); Logbird cannot make that choice for you.

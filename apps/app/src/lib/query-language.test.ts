@@ -11,6 +11,7 @@ import {
   highlightQuery,
   includeTerm,
   markErrorSpan,
+  neighbourSafeInsert,
   queryCompletionAt,
   removeTerm,
   type Segment,
@@ -457,5 +458,70 @@ describe('formatTerm', () => {
     const compiled = compileQuery(formatTerm('parent', id));
     expect(compiled.params).toEqual({ q0: id });
     expect(compiled.sql).toBe('(parent_event_id = {q0:String})');
+  });
+});
+
+describe('a dash negates where the server says it does (#220)', () => {
+  const fields = (q: string) =>
+    tokenize(q)
+      .filter((t) => t.kind !== 'space')
+      .map((t) => `${t.kind}:${t.field ?? t.raw}:${t.negated}`);
+  it('right after `)` the dash is part of the field name', () => {
+    expect(fields('(outcome:failure)-action:booked')).toEqual(['paren:(:false', 'field:outcome:false', 'paren:):false', 'field:-action:false']);
+    expect(compileQuery('(outcome:failure)-action:booked').params).toMatchObject({ q1: '-action' });
+  });
+  it('at the start, after a space or after `(` it is NOT', () => {
+    expect(fields('-action:x (-action:y) a:b -action:z')).toEqual([
+      'field:action:true',
+      'paren:(:false',
+      'field:action:true',
+      'paren:):false',
+      'field:a:false',
+      'field:action:true',
+    ]);
+    expect(fields('a:b)-(c:d)').slice(0, 3)).toEqual(['field:a:false', 'paren:):false', 'text:-:false']);
+  });
+});
+
+describe('neighbourSafeInsert (accepting a completion changes only its own term)', () => {
+  it('takes a first term in an empty or blank bar', () => {
+    expect(neighbourSafeInsert('', 0, 0, 'action:', 7)).toBe('action:');
+    expect(neighbourSafeInsert('  ', 2, 2, 'action:', 7)).toBe('action:');
+  });
+
+  it('keeps a range template as a template, never quoted', () => {
+    expect(neighbourSafeInsert('attempt:2', 8, 9, '[ TO ]', 1, false, false)).toBe('[ TO ]');
+    expect(neighbourSafeInsert('attempt:2 tenant:west', 8, 9, '[ TO ]', 1, false, false)).toBe('[ TO ]');
+  });
+
+  it('keeps the space after an operator the reader chose', () => {
+    expect(neighbourSafeInsert('action:booked ', 14, 14, 'OR ', 3, false, false)).toBe('OR ');
+  });
+
+  it('never glues a completion onto an operator: it goes after a space, or not at all', () => {
+    // `one ANDimpersonator:*` would be a field named `ANDimpersonator`; `one ORNOT two` would lose the OR.
+    expect(neighbourSafeInsert('one AND two', 7, 7, 'impersonator:*', 14)).toBe(' impersonator:*');
+    expect(neighbourSafeInsert('one OR', 6, 6, 'NOT ', 4, false, false)).toBe(' NOT ');
+    // Right before `two`, NOT would negate it: declined.
+    expect(neighbourSafeInsert('one OR two', 6, 6, 'NOT ', 4, false, false)).toBeNull();
+  });
+
+  it('checks the neighbours even when the rest of the query cannot be finished yet', () => {
+    // `attempt:[` cannot be finished by a word; the text before it is checked: `booked` unquoted would turn the
+    // attribute `-tenant` into NOT tenant.
+    expect(neighbourSafeInsert('action:"b"-tenant:west attempt:[', 7, 10, 'booked ', 7, true)).toBe('"booked"');
+  });
+
+  it('checks the neighbours inside groups still open, and declines what it cannot check', () => {
+    // `((action:"b"-tenant:west` closes with `))`: unquoted, `booked` would turn the field `-tenant` into NOT tenant.
+    expect(neighbourSafeInsert('((action:"b"-tenant:west', 9, 12, 'booked ', 7, true)).toBe('"booked"');
+    expect(neighbourSafeInsert('one OR', 6, 6, 'actor:', 6)).toBe(' actor:');
+    // Up to the parser's 16 levels of groups are closed for the check; nine open groups keep the OR after a space.
+    expect(neighbourSafeInsert('(((((((((one OR', 15, 15, 'actor:', 6)).toBe(' actor:');
+  });
+
+  it('refuses a key that would take the next term as its value', () => {
+    expect(neighbourSafeInsert('action:booked', 0, 0, 'outcome:', 8)).toBeNull();
+    expect(neighbourSafeInsert('fixed in #290', 6, 8, 'impersonator:', 13)).toBeNull();
   });
 });

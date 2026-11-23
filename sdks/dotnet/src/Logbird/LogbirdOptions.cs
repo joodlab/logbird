@@ -59,7 +59,9 @@ public sealed class LogbirdOptions
 
     /// <summary>
     /// The most events held in memory while waiting to be sent. Defaults to 10,000. When it is full,
-    /// <see cref="QueueFullBehavior"/> decides which event is dropped; <c>Track</c> never blocks or throws.
+    /// <see cref="QueueFullBehavior"/> decides which event is dropped; <c>Track</c> never blocks or throws. The batch
+    /// being sent comes on top (up to <see cref="BatchSize"/> more events), and <see cref="LogbirdStats.QueueLength"/>
+    /// counts both.
     /// </summary>
     public int MaxQueueSize { get; set; } = 10_000;
 
@@ -79,8 +81,10 @@ public sealed class LogbirdOptions
     public Action<Exception>? OnError { get; set; }
 
     /// <summary>
-    /// Called once for every event that will not be stored: queue overflow, a server rejection, a permanent HTTP error,
-    /// an oversized or invalid event, or shutdown. The <see cref="DroppedEvent.Json"/> lets you save it for replay; do not
+    /// Called once for every event the SDK stops trying to deliver: queue overflow, a server rejection, a permanent HTTP
+    /// error, an oversized or invalid event, an unacknowledged event, or shutdown. Such an event may still have been
+    /// stored if a request carrying it lost its answer: see <see cref="DroppedEvent.MayBeStored"/>, and resend it with the
+    /// same id when in doubt (the server deduplicates). The <see cref="DroppedEvent.Json"/> lets you save it for replay; do not
     /// log it if it may contain personal data. Callbacks run in order on a background thread, never on the thread that
     /// called <c>Track</c>; if they fall more than <see cref="MaxQueueSize"/> (at least 1,000) notifications behind,
     /// further notifications are skipped and counted on the <c>logbird.notifications.lost</c> meter, while

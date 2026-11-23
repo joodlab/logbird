@@ -18,10 +18,10 @@ import {
   sqlSignature,
   TYPE_BADGE,
 } from '@/lib/query-catalog';
-import { formatTerm, type QueryCompletion, queryCompletionAt, quoteIfNeeded } from '@/lib/query-language';
+import { formatField, formatTerm, type QueryCompletion, queryCompletionAt, quoteIfNeeded } from '@/lib/query-language';
 import { lintQuery, type QueryFix } from '@/lib/query-lint';
 import type { RecentQuery } from '@/lib/recent-queries';
-import { type SqlCompletion, sqlCallAt, sqlCompletionAt } from '@/lib/sql-language';
+import { type SqlCompletion, sqlCallAt, sqlCompletionAt, sqlLiteralBody } from '@/lib/sql-language';
 import { type Hint, queryHint, sqlHint } from './hints';
 
 export type SuggestionKind = 'key' | 'term' | 'value' | 'snippet' | 'column' | 'function' | 'keyword' | 'attr' | 'recent' | 'view' | 'fix';
@@ -132,7 +132,7 @@ function bestScore(scores: number[]): number {
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 const daysAgo = (n: number) => isoDay(new Date(Date.now() - n * 86_400_000));
-const escapeSql = (v: string) => v.replace(/[\\']/g, '\\$&');
+const escapeSql = sqlLiteralBody;
 const coverageLabel = (c: number) => (c >= 0.995 ? '100%' : c >= 0.01 ? `${Math.round(c * 100)}%` : c > 0 ? '<1%' : undefined);
 
 export function ageLabel(at: number, now = Date.now()): string {
@@ -338,7 +338,7 @@ export function useCompletions({
   ]);
 }
 
-interface Input {
+export interface CompletionInput {
   draft: string;
   caret: number;
   lang: QueryLang;
@@ -361,7 +361,7 @@ interface Input {
 /* Shared groups                                                       */
 /* ------------------------------------------------------------------ */
 
-function recentItems({ draft, recent }: Input, limit: number, filter?: string): Suggestion[] {
+function recentItems({ draft, recent }: CompletionInput, limit: number, filter?: string): Suggestion[] {
   const f = filter?.toLowerCase();
   return recent
     .filter((r) => !f || (r.q.toLowerCase().includes(f) && r.q !== draft))
@@ -381,7 +381,7 @@ function recentItems({ draft, recent }: Input, limit: number, filter?: string): 
     }));
 }
 
-function viewItems({ draft, views }: Input, limit: number): Suggestion[] {
+function viewItems({ draft, views }: CompletionInput, limit: number): Suggestion[] {
   return views.slice(0, limit).map((v) => ({
     id: `view:${v.id}`,
     kind: 'view' as const,
@@ -397,7 +397,7 @@ function viewItems({ draft, views }: Input, limit: number): Suggestion[] {
   }));
 }
 
-function fixItems({ fixes, caret, draft }: Input): Suggestion[] {
+function fixItems({ fixes, caret, draft }: CompletionInput): Suggestion[] {
   // The fix under (or right before) the caret first; one is enough to make the point.
   const near = fixes.find((f) => caret >= f.start && caret <= f.end) ?? (draft.trim() ? undefined : fixes[0]);
   if (!near) return [];
@@ -430,17 +430,19 @@ const OPERATOR_ROWS: { op: string; detail: string; insert?: string; back?: numbe
   { op: '( )', detail: 'Group terms: (a OR b) c', insert: '()', back: 1 },
 ];
 
-function keyItem(
+/** One field-name suggestion (exported for tests of what it inserts). */
+export function keyItem(
   key: string,
   spec: Pick<Suggestion, 'id' | 'kind' | 'badge' | 'detail' | 'meta' | 'group'>,
   c: { from: number; to: number },
 ): Suggestion {
   // Re-keying an existing term (`act|or:usr_1`) replaces through its colon, so the value is kept.
-  const insert = `${key}:`;
+  // A key that is not a plain name (`ticket status`) is quoted, as the server reads it.
+  const insert = `${formatField(key)}:`;
   return { ...spec, label: key, from: c.from, to: c.to, insert, caret: c.from + insert.length, keepOpen: true };
 }
 
-function fieldItems(input: Input, p: string, c: { from: number; to: number }, typedAttr?: string): Suggestion[] {
+function fieldItems(input: CompletionInput, p: string, c: { from: number; to: number }, typedAttr?: string): Suggestion[] {
   const { attributes, coverage } = input;
   const covered = (f: QueryKeySpec) => coverage.get(f.key) ?? 0;
   // With no prefix: core fields the project actually uses first (console order), then unused ones.
@@ -473,7 +475,7 @@ function fieldItems(input: Input, p: string, c: { from: number; to: number }, ty
   return [...coreItems, ...attrs];
 }
 
-function querySuggestions(input: Input): Suggestion[] {
+function querySuggestions(input: CompletionInput): Suggestion[] {
   const { draft } = input;
   const context = input.context as QueryCompletion;
   const after = (to: number) => draft.slice(to);
@@ -519,7 +521,10 @@ function querySuggestions(input: Input): Suggestion[] {
     const operators = OPERATOR_ROWS.filter((o) => (context.afterTerm || o.op === 'NOT' || o.op === '-' || o.op === '( )') && !replacesColon)
       .filter((o) => (p ? /^[A-Z]+$/.test(o.op) && o.op.startsWith(p.toUpperCase()) && o.op !== p : true))
       .map((o): Suggestion => {
-        const text = o.insert ?? o.op;
+        // After a term that ends right here (`action:(booked)|`) an operator needs a space before it: a `-` glued to `)`
+        // starts a word, never a NOT.
+        const lead = context.from > 0 && context.from === context.to && !/[\s(]/.test(draft[context.from - 1] ?? '') ? ' ' : '';
+        const text = lead + (o.insert ?? o.op);
         const space = o.insert || /^\s/.test(after(context.to)) ? '' : ' ';
         return {
           id: `op:${o.op}`,
@@ -571,7 +576,7 @@ function querySuggestions(input: Input): Suggestion[] {
     const attrs = ranked(input.attributes, (a) => matchScore(p, a.key), 20).map((a) => attributeQueryKey(a.key));
     const space = /^\s/.test(after(context.to)) ? '' : ' ';
     return [...keys, ...attrs].map((key) => {
-      const term = `${key}:*`;
+      const term = `${formatField(key)}:*`;
       return {
         id: `ex:${key}`,
         kind: 'term' as const,
@@ -590,14 +595,15 @@ function querySuggestions(input: Input): Suggestion[] {
   return fix;
 }
 
-function queryValueItems(input: Input, context: Extract<QueryCompletion, { kind: 'value' }>): Suggestion[] {
+function queryValueItems(input: CompletionInput, context: Extract<QueryCompletion, { kind: 'value' }>): Suggestion[] {
   const { draft, values, valueField, valuesLoading } = input;
   const after = draft.slice(context.to);
   const p = context.prefix;
   const pl = p.toLowerCase();
   const core = coreField(context.field);
   const type = core?.type ?? 'attr';
-  const bare = !context.op && !context.quoted && !context.inGroup && p === '';
+  // Operators and templates only where no value is typed yet: `attempt:|2` keeps its 2 (`>` there would leave `attempt:>`).
+  const bare = !context.op && !context.quoted && !context.inGroup && p === '' && context.to === context.from;
   const trailing = (keepOpen?: boolean) => (keepOpen || context.inGroup || /^[\s)]/.test(after) ? '' : ' ');
   const valuesGroup = `Values for ${context.field}`;
   const items: Suggestion[] = [];
@@ -751,7 +757,8 @@ const SQL_COMPARE: { op: string; detail: string; insert: string; back?: number }
   { op: 'BETWEEN … AND …', detail: 'Inclusive range', insert: 'BETWEEN ' },
 ];
 
-function sqlSuggestions(input: Input): Suggestion[] {
+/** SQL-mode suggestions for one caret context (exported for tests of what each one inserts). */
+export function sqlSuggestions(input: CompletionInput): Suggestion[] {
   const { attributes, draft, values, valuesLoading } = input;
   const context = input.context as SqlCompletion;
   if (context.kind === 'ident' && draft.trim() === '') {
@@ -884,7 +891,7 @@ function sqlSuggestions(input: Input): Suggestion[] {
   return [];
 }
 
-function sqlIdentItems(input: Input, context: Extract<SqlCompletion, { kind: 'ident' }>): Suggestion[] {
+function sqlIdentItems(input: CompletionInput, context: Extract<SqlCompletion, { kind: 'ident' }>): Suggestion[] {
   const { attributes } = input;
   const p = context.prefix;
   const space = input.call ? '' : ' ';

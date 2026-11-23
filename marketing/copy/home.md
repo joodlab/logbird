@@ -3,6 +3,8 @@ path: /
 module: apps/web/src/content/home.ts
 ---
 
+Page text renders from `apps/web/src/content/home.ts` (the shared calls to action from `apps/web/src/content/shared.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Home: brief
 
 **The words live in the module.** The page renders `apps/web/src/content/home.ts`. The shared calls to action, the header's
@@ -53,11 +55,10 @@ other one.
 
 | Section (module key) | Job | Visual |
 | --- | --- | --- |
-| `hero` | The promise: the two jobs, how events get in, where it runs | The `LogStack` illustration and the curl sample |
-| `explorer` | Show the console, not describe it | `marketing/media/staydesk/explorer-light.webp` (dark pair `explorer-dark.webp`) |
-| `customers` | Job 1: show each customer account its own history, with the limit as its own visible line | `marketing/media/staydesk/tenant-light.webp` |
-| `evidence` | Job 2: what you can show an auditor, each row with where it ends | `marketing/media/staydesk/retention-light.webp` and the limits table |
-| `operators` | Support investigations: one search, entity pages, operation trees | `marketing/media/staydesk/event-sheet-light.webp` |
+| `hero` | The promise: the two jobs, how events get in, where it runs; the real explorer beside it | `explorer-hero-{light,dark}.webp` (phone: `phone-explorer-hero-*`), the explorer with the visible query `explorer.query` (`-actor.type:system`, compiled in `landing-visuals.test.ts`), at high fetch priority with nothing layered over it (maintainer, design pass 2); the curl sample below it. No `LogStack` in the hero. |
+| `customers` | Job 1: show each customer account its own history, with the limit as its own visible line | `tenant-summary-{light,dark}.webp` (a crop of the tenant page: counts and "who did it"), opens full size |
+| `evidence` | Job 2: what you can show an auditor, each row with where it ends | `export-record-{light,dark}.webp`: a real completed evidence export's record in Workspace activity (docs/media/README.md), with "What a match shows" (`evidenceLimits.exportMatch`) beside it; the caption says only what the image shows. Opens full size. Then the limits table. |
+| `operators` | Support investigations: one search, entity pages, operation trees | `event-sheet-{light,dark}.webp`, opens full size |
 | `developers` | One call per action; TypeScript tabs; one sentence for every other stack and .NET | The Route and Worker tabs |
 | `hosting` | Self-host or Cloud, in the current state, with no prices | Two cards |
 | `guarantees` | Delivery, SDK, validation, retention and import promises with their limits | Two-column table |
@@ -82,7 +83,7 @@ Every claim on the page, with its source. Update the source and the module toget
 | The Nuxt proxy denies by default; `authorize()` returns the only forwarded query (`customers.now.points[1]`) | `docs/integrations.md` § Design |
 | `useAuditTrail` loads pages (`loadMore`); headless `AuditTimeline` (`customers.now.points[2]`) | `docs/integrations.md` § Design |
 | A read key reads the whole project, so your backend authorizes (`customers.now.limit`) | `docs/integrations.md` § Design ("A project read key is project-wide; a query filter is not authorization.") |
-| After the proof: viewer tokens of 15 minutes by default, one hour at most; the scope applied outside every query on search, detail, counts and export; scoped keys limited to one customer account's events, optionally to events naming one record, to action prefixes, or both; one tenant per scope, stored ids; the query builders always apply the scope, and ClickHouse also checks the tenant once the restricted query user has its tenant row policy (Compose and Coolify install it on upgrade; source installations run `create-query-user` once); cross-origin browser reads only from the key's listed origins (`customers.scoped`) | `docs/scoped-read-access.md` (§ The scope; § Browser use (CORS): `embedOrigins`); `docs/security.md` § Two enforcement layers; `CHANGELOG.md` 0.2.0 § Upgrading, "Restricted query user"; `CHANGELOG.md` 0.2.0 (release branch) § Scoped read access |
+| After the proof: viewer tokens of 15 minutes by default, one hour at most; the scope applied outside every query on search, detail, counts and export; scoped keys limited to one customer account's events, optionally to events naming one record, to action prefixes, or both (`customers.scoped.points`). The limit shows the first sentence, "One customer account per scope, matched on the id Logbird stored.", and links to /security § Scoped reads for the two layers and the browser origins (`customers.scoped.limit`, `limitLink`; all three sentences live in `content/scoped-read-limits.ts`) | `docs/scoped-read-access.md` (§ The scope; § Browser use (CORS): `embedOrigins`); `docs/security.md` § Two enforcement layers; `CHANGELOG.md` 0.2.0 § Upgrading, "Restricted query user" |
 | Actor, `impersonator`, tenant, records, before and after for up to 256 changes (`evidence.rows[0]`, `operators.screenshot`) | `docs/concepts.md` § Actors; `packages/clickhouse/src/normalize.ts` (`e.changes.slice(0, 256)`: the first 256 are kept, with their before and after values) |
 | Logbird records what your code sends (`evidence.rows[0].limit`) | `docs/SPEC.md` §1 item 2 ("Capture is the client's job") |
 | Retention from 7 days to 10 years; hourly deletion (`evidence.rows[1]`, `guarantees.items[3]`) | `packages/contracts/src/api.ts` `RETENTION_OPTIONS`; `docs/SPEC.md` §1.4, §4 |
