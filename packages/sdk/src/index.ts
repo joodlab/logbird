@@ -407,8 +407,9 @@ const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'imperson
  * The contract: `redact()` is exact for JSON data, which is what `EventInput` types: plain objects, arrays, primitives,
  * and `toJSON` values (such as `Date`) without side effects on other parts of the event. Getters or `toJSON` with side
  * effects on other parts of the event, or anything that changes the event while it is serialized, are outside it. A
- * change whose `field` is not a plain own string (a getter, an inherited or non-enumerable property, or a value with a
- * `toJSON`) has its `before` and `after` redacted, whatever the pattern.
+ * change whose `field` is a getter, an inherited or non-enumerable property, or a value (an object or a function) with a
+ * `toJSON` has its `before` and `after` redacted, whatever the pattern; any other non-string `field`, or none, is not
+ * matched.
  */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
   const keys = options.keys ?? DEFAULT_SECRET_KEYS;
@@ -463,7 +464,11 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
       if (own === undefined) changed = 'field' in entry;
       else if (!('value' in own) || !own.enumerable) changed = true;
       else if (typeof own.value === 'string') changed = matches(fields, own.value);
-      else changed = !!own.value && typeof own.value === 'object' && typeof (own.value as { toJSON?: unknown }).toJSON === 'function';
+      else
+        changed =
+          !!own.value &&
+          (typeof own.value === 'object' || typeof own.value === 'function') &&
+          typeof (own.value as { toJSON?: unknown }).toJSON === 'function';
       return keep(entry, { level: 'change', whole: false, changed });
     };
     function replacer(this: unknown, key: string, value: unknown): unknown {

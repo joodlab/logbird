@@ -191,8 +191,10 @@ describe('a change whose field JSON cannot tell fails closed', () => {
     expect(values(change)).toEqual(redacted);
   });
 
-  it('redacts a field whose value has a toJSON', () => {
+  it('redacts a field whose value has a toJSON, an object or a function', () => {
     expect(values({ field: { toJSON: () => 'public' }, before: 'b', after: 'a' })).toEqual(redacted);
+    const callable = Object.assign(() => 'unused', { toJSON: () => 'password' });
+    expect(values({ field: callable, before: 1, after: 2 })).toEqual(redacted);
   });
 
   it('keeps the shared rule for a plain own field', () => {

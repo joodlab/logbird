@@ -150,9 +150,10 @@ before a final line feed, and flags such as `i` fold case differently), so keep 
 you share between the SDKs to plain alternatives and anchors. `redact()` is exact for JSON
 data, which is what `EventInput` types (plain objects, arrays, primitives, and `toJSON`
 values such as `Date` without side effects on other parts of the event); getters or
-`toJSON` with such side effects are outside that contract. A change whose `field` is not a
-plain own string (a getter, an inherited or non-enumerable property, or a value with a
-`toJSON`) has its `before` and `after` redacted, whatever the pattern.
+`toJSON` with such side effects are outside that contract. A change whose `field` is a
+getter, an inherited or non-enumerable property, or a value (an object or a function) with a
+`toJSON` has its `before` and `after` redacted, whatever the pattern; any other non-string
+`field`, or none, is not matched.
 `DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
 cookies, credentials and private keys. Add email/phone patterns for your PII policy;
 the default secret pattern does not cover all PII. Supplying `keys` replaces the default pattern; combine them to retain secret protection. `changeFields` defaults to the resulting `keys` pattern. Hooks compose:
