@@ -18,9 +18,9 @@ is still going 15 minutes after its duration. `soak-report/` holds:
 - `metrics.csv`: one row per sample, summed over every client the run created;
 - `stand-in-samples.jsonl`.
 
-## Two layers
+## The stand-in
 
-**Layer 1: stand-in (CI).** The SDK talks over a real loopback socket to an in-process HTTP/1.1 stand-in
+The SDK talks over a real loopback socket to an in-process HTTP/1.1 stand-in
 (`StandIn.cs`). It checks the ingest key and records every event it stores, every id it acknowledges in an answer that
 reached the client, and each id's first-seen content. It injects one fault per request, by weight (`--faults`). The
 first requests of a run go once through every configured fault, so even a short run exercises each:
@@ -38,57 +38,12 @@ first requests of a run go once through every configured fault, so even a short 
 | `reject` | 202 with some not-yet-stored events rejected (`invalid_event`) |
 | `toolarge` | 413 `payload_too_large` |
 
-**Layer 2: real server (manual, part of the pre-publication gate).** `--upstream <url>` turns the stand-in into a
-proxy in front of a real Logbird.
-- **Faults that reach the server:** `latency`, `resetafterstore`, `emptyack` and `partial` forward the batch first,
-  then act on the server's answer. `partial` reports some events the server stored as unresolved, so the client
-  resends them and the server's deduplication is exercised.
-- **Faults that never reach the server:** `reset`, `hang`, `ratelimited`, `unavailable` and `toolarge` answer without
-  forwarding, as a broken network or gateway would. `reject` is not used.
-- **Canary:** before the load, one event goes straight to the server and must be delivered, so a wrong ingest key
-  fails the run at once. It is then read back with the read key, and its project must be `LOGBIRD_SOAK_PROJECT_ID`
-  before anything is written to ClickHouse.
-- **Completeness:** after the load, the run reads its events back by tag (`metadata.soakRun`), retrying transient
-  errors, until every id the server acknowledged to the client is there, or five minutes pass.
-- **Duplicates:** search answers one row per event id, so it cannot show a duplicate. The run counts, in the local
-  server's ClickHouse, the run's event ids with more than one **raw row** (no `FINAL`). It proves that check first by
-  inserting two identical rows in one statement (with `optimize_on_insert = 0`, so ClickHouse does not collapse them on
-  insert) under a self-test tag in the same fictional project and requiring them to be reported (three attempts, in
-  case a background merge collapses them first).
-  A background merge can collapse duplicates before the count, so a pass is evidence, not proof; a fail is a real
-  duplicate.
-
-Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse, with no user
-info, query or fragment, and its HTTP clients never follow a redirect, so keys never leave the machine and a production
-host is refused. Everything else comes from the environment:
-
-```bash
-# From the repository root, with the root .env (local services) and a server from master on 127.0.0.1:4741.
-# dotenv -o: the local .env overrides anything inherited (a DATABASE_URL pointing elsewhere is never used).
-F=/path/outside/the/repo/soak.env
-pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
-pnpm exec dotenv -o -e .env -e "$F" -- sh -c '
-  export LOGBIRD_SOAK_INGEST_KEY="$LOGBIRD_IT_INGEST_KEY" LOGBIRD_SOAK_READ_KEY="$LOGBIRD_IT_READ_KEY"
-  export LOGBIRD_SOAK_PROJECT_ID="$LOGBIRD_IT_PROJECT_ID" LOGBIRD_SOAK_CLICKHOUSE_URL="$CLICKHOUSE_URL"
-  export LOGBIRD_SOAK_CLICKHOUSE_USER="$CLICKHOUSE_USER" LOGBIRD_SOAK_CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD"
-  export LOGBIRD_SOAK_CLICKHOUSE_DATABASE="$CLICKHOUSE_DATABASE"
-  cd sdks/dotnet && dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --upstream http://127.0.0.1:4741 --duration 2h --rate 50'
-pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts delete "$F"
-```
-
-The fixture file holds fresh keys with owner-only permissions; keep it outside the repository. `delete` purges the
-project, including the canary and the ClickHouse self-test rows, then the fictional workspace. If a recent insert is
-still settling it fails with `ingest_pending` and keeps the file: run it again a minute later. Proxy variables
-(`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) must be unset, or `NO_PROXY` must list `127.0.0.1,localhost,::1`, because the
-SDK's HTTP client would otherwise send the ingest key to the proxy; the run refuses to start otherwise.
-
-Before NuGet publishing is enabled, the gate needs one layer-2 run of at least 2 hours against a local server built from
-master, with its report attached to the gate brief.
+A second layer, the same runner as a proxy in front of a real local Logbird with a read-back duplicate check, comes in
+its own pull request once it has run against a real server. Its 2-hour run is part of the pre-publication gate.
 
 ## Checks
 
-- **Exact accounting** (tracked = every id given to `Track`; stored = what the stand-in stored or, in layer 2, what
-  the server returns; dropped = each `OnDrop` report):
+- **Exact accounting** (tracked = every id given to `Track`; stored = what the stand-in stored; dropped = each `OnDrop` report):
   - every tracked event is stored or reported dropped;
   - no event is reported dropped twice;
   - every drop report names a tracked event;
@@ -96,7 +51,7 @@ master, with its report attached to the gate brief.
   - no event arrived with content different from its first arrival;
   - an event both stored and dropped has a reason the docs call "not confirmed" (`HttpError`, `Unacknowledged`,
     `Shutdown`).
-- **The client's own counters, in both layers:**
+- **The client's own counters:**
   - the summed `Stats.Delivered` equals the ids acknowledged to the client and not reported dropped;
   - `Rejected + Dropped` equals the drop reports.
 - **Only documented drop reasons.** `TooLarge`, `Invalid` and `InvalidEntityId` also fail, because the harness never
@@ -152,8 +107,8 @@ The `reject` fault rejects valid events on purpose, to exercise the rejection pa
 ## What a 30-minute run can and cannot show
 
 It catches:
-- an event lost or counted twice under any of the faults above (layer 1 stores one entry per id, so it cannot show the
-  server storing an event twice; layer 2's raw-row check does);
+- an event lost or counted twice under any of the faults above (the stand-in stores one entry per id, so it cannot show
+  a server storing an event twice; that is the real-server layer's job);
 - a retry that changes an event;
 - a counter that disagrees with what was acknowledged;
 - an undocumented drop reason;
@@ -170,9 +125,9 @@ measured), or the same share per fault.
 It does not catch:
 - smaller leaks, or memory that grows only after hours, which hide inside the margins and the noise of a full
   collection;
-- problems that only appear with real server latency, real TLS or real storage (layer 1 has none).
+- problems that only appear with real server latency, real TLS or real storage (the stand-in has none).
 
-The long manual run (`workflow_dispatch` with `duration: 2h` or more) and layer 2 are there for those, and
+The long manual run (`workflow_dispatch` with `duration: 2h` or more) and the real-server layer are there for those, and
 `metrics.csv` shows any trend directly.
 
 ## CI
