@@ -248,8 +248,15 @@ export type SqlCompletion =
   | { kind: 'operand'; column: string }
   | { kind: 'none' };
 
+/** ClickHouse's backslash escapes for control characters; any other escaped character stands for itself. */
+const SQL_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', 0: '\0', b: '\b', f: '\f' };
+
+/**
+ * The text of a single-quoted literal's body, decoded in one pass: `\'` and `''` are each one apostrophe, so
+ * `a\'\'b` (two apostrophes, as `sqlString` writes them) never collapses to one.
+ */
 export function unquoteSql(raw: string): string {
-  return raw.replace(/\\([\s\S])/g, (_, escaped: string) => (escaped === 'r' ? '\r' : escaped)).replaceAll("''", "'");
+  return raw.replace(/\\([\s\S])|''/g, (_, escaped: string | undefined) => (escaped === undefined ? "'" : (SQL_ESCAPES[escaped] ?? escaped)));
 }
 
 /** A column reference ending at solid index `k`: an allowed identifier or `attributes['key']`. */
@@ -398,6 +405,9 @@ export function sqlString(value: string): string {
   return `'${value.replace(/[\\']/g, '\\$&').replaceAll('\r', '\\r')}'`;
 }
 
+/** A literal's body exactly as `sqlString` writes it: a CR stays the escape ``, never a raw CR a textarea turns into LF. */
+export const sqlLiteralBody = (value: string) => sqlString(value).slice(1, -1);
+
 /**
  * Top-level `AND` conjuncts of an expression. An expression with a top-level `OR` (or a single
  * predicate) is one conjunct; parenthesised groups stay whole.
@@ -495,8 +505,22 @@ function columnPredicatePrefixes(column: string, attr?: string): string[] {
   return [`${ref} = '`, `${ref} != '`, `has(${ref}, '`, `NOT has(${ref}, '`];
 }
 
+/**
+ * Whether `conjunct` is exactly `prefix` followed by one closed string literal (and the `)` the prefix opened), with
+ * nothing else: `outcome = 'failure' OR actor_id = 'A'` starts and ends like a facet predicate but is not one.
+ */
+function isSinglePredicate(conjunct: string, prefix: string): boolean {
+  if (!conjunct.startsWith(prefix)) return false;
+  const rest = tokenizeSql(conjunct.slice(prefix.length - 1)).filter((t) => t.kind !== 'space');
+  const literal = rest[0];
+  const closers = prefix.includes('(') ? [')'] : [];
+  return (
+    literal?.kind === 'string' && literal.closed === true && rest.length === 1 + closers.length && closers.every((c, i) => rest[i + 1]?.raw === c)
+  );
+}
+
 export function isColumnPredicate(conjunct: string, column: string, attr?: string): boolean {
-  return columnPredicatePrefixes(column, attr).some((p) => conjunct.startsWith(p) && /'\)?$/.test(conjunct));
+  return columnPredicatePrefixes(column, attr).some((p) => isSinglePredicate(conjunct, p));
 }
 
 /** Facet toggle in SQL mode: include replaces this column's other equality predicates, exclude stacks. */
@@ -504,7 +528,7 @@ export function toggleSqlPredicate(q: string, predicate: string, column: string,
   if (hasSqlPredicate(q, predicate)) return removeSqlConjuncts(q, (c) => c === normalize(predicate));
   if (mode === 'include') {
     const ref = attr !== undefined ? `attributes[${sqlString(attr)}]` : column;
-    const cleaned = removeSqlConjuncts(q, (c) => (c.startsWith(`${ref} = '`) || c.startsWith(`has(${ref}, '`)) && /'\)?$/.test(c));
+    const cleaned = removeSqlConjuncts(q, (c) => isSinglePredicate(c, `${ref} = '`) || isSinglePredicate(c, `has(${ref}, '`));
     return appendSqlPredicate(cleaned, predicate);
   }
   return appendSqlPredicate(q, predicate);

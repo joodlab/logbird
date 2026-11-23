@@ -7,12 +7,15 @@ import {
   appendSqlPredicate,
   hasSqlPredicate,
   highlightSql,
+  isColumnPredicate,
   sqlCallAt,
   sqlCompletionAt,
   sqlConjuncts,
+  sqlLiteralBody,
   sqlString,
   toggleSqlPredicate,
   tokenizeSql,
+  unquoteSql,
 } from './sql-language';
 
 const suggestFieldFor = (column: string) => sqlColumn(column)?.suggestField;
@@ -412,5 +415,52 @@ describe('translateQueryToSql', () => {
     expect(translateQueryToSql('"free text"')).toBeNull();
     expect(translateQueryToSql('description:refund')).toBeNull();
     expect(translateQueryToSql('outcome:>2')).toBeNull();
+  });
+});
+
+describe('query ↔ SQL correctness (#220)', () => {
+  it('reads a dash right after `)` as part of the field name, as the server does, not as NOT', () => {
+    expect(translateQueryToSql('(outcome:failure)-action:booked')).toBe(
+      "(outcome = 'failure') AND (mapContains(attributes, '-action') AND attributes['-action'] = 'booked')",
+    );
+    expect(compileQuery('(outcome:failure)-action:booked').params).toMatchObject({ q1: '-action', q2: 'booked' });
+    expect(translateQueryToSql('(outcome:failure) -action:booked')).toBe("(outcome = 'failure') AND NOT action = 'booked'");
+  });
+
+  it('turns relative dates into SQL that is resolved when the query runs, and refuses what the server refuses', () => {
+    expect(translateQueryToSql('occurredAt:[now-7d TO now]')).toBe('(timestamp >= now64(3) - INTERVAL 7 DAY AND timestamp <= now64(3))');
+    expect(translateQueryToSql('occurredAt:>=now-1w/d')).toBe("timestamp >= toStartOfDay(now64(3) - INTERVAL 1 WEEK, 'UTC')");
+    expect(translateQueryToSql('attr.seen:>now-1h')).toBe(
+      "parseDateTime64BestEffortOrNull(attributes['seen'], 3, 'UTC') > now64(3) - INTERVAL 1 HOUR",
+    );
+    expect(translateQueryToSql('occurredAt:>now-7x')).toBeNull();
+    expect(translateQueryToSql('occurredAt:>now-99999999999d')).toBeNull();
+  });
+
+  it('reads quoted range bounds as their values, and a quoted star as no open bound', () => {
+    expect(translateQueryToSql('attempt:["2" TO "5"]')).toBe('(job_attempt >= 2 AND job_attempt <= 5)');
+    expect(translateQueryToSql('duration_ms:["10" TO *]')).toBe("toFloat64OrNull(attributes['duration_ms']) >= 10");
+    expect(translateQueryToSql('attempt:["*" TO 5]')).toBeNull();
+  });
+
+  it('never takes a whole top-level OR for one facet predicate', () => {
+    const q = "outcome = 'failure' OR actor_id = 'A'";
+    expect(isColumnPredicate(q, 'outcome')).toBe(false);
+    expect(toggleSqlPredicate(q, "outcome = 'success'", 'outcome', 'include')).toBe(`(${q}) AND outcome = 'success'`);
+    expect(isColumnPredicate("outcome = 'failure'", 'outcome')).toBe(true);
+    expect(isColumnPredicate("has(target_types, 'page')", 'target_types')).toBe(true);
+    expect(isColumnPredicate("NOT has(target_types, 'page') OR x = 'y')", 'target_types')).toBe(false);
+  });
+
+  it.each(["agent''s", "a'b", String.raw`back\slash`, 'line\rbreak', String.raw`\'`])('round-trips %j through a SQL literal', (value) => {
+    expect(unquoteSql(sqlLiteralBody(value))).toBe(value);
+    expect(sqlLiteralBody(value)).not.toContain('\r');
+  });
+
+  it("decodes ClickHouse's own escapes and doubled apostrophes once", () => {
+    expect(unquoteSql("it''s")).toBe("it's");
+    // Two apostrophes as sqlString writes them stay two (the facet must find the agent whose id has both).
+    expect(unquoteSql(String.raw`a\'\'b`)).toBe("a''b");
+    expect(unquoteSql(String.raw`tab\there\nnew`)).toBe('tab\there\nnew');
   });
 });

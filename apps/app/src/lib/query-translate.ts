@@ -12,6 +12,26 @@ import { sqlString } from './sql-language';
 
 const NUMBER = /^-?\d+(\.\d+)?$/;
 const DATE = /^\d{4}-\d{2}-\d{2}(T.+)?$/;
+/** The server's relative dates (`now`, `now-7d`, `now/d`): resolved when the query runs, in either mode. */
+const RELATIVE = /^now(?:([+-])(\d+)([smhdw]))?(\/d)?$/;
+const RELATIVE_UNIT = { s: ['SECOND', 1e3], m: ['MINUTE', 6e4], h: ['HOUR', 3.6e6], d: ['DAY', 8.64e7], w: ['WEEK', 6.048e8] } as const;
+/** A value the server compares as a date on an attribute (it then parses the attribute as a date too). */
+const isDateValue = (value: string) => DATE.test(value) || /^now(?:$|[-+/])/.test(value);
+
+/** The SQL instant for a date value, or null when the server would reject it (an unknown or out-of-range offset). */
+function dateSql(value: string): string | null {
+  if (!value.startsWith('now')) return `parseDateTime64BestEffort(${sqlString(value)}, 3, 'UTC')`;
+  const m = RELATIVE.exec(value);
+  if (!m) return null;
+  let sql = 'now64(3)';
+  if (m[1]) {
+    const [unit, ms] = RELATIVE_UNIT[m[3] as keyof typeof RELATIVE_UNIT];
+    // The server refuses an instant beyond ±8.64e15 ms; never hand ClickHouse an interval it would overflow on.
+    if (Number(m[2]) * ms > 8.64e15) return null;
+    sql = `${sql} ${m[1]} INTERVAL ${Number(m[2])} ${unit}`;
+  }
+  return m[4] ? `toStartOfDay(${sql}, 'UTC')` : sql;
+}
 const SQL_OPS: Record<string, string> = { '>': '>', '>=': '>=', '<': '<', '<=': '<=' };
 const QUOTED_VALUE = /^"(?:[^"\\]|\\[\s\S])*"$/;
 const BARE_VALUE = /^[^\s()"<>[\]{}]+$/;
@@ -25,16 +45,25 @@ function targetFor(field: string): Target | null {
   return { ref: `attributes[${key}]`, type: 'attr', key };
 }
 
-function literal(value: string, t: Target, forceNumber = false): string {
+function literal(value: string, t: Target, forceNumber = false): string | null {
   if ((t.type === 'number' || forceNumber) && NUMBER.test(value)) return value;
-  if (t.type === 'date' || (forceNumber && DATE.test(value))) return `parseDateTime64BestEffort(${sqlString(value)}, 3, 'UTC')`;
+  if (t.type === 'date' || (forceNumber && isDateValue(value))) return dateSql(value);
   return sqlString(value);
 }
 
 /** Numeric/date view of a target for comparisons (attributes are strings). */
 function ordered(t: Target, sample: string): string {
   if (t.type !== 'attr') return t.ref;
-  return DATE.test(sample) ? `parseDateTime64BestEffortOrNull(${t.ref}, 3, 'UTC')` : `toFloat64OrNull(${t.ref})`;
+  return isDateValue(sample) ? `parseDateTime64BestEffortOrNull(${t.ref}, 3, 'UTC')` : `toFloat64OrNull(${t.ref})`;
+}
+
+/** A range bound's value: `*` when open, the decoded text when quoted, null when it is not a single plain value. */
+function rangeBound(raw: string): string | null {
+  if (!raw.startsWith('"')) return raw;
+  if (!QUOTED_VALUE.test(raw)) return null;
+  const { value } = readQueryValue(raw);
+  // A quoted star is not an open bound to the server: it is the literal value `*`, which no number or date matches.
+  return value === '*' ? null : value;
 }
 
 function presence(t: Target): string {
@@ -55,7 +84,8 @@ function equals(t: Target, value: string, wildcard: boolean | undefined): string
   }
   if (t.type === 'number' && !NUMBER.test(value)) return null;
   if (t.type === 'array') return `has(${t.ref}, ${sqlString(value)})`;
-  return `${t.ref} = ${literal(value, t)}`;
+  const operand = literal(value, t);
+  return operand && `${t.ref} = ${operand}`;
 }
 
 function recordValueToSql(raw: string): string | null {
@@ -119,19 +149,27 @@ function termToSql(token: QueryToken): string | null {
       return isSimpleOperand(token, raw, start) ? attributePredicate(t, equals(t, value, token.wildcard)) : null;
     case 'compare': {
       const operand = raw.slice(token.op?.length ?? 0);
-      if (t.type === 'string' || t.type === 'array' || (!NUMBER.test(value) && !DATE.test(value)) || /^\s+-/.test(operand)) return null;
-      return `${ordered(t, value)} ${SQL_OPS[token.op ?? '>']} ${literal(value, t, t.type === 'attr')}`;
+      if (t.type === 'string' || t.type === 'array' || (!NUMBER.test(value) && !isDateValue(value)) || /^\s+-/.test(operand)) return null;
+      const bound = literal(value, t, t.type === 'attr');
+      return bound && `${ordered(t, value)} ${SQL_OPS[token.op ?? '>']} ${bound}`;
     }
     case 'range': {
       const m = /^([[{])\s*(\S+)\s+TO\s+(\S+)\s*([\]}])$/.exec(value);
       if (!m || t.type === 'string' || t.type === 'array') return null;
-      const [, open, lo = '*', hi = '*', close] = m;
+      const [, open, rawLo = '*', rawHi = '*', close] = m;
+      // Bounds read as the server reads them: a quoted bound is its decoded value, and only a bare `*` is open.
+      const lo = rangeBound(rawLo);
+      const hi = rangeBound(rawHi);
+      if (lo === null || hi === null) return null;
       const ref = ordered(t, lo === '*' ? hi : lo);
-      const parts = [
-        lo === '*' ? null : `${ref} ${open === '[' ? '>=' : '>'} ${literal(lo, t, t.type === 'attr')}`,
-        hi === '*' ? null : `${ref} ${close === ']' ? '<=' : '<'} ${literal(hi, t, t.type === 'attr')}`,
-      ].filter(Boolean);
-      return parts.length ? parts.join(' AND ') : null;
+      const bounds = [lo === '*' ? null : [open === '[' ? '>=' : '>', lo], hi === '*' ? null : [close === ']' ? '<=' : '<', hi]].filter(
+        (b): b is [string, string] => b !== null,
+      );
+      const parts = bounds.map(([op, v]) => {
+        const sql = literal(v, t, t.type === 'attr');
+        return sql && `${ref} ${op} ${sql}`;
+      });
+      return parts.length && parts.every(Boolean) ? parts.join(' AND ') : null;
     }
     case 'regex': {
       if (!/^\/(?:[^/\\]|\\[\s\S])*\/$/.test(value)) return null;
@@ -148,7 +186,8 @@ function termToSql(token: QueryToken): string | null {
         return each.every(Boolean) ? attributePredicate(t, `(${each.join(' OR ')})`) : null;
       }
       if (t.type === 'array') return `hasAny(${t.ref}, [${values.map(({ value: member }) => sqlString(member)).join(', ')}])`;
-      return attributePredicate(t, `${t.ref} IN (${values.map(({ value: member }) => literal(member, t)).join(', ')})`);
+      const operands = values.map(({ value: member }) => literal(member, t));
+      return operands.every(Boolean) ? attributePredicate(t, `${t.ref} IN (${operands.join(', ')})`) : null;
     }
     default:
       return null;

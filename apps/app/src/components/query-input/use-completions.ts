@@ -21,7 +21,7 @@ import {
 import { formatTerm, type QueryCompletion, queryCompletionAt, quoteIfNeeded } from '@/lib/query-language';
 import { lintQuery, type QueryFix } from '@/lib/query-lint';
 import type { RecentQuery } from '@/lib/recent-queries';
-import { type SqlCompletion, sqlCallAt, sqlCompletionAt } from '@/lib/sql-language';
+import { type SqlCompletion, sqlCallAt, sqlCompletionAt, sqlLiteralBody } from '@/lib/sql-language';
 import { type Hint, queryHint, sqlHint } from './hints';
 
 export type SuggestionKind = 'key' | 'term' | 'value' | 'snippet' | 'column' | 'function' | 'keyword' | 'attr' | 'recent' | 'view' | 'fix';
@@ -132,7 +132,7 @@ function bestScore(scores: number[]): number {
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 const daysAgo = (n: number) => isoDay(new Date(Date.now() - n * 86_400_000));
-const escapeSql = (v: string) => v.replace(/[\\']/g, '\\$&');
+const escapeSql = sqlLiteralBody;
 const coverageLabel = (c: number) => (c >= 0.995 ? '100%' : c >= 0.01 ? `${Math.round(c * 100)}%` : c > 0 ? '<1%' : undefined);
 
 export function ageLabel(at: number, now = Date.now()): string {

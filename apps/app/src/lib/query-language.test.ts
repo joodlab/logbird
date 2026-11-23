@@ -459,3 +459,25 @@ describe('formatTerm', () => {
     expect(compiled.sql).toBe('(parent_event_id = {q0:String})');
   });
 });
+
+describe('a dash negates where the server says it does (#220)', () => {
+  const fields = (q: string) =>
+    tokenize(q)
+      .filter((t) => t.kind !== 'space')
+      .map((t) => `${t.kind}:${t.field ?? t.raw}:${t.negated}`);
+  it('right after `)` the dash is part of the field name', () => {
+    expect(fields('(outcome:failure)-action:booked')).toEqual(['paren:(:false', 'field:outcome:false', 'paren:):false', 'field:-action:false']);
+    expect(compileQuery('(outcome:failure)-action:booked').params).toMatchObject({ q1: '-action' });
+  });
+  it('at the start, after a space or after `(` it is NOT', () => {
+    expect(fields('-action:x (-action:y) a:b -action:z')).toEqual([
+      'field:action:true',
+      'paren:(:false',
+      'field:action:true',
+      'paren:):false',
+      'field:a:false',
+      'field:action:true',
+    ]);
+    expect(fields('a:b)-(c:d)').slice(0, 3)).toEqual(['field:a:false', 'paren:):false', 'text:-:false']);
+  });
+});
