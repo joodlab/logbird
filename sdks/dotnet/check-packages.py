@@ -5,8 +5,10 @@ Usage: python3 check-packages.py <folder with the .nupkg files> [expected versio
 It requires, reading each package's manifest as XML:
 - exactly one Logbird and one Logbird.AspNetCore package in the folder, each with a non-empty version that matches its
   file name, both with the same version (and the expected version, when given);
-- for every target framework Logbird.AspNetCore ships (its lib/<tfm>/ folders), a dependency group for that framework
-  with exactly one Logbird dependency, at exactly that version ([x.y.z]) and with exclude="Build,Analyzers".
+- dependency groups for exactly the target frameworks Logbird.AspNetCore ships (its lib/<tfm>/ folders, matched by exact
+  name), each with exactly one Logbird dependency, at exactly that version ([x.y.z]) and with exclude="Build,Analyzers".
+
+NuGet package ids are case-insensitive, so ids are compared case-insensitively everywhere.
 
 Logbird.AspNetCore calls Logbird's internal members, so a version range could bind to a Logbird build without them.
 """
@@ -58,15 +60,15 @@ def main():
         version = text(metadata, "version", package)
         if package.name != f"{package_id}.{version}.nupkg":
             raise SystemExit(f"{package.name}: the file name does not match its manifest ({package_id} {version})")
-        packages.setdefault(package_id, []).append((package, metadata, frameworks, version))
+        packages.setdefault(package_id.lower(), []).append((package, metadata, frameworks, version))
 
     for package_id in ("Logbird", "Logbird.AspNetCore"):
-        found = packages.get(package_id, [])
+        found = packages.get(package_id.lower(), [])
         if len(found) != 1:
-            raise SystemExit(f"expected exactly one {package_id} package in {folder}, found {len(found)}: {[p.name for p, *_ in found]}")
+            raise SystemExit(f"expected exactly one {package_id} package (any casing) in {folder}, found {len(found)}: {[p.name for p, *_ in found]}")
 
-    _, _, _, logbird_version = packages["Logbird"][0]
-    aspnet, metadata, frameworks, aspnet_version = packages["Logbird.AspNetCore"][0]
+    _, _, _, logbird_version = packages["logbird"][0]
+    aspnet, metadata, frameworks, aspnet_version = packages["logbird.aspnetcore"][0]
     if aspnet_version != logbird_version:
         raise SystemExit(f"Logbird is {logbird_version} but Logbird.AspNetCore is {aspnet_version}")
     if expected is not None and logbird_version != expected:
@@ -79,14 +81,20 @@ def main():
         if [child for child in dependencies if local(child.tag) == "dependency"]:
             raise SystemExit(f"{aspnet.name}: dependencies outside a target framework group")
         for group in children(dependencies, "group"):
-            groups.setdefault(group.get("targetFramework", ""), []).append(group)
+            groups.setdefault((group.get("targetFramework") or "").lower(), []).append(group)
+
+    # The declared groups must be exactly the shipped frameworks, by exact name: no group a consumer could select that
+    # this check does not see, and no shipped framework without its group.
+    shipped = {framework.lower() for framework in frameworks}
+    if set(groups) != shipped:
+        raise SystemExit(f"{aspnet.name}: dependency groups {sorted(groups)} do not match the shipped frameworks {sorted(shipped)}")
 
     pinned = f"[{logbird_version}]"
     for framework in frameworks:
-        matching = [group for name, found in groups.items() for group in found if name.lower().replace(".", "") == framework.lower().replace(".", "")]
+        matching = groups[framework.lower()]
         if len(matching) != 1:
             raise SystemExit(f"{aspnet.name}: expected one dependency group for {framework}, found {len(matching)}")
-        logbird = [d for d in children(matching[0], "dependency") if d.get("id") == "Logbird"]
+        logbird = [d for d in children(matching[0], "dependency") if (d.get("id") or "").lower() == "logbird"]
         if len(logbird) != 1:
             raise SystemExit(f"{aspnet.name}: the {framework} group has {len(logbird)} Logbird dependencies, expected one")
         version = logbird[0].get("version")
