@@ -9,7 +9,7 @@ import {
 } from '@logbird/clickhouse';
 import { storedWebhookScope, type WebhookScope } from '@logbird/contracts';
 import { type Prisma, prisma, type WebhookEndpoint, withIngestReceiptGate } from '@logbird/database';
-import { WEBHOOK_LOG_RETENTION_MS, webhookCursorClock, webhookCursorNeedsReview } from '@logbird/database/webhooks';
+import { WEBHOOK_LOG_RETENTION_MS, webhookCursorClock, webhookCursorNeedsReview, webhookCursorStart } from '@logbird/database/webhooks';
 import { webhookWatermark } from './webhook-policy';
 
 const DISCOVERY_PAGE_SIZE = 10_000;
@@ -101,6 +101,8 @@ export async function discoverWebhookDeliveries(
 ) {
   if (!endpoint.enabled || endpoint.cursorReviewRequired || endpoint.filterReviewRequired) return;
   const cursorClock = clock ?? (await webhookCursorClock(prisma));
+  const start = webhookCursorStart(endpoint, cursorClock.rollout);
+  const early = +endpoint.cursorReceivedAt < start;
   const snapshot = {
     id: endpoint.id,
     enabled: true,
@@ -117,7 +119,20 @@ export async function discoverWebhookDeliveries(
     scopeMask: { equals: endpoint.scopeMask },
     filterQuery: endpoint.filterQuery,
   };
-  if (webhookCursorNeedsReview(endpoint, cursorClock)) {
+  const earlyDelivery =
+    early && endpoint.lastScannedAt && endpoint.cursorEventId
+      ? await prisma.webhookDelivery.findUnique({
+          where: {
+            endpointId_eventId_receivedAt: {
+              endpointId: endpoint.id,
+              eventId: endpoint.cursorEventId,
+              receivedAt: endpoint.cursorReceivedAt,
+            },
+          },
+          select: { id: true },
+        })
+      : null;
+  if (webhookCursorNeedsReview(endpoint, cursorClock, !!earlyDelivery)) {
     const blocked = await prisma.webhookEndpoint.updateMany({ where: snapshot, data: { cursorReviewRequired: true, updatedAt: endpoint.updatedAt } });
     if (blocked.count) console.warn(JSON.stringify({ event: 'webhook.cursor_review_required', endpointId: endpoint.id }));
     return;
@@ -132,6 +147,9 @@ export async function discoverWebhookDeliveries(
     if (!bounds) return;
     if (bounds.now > lastScannedAt) lastScannedAt = bounds.now;
     if (bounds.watermark < endpoint.cursorReceivedAt) return;
+    // Wait until a short page can advance to the nominal start. A partially committed early page
+    // can resume from its last delivery, whose row was committed with the cursor.
+    if (early && +bounds.watermark + 1 < start) return;
     // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
     const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +bounds.watermark + 1));
     const rows = await readWebhookCandidates(ch, endpoint, scope, sliceEnd, bounds.now);
@@ -173,7 +191,9 @@ export async function discoverWebhookDeliveries(
     if (rows.length < DISCOVERY_PAGE_SIZE) await commit(sliceEnd, null);
   } finally {
     // Move a busy/failing endpoint to the back of the scan without changing its cursor.
-    if (!scanRecorded) await prisma.webhookEndpoint.updateMany({ where: snapshot, data: { lastScannedAt, updatedAt: endpoint.updatedAt } });
+    // An untouched early cursor must retain its never-scanned state until its first successful commit.
+    if (!scanRecorded && (!early || endpoint.lastScannedAt))
+      await prisma.webhookEndpoint.updateMany({ where: snapshot, data: { lastScannedAt, updatedAt: endpoint.updatedAt } });
   }
 }
 

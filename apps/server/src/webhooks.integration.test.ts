@@ -10,13 +10,16 @@ import {
   MAX_WEBHOOK_ENDPOINTS,
   SCOPE_MASKS,
   webhookEndpointSchema,
+  webhookLookupBusySchema,
   webhookSettingsPath,
+  webhookUrlOrMutationBusySchema,
 } from '@logbird/contracts';
 import { prisma, withProjectLock } from '@logbird/database';
 import { decryptWebhookSecret, encryptWebhookSecret, type WebhookLookup, webhookCursorClock, webhookSecretKey } from '@logbird/database/webhooks';
 import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES, verifyWebhook } from '@logbird/sdk';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { deliverWebhooks } from '../../worker/src/webhook-delivery';
 import { discoverWebhookDeliveries } from '../../worker/src/webhook-discovery';
 import { sendWebhookFilterReviewNotices } from '../../worker/src/webhook-notices';
@@ -581,10 +584,11 @@ it('documents and returns a retryable lookup error on create and update while an
   expect(openapi.status).toBe(200);
   const { paths } = await openapi.json();
   const documented = [paths['/api/projects/{projectId}/webhooks'].post, paths['/api/projects/{projectId}/webhooks/{id}'].patch];
+  const { anyOf } = z.toJSONSchema(webhookUrlOrMutationBusySchema, { io: 'input' });
   for (const route of documented) {
     expect(route.responses['503']).toMatchObject({
       headers: { 'Retry-After': { schema: { type: 'integer', example: 3 } } },
-      content: { 'application/json': { schema: { properties: { error: { properties: { code: { const: 'webhook_lookup_busy' } } } } } } },
+      content: { 'application/json': { schema: { anyOf } } },
     });
   }
   let release!: (value: Awaited<ReturnType<WebhookLookup>>) => void;
@@ -605,7 +609,7 @@ it('documents and returns a retryable lookup error on create and update while an
     for (const busy of await Promise.all([request(base(), 'POST', input), request(`${base()}/${endpoint.id}`, 'PATCH', input)])) {
       expect(busy.status).toBe(503);
       expect(busy.headers.get('Retry-After')).toBe('3');
-      expect(await busy.json()).toMatchObject({ error: { code: 'webhook_lookup_busy' } });
+      expect(webhookLookupBusySchema.safeParse(await busy.json()).success).toBe(true);
     }
     expect((await request(`/api/projects/${foreignId}/webhooks`, 'POST', { url: 'https://ready.example.invalid' }, 'foreign-owner')).status).toBe(
       201,

@@ -244,6 +244,8 @@ Set DATABASE_URL, CLICKHOUSE_URL, REDIS_URL and ClickHouse admin/query credentia
 
 Postgres needs schema migration rights. ClickHouse needs logbird schema/table/view DDL and read/write, CREATE/ALTER USER, CREATE/ALTER SETTINGS PROFILE, CREATE/ALTER ROW POLICY, SELECT WITH GRANT OPTION on the four Logbird tables, SHOW ACCESS/GRANTS and system.users/settings visibility. Use ClickHouse 26.9 with SQL_ settings. Provisioning checks credentials, four SELECT grants, effective limits and unchanged main-user row counts. Stop writes during upgrades; concurrent ingest can fail that safety check.
 
+Give each Logbird stack its own Postgres database. The worker scans every enabled webhook endpoint in that database that is eligible for discovery.
+
 Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashtags=true`, matching brace-enclosed BullMQ prefixes such as {logbird} across producers/workers, and no queue eviction. Do not use ioredis keyPrefix.
 
 ## Upgrades and backups
@@ -287,6 +289,24 @@ below for older Trailmark installations.
 
 See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
 for signal handling; its live acceptance is pending in #77.
+
+### Webhook delivery on upgrade
+
+An existing enabled endpoint with an empty filter starts automatically. Its first eligible delivery is the first matching event
+received at or after the delivery migration's UTC start time (`20261122140000_webhook_deliveries`).
+Events received before that millisecond are excluded. An endpoint created by the new API starts at its creation millisecond, inclusive.
+During a rolling upgrade, an old API can set a never-scanned endpoint's cursor up to 60 seconds before that nominal start
+through the transaction-time default. The worker keeps the stored cursor and can deliver matching events received
+from that earlier millisecond, inclusive.
+
+An existing endpoint with a non-empty filter delivers nothing until an owner or admin confirms the filter in the console.
+The worker sends one review email to the workspace owners and admins. Saving the filter in the console sends an explicit
+`filterQuery` in PATCH, even when its text stays the same. The endpoint keeps its rollout cursor during the hold.
+After confirmation, discovery picks up at that cursor and queues each event received during the hold that matches the confirmed
+filter and current scope and is still stored. The project's event retention governs which events remain available, and the
+five-minute scan slices and 10,000-position pages govern how fast discovery catches up. The separate 30-day delivery log
+retention governs attempts and delivery records. A genuinely untrusted cursor follows the
+[operator reconciliation procedure](#reconcile-a-webhook-discovery-cursor).
 
 ### Upgrading to the arrival-time index (010)
 
@@ -1113,9 +1133,7 @@ server, or the same `BETTER_AUTH_SECRET` if using a derived key. The worker
 logs `webhook.delivery_key_missing` and reports itself unready when neither is supplied. For disable
 notifications, give the worker the existing `SMTP_*`, `MAIL_FROM` and
 `APP_URL` settings. Keep both roles' `WEBHOOKS_ALLOW_HTTP` settings aligned.
-
-On upgrade, endpoints with existing non-empty filters pause at their saved cursor until an owner or admin reviews the query under the current syntax.
-Confirm the filter by saving it with `filterQuery` in PATCH, even if its text stays the same; the worker uses the existing SMTP settings to send one review notice per held endpoint to workspace owners and admins.
+See [when existing webhooks start delivering](#webhook-delivery-on-upgrade).
 
 | Worker environment variable | Default | Effect |
 | --- | --- | --- |
@@ -1125,7 +1143,7 @@ Confirm the filter by saving it with `filterQuery` in PATCH, even if its text st
 
 Set these optional variables in the worker's runtime environment, such as a
 Compose override or a Kubernetes deployment overlay. Attempt logs expire
-after 30 days. Delivery records expire 30 days after they finish. New endpoints start at their creation millisecond. A receiver should
+after 30 days. Delivery records expire 30 days after they finish. A receiver should
 deduplicate by `webhook-id` and verify its signature against the raw request body.
 The header stays stable on retry and resend. When retention frees an event ID and it is used again,
 the new occurrence has a different `webhook-id` and the same JSON `id`. Pending disable emails survive
@@ -1162,8 +1180,10 @@ cursor shifted by the former database session time zone. Discovery compares
 the stored cursor to database time, the later of endpoint creation and the UTC
 rollout, and the last recorded scan. A verified original rollout stored on the
 endpoint takes precedence over the live ledger's time. The scan bound allows a
-minute for prior workers to acquire their watermark. A cursor outside those
-bounds is held in place.
+minute for prior workers to acquire their watermark. An early cursor inside the
+60-second startup tolerance can continue after a partial scan when its stored
+delivery confirms the position. A future cursor, a cursor outside the accepted
+bounds, or an early position with missing evidence is held in place.
 The worker logs `webhook.cursor_review_required` and the endpoint API returns
 `cursorWarning: webhook_cursor_review_required`. The hold persists until an
 operator clears it. The check detects impossible positions and cannot establish

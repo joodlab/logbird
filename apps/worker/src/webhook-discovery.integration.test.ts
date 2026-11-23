@@ -58,6 +58,68 @@ it('includes the creation millisecond across delivery batches with the same rece
   expect(await queuedIds(hook.id)).toEqual(ids);
 });
 
+it.each([
+  { offset: -11, review: false },
+  { offset: -59_000, review: false },
+  { offset: -61_000, review: true },
+  { offset: 180_000, review: true },
+])('sets cursor review=$review for a stored cursor $offset ms from creation', async ({ offset, review }) => {
+  const start = new Date(Date.now() - 120_000);
+  const { hook, row } = await fixture(start, `cursor.${offset}`);
+  const early = new Date(+start + offset);
+  const endpoint = await prisma.webhookEndpoint.update({ where: { id: hook.id }, data: { cursorReceivedAt: early } });
+  if (!review) {
+    await insertEvents(ch, [row('before-cursor', new Date(+early - 1)), row('at-cursor', early), row('at-start', start)]);
+  }
+  const clock = { now: new Date(), rollout: new Date(+start - 180_000) };
+  await discoverWebhookDeliveries(ch, endpoint, clock);
+  const after = await refetch(hook.id);
+  expect(after.cursorReviewRequired).toBe(review);
+  if (review) expect(after).toMatchObject({ cursorReceivedAt: early, cursorEventId: null, lastScannedAt: null });
+  await discoverWebhookDeliveries(ch, after, clock);
+  expect(await queuedIds(hook.id)).toEqual(review ? [] : ['at-cursor', 'at-start']);
+  expect((await refetch(hook.id)).cursorReviewRequired).toBe(review);
+});
+
+it('keeps an early cursor eligible while waiting for the watermark and after an interrupted early batch', async () => {
+  const now = Date.now();
+  const start = new Date(now - 120_000);
+  const early = new Date(+start - 11);
+  const { hook, row } = await fixture(start, 'early-batch');
+  const endpoint = await prisma.webhookEndpoint.update({ where: { id: hook.id }, data: { cursorReceivedAt: early } });
+  const clock = { now: new Date(now), rollout: new Date(+start - 180_000) };
+  const eventId = 'qa-early-pending';
+  const receivedAt = new Date(+early + 1);
+  await prisma.ingestReceipt.create({
+    data: { projectId, eventId, organizationId: projectId, fingerprint: 'qa-pending', receivedAt, eventAt: receivedAt },
+  });
+  await discoverWebhookDeliveries(ch, endpoint, clock);
+  expect(await refetch(hook.id)).toMatchObject({ cursorReceivedAt: early, cursorEventId: null, lastScannedAt: null, cursorReviewRequired: false });
+  await prisma.ingestReceipt.delete({ where: { projectId_eventId: { projectId, eventId } } });
+  const ids = Array.from({ length: 101 }, (_, index) => `qa-early-${String(index).padStart(3, '0')}`);
+  await insertEvents(
+    ch,
+    ids.map((id) => row(id, early)),
+  );
+  const transaction = prisma.$transaction.bind(prisma);
+  const interrupted = vi.spyOn(prisma, '$transaction').mockImplementation(async (...args) => {
+    const result = await Reflect.apply(transaction, prisma, args);
+    if (args[1] === undefined) throw new Error('QA interrupted after early delivery commit');
+    return result;
+  });
+  try {
+    await expect(discoverWebhookDeliveries(ch, endpoint, clock)).rejects.toThrow('QA interrupted after early delivery commit');
+  } finally {
+    interrupted.mockRestore();
+  }
+  const resumed = await refetch(hook.id);
+  expect(resumed).toMatchObject({ cursorReceivedAt: early, cursorEventId: ids[99], cursorReviewRequired: false });
+  expect(await queuedIds(hook.id)).toEqual(ids.slice(0, 100));
+  await discoverWebhookDeliveries(ch, resumed, clock);
+  expect(await queuedIds(hook.id)).toEqual(ids);
+  expect((await refetch(hook.id)).cursorReviewRequired).toBe(false);
+});
+
 it('resumes an interrupted batch and drains 25,000 events in receive-time and ID order', { timeout: 180_000 }, async () => {
   const from = new Date(Date.now() - 7 * 60_000);
   const { hook, row } = await fixture(from, 'drain');

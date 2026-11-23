@@ -524,11 +524,21 @@ returns 503 `webhook_lookup_busy` with `Retry-After: 3`. A scope needs a `tenant
 or a `target` and uses the same [stored-ID rules as scoped reads](security.md#scopes-name-stored-ids).
 An invalid legacy scope returns `scopeWarning: webhook_invalid_scope` and blocks discovery and delivery until corrected.
 Create and update reject filters on masked fields with HTTP 422 `invalid_query`.
-After upgrade, every existing non-empty filter returns `filterWarning: webhook_filter_review_required` and pauses discovery and delivery at the stored cursor.
-The worker sends one review notice per held endpoint to workspace owners and admins, and an explicit `filterQuery` in PATCH confirms the filter and resumes processing.
+An existing enabled endpoint with an empty filter starts automatically at the delivery migration's UTC start time.
+Its first eligible delivery is the first matching event received at or after that millisecond. Events received before it are excluded.
+A new endpoint starts at its creation millisecond, inclusive. During a rolling upgrade, the old API can leave a never-scanned
+cursor up to 60 seconds before that nominal start. The worker keeps that cursor and can deliver matching events received
+from the stored cursor, inclusive.
 
-Each endpoint starts at the creation millisecond, inclusive, or at rollout for existing endpoints.
-There is no historical backfill. The worker reads ClickHouse in
+An existing endpoint with a non-empty filter delivers nothing until an owner or admin confirms its filter in the console.
+It returns `filterWarning: webhook_filter_review_required` and keeps the rollout cursor while held.
+The worker sends one review notice per held endpoint to workspace owners and admins.
+An explicit `filterQuery` in PATCH confirms the filter, even when its text stays the same.
+Discovery then starts at rollout and queues each still-stored occurrence that matches the confirmed filter and current scope,
+including events received during the hold. Project event retention determines which occurrences remain available.
+The 30-day delivery log retention applies to delivery records and attempts, and the regular discovery limits govern catch-up speed.
+
+The worker reads ClickHouse in
 `(received_at, event_id)` order through the Logbird query compiler. The scope
 applies as an AND. A target must match both the type and ID on the same event
 target. The scan window ends at the earlier of:
@@ -544,8 +554,9 @@ through 24 hours after receipt. Physical reads can still span historical partiti
 sorts by event time. On very large projects delivery can stall until the arrival-time index is present.
 A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
 Larger pages shorten that delay by requiring fewer ClickHouse queries to drain the import.
-The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an implausible cursor and the
-API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
+The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an untrusted cursor, including a future
+position, an early position outside the tolerance or without evidence of progress, or a position beyond the allowed scan bound.
+The API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
 The worker commits at most 100 deliveries with their cursor position in each Postgres transaction. An interrupted page
 resumes after the last committed position. Deliveries are unique
 by endpoint, event ID, and stored receive time. If retention frees an event ID and it is used again,
