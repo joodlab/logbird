@@ -11,10 +11,12 @@ interface EmptyStateProps {
   className?: string;
   /** Compact variant for cards and side panels. */
   size?: 'default' | 'sm';
+  /** The title's element: `h1` when the state is the whole page (not found), so heading navigation finds it. */
+  titleAs?: 'p' | 'h1' | 'h2';
 }
 
 /** Calm empty state: what is missing and the next useful step. */
-export function EmptyState({ icon: Icon, title, description, children, className, size = 'default' }: EmptyStateProps) {
+export function EmptyState({ icon: Icon, title, description, children, className, size = 'default', titleAs: Title = 'p' }: EmptyStateProps) {
   return (
     <div
       className={cn(
@@ -34,7 +36,7 @@ export function EmptyState({ icon: Icon, title, description, children, className
         </div>
       ) : null}
       <div className="flex max-w-sm flex-col gap-1">
-        <p className={cn('font-medium text-foreground', size === 'sm' ? 'text-sm' : 'text-[15px]')}>{title}</p>
+        <Title className={cn('font-medium text-foreground', size === 'sm' ? 'text-sm' : 'text-[15px]')}>{title}</Title>
         {description ? <div className="text-muted-foreground text-sm leading-relaxed">{description}</div> : null}
       </div>
       {children ? <div className="mt-1 flex flex-wrap items-center justify-center gap-2">{children}</div> : null}
