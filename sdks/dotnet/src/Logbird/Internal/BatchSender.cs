@@ -59,6 +59,10 @@ internal sealed class BatchSender
     private readonly Func<QueuedEvent, Action, bool> _settle;
     private int _abandonedAttempts;
     private readonly Action<Exception> _report;
+
+    // Reserves the place of a batch-level OnError report before the events it is about settle, so no flush can see them
+    // settled and return before the report is posted; the returned callback posts it (or releases the place with null).
+    private readonly Func<Action<Exception?>> _reserveReport;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<double> _random;
     private readonly Func<TimeSpan> _elapsed;
@@ -78,7 +82,8 @@ internal sealed class BatchSender
         Func<TimeSpan>? clock = null,
         Action? delivered = null,
         Action<DropReason>? countDrop = null,
-        Func<QueuedEvent, Action, bool>? settle = null)
+        Func<QueuedEvent, Action, bool>? settle = null,
+        Func<Action<Exception?>>? reserveReport = null)
     {
         _delivered = delivered;
         _countDrop = countDrop;
@@ -101,6 +106,13 @@ internal sealed class BatchSender
         _warn = warn;
         _progress = progress;
         _report = report;
+        _reserveReport = reserveReport ?? (() => error =>
+        {
+            if (error is not null)
+            {
+                report(error);
+            }
+        });
         _delay = delay ?? Task.Delay;
         var jitter = new Random();
         _random = random ?? (() =>
@@ -376,12 +388,19 @@ internal sealed class BatchSender
                 var retryable = status == 0 || status == 429 || status >= 500 || unacknowledged;
                 if (!retryable)
                 {
-                    foreach (var index in state.PendingIndices())
+                    var post = _reserveReport();
+                    try
                     {
-                        state.TryReject(index, DropReason.HttpError, _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture), null));
+                        foreach (var index in state.PendingIndices())
+                        {
+                            state.TryReject(index, DropReason.HttpError, _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture), null));
+                        }
+                    }
+                    finally
+                    {
+                        post(new LogbirdDeliveryException($"Logbird HTTP {status}; batch dropped.", (HttpStatusCode)status));
                     }
 
-                    _report(new LogbirdDeliveryException($"Logbird HTTP {status}; batch dropped.", (HttpStatusCode)status));
                     return state.Complete();
                 }
 
@@ -394,15 +413,22 @@ internal sealed class BatchSender
                     {
                         // Never counted as delivered: report each event that is still unacknowledged.
                         var count = 0;
-                        foreach (var index in state.PendingIndices())
+                        var post = _reserveReport();
+                        try
                         {
-                            if (state.TryReject(index, DropReason.Unacknowledged, _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.", null)))
+                            foreach (var index in state.PendingIndices())
                             {
-                                count++;
+                                if (state.TryReject(index, DropReason.Unacknowledged, _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.", null)))
+                                {
+                                    count++;
+                                }
                             }
                         }
+                        finally
+                        {
+                            post(count > 0 ? new LogbirdDeliveryException($"Logbird HTTP {status} did not acknowledge {count} event(s) after retries; they were dropped.", (HttpStatusCode)status) : null);
+                        }
 
-                        _report(new LogbirdDeliveryException($"Logbird HTTP {status} did not acknowledge {count} event(s) after retries; they were dropped.", (HttpStatusCode)status));
                         return state.Complete();
                     }
 
@@ -620,6 +646,20 @@ internal sealed class BatchSender
         }
 
         var codes = new List<string>();
+        var post = _reserveReport();
+        try
+        {
+            RejectEach(state, attempt, rejections, codes);
+        }
+        finally
+        {
+            // Whatever settled before a failure is still reported.
+            post(codes.Count > 0 ? new LogbirdRejectedException(codes.Count, codes) : null);
+        }
+    }
+
+    private void RejectEach(State state, int[] attempt, JsonElement rejections, List<string> codes)
+    {
         foreach (var rejection in rejections.EnumerateArray())
         {
             if (rejection.ValueKind != JsonValueKind.Object
@@ -646,11 +686,6 @@ internal sealed class BatchSender
             }
 
             codes.Add(code);
-        }
-
-        if (codes.Count > 0)
-        {
-            _report(new LogbirdRejectedException(codes.Count, codes));
         }
     }
 

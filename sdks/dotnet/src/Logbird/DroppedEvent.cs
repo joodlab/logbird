@@ -19,10 +19,13 @@ public enum DropReason
     HttpError = 2,
 
     /// <summary>
-    /// The event as sent (after <see cref="LogbirdOptions.BeforeSend"/> and redaction) is larger than 256 KB. Separately, an
-    /// event whose data is more than 1 MiB of text before redaction is refused without being copied, whatever redaction
-    /// would have removed: copying an unbounded tree to redact it could exhaust the host's memory.
-    /// <see cref="DroppedEvent.MayBeStored"/> is false: the event was never sent.
+    /// The event as sent (after <see cref="LogbirdOptions.BeforeSend"/> and redaction) is larger than 256 KB of UTF-8 JSON.
+    /// Separately, an event whose data measures more than 1 MiB before redaction is refused without being copied, whatever
+    /// redaction would have removed: copying an unbounded tree to redact it could exhaust the host's memory. That guard
+    /// counts one byte per UTF-16 code unit of every text the event carries (fields, context, targets, change fields,
+    /// metadata keys and values), plus JSON punctuation and the digits of parsed numbers: a lower bound of the JSON's size,
+    /// so it never refuses an event whose JSON would be under 1 MiB. <see cref="DroppedEvent.MayBeStored"/> is false: the
+    /// event was never sent.
     /// </summary>
     TooLarge = 3,
 
@@ -35,10 +38,15 @@ public enum DropReason
 
     /// <summary>
     /// The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw, or its metadata
-    /// or a change value nests JSON deeper than 1,000 levels. That limit is the server's own for storing numbers exactly,
-    /// and it keeps System.Text.Json's internal recursion (a node looks its options up through its parents) well inside any
-    /// thread's stack, where an overflow would end the host process. The one gap: a tree holding only strings, deeper than
-    /// 1,000 levels, which the server would store, is refused here.
+    /// or a change value nests JSON deeper than 1,000 levels, checked on the event as given (before
+    /// <see cref="LogbirdOptions.BeforeSend"/> and redaction: a deep part they would remove still counts, because walking it
+    /// is the risk). The limit keeps System.Text.Json's internal recursion (a node looks its options up through its parents)
+    /// well inside any thread's stack, where an overflow would end the host process; it is tested on a 256 KB stack. It is
+    /// the number the server uses for exact numbers, but the server applies it differently: to the whole event, and only
+    /// when the event holds a number a double cannot keep exactly. So a deeper tree without such a number (strings,
+    /// booleans, nulls, ordinary numbers), which the server would store, is refused here; and a change value sits three
+    /// levels into the event, so one holding such a number more than 997 levels deep is rejected by the server
+    /// (<see cref="Rejected"/>).
     /// </summary>
     Invalid = 5,
 

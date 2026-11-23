@@ -233,12 +233,13 @@ public sealed class Redactor
         }
     }
 
-    // JavaScript's RegExp.test coerces a non-string field to text.
+    // JavaScript's RegExp.test coerces a non-string field to text. A structured field is matched against its JSON, written
+    // by the SDK's iterative writer, so a field as deep as the event allows never reaches System.Text.Json's recursive one.
     private static string FieldText(JsonNode? field)
         => field switch
         {
             null => "null",
             JsonValue value when Internal.JsJson.TryGetString(value, out var text) => text,
-            _ => field.ToJsonString(),
+            _ => System.Text.Encoding.UTF8.GetString(Internal.JsJson.ToUtf8(field)),
         };
 }

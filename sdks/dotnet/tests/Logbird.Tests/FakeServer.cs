@@ -17,7 +17,8 @@ namespace Logbird.Tests;
 /// <summary>A captured ingest request.</summary>
 internal sealed class CapturedRequest(HttpRequestMessage request, byte[] body)
 {
-    // The client has no nesting limit of its own (the server has none for ordinary JSON), beyond the reader's default of 64.
+    // The client sends events nested up to its own limit (1,000 levels inside metadata or a change value, plus the
+    // envelope), far beyond the reader's default of 64; this fake reads whatever it is sent.
     private static readonly JsonDocumentOptions Deep = new() { MaxDepth = 65_536 };
 
     public HttpRequestMessage Request { get; } = request;

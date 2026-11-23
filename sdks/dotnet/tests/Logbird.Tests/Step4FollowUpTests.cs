@@ -1,0 +1,439 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
+using Logbird.Internal;
+
+namespace Logbird.Tests;
+
+/// <summary>Review of PR 1 (step-4 delivery and accounting): the fixes for R01 to R11 and the boundary checks of B01.</summary>
+public class Step4FollowUpTests
+{
+    private static readonly Uri Endpoint = new("https://audit.example.invalid/");
+
+    private static LogbirdOptions Options(Action<LogbirdOptions>? configure = null)
+    {
+        var options = new LogbirdOptions { Endpoint = Endpoint, IngestKey = "lb_ingest_fictional", FlushInterval = TimeSpan.FromHours(1) };
+        configure?.Invoke(options);
+        return options;
+    }
+
+    private static LogbirdClient Client(LogbirdOptions options, HttpMessageHandler handler)
+        => new(options, new HttpClient(handler), logger: null, delay: (_, _) => Task.CompletedTask);
+
+    private static readonly JsonNodeOptions CaseInsensitive = new() { PropertyNameCaseInsensitive = true };
+
+    // ---------------------------------------------------------------- R01: copies keep the source's options
+
+    [Fact]
+    public void Redact_finds_changes_in_a_case_insensitive_parsed_event()
+    {
+        var parsed = JsonNode.Parse(
+            """{"action":"x","Changes":[{"field":"password","before":"old-secret","after":"new-secret"}]}""",
+            CaseInsensitive)!;
+
+        var redacted = new Redactor().Redact((JsonObject)parsed);
+
+        var change = redacted["changes"]![0]!;
+        Assert.Equal("[redacted]", change["before"]!.GetValue<string>());
+        Assert.Equal("[redacted]", change["after"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void A_copy_keeps_each_containers_effective_options()
+    {
+        var parsed = JsonNode.Parse("""{"Outer":{"Inner":[{"Key":1}]}}""", CaseInsensitive)!;
+        var copy = JsonTree.Clone(parsed)!;
+
+        Assert.NotNull(copy["outer"]?["inner"]?[0]?["key"]);
+        Assert.True(copy["outer"]!.Options?.PropertyNameCaseInsensitive);
+    }
+
+    [Fact]
+    public async Task A_BeforeSend_hook_removes_a_key_from_case_insensitive_metadata_by_any_casing()
+    {
+        var server = new FakeServer();
+        await using var client = Client(Options(o => o.BeforeSend = e =>
+        {
+            e.Metadata.Remove("internalnote");
+            return e;
+        }), server);
+        var metadata = (JsonObject)JsonNode.Parse("""{"InternalNote":"fictional","kept":1}""", CaseInsensitive)!;
+        client.Track(new AuditEvent("x") { Metadata = metadata });
+        Assert.True(await client.FlushAsync());
+
+        var sent = Assert.Single(server.Requests.SelectMany(r => r.Events)).GetProperty("metadata");
+        Assert.False(sent.TryGetProperty("InternalNote", out _));
+        Assert.Equal(1, sent.GetProperty("kept").GetInt32());
+    }
+
+    // ---------------------------------------------------------------- R03: one frame per level
+
+#if NET
+    [Fact]
+    public void A_wide_array_of_containers_is_measured_without_queueing_its_members()
+    {
+        // 200,000 one-element arrays (4 bytes each, under the guard) and 400,000 empty ones (3 bytes each, over it). Queueing
+        // every member, as before, allocated megabytes; one frame per level allocates next to nothing.
+        var nested = new JsonArray();
+        for (var i = 0; i < 200_000; i++)
+        {
+            nested.Add((JsonNode)new JsonArray(0));
+        }
+
+        // System.Text.Json creates an empty array's list the first time anything reads it (whoever reads the caller's nodes
+        // first pays that once, and it stays with the node); it is read here so the measurement below counts only the walk.
+        var empty = new JsonArray();
+        for (var i = 0; i < 400_000; i++)
+        {
+            var member = new JsonArray();
+            _ = member.Count;
+            empty.Add((JsonNode)member);
+        }
+
+        var small = new AuditEvent("nested") { Metadata = { ["n"] = nested } };
+        var large = new AuditEvent("empty") { Metadata = { ["e"] = empty } };
+        JsonSize.Measure(new AuditEvent("warm up") { Metadata = { ["w"] = new JsonArray(new JsonArray(0)) } }, LogbirdClient.MaxDataBytes);
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var smallShape = JsonSize.Measure(small, LogbirdClient.MaxDataBytes);
+        var largeShape = JsonSize.Measure(large, LogbirdClient.MaxDataBytes);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(JsonSize.Shape.Ok, smallShape);
+        Assert.Equal(JsonSize.Shape.TooLarge, largeShape);
+        Assert.True(allocated < 16 * 1024, allocated.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+#endif
+
+    // ---------------------------------------------------------------- R04: every carried field is measured
+
+    [Fact]
+    public void The_guard_measures_context_schema_version_change_framing_and_number_digits()
+    {
+        var over = LogbirdClient.MaxDataBytes + 1;
+        Assert.Equal(JsonSize.Shape.TooLarge, JsonSize.Measure(new AuditEvent("x") { Context = new AuditContext { UserAgent = new string('u', over) } }, LogbirdClient.MaxDataBytes));
+        Assert.Equal(JsonSize.Shape.TooLarge, JsonSize.Measure(new AuditEvent("x") { SchemaVersion = new string('v', over) }, LogbirdClient.MaxDataBytes));
+
+        var digits = JsonNode.Parse("0." + new string('1', over))!;
+        Assert.Equal(JsonSize.Shape.TooLarge, JsonSize.Measure(new AuditEvent("x") { Metadata = { ["n"] = digits } }, LogbirdClient.MaxDataBytes));
+
+        var changes = new AuditEvent("x");
+        for (var i = 0; i < over / JsonSize.ChangeFraming + 1; i++)
+        {
+            changes.Change(string.Empty, null, null);
+        }
+
+        Assert.Equal(JsonSize.Shape.TooLarge, JsonSize.Measure(changes, LogbirdClient.MaxDataBytes));
+    }
+
+    [Fact]
+    public async Task A_context_over_the_guard_is_refused_before_it_is_copied()
+    {
+        var copies = 0;
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using var client = Client(Options(o =>
+        {
+            o.OnDrop = drops.Enqueue;
+            o.BeforeSend = e =>
+            {
+                Interlocked.Increment(ref copies);
+                return e;
+            };
+        }), new FakeServer());
+        client.Track(new AuditEvent("x") { Context = new AuditContext { UserAgent = new string('u', 1_100_000) } });
+        Assert.True(await client.FlushAsync());
+
+        Assert.Equal(0, copies);
+        var drop = Assert.Single(drops);
+        Assert.Equal(DropReason.TooLarge, drop.Reason);
+        Assert.Equal(LogbirdClient.GuardDetail, drop.Detail);
+        Assert.False(drop.MayBeStored);
+    }
+
+    [Fact]
+    public void A_parsed_strings_escapes_count_as_one_code_unit_each()
+    {
+        var parsed = (JsonValue)JsonNode.Parse("\"a" + (char)92 + "n" + (char)92 + "u00e9b\"")!;
+        Assert.True(JsJson.TryGetStringLength(parsed, out var units));
+        Assert.Equal(4, units);
+        Assert.Equal(JsJson.DecodeString(parsed.ToJsonString()).Length, units);
+    }
+
+    // ---------------------------------------------------------------- R05: the writer's budget is UTF-8 bytes
+
+    [Theory]
+    [InlineData(0x0800, 250_000)]
+    [InlineData(0x0001, 50_000)]
+    [InlineData(0x00e9, 140_000)]
+    public void The_writer_stops_at_the_UTF8_byte_limit(int character, int count)
+    {
+        // 250,000 three-byte characters are 750,000 bytes; 50,000 controls escape to 300,000; 140,000 two-byte characters
+        // are 280,000. Each is under 262,144 UTF-16 code units.
+        var node = new JsonObject { ["s"] = new string((char)character, count) };
+        Assert.Null(JsJson.ToUtf8(node, LogbirdClient.MaxEventBytes));
+    }
+
+    [Fact]
+    public void The_writer_counts_exactly_what_it_writes()
+    {
+        var text = "a" + (char)0xe9 + (char)0x800 + (char)0xD83D + (char)0xDE00 + (char)0xD800 + (char)1 + (char)34 + "z";
+        var node = new JsonObject { ["k"] = text, ["n"] = JsonNode.Parse("12.50"), ["a"] = new JsonArray(true, null) };
+        var full = JsJson.ToUtf8(node);
+
+        Assert.Equal(full, JsJson.ToUtf8(node, full.Length));
+        Assert.Null(JsJson.ToUtf8(node, full.Length - 1));
+    }
+
+    // ---------------------------------------------------------------- R07: a structured change field is written iteratively
+
+    [Fact]
+    public void Redact_matches_a_structured_change_field_as_deep_as_the_event_allows()
+    {
+        // The field sits at level 4 of the event; 1,003 levels under it make the event 1,007 deep (within 1,008), past
+        // System.Text.Json's own writer limit of 1,000.
+        JsonNode field = new JsonArray("password");
+        for (var i = 0; i < 1_003; i++)
+        {
+            field = new JsonArray(field);
+        }
+
+        var eventJson = new JsonObject
+        {
+            ["action"] = "x",
+            ["changes"] = new JsonArray(new JsonObject { ["field"] = field, ["before"] = "old-secret", ["after"] = "new-secret" }),
+        };
+
+        var redacted = new Redactor().Redact(eventJson);
+
+        Assert.Equal("[redacted]", redacted["changes"]![0]!["after"]!.GetValue<string>());
+    }
+
+    // ---------------------------------------------------------------- R08: a notice that could not be queued is retried
+
+    [Fact]
+    public async Task A_loss_notice_the_pool_refused_is_sent_once_when_it_recovers()
+    {
+        var gate = new ManualResetEventSlim();
+        var notices = new ConcurrentQueue<Exception>();
+        var logger = new EntityIdTests.CapturingLogger();
+        var client = new LogbirdClient(
+            Options(o =>
+            {
+                o.MaxQueueSize = 1_000;
+                o.OnDrop = _ => gate.Wait();
+                o.OnError = e =>
+                {
+                    if (e.Message.Contains("logbird.notifications.lost", StringComparison.Ordinal))
+                    {
+                        notices.Enqueue(e);
+                    }
+                };
+            }),
+            new HttpClient(new FakeServer()),
+            logger,
+            delay: (_, _) => Task.CompletedTask);
+        var scheduled = new List<WaitCallback>();
+        var refusals = 0;
+        client.ScheduleNotice = callback =>
+        {
+            lock (scheduled)
+            {
+                if (refusals < 2)
+                {
+                    // The first attempt is refused, the second throws: neither may use up the one notice.
+                    return refusals++ == 0 ? false : throw new NotSupportedException("fictional");
+                }
+
+                scheduled.Add(callback);
+                return true;
+            }
+        };
+        await client.DisposeAsync();
+        try
+        {
+            // The first OnDrop blocks, so the notification queue (1,000) fills and every later drop is skipped.
+            for (var i = 0; i < 3_000; i++)
+            {
+                client.Track(new AuditEvent("after shutdown"));
+            }
+
+            Assert.Equal(2, refusals);
+            var notice = Assert.Single(scheduled);
+            notice(null);
+
+            Assert.Single(notices);
+            Assert.Single(logger.Lines, line => line.Contains("logbird.notifications.lost", StringComparison.Ordinal));
+            Assert.True(client.NotificationsLost >= 2_000);
+        }
+        finally
+        {
+            gate.Set();
+        }
+    }
+
+    // ---------------------------------------------------------------- R10: a skipped entry counts every callback it carries
+
+    [Fact]
+    public void A_skipped_entry_counts_as_many_lost_callbacks_as_it_carries()
+    {
+        long lost = 0;
+        var notifier = new Notifier(1, count => Interlocked.Add(ref lost, count), () => { }, schedule: _ => true);
+        notifier.Post(() => { });
+        notifier.Post(() => { }, weight: 3);
+        notifier.Post(() => { });
+
+        Assert.Equal(4, Interlocked.Read(ref lost));
+    }
+
+    [Fact]
+    public async Task Identifier_warnings_skipped_together_count_one_lost_notification_each()
+    {
+        // Warnings are queued for accepted events, one entry per event; the first OnError blocks the notifications.
+        var errorGate = new ManualResetEventSlim();
+        await using var live = Client(Options(o =>
+        {
+            o.MaxQueueSize = 1_000;
+            o.OnError = _ => errorGate.Wait();
+        }), new FakeServer());
+        try
+        {
+            var longId = new string('a', 300);
+            for (var i = 0; i < 1_100; i++)
+            {
+                live.Track(new AuditEvent("filler") { Actor = AuditActor.User(longId) });
+            }
+
+            // The notification queue is now full of one-warning entries behind the blocked first one; an event with two
+            // warnings is skipped as one entry and counts two. The event queue is drained first, so tracking it evicts nothing.
+            await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+            {
+                while (live.Stats.QueueLength > 0)
+                {
+                    await Task.Delay(10);
+                }
+            });
+            var before = live.NotificationsLost;
+            live.Track(new AuditEvent("two warnings") { Actor = AuditActor.User(longId), Tenant = new AuditTenant(longId) });
+            Assert.Equal(before + 2, live.NotificationsLost);
+        }
+        finally
+        {
+            errorGate.Set();
+        }
+    }
+
+    // ---------------------------------------------------------------- R11: a batch report is reserved before settlement
+
+    [Fact]
+    public async Task A_batch_report_is_reserved_before_its_events_settle_and_posted_after()
+    {
+        var order = new List<string>();
+        var server = new FakeServer().Then(request => FakeServer.Accept(request, (0, "invalid_event")));
+        var sender = new BatchSender(
+            new HttpClient(server),
+            Endpoint,
+            "lb_ingest_fictional",
+            0,
+            TimeSpan.FromSeconds(10),
+            drop: (_, _, _, _) => null,
+            warn: (_, _) => { },
+            progress: () => { },
+            report: _ => order.Add("unreserved report"),
+            settle: (item, count) =>
+            {
+                if (!item.TrySettle())
+                {
+                    return false;
+                }
+
+                count();
+                order.Add("settled");
+                return true;
+            },
+            reserveReport: () =>
+            {
+                order.Add("reserved");
+                return error => order.Add(error is null ? "released" : "posted " + error.GetType().Name);
+            });
+        var json = Encoding.UTF8.GetBytes("{\"id\":\"evt_1\",\"action\":\"x\",\"occurredAt\":\"2026-11-23T00:00:00.000Z\"}");
+        await sender.SendAsync([new QueuedEvent(json, "evt_1", "x", 1)], CancellationToken.None);
+
+        Assert.Equal(["reserved", "settled", "posted LogbirdRejectedException"], order);
+    }
+
+    [Fact]
+    public async Task A_wait_covers_a_reserved_report_and_later_notifications_keep_their_order()
+    {
+        var ran = new List<string>();
+        var notifier = new Notifier(10, _ => { }, () => { });
+        var slot = notifier.Reserve();
+        notifier.Post(() => ran.Add("later"));
+
+        // Nothing behind the reserved place runs, and a wait does not return, until it is filled.
+        var wait = notifier.WaitAsync(CancellationToken.None);
+        await Task.Delay(100);
+        Assert.False(wait.IsCompleted);
+        Assert.Empty(ran);
+
+        notifier.PostReserved(slot, () => ran.Add("reserved"));
+        await Deadline.Within(TimeSpan.FromSeconds(10), () => wait);
+        Assert.Equal(["reserved", "later"], ran);
+
+        // A released place is skipped without running anything.
+        var released = notifier.Reserve();
+        notifier.Post(() => ran.Add("after release"));
+        notifier.PostReserved(released, null);
+        await Deadline.Within(TimeSpan.FromSeconds(10), () => notifier.WaitAsync(CancellationToken.None));
+        Assert.Equal(["reserved", "later", "after release"], ran);
+    }
+
+    [Fact]
+    public async Task With_only_OnError_a_flush_returns_after_the_rejection_report()
+    {
+        var reports = new ConcurrentQueue<Exception>();
+        var server = new FakeServer().Then(request => FakeServer.Accept(request, (0, "invalid_event")));
+        await using var client = Client(Options(o => o.OnError = reports.Enqueue), server);
+        client.Track(new AuditEvent("x"));
+
+        Assert.True(await client.FlushAsync());
+        Assert.Single(reports.OfType<LogbirdRejectedException>());
+    }
+
+    // ---------------------------------------------------------------- B01: the guard's boundary, on redaction-shrinkable data
+
+    [Fact]
+    public async Task Redactable_data_just_under_the_guard_is_sent_and_just_over_it_is_refused()
+    {
+        static AuditEvent WithToken(int length) => new("x") { Id = "evt_boundary", Metadata = { ["token"] = new string('s', length) } };
+
+        // The longest token the guard admits, found from its own measure (the unit is documented on JsonSize).
+        var length = LogbirdClient.MaxDataBytes - 64;
+        while (JsonSize.Measure(WithToken(length + 1), LogbirdClient.MaxDataBytes) == JsonSize.Shape.Ok)
+        {
+            length++;
+        }
+
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(WithToken(length), LogbirdClient.MaxDataBytes));
+        Assert.True(length > LogbirdClient.MaxDataBytes - 64);
+
+        var server = new FakeServer();
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using var client = Client(Options(o => o.OnDrop = drops.Enqueue), server);
+        client.Track(WithToken(length));
+        client.Track(WithToken(length + 1));
+        Assert.True(await client.FlushAsync());
+
+        var sent = Assert.Single(server.Requests.SelectMany(r => r.Events));
+        Assert.Equal("[redacted]", sent.GetProperty("metadata").GetProperty("token").GetString());
+        var drop = Assert.Single(drops);
+        Assert.Equal(DropReason.TooLarge, drop.Reason);
+        Assert.Equal(LogbirdClient.GuardDetail, drop.Detail);
+    }
+}

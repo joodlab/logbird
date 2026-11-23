@@ -204,21 +204,14 @@ internal static class Recording
         AuditEvent copy;
         try
         {
-            // The client's own depth and size limits apply before anything is copied: an event they would reject is dropped
-            // and reported here, under its id or a new one, without copying it or handing the caller's instance to any client.
-            var shape = JsonSize.Measure(prepared, LogbirdClient.MaxEventBytes);
-            if (shape != JsonSize.Shape.Ok)
+            // The client's own pre-copy checks (depth, and the 1 MiB memory guard before redaction) apply before anything is
+            // copied: an event they refuse is dropped and reported here, under its id or a new one, without copying it or
+            // handing the caller's instance to any client. The 256 KB limit is decided later by the client, on what it sends
+            // (after BeforeSend and redaction).
+            if (LogbirdClient.RefuseBeforeCopy(prepared) is { } refusal)
             {
                 var dropped = SafeId(prepared) ?? LogbirdClient.NewEventId();
-                if (shape == JsonSize.Shape.TooLarge)
-                {
-                    client.Drop(DropReason.TooLarge, dropped, SafeAction(prepared), "the event exceeds 256 KB.");
-                }
-                else
-                {
-                    client.Drop(DropReason.Invalid, dropped, SafeAction(prepared), "the event is nested too deeply.");
-                }
-
+                client.Drop(refusal.Reason, dropped, SafeAction(prepared), refusal.Detail);
                 return dropped;
             }
 

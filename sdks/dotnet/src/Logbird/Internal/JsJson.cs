@@ -22,53 +22,79 @@ internal static class JsJson
     public static byte[] ToUtf8(JsonNode node) => ToUtf8(node, long.MaxValue)!;
 
     /// <summary>
-    /// The JSON as UTF-8, or null as soon as it is certain to exceed <paramref name="maxBytes"/>: every UTF-16 code unit
-    /// written is at least one UTF-8 byte, so writing stops once the text passes the limit and an oversized value is never
-    /// written whole.
+    /// The JSON as UTF-8, or null as soon as it would exceed <paramref name="maxBytes"/>. The writer counts the UTF-8 bytes
+    /// of everything it appends (escapes, multi-byte characters and raw number tokens included) before appending it, so
+    /// the output never grows past the limit and an oversized value is never written whole.
     /// </summary>
     public static byte[]? ToUtf8(JsonNode node, long maxBytes)
     {
-        var builder = new StringBuilder(512);
-        var previous = _limit;
-        _limit = maxBytes;
+        var output = new Output(maxBytes);
         try
         {
-            Write(builder, node);
+            Write(output, node);
         }
         catch (TooLong)
         {
             return null;
         }
-        finally
-        {
-            _limit = previous;
-        }
 
-        // Lone surrogates were escaped above, so the text is valid UTF-16 and encodes to valid UTF-8.
-        return Encoding.UTF8.GetBytes(builder.ToString());
+        // Lone surrogates were escaped above, so the text is valid UTF-16 and encodes to valid UTF-8 of exactly the
+        // counted length.
+        return Encoding.UTF8.GetBytes(output.Text.ToString());
     }
 
-    /// <summary>The current <see cref="ToUtf8(JsonNode, long)"/> call's limit on this thread; unlimited otherwise.</summary>
-    [ThreadStatic]
-    private static long _limit;
-
-    private static long Limit => _limit == 0 ? long.MaxValue : _limit;
-
-    /// <summary>Thrown by the writer once the output must pass the caller's limit; never escapes <see cref="ToUtf8(JsonNode, long)"/>.</summary>
+    /// <summary>Thrown by the writer once the output would pass its limit; never escapes <see cref="ToUtf8(JsonNode, long)"/>.</summary>
     private sealed class TooLong : Exception;
+
+    /// <summary>The text being written and its length in UTF-8 bytes, checked against the limit before each append.</summary>
+    private sealed class Output(long limit)
+    {
+        public StringBuilder Text { get; } = new(512);
+
+        public long Bytes { get; private set; }
+
+        /// <summary>Accounts <paramref name="bytes"/> more UTF-8 bytes, or throws if they would pass the limit.</summary>
+        public void Reserve(long bytes)
+        {
+            Require(bytes);
+            Bytes += bytes;
+        }
+
+        /// <summary>Throws if <paramref name="bytes"/> more could not fit, without accounting them.</summary>
+        public void Require(long bytes)
+        {
+            if (Bytes + bytes > limit)
+            {
+                throw new TooLong();
+            }
+        }
+
+        /// <summary>Appends ASCII text (punctuation, literals, number tokens): one byte per character.</summary>
+        public void Ascii(char c)
+        {
+            Reserve(1);
+            Text.Append(c);
+        }
+
+        public void Ascii(string text)
+        {
+            Reserve(text.Length);
+            Text.Append(text);
+        }
+    }
 
     public static string Quote(string value)
     {
-        var builder = new StringBuilder(value.Length + 2);
-        AppendString(builder, value);
-        return builder.ToString();
+        var output = new Output(long.MaxValue);
+        AppendString(output, value);
+        return output.Text.ToString();
     }
 
     /// <summary>
     /// Writes a node without recursion: open objects and arrays wait on an explicit stack, so any depth the size limit
     /// allows is written on any thread's stack.
     /// </summary>
-    private static void Write(StringBuilder builder, JsonNode? root)
+    private static void Write(Output builder, JsonNode? root)
     {
         var open = new Stack<Frame>();
         WriteOne(builder, root, open);
@@ -79,19 +105,19 @@ internal static class JsJson
             {
                 if (!members.MoveNext())
                 {
-                    builder.Append('}');
+                    builder.Ascii('}');
                     open.Pop();
                     continue;
                 }
 
                 if (!frame.First)
                 {
-                    builder.Append(',');
+                    builder.Ascii(',');
                 }
 
                 frame.First = false;
                 AppendString(builder, members.Current.Key);
-                builder.Append(':');
+                builder.Ascii(':');
                 WriteOne(builder, members.Current.Value, open);
             }
             else
@@ -99,14 +125,14 @@ internal static class JsJson
                 var array = frame.Array!;
                 if (frame.Index >= array.Count)
                 {
-                    builder.Append(']');
+                    builder.Ascii(']');
                     open.Pop();
                     continue;
                 }
 
                 if (frame.Index > 0)
                 {
-                    builder.Append(',');
+                    builder.Ascii(',');
                 }
 
                 WriteOne(builder, array[frame.Index++], open);
@@ -115,29 +141,24 @@ internal static class JsJson
     }
 
     /// <summary>Writes a leaf, or opens an object or array whose contents the caller's loop writes.</summary>
-    private static void WriteOne(StringBuilder builder, JsonNode? node, Stack<Frame> open)
+    private static void WriteOne(Output builder, JsonNode? node, Stack<Frame> open)
     {
         switch (node)
         {
             case null:
-                builder.Append("null");
+                builder.Ascii("null");
                 break;
             case JsonObject obj:
-                builder.Append('{');
+                builder.Ascii('{');
                 open.Push(new Frame { Members = JavaScriptOrder(obj).GetEnumerator() });
                 break;
             case JsonArray array:
-                builder.Append('[');
+                builder.Ascii('[');
                 open.Push(new Frame { Array = array });
                 break;
             case JsonValue value:
                 WriteValue(builder, value);
                 break;
-        }
-
-        if (builder.Length > Limit)
-        {
-            throw new TooLong();
         }
     }
 
@@ -176,7 +197,47 @@ internal static class JsJson
         return false;
     }
 
-    private static void WriteValue(StringBuilder builder, JsonValue value)
+    /// <summary>
+    /// The number of UTF-16 code units in a string value, without decoding it: a parsed string's escapes are counted from
+    /// its raw text (System.Text.Json 8 offers no allocation-free view of it, so the raw token is read once).
+    /// </summary>
+    internal static bool TryGetStringLength(JsonValue value, out long units)
+    {
+        if (value.TryGetValue<JsonElement>(out var parsed))
+        {
+            units = parsed.ValueKind == JsonValueKind.String ? DecodedLength(parsed.GetRawText()) : 0;
+            return parsed.ValueKind == JsonValueKind.String;
+        }
+
+        if (value.TryGetValue<string>(out var own))
+        {
+            units = own.Length;
+            return true;
+        }
+
+        units = 0;
+        return false;
+    }
+
+    /// <summary>The UTF-16 code units <see cref="DecodeString"/> would produce for a JSON string literal (with its quotes).</summary>
+    internal static long DecodedLength(string raw)
+    {
+        long units = 0;
+        for (var i = 1; i < raw.Length - 1; i++)
+        {
+            if (raw[i] == (char)92)
+            {
+                // An escape is one code unit: a u escape spans six characters, the others two.
+                i += raw[i + 1] == 'u' ? 5 : 1;
+            }
+
+            units++;
+        }
+
+        return units;
+    }
+
+    private static void WriteValue(Output builder, JsonValue value)
     {
         if (TryGetString(value, out var text))
         {
@@ -186,7 +247,7 @@ internal static class JsJson
 
         if (value.TryGetValue<bool>(out var flag))
         {
-            builder.Append(flag ? "true" : "false");
+            builder.Ascii(flag ? "true" : "false");
             return;
         }
 
@@ -202,8 +263,9 @@ internal static class JsJson
         string json;
         if (value.TryGetValue<JsonElement>(out var element) && element.ValueKind == JsonValueKind.Number)
         {
-            // Parsed JSON: send the number exactly as it was written (a maintainer decision: never round on purpose).
-            builder.Append(element.GetRawText());
+            // Parsed JSON: send the number exactly as it was written (a maintainer decision: never round on purpose). A
+            // number token is ASCII.
+            builder.Ascii(element.GetRawText());
             return;
         }
         else if (value.TryGetValue<JsonElement>(out element))
@@ -230,15 +292,15 @@ internal static class JsJson
         }
         else if (json is "null" or "true" or "false")
         {
-            builder.Append(json);
+            builder.Ascii(json);
         }
         else if (json is "NaN" or "Infinity" or "-Infinity")
         {
-            builder.Append("null");
+            builder.Ascii("null");
         }
         else
         {
-            builder.Append(FormatNumber(json));
+            builder.Ascii(FormatNumber(json));
         }
     }
 
@@ -437,49 +499,61 @@ internal static class JsJson
         return negative ? "-" + result : result;
     }
 
-    private static void AppendString(StringBuilder builder, string value)
+    private static void AppendString(Output output, string value)
     {
-        if (builder.Length + value.Length > Limit)
-        {
-            throw new TooLong();
-        }
-
-        builder.Append('"');
+        // Every code unit is at least one byte, so a value that cannot fit even unescaped is refused before it is read.
+        output.Require(value.Length + 2L);
+        var builder = output.Text;
+        output.Ascii('"');
         for (var i = 0; i < value.Length; i++)
         {
             var c = value[i];
             switch (c)
             {
                 case '"':
+                    output.Reserve(2);
                     builder.Append('\\').Append('"');
                     break;
                 case '\\':
+                    output.Reserve(2);
                     builder.Append('\\').Append('\\');
                     break;
                 case '\b':
+                    output.Reserve(2);
                     builder.Append('\\').Append('b');
                     break;
                 case '\f':
+                    output.Reserve(2);
                     builder.Append('\\').Append('f');
                     break;
                 case '\n':
+                    output.Reserve(2);
                     builder.Append('\\').Append('n');
                     break;
                 case '\r':
+                    output.Reserve(2);
                     builder.Append('\\').Append('r');
                     break;
                 case '\t':
+                    output.Reserve(2);
                     builder.Append('\\').Append('t');
                     break;
                 default:
-                    var lone = (char.IsHighSurrogate(c) && (i + 1 >= value.Length || !char.IsLowSurrogate(value[i + 1])))
-                        || (char.IsLowSurrogate(c) && (i == 0 || !char.IsHighSurrogate(value[i - 1])));
-                    if (c < 0x20 || lone)
+                    if (char.IsHighSurrogate(c) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
                     {
+                        // A surrogate pair is one code point outside the BMP: four UTF-8 bytes.
+                        output.Reserve(4);
+                        builder.Append(c).Append(value[++i]);
+                    }
+                    else if (c < 0x20 || char.IsSurrogate(c))
+                    {
+                        // Controls and lone surrogates are escaped as six ASCII bytes.
+                        output.Reserve(6);
                         builder.Append('\\').Append('u').Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
                     }
                     else
                     {
+                        output.Reserve(c < 0x80 ? 1 : c < 0x800 ? 2 : 3);
                         builder.Append(c);
                     }
 
@@ -487,6 +561,6 @@ internal static class JsJson
             }
         }
 
-        builder.Append('"');
+        output.Ascii('"');
     }
 }
