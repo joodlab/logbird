@@ -128,6 +128,20 @@ export async function recoverAbandonedRetention(tx: import('./generated/client')
   });
 }
 
+/**
+ * Background retention run states (apps/worker/src/retention.ts). `staging` (between its fences) and `materializing`
+ * (DELETE mutations still finishing) never refuse ingest or reads; only `running` (its second fence) does.
+ */
+export const RETENTION_STAGING = 'staging';
+export const RETENTION_MATERIALIZING = 'materializing';
+/** Call while holding the exclusive project lock, before writing rows with an original (earlier) receive clock. */
+export async function cancelStagedRetention(projectId: string, db: import('./generated/client').Prisma.TransactionClient = prisma) {
+  return db.retentionRun.updateMany({
+    where: { projectId, kind: 'retention', status: RETENTION_STAGING },
+    data: { status: 'canceled', finishedAt: new Date(), error: 'Recovered writes arrived during the run; the next run retries.' },
+  });
+}
+
 export * from './audit-outbox';
 export * from './auth-email-hash';
 export * from './auth-records';

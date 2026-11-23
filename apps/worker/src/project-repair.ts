@@ -6,7 +6,7 @@ import { enqueueProjectRetention } from './queue';
 export function heartbeatMaintenanceRun(runId: string) {
   const timer = setInterval(() => {
     void prisma.retentionRun
-      .updateMany({ where: { id: runId, status: 'running' }, data: { heartbeatAt: new Date() } })
+      .updateMany({ where: { id: runId, status: { in: ['running', 'staging'] } }, data: { heartbeatAt: new Date() } })
       .catch(() => console.error(JSON.stringify({ level: 'error', event: 'maintenance.heartbeat_failed', runId })));
   }, 30_000);
   return () => clearInterval(timer);

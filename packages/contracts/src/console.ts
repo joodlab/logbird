@@ -47,7 +47,9 @@ export const retentionStatusSchema = z.object({
       startedAt: z.string(),
       finishedAt: z.string().nullable(),
       deletedEvents: z.number().int().nullable(),
-      status: z.string(), // running | completed | failed
+      // running | staging | materializing | completed | canceled | failed. `staging` and `materializing` belong to the
+      // hourly background run (#268): ingest and reads continue while ClickHouse finishes its DELETEs.
+      status: z.string(),
       cutoff: z.string(),
       error: z.string().nullable(),
     })

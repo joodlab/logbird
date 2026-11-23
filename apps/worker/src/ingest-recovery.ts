@@ -7,7 +7,15 @@ import {
   repairEventIndex,
   retryFingerprint,
 } from '@logbird/clickhouse';
-import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, type Prisma, ProjectBusyError, prisma, withProjectLock } from '@logbird/database';
+import {
+  cancelStagedRetention,
+  confirmIngestReceipts,
+  INGEST_RECEIPT_WINDOW_MS,
+  type Prisma,
+  ProjectBusyError,
+  prisma,
+  withProjectLock,
+} from '@logbird/database';
 import { rebuildProjectReadModel } from './project-repair';
 
 const FLUSH_INTERVAL_MS = 60_000;
@@ -180,6 +188,9 @@ export async function recoverProjectIngest(
     if (proof.claimed) await rebuildProjectReadModel(ch, projectId);
     await settleAbandonedReceipts(ch, projectId, eligible, readyCutoff);
     if (replay) {
+      // A replay writes rows with their original receive clock. A background retention run staged between its fences
+      // has not counted them, so it must not apply: cancel it (we hold the exclusive lock its second fence needs).
+      await cancelStagedRetention(projectId);
       await replay();
       return true;
     }

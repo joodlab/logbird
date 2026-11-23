@@ -56,15 +56,21 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
   // cleanup stays ordered: the caller's drain then fails on a completed download, and its receipt check says why.
   async function whileReading<T>(reader: ReadableStreamDefaultReader<Uint8Array>, started: T | Promise<T>) {
     const work = Promise.resolve(started);
-    let open = true;
     for (;;) {
-      const settled = await Promise.race([work.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000))]);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settled = await Promise.race([
+        work.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), 5000);
+        }),
+      ]).finally(() => clearTimeout(timer));
       if (settled) return work;
-      if (open)
-        open = await reader.read().then(
-          ({ done }) => !done,
-          () => false,
-        );
+      const open = await reader.read().then(
+        ({ done }) => !done,
+        () => false,
+      );
+      // The download ended (completed or failed): stop polling, still waiting for the maintenance itself.
+      if (!open) return work;
     }
   }
   async function receipts(requestId: string) {

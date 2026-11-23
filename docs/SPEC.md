@@ -283,9 +283,39 @@ Retention: `apps/worker` runs hourly and immediately after retention decreases. 
 (`RetentionRun` in Postgres) and shown in Settings. Project deletion purges all of its rows.
 
 Retention skips mutations and exclusive locking when no expired row exists, recording a completed zero-deletion run.
-Retention increases do not trigger a purge. Actual purges delete minute buckets up to the cutoff minute and
-recompute that partial minute exactly from survivors. Only entities and attribute keys present in expired
-rows are recomputed, preserving exact counts and extrema without rebuilding unaffected histories.
+Retention increases do not trigger a purge.
+
+**Hourly runs never hold the project lock across a ClickHouse mutation** (#268). A lightweight DELETE becomes a
+mutation that ClickHouse applies to every active part of the table, so on a large table it takes tens of seconds; the
+hourly run therefore creates its DELETEs without waiting for them, between two short exclusive fences:
+1. *Fence A* proves no insert of the project can still land (no unresolved claim, or the newest is past its lease, the
+   async-insert flush bound and a 30-second clock-skew allowance, then the async queue is flushed; otherwise the run
+   waits for the next hour) and records F_A from the database clock, the clock ingest stamps `received_at` with. The
+   run deletes exactly the rows with `timestamp` before the cutoff (floored to the minute) and `received_at <= F_A`;
+   rows received later survive it and the next run deletes them.
+2. *Between the fences*, without a lock, it recomputes the entity and attribute-key rows the deleted rows contributed
+   to, from the surviving rows received by F_A, into a ClickHouse session temporary table. The run is `staging`.
+3. *Fence B* cancels the run (`canceled`, nothing deleted) if the retention period changed or a recovered write with
+   its original receive clock landed since fence A, sets the destructive fence and a new maintenance generation, then
+   creates the five DELETE mutations without waiting and inserts the staged rows plus the contribution of rows
+   received in (F_A, F_B]. Minute buckets before the cutoff held only deleted rows (plus that delta), so they are
+   deleted rather than recomputed. Ingest and rollup reads wait for this fence only; it takes milliseconds.
+4. The run is `materializing` until ClickHouse finishes the DELETEs. Every Logbird ClickHouse client sets
+   `apply_mutations_on_fly = 1`, so readers already see the DELETEs applied and never see old and replacement rollup
+   rows together; a mutation applies only to parts that existed when it was created, so the replacement rows and every
+   later insert survive it. Exports stay refused ("Retention is finishing…", Retry-After 60) until the
+   destructive-maintenance reconciler sees no pending mutation, verifies with plain reads (pending mutations not
+   applied) that the deleted rows are gone, purges their receipts and marks the run `completed`. DELETEs still pending
+   after 15 minutes mark the run `failed` with ClickHouse's reason; ingest and reads are unaffected, and the run
+   completes by itself if they finish later. While a project has pending DELETEs, its hourly run waits.
+
+`staging`, `materializing` and `canceled` never refuse ingest or reads. A failure after the DELETEs exist marks the run
+`failed` and records a failed ingest repair, which fences rollup reads until the next run rebuilds the rollups.
+
+Lowering retention, repairs and interrupted runs keep the synchronous purge under the exclusive lock: it deletes minute
+buckets up to the cutoff minute and recomputes that partial minute exactly from survivors. Only entities and attribute
+keys present in expired rows are recomputed, preserving exact counts and extrema without rebuilding unaffected
+histories.
 The hard TTL uses receipt time plus 3650 days; event-time policy remains enforced by the retention worker.
 The migration changes TTL metadata without materializing it or removing existing rows.
 
@@ -304,7 +334,8 @@ Raw-event reads are not snapshots and may overlap a purge. Exports instead use t
 maintenance generation and fence before/after querying; an overlapping rebuild returns 503 even if completed.
 Writers use session advisory locks held on a separate pool (16 connections per process), never a transaction:
 ingest (including Logbird's own audit writes) takes a **shared** data lock, so concurrent ingests for one project
-coexist; maintenance (retention, sample replacement/removal, deletion, policy changes) takes it **exclusive**. A
+coexist; maintenance (retention, sample replacement/removal, deletion, policy changes) takes it **exclusive** (the hourly
+retention run only for its two fences, never across a ClickHouse mutation). A
 second "gate" lock gives maintenance writer preference: while maintenance waits or runs, new ingests cannot pass the
 gate, so a steady ingest stream cannot starve it, and in-flight ingests (tens of ms) drain first. Every acquisition is
 a non-blocking try with a bounded retry (default 3 s); on timeout the caller gets HTTP 503 project_busy with

@@ -6,6 +6,7 @@ export * from './migrations';
 export * from './normalize';
 export * from './queries';
 export * from './query';
+export * from './retention';
 export * from './scope';
 export * from './setup';
 export * from './sql-guard';

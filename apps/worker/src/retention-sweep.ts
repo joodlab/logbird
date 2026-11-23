@@ -1,7 +1,7 @@
 import { projectMaintenance } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { logIngestRecoveryFailure, recoverProjectIngest } from './ingest-recovery';
-import { clickhouse, enforceProjectRetention, pruneReceiptBackstop } from './retention';
+import { clickhouse, pruneReceiptBackstop, runBackgroundRetention } from './retention';
 
 export async function enforceRetention() {
   await pruneReceiptBackstop(); // Includes idle workspace audit streams.
@@ -29,7 +29,8 @@ export async function enforceRetention() {
     const projects = await prisma.project.findMany({ select: { id: true } });
     for (const project of projects) {
       try {
-        await enforceProjectRetention(project.id);
+        // Two short fences instead of the lock across the purge (#268); unusual states take the synchronous path.
+        await runBackgroundRetention(project.id);
       } catch (error) {
         failures.push(error);
       }

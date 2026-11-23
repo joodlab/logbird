@@ -12,7 +12,15 @@ const fake = vi.hoisted(() => ({
   recoverRetention: vi.fn(),
 }));
 vi.mock('@logbird/database', () => ({
-  prisma: { ingestReceipt: { findMany: fake.pending }, project: { findMany: fake.projects, findUnique: fake.project } },
+  prisma: {
+    ingestReceipt: { findMany: fake.pending },
+    project: { findMany: fake.projects, findUnique: fake.project },
+    retentionRun: { findFirst: async () => null, count: async () => 0 },
+  },
+  RETENTION_LEASE_MS: 600_000,
+  RETENTION_STAGING: 'staging',
+  RETENTION_MATERIALIZING: 'materializing',
+  cancelStagedRetention: vi.fn(),
   pruneIngestReceipts: fake.prune,
   compactIngestReceiptIndex: fake.compact,
   withProjectLock: fake.lock,
@@ -23,6 +31,9 @@ vi.mock('@logbird/clickhouse', () => ({
   createMaintenanceClickHouseClient: () => ({}),
   projectMaintenance: (client: unknown) => client,
   hasExpiredEvents: fake.expired,
+  pendingProjectMutations: async () => [],
+  retentionCutoff: (now: number, days: number) => new Date(now - days * 86_400_000),
+  createSessionClickHouseClient: () => ({ close: async () => undefined }),
   purgeProject: vi.fn(),
   rebuildProjectRollups: vi.fn(),
 }));
@@ -41,7 +52,9 @@ beforeEach(() => {
   fake.projects.mockResolvedValue([{ id: 'qa-project' }]);
   fake.project.mockResolvedValue({ id: 'qa-project', retentionDays: 30 });
   fake.expired.mockResolvedValue(true);
-  fake.lock.mockImplementation(async (_id, work) => work({ retentionRun: { findFirst: async () => ({ status: 'running' }) } }));
+  fake.lock.mockImplementation(async (_id, work) =>
+    work({ retentionRun: { findFirst: async () => ({ status: 'running' }), updateMany: async () => ({ count: 0 }) } }),
+  );
   fake.compact.mockResolvedValue({ action: 'skipped_compact' });
 });
 afterEach(() => vi.restoreAllMocks());

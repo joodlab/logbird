@@ -1,3 +1,4 @@
+import { assertSupportedClickHouse } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
@@ -7,6 +8,8 @@ import { runReceiptIndexCompaction } from './receipt-index-compaction';
 import { clickhouse, enforceProjectRetention } from './retention';
 import { enforceRetention } from './retention-sweep';
 
+// An unsupported ClickHouse fails here, naming its version, instead of on the first read (#268).
+await assertSupportedClickHouse(clickhouse);
 await probeIngestRecovery(clickhouse);
 const worker = new Worker(
   retentionQueueName,

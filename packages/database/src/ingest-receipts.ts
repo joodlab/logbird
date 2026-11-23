@@ -275,6 +275,13 @@ export function sweepIngestReceipts(projectId?: string) {
 }
 
 /** Call after the matching ClickHouse purge while holding the exclusive project lock. */
-export async function purgeIngestReceipts(projectId: string, cutoff?: Date) {
-  await prisma.ingestReceipt.deleteMany({ where: { projectId, ...(cutoff ? { eventAt: { lt: cutoff }, confirmedAt: { not: null } } : {}) } });
+/** `receivedBefore` limits a cutoff purge to the receipts of the rows a background retention run deleted. */
+export async function purgeIngestReceipts(projectId: string, cutoff?: Date, receivedBefore?: Date) {
+  await prisma.ingestReceipt.deleteMany({
+    where: {
+      projectId,
+      ...(cutoff ? { eventAt: { lt: cutoff }, confirmedAt: { not: null } } : {}),
+      ...(cutoff && receivedBefore ? { receivedAt: { lte: receivedBefore } } : {}),
+    },
+  });
 }

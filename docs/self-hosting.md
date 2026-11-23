@@ -244,6 +244,42 @@ Set DATABASE_URL, CLICKHOUSE_URL, REDIS_URL and ClickHouse admin/query credentia
 
 Postgres needs schema migration rights. ClickHouse needs logbird schema/table/view DDL and read/write, CREATE/ALTER USER, CREATE/ALTER SETTINGS PROFILE, CREATE/ALTER ROW POLICY, SELECT WITH GRANT OPTION on the four Logbird tables, SHOW ACCESS/GRANTS and system.users/settings visibility. Use ClickHouse 26.9 with SQL_ settings. Provisioning checks credentials, four SELECT grants, effective limits and unchanged main-user row counts. Stop writes during upgrades; concurrent ingest can fail that safety check.
 
+**ClickHouse 26.9 or newer is required, and the server and worker check it at startup.** The hourly retention run
+creates its DELETE mutations without waiting for them, and every Logbird ClickHouse client reads with
+`apply_mutations_on_fly = 1`, so readers never see a row a pending DELETE removes (#268). ClickHouse applies lightweight
+DELETEs on the fly since 25.5; Logbird is measured and supported on the 26.9 line only, and the server and worker refuse
+to start against an older server with a message naming its version. The ClickHouse writer also needs
+`SYSTEM FLUSH ASYNC INSERT QUEUE` (below); without it, retention runs are canceled with that reason in Settings.
+
+**Never run a mutation with `now()`, `rand()` or a subquery in its predicate on a Logbird table.** ClickHouse cannot
+apply such a mutation on the fly, so while it is pending every Logbird read of that table fails. Logbird's own clients
+resolve these to literals (`mutations_execute_nondeterministic_on_initiator` and
+`mutations_execute_subqueries_on_initiator`); for manual maintenance, bind literal timestamps or set those settings.
+
+### Stuck retention deletes
+
+A retention run is `materializing` while ClickHouse applies its DELETEs; that normally takes under a minute. Ingest
+and reads continue, and exports of the project are refused with "Retention is finishing…" until the DELETEs finish.
+If they are still pending after 15 minutes, the run shows as failed in Settings with ClickHouse's reason and the worker
+logs `retention.materialization_stuck` (the server also warns `maintenance.reconciliation_pending` after 5 minutes).
+
+ClickHouse applies mutations to each part in order, so one mutation that keeps failing on a part (disk full, memory
+limit, a corrupted part) also holds every later mutation on that part, including other projects' retention DELETEs.
+Their runs stay `materializing`, their exports stay refused, and their hourly runs wait; nothing is refused to ingest.
+To act:
+
+1. Find it: `SELECT table, mutation_id, command, parts_to_do, latest_fail_reason, latest_fail_time FROM system.mutations
+   WHERE database = currentDatabase() AND is_done = 0 ORDER BY create_time`.
+2. Fix the cause shown in `latest_fail_reason` (free disk, raise the memory limit for merges and mutations, or detach
+   and restore a corrupted part from backup). ClickHouse retries failed mutations by itself; the runs complete within
+   about ten seconds of the queue draining, and their exports reopen.
+3. Only if the cause cannot be fixed, `KILL MUTATION WHERE mutation_id = '…'`. Killing a Logbird retention DELETE leaves
+   rows that should have been removed: the reconciler's verification then marks the run failed, and the next hourly
+   run deletes them again on the synchronous path. Killing a DELETE on `entities` or `attribute_keys` also leaves the
+   old rollup rows next to their replacements, so rebuild that project's rollups afterwards:
+   `node --env-file=.env --import tsx scripts/repair-rollups.ts PROJECT`. The rebuild holds the project's exclusive
+   lock, so its ingest is refused (503 `project_busy`, retried by the SDKs) while it runs.
+
 Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashtags=true`, matching brace-enclosed BullMQ prefixes such as {logbird} across producers/workers, and no queue eviction. Do not use ioredis keyPrefix.
 
 ## Upgrades and backups

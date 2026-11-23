@@ -438,7 +438,10 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
         await deliverOutboxEvent(requested.id, ingest);
         if (!(await waitForAuditDelivery(requested.id))) throw new Error('Export request not acknowledged');
         if (!membership)
-          throw new ApiError(503, 'export_project_unreadable', 'Data maintenance is incomplete for this project. Retry after maintenance finishes.');
+          throw (
+            requested.unreadable ??
+            new ApiError(503, 'export_project_unreadable', 'Data maintenance is incomplete for this project. Retry after maintenance finishes.')
+          );
       } catch (error) {
         if (error instanceof ApiError && ['export_busy', 'export_project_busy', 'export_project_unreadable'].includes(error.code)) throw error;
         throw new ApiError(503, 'export_audit_unavailable', 'The export request could not be recorded. Retry the export before downloading.');

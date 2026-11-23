@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { assertSupportedClickHouse } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
@@ -11,6 +12,8 @@ import { ingest } from './ingest';
 import { startAuditDrainer } from './outbox-delivery';
 import { rateLimitStore } from './rate-limit';
 
+// Before accepting requests: an unsupported ClickHouse fails here, naming its version, not on the first read (#268).
+await assertSupportedClickHouse(clickhouse);
 const server = serve({ fetch: app.fetch, port: env.PORT }, () =>
   console.log(JSON.stringify({ level: 'info', event: 'server.ready', port: env.PORT })),
 );
