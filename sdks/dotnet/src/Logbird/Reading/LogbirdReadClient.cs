@@ -30,7 +30,13 @@ public sealed class LogbirdReadOptions
     /// </summary>
     public string? ReadKey { get; set; }
 
-    /// <summary>The time limit for one request. Defaults to 30 seconds.</summary>
+    /// <summary>
+    /// The time limit for each HTTP request: the version read, each search page, a detail, facet or mint request, and the
+    /// wait for an export's headers. It is not a limit for a whole call (a first call that also reads the server's version,
+    /// or a <c>SearchAllAsync</c> iteration, makes several requests, each with its own limit), and an export's download is
+    /// bounded only by your cancellation token (which also needs your destination stream to honour it). It holds even when a custom HTTP handler ignores cancellation; past it the
+    /// request throws <see cref="LogbirdApiException"/> with code <c>unreachable</c>. Defaults to 30 seconds.
+    /// </summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
@@ -45,8 +51,25 @@ public sealed class LogbirdReadOptions
 /// recording, reading reports failures by throwing <see cref="LogbirdApiException"/>, because the caller needs the data.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A read key can read the whole project. When you show history to your own customers, check that the signed-in user
 /// may see the tenant or record before you search, on every request including next-page requests.
+/// </para>
+/// <para>
+/// Each HTTP request ends within <see cref="LogbirdReadOptions.Timeout"/> (<c>unreachable</c> past it; for an export, the
+/// limit covers only the wait for its headers, not the download), and every call ends when your token is cancelled
+/// (<see cref="OperationCanceledException"/>). An export's download ends on cancellation when the response body fails or
+/// ends a pending read once disposed, as <c>HttpClient</c>'s own streams do; a body from a custom handler that does
+/// neither, or a write to your destination stream that ignores the token, holds the export until that read or write
+/// returns. A call whose token is already cancelled sends nothing.
+/// </para>
+/// <para>
+/// A search, detail or facet answer is checked against the server's contract before it is read: a required member that
+/// is missing, or <c>null</c> where the contract allows none, throws <c>invalid_response</c> instead of reading as an
+/// empty page (optional members may be absent). A viewer-token answer has its own checks
+/// (<c>invalid_response</c> or <c>scope_mismatch</c>). A search, detail, facet or viewer-token answer over 64 MiB throws
+/// <c>response_too_large</c>; an export is streamed and has no size limit.
+/// </para>
 /// </remarks>
 public sealed class LogbirdReadClient : IDisposable
 {
@@ -106,7 +129,11 @@ public sealed class LogbirdReadClient : IDisposable
     /// <summary>Searches stored events and returns one page.</summary>
     /// <param name="search">The search; <see langword="null"/> returns the newest events in the default range.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
-    /// <exception cref="LogbirdApiException">The server answered an error, or could not be reached.</exception>
+    /// <exception cref="LogbirdApiException">
+    /// The server answered an error, could not be reached in time (<c>unreachable</c>), or answered something this SDK
+    /// cannot read (<c>invalid_response</c>).
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     /// <exception cref="LogbirdApiException">
     /// Also when the search needs a newer server than the one answering (<c>server_too_old</c>, or
     /// <c>server_version_unknown</c> when its version cannot be read): such a search is never sent.
@@ -256,9 +283,13 @@ public sealed class LogbirdReadClient : IDisposable
     /// a viewer token cannot mint another. Logbird 0.2.0 and later.
     /// </summary>
     /// <param name="scope">What the token may read. Checked locally before sending (see <see cref="ViewerScope"/>).</param>
-    /// <param name="lifetime">How long the token works, 60 seconds to 1 hour; the server default (15 minutes) when null.</param>
+    /// <param name="lifetime">
+    /// How long the token works: a whole number of seconds from 60 seconds to 1 hour; the server default (15 minutes)
+    /// when null. A fraction of a second is refused rather than silently dropped.
+    /// </param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="ArgumentException">The scope or lifetime is invalid.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     /// <exception cref="LogbirdApiException">
     /// The server refused (for example <c>scope_exceeded</c> when the scope is wider than the key's), could not be reached,
     /// is older than 0.2.0, or granted a scope different from the one requested (<c>scope_mismatch</c>; the token is not
@@ -277,6 +308,11 @@ public sealed class LogbirdReadClient : IDisposable
             if (span < TimeSpan.FromSeconds(60) || span > TimeSpan.FromHours(1))
             {
                 throw new ArgumentException("A viewer token lives 60 seconds to 1 hour.", nameof(lifetime));
+            }
+
+            if (span.Ticks % TimeSpan.TicksPerSecond != 0)
+            {
+                throw new ArgumentException("A viewer token lifetime is a whole number of seconds.", nameof(lifetime));
             }
 
             ttlSeconds = (int)span.TotalSeconds;
@@ -367,7 +403,11 @@ public sealed class LogbirdReadClient : IDisposable
     /// <param name="query">The field, optional second field, query and range.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="ArgumentException">The facet request is invalid.</exception>
-    /// <exception cref="LogbirdApiException">The server refused, could not be reached, or is older than 0.2.0.</exception>
+    /// <exception cref="LogbirdApiException">
+    /// The server refused, could not be reached in time (<c>unreachable</c>), is older than 0.2.0, or answered something
+    /// this SDK cannot read (<c>invalid_response</c>, for example a result without its <c>values</c>).
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public async Task<FacetResult> FacetsAsync(FacetQuery query, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(query, nameof(query));
@@ -380,16 +420,28 @@ public sealed class LogbirdReadClient : IDisposable
     /// Streams every matching event in the range into <paramref name="destination"/> in one format, and returns the number
     /// of bytes written. With a viewer token or scoped key, only events in its scope are exported. The client's
     /// <see cref="LogbirdReadOptions.Timeout"/> applies until the server starts answering; the download itself runs until
-    /// it ends or <paramref name="cancellationToken"/> is cancelled, so pass a token to bound a large export.
+    /// it ends or <paramref name="cancellationToken"/> is cancelled, so pass a token to bound a large export. The token is
+    /// passed to <paramref name="destination"/>'s writes too: a destination whose write ignores it holds the export until
+    /// that write returns.
     /// Logbird 0.2.0 and later.
     /// </summary>
     /// <param name="query">The format, query and range.</param>
     /// <param name="destination">Where to write the file. Not disposed.</param>
     /// <param name="cancellationToken">Cancels the export.</param>
     /// <exception cref="LogbirdApiException">
-    /// The server refused (for example <c>masked_export</c> for an evidence export of a masked scope), could not be
-    /// reached, or is older than 0.2.0. If the download fails part way, <paramref name="destination"/> holds a partial file.
+    /// The server refused with an HTTP error, keeping its code (for example <c>masked_export</c> for an evidence export of
+    /// a masked scope); could not be reached in time (<c>unreachable</c>); or is older than 0.2.0. A success answer that is
+    /// not the requested export is <c>invalid_response</c>: a success status other than 200 (such as a 206 partial answer),
+    /// or a 200 without the requested content type (<c>text/csv</c> for CSV, <c>application/x-ndjson</c> for JSONL; such as a
+    /// proxy's HTML page). In all these cases nothing is written. If the download fails part way (<c>unreachable</c>),
+    /// <paramref name="destination"/> holds a partial file.
     /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// An exception thrown by <paramref name="destination"/> itself (for example a full disk) reaches you unchanged, with
+    /// its own stack trace, so it is never mistaken for a network failure; the destination then holds what was written
+    /// before it. A destination failure caused by your cancellation is reported as the cancellation.
+    /// </remarks>
     public async Task<long> ExportAsync(ExportQuery query, System.IO.Stream destination, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(query, nameof(query));
@@ -427,7 +479,11 @@ public sealed class LogbirdReadClient : IDisposable
             throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached: " + e.GetType().Name);
         }
 
-        using (response)
+        // This method disposes the response once: after a destination failure quietly, and then not again (a response
+        // that throws from Dispose would otherwise replace that failure). Cancelling also disposes it, to end a stalled
+        // body read.
+        var responseDisposed = false;
+        try
         {
             if (!response.IsSuccessStatusCode)
             {
@@ -444,35 +500,43 @@ public sealed class LogbirdReadClient : IDisposable
                 throw LogbirdApiException.FromResponse(response.StatusCode, error);
             }
 
+            // Only the whole export, in the requested format, is written: a 206 partial answer or a proxy's HTML page is not.
+            var expected = query.Format == ExportFormat.Csv ? "text/csv" : "application/x-ndjson";
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird answered the export with status " + (int)response.StatusCode + " instead of 200; nothing was written.");
+            }
+
+            var content = response.Content;
+            if (content is null || !string.Equals(content.Headers.ContentType?.MediaType, expected, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird answered the export with a content type other than " + expected + "; nothing was written.");
+            }
+
             // Cancelling disposes the response, which ends a body read the stream itself would not cancel (as on
-            // .NET Framework), so the caller's token always ends a stalled download.
+            // .NET Framework): HttpClient's streams fail or end a pending read once disposed, so the caller's token ends
+            // a stalled download. A custom handler's body that does neither holds the read until it returns.
             using var abort = cancellationToken.Register(static state => ((HttpResponseMessage)state!).Dispose(), response);
             try
             {
-                if (response.Content is null)
-                {
-                    return 0;
-                }
-
 #if NET
-                var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                var source = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 #else
-                var source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                var source = await content.ReadAsStreamAsync().ConfigureAwait(false);
 #endif
-                using (source)
+                var cleanedUp = false;
+                try
                 {
                     var buffer = new byte[81920];
                     long total = 0;
                     int read;
 #if NET
                     while ((read = await source.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
-                    {
-                        await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
 #else
                     while ((read = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
-                    {
-                        await destination.WriteAsync(buffer, 0, read, cancellationToken).ConfigureAwait(false);
 #endif
+                    {
+                        await WriteToDestinationAsync(destination, buffer, read, cancellationToken).ConfigureAwait(false);
                         total += read;
                     }
 
@@ -481,20 +545,95 @@ public sealed class LogbirdReadClient : IDisposable
                     cancellationToken.ThrowIfCancellationRequested();
                     return total;
                 }
+                catch (DestinationWriteException)
+                {
+                    // The destination's failure is the one to report: a failure while cleaning up the download (the body
+                    // stream or the response throwing from Dispose) must not replace it.
+                    cleanedUp = true;
+                    responseDisposed = true;
+                    DisposeQuietly(source);
+                    DisposeQuietly(response);
+                    throw;
+                }
+                finally
+                {
+                    if (!cleanedUp)
+                    {
+                        source.Dispose();
+                    }
+                }
+            }
+            catch (DestinationWriteException failure)
+            {
+                // The caller's own stream failed: its exception, unchanged, never a network failure.
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure.InnerException!).Throw();
+                throw;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
-            catch (Exception e) when (cancellationToken.IsCancellationRequested && e is HttpRequestException or System.IO.IOException or ObjectDisposedException)
+            catch (Exception e) when (cancellationToken.IsCancellationRequested && IsDownloadFailure(e))
             {
                 // The read failed because cancelling disposed the response: report the cancellation, not a network fault.
                 throw new OperationCanceledException("The export was cancelled.", e, cancellationToken);
             }
-            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException)
+            catch (Exception e) when (IsDownloadFailure(e))
             {
                 throw new LogbirdApiException(response.StatusCode, "unreachable", "The export download failed part way: " + e.GetType().Name);
             }
+        }
+        finally
+        {
+            if (!responseDisposed)
+            {
+                response.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// A failure reading the download from Logbird: the transport, a body stream that was disposed or timed out, or a
+    /// response decoder that met corrupt data.
+    /// </summary>
+    private static bool IsDownloadFailure(Exception e)
+        => e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException or System.IO.InvalidDataException or TimeoutException;
+
+    private static void DisposeQuietly(IDisposable disposable)
+    {
+        try
+        {
+            disposable.Dispose();
+        }
+        catch
+        {
+            // Cleanup after a destination failure: that failure is the one reported.
+        }
+    }
+
+    /// <summary>Writes to the caller's stream, marking its failures so they are never reported as a network failure.</summary>
+    private static async Task WriteToDestinationAsync(System.IO.Stream destination, byte[] buffer, int count, CancellationToken cancellationToken)
+    {
+        try
+        {
+#if NET
+            await destination.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+#else
+            await destination.WriteAsync(buffer, 0, count, cancellationToken).ConfigureAwait(false);
+#endif
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception e) when (cancellationToken.IsCancellationRequested && e is HttpRequestException or System.IO.IOException or ObjectDisposedException)
+        {
+            // The destination failed because the caller cancelled (as before #264): report the cancellation.
+            throw new OperationCanceledException("The export was cancelled.", e, cancellationToken);
+        }
+        catch (Exception e)
+        {
+            throw new DestinationWriteException(e);
         }
     }
 
@@ -506,7 +645,11 @@ public sealed class LogbirdReadClient : IDisposable
     /// </summary>
     /// <param name="search">The search. Its <see cref="EventSearch.Cursor"/> is the starting point.</param>
     /// <param name="cancellationToken">Cancels the iteration.</param>
-    /// <exception cref="LogbirdApiException">The server answered an error, could not be reached, or the page limit was reached.</exception>
+    /// <exception cref="LogbirdApiException">
+    /// The server answered an error, could not be reached in time (<c>unreachable</c>), answered something this SDK
+    /// cannot read (<c>invalid_response</c>), or the page limit was reached.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public async IAsyncEnumerable<StoredEvent> SearchAllAsync(EventSearch? search = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await EnsureServerSupportsAsync(search ?? new EventSearch(), cancellationToken).ConfigureAwait(false);
@@ -568,7 +711,11 @@ public sealed class LogbirdReadClient : IDisposable
     /// <summary>Gets one event with its raw payload and causation chain, or <see langword="null"/> when it does not exist.</summary>
     /// <param name="eventId">The event id.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
-    /// <exception cref="LogbirdApiException">The server answered an error other than 404, or could not be reached.</exception>
+    /// <exception cref="LogbirdApiException">
+    /// The server answered an error other than 404, could not be reached in time (<c>unreachable</c>), or answered
+    /// something this SDK cannot read (<c>invalid_response</c>).
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public Task<EventDetail?> GetAsync(string eventId, CancellationToken cancellationToken = default)
     {
         Guard.NotBlank(eventId, nameof(eventId));
@@ -771,6 +918,9 @@ public sealed class LogbirdReadClient : IDisposable
         }
     }
 }
+
+/// <summary>A failure of the caller's export destination, carried out of the download loop and rethrown unchanged.</summary>
+internal sealed class DestinationWriteException(Exception inner) : Exception("The export destination failed.", inner);
 
 /// <summary>A response body over the read client's limit, with the status the server answered.</summary>
 internal sealed class TooLargeResponseException(HttpStatusCode status) : Exception("The Logbird response was larger than the read client accepts.")

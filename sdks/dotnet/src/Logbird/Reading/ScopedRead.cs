@@ -78,13 +78,40 @@ public sealed class ViewerScope
     /// <summary>Lists no values (tenant and target ids), so logging this object cannot leak them.</summary>
     public override string ToString() => nameof(ViewerScope);
 
-    /// <summary>A copy that the caller can no longer change (the prefix list is copied).</summary>
+    /// <summary>The most action prefixes a scope may name.</summary>
+    internal const int MaxActionPrefixes = 20;
+
+    /// <summary>A copy that the caller can no longer change (the prefix list is copied, read-only).</summary>
     internal ViewerScope Snapshot() => new(TenantId)
     {
         Target = Target is null ? null : new ViewerScopeTarget(Target.Type, Target.Id),
-        ActionPrefixes = ActionPrefixes?.ToArray(),
+        ActionPrefixes = CopyPrefixes(ActionPrefixes),
         Mask = Mask,
     };
+
+    /// <summary>
+    /// A read-only copy of at most 21 entries (one more than the limit): a list of up to 21 is copied whole, and a longer
+    /// one fails validation without being copied whole (its <c>Count</c> is not trusted).
+    /// </summary>
+    private static PrefixList? CopyPrefixes(IReadOnlyList<string>? prefixes)
+    {
+        if (prefixes is null)
+        {
+            return null;
+        }
+
+        var copy = new List<string>();
+        foreach (var prefix in prefixes)
+        {
+            copy.Add(prefix);
+            if (copy.Count > MaxActionPrefixes)
+            {
+                break;
+            }
+        }
+
+        return new PrefixList(copy.ToArray());
+    }
 
     internal void Validate()
     {
@@ -97,7 +124,7 @@ public sealed class ViewerScope
 
         if (ActionPrefixes is not null)
         {
-            if (ActionPrefixes.Count is < 1 or > 20)
+            if (ActionPrefixes.Count is < 1 or > MaxActionPrefixes)
             {
                 throw new ArgumentException("ActionPrefixes must hold 1 to 20 prefixes, or be null for every action.", nameof(ActionPrefixes));
             }
@@ -143,7 +170,8 @@ public sealed class ViewerScope
     internal static ViewerScope FromWire(ViewerScopeWire wire) => new(wire.TenantId ?? string.Empty)
     {
         Target = wire.Target is null ? null : new ViewerScopeTarget(wire.Target.Type ?? string.Empty, wire.Target.Id ?? string.Empty),
-        ActionPrefixes = wire.ActionPrefixes,
+        // Read-only: the granted scope is handed to the caller, who must not be able to cast it back and change it.
+        ActionPrefixes = wire.ActionPrefixes is null ? null : new PrefixList(wire.ActionPrefixes.ToArray()),
         Mask = MaskFromNames(wire.Mask),
     };
 
@@ -499,6 +527,27 @@ internal static class Query2
         var parts = pairs.Where(p => p.Value is not null).Select(p => p.Key + "=" + Uri.EscapeDataString(p.Value!)).ToArray();
         return parts.Length == 0 ? string.Empty : "?" + string.Join("&", parts);
     }
+}
+
+/// <summary>
+/// A list of action prefixes that nobody can change: it implements only <see cref="IReadOnlyList{T}"/>, so no interface
+/// (<c>IList</c>, <c>ICollection.SyncRoot</c>) leads to its storage.
+/// </summary>
+internal sealed class PrefixList(string[] items) : IReadOnlyList<string>
+{
+    public int Count => items.Length;
+
+    public string this[int index] => items[index];
+
+    public IEnumerator<string> GetEnumerator()
+    {
+        foreach (var item in items)
+        {
+            yield return item;
+        }
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 // A granted scope with a member this SDK does not know (a newer server's restriction) is refused, never silently dropped:

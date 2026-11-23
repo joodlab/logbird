@@ -137,14 +137,104 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
             Assert.DoesNotContain(email, Encoding.UTF8.GetString(file.ToArray()), StringComparison.Ordinal);
         }
 
+        // CSV: the server's text/csv answer is accepted: a header whose first column is id, then exactly one record per
+        // in-scope event (no control, no repeat), with the ip masked.
+        using (var csv = new MemoryStream())
+        {
+            await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv) { From = from }, csv);
+            var text = Encoding.UTF8.GetString(csv.ToArray());
+            var firstColumn = CsvFirstColumn(text);
+            Assert.StartsWith("id,timestamp,action,", text, StringComparison.Ordinal);
+            Assert.Equal(inScope.OrderBy(x => x, StringComparer.Ordinal), firstColumn.Skip(1).OrderBy(x => x, StringComparer.Ordinal));
+            Assert.DoesNotContain(Ip, text, StringComparison.Ordinal);
+        }
+
         using (var evidence = new MemoryStream())
         {
             var refused = await Assert.ThrowsAsync<LogbirdApiException>(() => scoped.ExportAsync(new ExportQuery(ExportFormat.JsonlEvidence) { From = from }, evidence));
             Assert.Equal("masked_export", refused.Code);
         }
 
-        output.WriteLine($"server {version}: viewer token read {found.Count} in-scope events (ip, agent, email masked on search, detail and export), controls hidden, facets scoped, evidence export refused");
+        output.WriteLine($"server {version}: viewer token read {found.Count} in-scope events (ip, agent, email masked on search, detail and export), controls hidden, facets scoped, CSV and JSONL exports scoped, evidence export refused");
     }
+
+    /// <summary>
+    /// The first field of every CSV record (quoted fields may hold commas, quotes and line breaks), including a last record
+    /// that does not end with a newline.
+    /// </summary>
+    internal static List<string> CsvFirstColumn(string text)
+    {
+        var fields = new List<string>();
+        var field = new StringBuilder();
+        var quoted = false;
+        var first = true;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (quoted)
+            {
+                if (c == '"' && i + 1 < text.Length && text[i + 1] == '"')
+                {
+                    field.Append('"');
+                    i++;
+                }
+                else if (c == '"')
+                {
+                    quoted = false;
+                }
+                else
+                {
+                    field.Append(c);
+                }
+            }
+            else if (c == '"')
+            {
+                quoted = true;
+            }
+            else if (c == ',')
+            {
+                if (first)
+                {
+                    fields.Add(field.ToString());
+                    first = false;
+                }
+
+                field.Clear();
+            }
+            else if (c == (char)10)
+            {
+                if (first)
+                {
+                    fields.Add(field.ToString());
+                }
+
+                field.Clear();
+                first = true;
+            }
+            else
+            {
+                field.Append(c);
+            }
+        }
+
+        // A last record without its closing newline (a truncated file, possibly inside an open quote) still counts, so it
+        // cannot hide an id.
+        if (first && (quoted || (text.Length > 0 && text[text.Length - 1] != (char)10)))
+        {
+            fields.Add(field.ToString());
+        }
+
+        return fields;
+    }
+
+    [Theory]
+    [InlineData("id,timestamp\n\"evt_1\",\"t\"\n", new[] { "id", "evt_1" })]
+    [InlineData("id,timestamp\n\"evt_1\",\"t\"\n\"evt_other\"", new[] { "id", "evt_1", "evt_other" })]
+    [InlineData("id,timestamp\n\"evt_1\",\"t\"\n\"evt_other\",\"t", new[] { "id", "evt_1", "evt_other" })]
+    [InlineData("id,timestamp\n\"evt,\"\"1\",\"line\nbreak\"\n", new[] { "id", "evt,\"1" })]
+    [InlineData("id,timestamp\n\"evt_1\",\"t\"\n\"evt_other\n", new[] { "id", "evt_1", "evt_other\n" })]
+    public void The_csv_reader_counts_every_record_including_a_truncated_last_one(string text, string[] expected)
+        => Assert.Equal(expected, CsvFirstColumn(text));
 
     [LiveFact(requires: "LOGBIRD_IT_SCOPED")]
     public async Task A_scoped_read_key_reads_and_mints_only_inside_its_tenant()
