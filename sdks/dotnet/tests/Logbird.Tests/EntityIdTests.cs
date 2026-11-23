@@ -108,7 +108,7 @@ public class EntityIdTests
         Assert.Equal(h.Server.Requests.SelectMany(r => r.Ids).First(), warning.EventId);
         Assert.Equal(expected, warning.Reason);
         Assert.Equal("Logbird warning about an event it is sending: " + expected, warning.Message);
-        Assert.Equal(new LogbirdStats(2, 2, 0, 0, 0, 0, 0, Warnings: 1), h.Client.Stats);
+        Assert.Equal(new LogbirdStats(2, 2, 0, 0, 0, 0, 0, warnings: 1), h.Client.Stats);
 
         // The logger gets the same message, which names the field and never carries the value.
         Assert.Contains("Logbird: Logbird warning about an event it is sending: " + expected, h.Logger.Lines);
@@ -297,7 +297,7 @@ public class EntityIdTests
         Assert.Equal("invalid_entity_id", drop.Code);
         Assert.Equal("actor.id: longer than 256 characters", drop.Detail);
         Assert.Equal(["invalid_entity_id"], h.Errors.OfType<LogbirdRejectedException>().Single().Codes);
-        Assert.Equal(new LogbirdStats(2, 1, 1, 0, 0, 0, 0, Warnings: 1), h.Client.Stats);
+        Assert.Equal(new LogbirdStats(2, 1, 1, 0, 0, 0, 0, warnings: 1), h.Client.Stats);
     }
 
     [Fact]
@@ -410,6 +410,6 @@ public class EntityIdTests
         Assert.Equal("second", warning.Action);
         Assert.Equal(server.Requests.Single().Ids[1], warning.EventId);
         Assert.StartsWith("occurredAt:", warning.Reason);
-        Assert.Equal(new LogbirdStats(2, 2, 0, 0, 0, 0, 0, Warnings: 1), h.Client.Stats);
+        Assert.Equal(new LogbirdStats(2, 2, 0, 0, 0, 0, 0, warnings: 1), h.Client.Stats);
     }
 }

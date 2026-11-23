@@ -237,7 +237,7 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
             {
                 try
                 {
-                    project = (await reader.GetAsync(canaryId).ConfigureAwait(false))?.Event.ProjectId;
+                    project = (await reader.GetEventAsync(canaryId).ConfigureAwait(false))?.Event.ProjectId;
                 }
                 catch (LogbirdApiException)
                 {
