@@ -3,7 +3,7 @@ import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, EXPORT_FORMAT_LABELS, exportEvidenceRowSchema } from '@logbird/contracts';
 import { prisma, storeAuditEvent, withProjectLock } from '@logbird/database';
 import { enforceProjectRetention } from '@logbird/worker/retention';
-import { expect, it, vi } from 'vitest';
+import { expect, vi } from 'vitest';
 import { app } from './app';
 import * as projectStorage from './clickhouse';
 import { clickhouse } from './clickhouse';
@@ -11,6 +11,7 @@ import { reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { ApiError } from './errors';
 import { drainExportAudits } from './export-stream';
 import * as ingestion from './ingest';
+import { it } from './slow-store';
 import { drainTestAudit } from './test-audit';
 
 vi.mock('./clickhouse', async (original) => ({ ...(await original<typeof import('./clickhouse')>()), queryClickhouse: null }));
@@ -48,6 +49,25 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
         .map((s) => s.split(';')[0])
         .join('; '),
     };
+  }
+  // Keeps a download active while slow maintenance runs, so only the membership fence can end it. A reader paused for a
+  // whole purge trips the 30 s idle timer on a store where one purge takes longer than that, which tests the timer.
+  // The download must not complete meanwhile; if maintenance ends it early, the caller's receipt check says why.
+  async function whileReading<T>(reader: ReadableStreamDefaultReader<Uint8Array>, started: T | Promise<T>) {
+    const work = Promise.resolve(started);
+    let open = true;
+    for (;;) {
+      const settled = await Promise.race([work.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000))]);
+      if (settled) return work;
+      if (open)
+        open = await reader.read().then(
+          ({ done }) => {
+            expect(done).toBe(false);
+            return true;
+          },
+          () => false,
+        );
+    }
   }
   async function receipts(requestId: string) {
     await drainExportAudits();
@@ -268,7 +288,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     if (!retentionExport.body) throw new Error('Export body missing');
     const retentionReader = retentionExport.body.getReader();
     await retentionReader.read();
-    await enforceProjectRetention(projectId);
+    await whileReading(retentionReader, enforceProjectRetention(projectId));
     await expect(
       (async () => {
         while (!(await retentionReader.read()).done) {
@@ -322,7 +342,9 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     if (!deletionExport.body) throw new Error('Export body missing');
     const deletionReader = deletionExport.body.getReader();
     await deletionReader.read();
-    expect((await request(owner.cookie, `/api/projects/${projectId}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
+    expect((await whileReading(deletionReader, request(owner.cookie, `/api/projects/${projectId}?confirm=${project.slug}`, 'DELETE'))).status).toBe(
+      204,
+    );
     project = undefined;
     await expect(
       (async () => {

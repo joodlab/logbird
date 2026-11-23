@@ -12,12 +12,13 @@ import {
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
 import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { it, slowStore } from './slow-store';
 
-vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+vi.setConfig({ testTimeout: slowStore(30_000), hookTimeout: slowStore(30_000) });
 let f: ImmutableFixture;
 let clock = Date.now();
 beforeEach(async () => {

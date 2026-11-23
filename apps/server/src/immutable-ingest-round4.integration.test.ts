@@ -9,11 +9,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 import { ingest } from './ingest';
+import { slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
 const wallClock = Date.now;
-vi.setConfig({ testTimeout: 90_000, hookTimeout: 60_000 });
+vi.setConfig({ testTimeout: slowStore(90_000), hookTimeout: slowStore(60_000) });
 beforeEach(async () => {
   f = await immutableFixture();
   await f.authorize();

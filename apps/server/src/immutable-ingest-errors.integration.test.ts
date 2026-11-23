@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { read } from '@logbird/clickhouse';
 import { prisma, withProjectLock } from '@logbird/database';
-import { expect, it } from 'vitest';
+import { expect } from 'vitest';
 import { app } from './app';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
 import { ingest } from './ingest';
+import { it } from './slow-store';
 
 it('DELETE project purges confirmed and unresolved receipts before returning 204 (real services)', async () => {
   const org = randomUUID();

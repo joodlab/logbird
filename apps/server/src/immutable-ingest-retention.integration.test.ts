@@ -4,9 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { enforceProjectRetention, clickhouse as retentionClickhouse } from '../../worker/src/retention';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { slowStore } from './slow-store';
 
 let f: ImmutableFixture;
-vi.setConfig({ testTimeout: 90_000, hookTimeout: 30_000 });
+vi.setConfig({ testTimeout: slowStore(90_000), hookTimeout: slowStore(30_000) });
 beforeEach(async () => {
   f = await immutableFixture();
 });

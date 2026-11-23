@@ -6,10 +6,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
-vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
+vi.setConfig({ testTimeout: slowStore(60_000), hookTimeout: slowStore(30_000) });
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   clock = Math.max(clock, Date.now()) + 61_000;

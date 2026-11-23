@@ -6,8 +6,9 @@ import { Logbird } from '@logbird/sdk';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { slowStore } from './slow-store';
 
-vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+vi.setConfig({ testTimeout: slowStore(30_000), hookTimeout: slowStore(30_000) });
 let f: ImmutableFixture;
 let fileClock = Date.now();
 beforeEach(async () => {

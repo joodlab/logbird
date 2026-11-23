@@ -4,11 +4,12 @@ import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { slowStore } from './slow-store';
 
 const qa = process.env.CLICKHOUSE_DATABASE === 'logbird_qa_062';
 let f: ImmutableFixture,
   clock = Date.now();
-vi.setConfig({ testTimeout: 90_000, hookTimeout: 30_000 });
+vi.setConfig({ testTimeout: slowStore(90_000), hookTimeout: slowStore(30_000) });
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   clock = Math.max(clock, Date.now()) + 61_000;

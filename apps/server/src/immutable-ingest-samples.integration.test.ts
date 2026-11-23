@@ -1,10 +1,11 @@
 ﻿import { deleteAndVerify, getEvent, insertEvents, read } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, withProjectLock } from '@logbird/database';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, expect, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { afterEach, it, slowStore } from './slow-store';
 
-vi.setConfig({ testTimeout: 40_000, hookTimeout: 40_000 });
+vi.setConfig({ testTimeout: slowStore(40_000), hookTimeout: slowStore(40_000) });
 let f: ImmutableFixture;
 beforeEach(async () => {
   f = await immutableFixture();

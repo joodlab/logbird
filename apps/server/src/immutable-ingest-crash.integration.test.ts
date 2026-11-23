@@ -6,10 +6,11 @@ import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
-vi.setConfig({ hookTimeout: 30_000 });
+vi.setConfig({ hookTimeout: slowStore(30_000) });
 beforeEach(async () => {
   f = await immutableFixture();
 });

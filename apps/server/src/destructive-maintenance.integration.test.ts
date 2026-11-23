@@ -3,12 +3,13 @@ import { maintenanceQueryPrefix, projectMaintenance, purgeProject, read } from '
 import { closeProjectLocks, prisma, withProjectLock } from '@logbird/database';
 import { rebuildProjectReadModel } from '@logbird/worker/project-repair';
 import * as retention from '@logbird/worker/retention';
-import { afterAll, expect, it, vi } from 'vitest';
+import { afterAll, expect, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse, queryClickhouse } from './clickhouse';
 import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { stageExport, validateExportMembership } from './export-outcomes';
 import { ingest } from './ingest';
 import { removeSampleData } from './sample-data';
+import { it, slowStore } from './slow-store';
 
 afterAll(async () => {
   await closeProjectLocks();
@@ -195,7 +196,7 @@ it('keeps newly admitted exports refused across an orphaned tagged query and que
       async () => {
         expect(await withProjectLock(id, () => reconcileDestructiveMaintenance(id))).toBe(true);
       },
-      { timeout: 30_000, interval: 100 },
+      { timeout: slowStore(30_000), interval: 100 },
     );
     expect(Number((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: id }))[0]?.n)).toBe(0);
     expect((await prisma.project.findUniqueOrThrow({ where: { id } })).exportDeleteStartedAt).toBeNull();
@@ -240,7 +241,7 @@ it('persists the sample-removal fence before its raw delete even if the caller d
       async () => {
         expect(await withProjectLock(id, () => reconcileDestructiveMaintenance(id))).toBe(true);
       },
-      { timeout: 30_000, interval: 100 },
+      { timeout: slowStore(30_000), interval: 100 },
     );
     await prisma.organization.delete({ where: { id } });
   }

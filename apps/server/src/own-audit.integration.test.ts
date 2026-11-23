@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
-import { expect, it } from 'vitest';
+import { expect } from 'vitest';
 import { app } from './app';
 import { authEmailHash } from './auth-failures';
 import { clickhouse } from './clickhouse';
 import { env } from './env';
+import { it } from './slow-store';
 import { drainTestAudit, flushTestSignIns } from './test-audit';
 
 it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chip evidence', async () => {
