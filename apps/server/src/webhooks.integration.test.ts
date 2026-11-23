@@ -1027,6 +1027,12 @@ it('refuses a regex RE2 rejects, holds a stored one after one scan, and resumes 
   }
   expect(await prisma.webhookEndpoint.count({ where: { projectId } })).toBe(1);
   expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } })).toMatchObject({ filterQuery: 'action:qa.re2' });
+  // RE2 syntax that JavaScript lacks is accepted, on create and on PATCH.
+  const quoted = String.raw`action:/\Qqa.re2\E/`;
+  const { endpoint: literal } = await create('owner', { url: receiver, filterQuery: quoted });
+  expect(literal.filterQuery).toBe(quoted);
+  expect((await request(`${base()}/${literal.id}`, 'PATCH', { filterQuery: String.raw`action:/(?i)\QQA.RE2\E/` })).status).toBe(200);
+  expect((await request(`${base()}/${literal.id}`, 'DELETE')).status).toBe(204);
   const { now } = await webhookCursorClock(prisma);
   const time = new Date(+now - 45_000);
   const cursorReceivedAt = new Date(+time - 1000);

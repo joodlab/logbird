@@ -577,8 +577,9 @@ with `scope_mismatch` and does not count toward endpoint failure. A missing even
 finishes with `event_unavailable`.
 In webhook filters, `now` in a relative time is each event's arrival time (`received_at`), and `now/d` is the
 UTC start of the arrival day. Discovery and the send-time recheck therefore select the same events whenever and
-however often they run, including after a partial page or a worker outage. Regexes use RE2 syntax: create and
-update reject a pattern RE2 does not accept with HTTP 422 `invalid_query`. When discovery meets a stored filter
+however often they run, including after a partial page or a worker outage. Webhook filter regexes are checked against RE2's
+syntax rather than JavaScript's: create and update reject a pattern RE2 rejects with HTTP 422 `invalid_query` and
+accept RE2 syntax such as `\Q…\E`. Explorer, search and export filters keep their existing check. When discovery meets a stored filter
 that can never run (a compile error, or ClickHouse error 427 `CANNOT_COMPILE_REGEXP`), it holds the endpoint at
 its cursor with `filterWarning: webhook_filter_invalid` and sends the filter-review notice. Timeouts, limits and
 network errors are retried and never hold a filter. A PATCH with a valid `filterQuery` resumes from the cursor.

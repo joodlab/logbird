@@ -1130,9 +1130,11 @@ often discovery runs, including after a worker outage. `now/d` is the UTC start 
 the arrival day. The Explorer evaluates `now` at search time, so a relative filter
 can show different results there.
 
-Regexes run in ClickHouse with RE2. Create and PATCH reject a pattern that RE2 does
-not accept, such as `\cK`, `A`, lookaround or backreferences, with HTTP 422
-`invalid_query`. A stored filter that can never run, such as one saved before this
+Regexes run in ClickHouse with RE2, so webhook filters are checked against RE2's
+syntax rather than JavaScript's. Create and PATCH reject a pattern that RE2 rejects,
+such as `\cK`, lookaround or backreferences, with HTTP 422 `invalid_query`. RE2
+syntax such as `\Q…\E` or `(?i)` is accepted. Explorer searches and exports keep
+their existing regex check. A stored filter that can never run, such as one saved before this
 check or one that RE2 refuses as too large, is held: discovery stops at the saved
 cursor, the API returns `filterWarning: webhook_filter_invalid`, the worker logs
 `webhook.filter_invalid` and sends the filter-review email. Network errors, timeouts and
@@ -1199,8 +1201,9 @@ Each delivery claim has a two-minute lease. Before a POST starts, the worker res
 
 Webhook delivery runs on PostgreSQL time: the server assigns arrival times and the worker
 scans, schedules and selects signing secrets with it. The PostgreSQL server clock must not
-step backwards. Use a time service that slews the clock (for example chrony or
-systemd-timesyncd with its default slewing) instead of stepping it. If the clock does step
+step backwards. Use a time service that slews the clock instead of stepping it, for
+example chrony configured to step only during its first clock updates after boot
+(such as `makestep 1 3`) and to slew afterwards. If the clock does step
 back, an event admitted after the step can get an arrival time behind a cursor that discovery
 already committed. That event is stored and searchable, but its webhook delivery can be
 missed. Use [Rewind a webhook cursor after a missed delivery](#rewind-a-webhook-cursor-after-a-missed-delivery)
@@ -1340,14 +1343,14 @@ An endpoint that shows `cursorWarning: webhook_cursor_review_required` follows
    incident window, with a wide event-time range. Compare the event IDs and receive times with the endpoint's
    delivery log and receiver records. Choose the **checkpoint**: the earliest receive millisecond whose delivery is
    uncertain.
-3. Determine the endpoint's **eligible start**, the first receive millisecond the endpoint could ever deliver.
-   This is the later of the endpoint's `createdAt` and its starting bound (its `cursorVerifiedFloor`, or else the
-   start of `20261122140000_webhook_deliveries` in `_prisma_migrations`). The one exception is an endpoint
-   created at or after that bound through a previous-version API during a rolling upgrade. Its first cursor can be
-   up to 60 seconds before `createdAt`. If a backup or its earliest delivery shows that earlier cursor, use it.
-   The statement rejects any other value, and a checkpoint before the eligible start.
-4. In `psql`, set `endpoint_id`, `project_id`, `expected_cursor`, `expected_event_id`, `eligible_start`,
-   `checkpoint`, `evidence_ref` and `audit_namespace` with `\set`. Use ISO 8601 timestamps with `Z`, and an empty
+3. The checkpoint can never be earlier than the endpoint's **start**: the later of its `createdAt` and its starting
+   bound (its `cursorVerifiedFloor`, or else the start of `20261122140000_webhook_deliveries` in
+   `_prisma_migrations`). The statement computes this start and changes nothing for an earlier checkpoint. Logbird
+   stores no verified record of the earlier first cursor (up to 60 seconds before `createdAt`) that a
+   previous-version API could give an endpoint during a rolling upgrade, so a rewind never goes below `createdAt`.
+   Events such an endpoint received in those milliseconds before its creation are not delivered again by a rewind.
+4. In `psql`, set `endpoint_id`, `project_id`, `expected_cursor`, `expected_event_id`, `checkpoint`,
+   `evidence_ref` and `audit_namespace` with `\set`. Use ISO 8601 timestamps with `Z`, and an empty
    string for `expected_event_id` when `cursorEventId` is `NULL`. Use an incident or backup reference without
    credentials or payload data for `evidence_ref`, and the worker's `BULLMQ_PREFIX` (default `{logbird}`) for
    `audit_namespace`.
@@ -1362,7 +1365,6 @@ BEGIN;
 WITH bounds AS (
   SELECT (:'expected_cursor'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS expected_cursor,
          nullif(:'expected_event_id', '') AS expected_event_id,
-         (:'eligible_start'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS eligible_start,
          (:'checkpoint'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS checkpoint,
          (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now_utc,
          (SELECT (started_at AT TIME ZONE 'UTC')::timestamp(3) FROM "_prisma_migrations"
@@ -1371,12 +1373,7 @@ WITH bounds AS (
           ORDER BY started_at LIMIT 1) AS ledger_rollout
 ), rewound AS (
   UPDATE "WebhookEndpoint" e
-  SET "cursorReceivedAt" = b.checkpoint, "cursorEventId" = NULL,
-      -- A checkpoint before createdAt is a never-scanned start, which discovery accepts without a scan time.
-      "lastScannedAt" = CASE
-        WHEN b.checkpoint < greatest(e."createdAt", coalesce(e."cursorVerifiedFloor", b.ledger_rollout)) THEN NULL
-        ELSE e."lastScannedAt" END,
-      "updatedAt" = b.now_utc
+  SET "cursorReceivedAt" = b.checkpoint, "cursorEventId" = NULL, "updatedAt" = b.now_utc
   FROM bounds b, "Project" p
   WHERE e.id = :'endpoint_id' AND e."projectId" = :'project_id' AND p.id = e."projectId"
     AND NOT e."cursorReviewRequired"
@@ -1384,16 +1381,12 @@ WITH bounds AS (
     -- Compare and swap: the cursor is still where the incident review found it.
     AND e."cursorReceivedAt" = b.expected_cursor
     AND e."cursorEventId" IS NOT DISTINCT FROM b.expected_event_id
-    -- Rewind only, and never before the endpoint's eligible start.
-    AND b.checkpoint <= e."cursorReceivedAt" AND b.checkpoint >= b.eligible_start
-    AND (b.eligible_start = greatest(e."createdAt", coalesce(e."cursorVerifiedFloor", b.ledger_rollout))
-         OR (e."createdAt" >= coalesce(e."cursorVerifiedFloor", b.ledger_rollout)
-             AND b.eligible_start < e."createdAt"
-             AND b.eligible_start >= greatest(e."createdAt" - interval '60 seconds',
-                                              coalesce(e."cursorVerifiedFloor", b.ledger_rollout))))
+    -- Rewind only, and never before the endpoint's start: the later of its creation and its starting bound.
+    AND b.checkpoint <= e."cursorReceivedAt"
+    AND b.checkpoint >= greatest(e."createdAt", coalesce(e."cursorVerifiedFloor", b.ledger_rollout))
     AND length(trim(:'evidence_ref')) > 0 AND length(trim(:'audit_namespace')) > 0
   RETURNING e.id, p."organizationId", e."projectId", b.expected_cursor, b.expected_event_id,
-            b.eligible_start, b.checkpoint, b.now_utc
+            greatest(e."createdAt", coalesce(e."cursorVerifiedFloor", b.ledger_rollout)) AS start, b.checkpoint, b.now_utc
 ), audit AS (
   SELECT *, gen_random_uuid()::text AS audit_id FROM rewound
 )
@@ -1405,7 +1398,7 @@ SELECT audit_id, :'audit_namespace', 'ws:' || "organizationId", jsonb_build_obje
                              jsonb_build_object('type', 'project', 'id', "projectId")),
   'metadata', jsonb_build_object('previousCursor', expected_cursor AT TIME ZONE 'UTC',
                                 'previousEventId', expected_event_id,
-                                'eligibleStart', eligible_start AT TIME ZONE 'UTC',
+                                'start', start AT TIME ZONE 'UTC',
                                 'checkpoint', checkpoint AT TIME ZONE 'UTC', 'evidenceRef', :'evidence_ref'::text)
 ), now_utc, now_utc, now_utc
 FROM audit

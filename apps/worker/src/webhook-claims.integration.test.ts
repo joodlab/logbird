@@ -18,7 +18,7 @@ import { deliverWebhooks } from './webhook-delivery';
 
 const ch = createClickHouseClient();
 const runId = randomUUID();
-const projects = ['p1', 'p2'].map((name) => `qa-webhook-claims-${name}-${runId}`);
+const projects = ['p1', 'p2', 'p3', 'p4'].map((name) => `qa-webhook-claims-${name}-${runId}`);
 const secretKey = Buffer.alloc(32, 9);
 const received: { path: string; id: string }[] = [];
 const receiver = createServer(async (req, res) => {
@@ -178,4 +178,72 @@ it('claims and delivers another project once while the first project claim keeps
   expect(sent(failing.eventId)).toBe(1);
   expect(sent(other.eventId)).toBe(1);
   expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: other.id } })).toMatchObject({ status: 'succeeded', attemptNumber: 1 });
+});
+
+const ping = async (endpointId: string, name: string, nextAttemptAt: Date) =>
+  prisma.webhookDelivery.create({
+    data: { endpointId, eventId: `qa-${name}-${runId}`, expiresAt: new Date(+nextAttemptAt + 86_400_000), nextAttemptAt },
+  });
+
+it('delivers another project within bounded passes while the oldest row stays locked by another transaction', { timeout: 60_000 }, async () => {
+  const [, , first = '', second = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const locked = await ping((await endpoint(first, 'locked')).id, 'locked', new Date(+now - 120_000));
+  const other = await ping((await endpoint(second, 'unlocked')).id, 'unlocked', new Date(+now - 60_000));
+  // Another worker or a long transaction keeps the oldest due row locked across every pass.
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((done) => {
+    release = done;
+  });
+  let ready: () => void = () => undefined;
+  const holding = new Promise<void>((done) => {
+    ready = done;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "WebhookDelivery" WHERE id = ${locked.id} FOR UPDATE`;
+      ready();
+      await released;
+    },
+    { timeout: 50_000, maxWait: 5000 },
+  );
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  let passes = 0;
+  try {
+    await holding;
+    while (!sent(other.eventId) && passes < 3) {
+      passes++;
+      await deliverWebhooks(ch, options(), [first, second]);
+    }
+    expect(sent(other.eventId)).toBe(1);
+    expect(passes).toBe(1);
+    expect(sent(locked.eventId)).toBe(0);
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: locked.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
+  } finally {
+    release();
+    await holder;
+  }
+  await deliverWebhooks(ch, options(), [first, second]);
+  expect(sent(locked.eventId)).toBe(1);
+  expect(sent(other.eventId)).toBe(1);
+});
+
+it("delivers another project's due row in the first pass while one project has more due rows than the slots", { timeout: 60_000 }, async () => {
+  const [, , first = '', second = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const busy = await endpoint(first, 'backlog');
+  // Eight older rows in one project against two slots: oldest-first selection would fill both slots for four passes.
+  const backlog = await Promise.all(Array.from({ length: 8 }, (_, index) => ping(busy.id, `backlog-${index}`, new Date(+now - 300_000 + index))));
+  const other = await ping((await endpoint(second, 'single')).id, 'single', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  let passes = 0;
+  while (!sent(other.eventId) && passes < 3) {
+    passes++;
+    await deliverWebhooks(ch, { ...options(), concurrency: 2, perEndpoint: 4 }, [first, second]);
+  }
+  expect(sent(other.eventId)).toBe(1);
+  expect(passes).toBe(1);
+  // The busy project still took the other slot, and no row was claimed twice.
+  expect(backlog.filter(({ eventId }) => sent(eventId) === 1)).toHaveLength(1);
+  expect(received.filter(({ id }) => backlog.some(({ eventId }) => eventId === id)).length).toBe(1);
 });
