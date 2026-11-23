@@ -18,7 +18,7 @@ import { deliverWebhooks } from './webhook-delivery';
 
 const ch = createClickHouseClient();
 const runId = randomUUID();
-const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'].map((name) => `qa-webhook-claims-${name}-${runId}`);
+const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9'].map((name) => `qa-webhook-claims-${name}-${runId}`);
 const secretKey = Buffer.alloc(32, 9);
 const received: { path: string; id: string }[] = [];
 const receiver = createServer(async (req, res) => {
@@ -334,4 +334,30 @@ it('dispatches the claims of earlier rounds when a refill selection fails', { ti
   expect(sent(claimable.eventId)).toBe(1);
   expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: claimable.id } })).toMatchObject({ status: 'succeeded', attemptNumber: 1 });
   expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: locked.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
+});
+
+it("claims a project's next endpoint while its oldest due row stays locked", { timeout: 60_000 }, async () => {
+  const [, , , , , , , , project = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const oldest = await ping((await endpoint(project, 'sibling-locked')).id, 'sibling-locked', new Date(+now - 120_000));
+  const sibling = await ping((await endpoint(project, 'sibling-free')).id, 'sibling-free', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const unlock = await holdLocked([oldest.id]);
+  let passes = 0;
+  try {
+    while (!sent(sibling.eventId) && passes < 3) {
+      passes++;
+      await deliverWebhooks(ch, options(), project);
+    }
+    expect(sent(sibling.eventId)).toBe(1);
+    expect(passes).toBe(1);
+    expect(sent(oldest.eventId)).toBe(0);
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: oldest.id } })).toMatchObject({
+      status: 'pending',
+      attemptNumber: 0,
+      leaseUntil: null,
+    });
+  } finally {
+    await unlock();
+  }
 });

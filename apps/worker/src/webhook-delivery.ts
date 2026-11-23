@@ -46,19 +46,49 @@ const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }
 
 type DueRow = { id: string; endpointId: string; projectId: string; scope: ScopeColumns; scopeUpdatedAt: Date };
 
-/** Lock, recheck and claim one project's chosen rows with set-based writes in a short transaction of their own. */
-async function claimRows(ids: string[], now: Date, leaseDeadline: number): Promise<Claim[]> {
+/**
+ * Claim up to `limit` of one project's oldest due rows that no other transaction holds, across all its eligible endpoints
+ * and within each endpoint's limits, with set-based writes in a short transaction of its own. Selection only decides
+ * which projects get how many slots: a locked row is skipped here in favour of the project's next claimable row.
+ */
+async function claimRows(
+  projectId: string,
+  limit: number,
+  heldEndpoints: string[],
+  perEndpoint: number,
+  now: Date,
+  leaseDeadline: number,
+): Promise<Claim[]> {
   // Bind UTC wall time to the timestamp columns independently of the session time zone.
   const at = (time: Date) => Prisma.sql`${time.toISOString()}::timestamp`;
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL lock_timeout = '1s'`;
     await tx.$executeRaw`SET LOCAL statement_timeout = '2s'`;
-    // A settlement, resend or endpoint edit can change a row between selection and this lock.
+    // The same eligibility as selection, evaluated under the row locks: a settlement, resend or endpoint edit can change
+    // a row after selection.
     const locked = await tx.$queryRaw<{ id: string; leased: boolean }[]>`
-      SELECT id, "leaseUntil" IS NOT NULL AS leased FROM "WebhookDelivery"
-      WHERE id = ANY(${ids}::text[]) AND status = 'pending' AND "nextAttemptAt" <= ${at(now)}
-        AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${at(now)})
-      ORDER BY "nextAttemptAt", id FOR UPDATE SKIP LOCKED`;
+      SELECT d.id, d."leaseUntil" IS NOT NULL AS leased FROM "WebhookEndpoint" e
+      CROSS JOIN LATERAL (
+        SELECT id FROM "WebhookDelivery"
+        WHERE "endpointId" = e.id AND status = 'pending'
+          AND "nextAttemptAt" <= ${at(now)} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${at(now)})
+        ORDER BY "nextAttemptAt", id
+        LIMIT greatest(0, least(
+          ${perEndpoint} - (
+            SELECT count(*) FROM "WebhookDelivery"
+            WHERE "endpointId" = e.id AND status = 'pending' AND "leaseUntil" > ${at(now)}
+          ),
+          ${MAX_ENDPOINT_ATTEMPTS_PER_SECOND} - (
+            SELECT count(*) FROM "WebhookAttempt" a JOIN "WebhookDelivery" recent ON recent.id = a."deliveryId"
+            WHERE recent."endpointId" = e.id AND a."startedAt" > ${at(new Date(+now - 1000))}
+          )
+        ))
+        FOR UPDATE SKIP LOCKED
+      ) candidate
+      JOIN "WebhookDelivery" d ON d.id = candidate.id
+      WHERE e."projectId" = ${projectId} AND e.enabled AND NOT e."scopeReviewRequired" AND NOT e."filterReviewRequired"
+        AND NOT (e.id = ANY(${heldEndpoints}::text[]))
+      ORDER BY d."nextAttemptAt", d.id LIMIT ${limit}`;
     if (!locked.length) return [];
     const leased = locked.filter((row) => row.leased).map((row) => row.id);
     if (leased.length)
@@ -136,8 +166,8 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
   const skippedIds: string[] = [];
   const skippedProjects: string[] = [];
   // A chosen row can be locked elsewhere or change before its claim, and a project's claim can fail. Refill the
-  // unused capacity past those rows within this pass, a bounded number of times. A project that yields no claimable
-  // row or fails is left out of the remaining rounds, so its other locked rows cannot take every round.
+  // unused capacity past those rows within this pass, a bounded number of times. A project with no claimable row
+  // left, or whose claim fails, is left out of the remaining rounds, so its locked rows cannot take every round.
   for (let round = 0; round < CLAIM_ROUNDS && claims.length < capacity; round++) {
     let due: DueRow[];
     try {
@@ -149,20 +179,23 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
       break;
     }
     if (!due.length) break;
-    const byProject = new Map<string, string[]>();
+    // Slots per project in this round. The claim takes each project's oldest unlocked rows, which may differ from the
+    // chosen ones when a chosen row is locked elsewhere.
+    const slots = new Map<string, number>();
     for (const row of due) {
       skippedIds.push(row.id);
       if (storedWebhookScope(row.scope) === undefined) held.set(row.endpointId, { scope: row.scope, updatedAt: row.scopeUpdatedAt });
-      else byProject.set(row.projectId, [...(byProject.get(row.projectId) ?? []), row.id]);
+      else slots.set(row.projectId, (slots.get(row.projectId) ?? 0) + 1);
     }
-    for (const [project, ids] of byProject) {
+    for (const [project, limit] of slots) {
       try {
-        const claimed = await claimRows(ids, now, leaseDeadline);
+        const claimed = await claimRows(project, limit, [...held.keys()], options.perEndpoint, now, leaseDeadline);
+        // Nothing claimable in this project now: leave it out of the remaining rounds of this pass.
         if (!claimed.length) skippedProjects.push(project);
         claims.push(...claimed);
       } catch {
         skippedProjects.push(project);
-        console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, deliveries: ids.length }));
+        console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, deliveries: limit }));
       }
     }
   }
