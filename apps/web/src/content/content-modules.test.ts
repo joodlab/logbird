@@ -35,6 +35,9 @@ const MOVED = [
   'routes/compare.workos-audit-logs.tsx',
   'components/marketing/comparison-page.tsx',
   'components/marketing/capture-lanes.tsx',
+  'routes/developers.tsx',
+  'routes/open-source.tsx',
+  'components/marketing/feature-row.tsx',
 ];
 
 /** Props and keys whose string value is always wording, even one word. */
