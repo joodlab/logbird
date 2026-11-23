@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-/** Unsupported dialect syntax at the start of a query token. Quoted values are scanned separately. */
-export const QUERY_DIALECT_PREFIX = /^(?:([\w.]+)\s+(!=|=)\s*("(?:[^"\\]|\\.)*"|[^\s()]+)|(!)(?=[\w.]+:)|(&&|\|\|))/;
+// Zod-free, so the query parser (query-syntax.ts) can be bundled into the SDK without zod.
+export { QUERY_DIALECT_PREFIX } from './query-dialect';
 
 /* ------------------------------------------------------------------ */
 /* Query languages                                                     */

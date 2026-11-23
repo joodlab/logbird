@@ -47,7 +47,12 @@ export function report(onError: CaptureOptions<unknown>['onError'], error: unkno
 }
 export async function createAudit<C>(options: CaptureOptions<C>, context: C, request: Request): Promise<Audit> {
   if (typeof window !== 'undefined') throw new Error('Logbird ingest is server-only');
-  const header = (name: string) => request.headers.get(name)?.slice(0, 256) || undefined;
+  // A correlation id is used whole or not at all (#206): cutting two long ids to 256 characters could make them one.
+  // Longer than 256 means ignored, with the usual generated fallback, as in the ASP.NET Core integration.
+  const header = (name: string) => {
+    const value = request.headers.get(name);
+    return value && value.length <= 256 ? value : undefined;
+  };
   const trace = request.headers.get('traceparent')?.match(/^[\da-f]{2}-([\da-f]{32})-([\da-f]{16})-[\da-f]{2}$/);
   return capture(options, context, {
     action: '',
