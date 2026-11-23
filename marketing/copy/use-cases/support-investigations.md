@@ -3,6 +3,8 @@ path: /use-cases/support-investigations
 module: apps/web/src/content/use-cases/support-investigations.ts
 ---
 
+Page text renders from `apps/web/src/content/use-cases/support-investigations.ts`; edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Support investigations: brief
 
 **The words live in the module.** The page renders `apps/web/src/content/use-cases/support-investigations.ts` through

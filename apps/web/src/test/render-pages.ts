@@ -27,7 +27,8 @@ export async function renderPages(paths: string[], env: Record<string, string> =
 export function quietHrefWarnings() {
   const error = console.error;
   vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
-    if (!String(args[0]).includes('href')) {
+    // React passes the attribute name as a format argument ("…passed to the %s attribute"), not in the message.
+    if (!args.some((arg) => String(arg).includes('href'))) {
       error(...args);
     }
   });

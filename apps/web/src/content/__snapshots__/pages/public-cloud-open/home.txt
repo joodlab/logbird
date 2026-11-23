@@ -1,0 +1,287 @@
+title: Logbird — open-source audit logs for your product
+description: The audit log your customers ask for, and the evidence your auditors ask for. Open source: self-host it, or ask for early access to Logbird Cloud.
+
+headings:
+h1 The audit log your customers ask for, and the evidence your auditors ask for.
+h2 Show each customer their own history.
+h2 Answer the auditor with evidence.
+h2 Answer "what happened in this account?" in one search.
+h3 Search
+h3 Entity pages
+h3 Operation trees
+h2 One call per action. No schema to migrate.
+h2 Run it on your servers, or on ours in early access.
+h3 Self-host
+h3 Logbird Cloud
+h2 What Logbird promises, and where the promise ends.
+h2 Start with one event.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+[sr-only] Color theme
+Sign in
+Request access
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+Request access
+Sign in
+Theme
+[sr-only] Color theme
+Retrace every step.
+The audit log your customers ask for, and the evidence your auditors ask for.
+Send one event per action over HTTP or the TypeScript SDK. Show each customer account its own history in your product, search your events in the console, and export them complete when an auditor asks. MIT-licensed: run it on your own servers, or ask for early access to Logbird Cloud.
+Request access
+Self-host it
+Logbird Cloud is in early access: sign-ups are limited to invited teams for now. Already invited? Sign in. Source on GitHub
+[aria-hidden] ExplorerFull size
+[img: The explorer with the query -actor.type:system: 9,415 events in the last seven days, a histogram, and a table of what people did.]
+[img: The explorer with the query -actor.type:system: 9,415 events in the last seven days, a histogram, and a table of what people did.]
+The explorer, filtered with -actor.type:system to leave out the scheduler: what people did over seven days, with a histogram and every event.
+Send your first event
+pre| curl http://localhost:4600/v1/events \
+pre|   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \
+pre|   -H 'Content-Type: application/json' \
+pre|   -d '{"action":"booking.cancelled"}'
+That's a valid event. Only action is required.
+Customer-facing audit logs
+Show each customer their own history.
+Your customers' admins want to see who did what in their account. Send each event with the customer account it belongs to (tenant), and your product can show every account its own trail.
+Viewer tokens. Your server mints a token for one customer account and hands it to the browser. It expires after 15 minutes by default, one hour at most.
+Enforced by Logbird. The scope applies outside every query, on search, event detail, counts and export. Nothing in the query can widen it.
+Scoped server keys. A scoped read key reads one customer account's events. It can also be limited to events that name one record, to actions with given prefixes, or both.
+The limit: One customer account per scope, matched on the id Logbird stored. How it is enforced
+How to show customers their history
+[aria-hidden] Customer accountFull size
+[img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.]
+[img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.]
+A customer account's page in the console: its event counts, and how many events support did while signed in as the customer, by agent.
+Compliance evidence
+Answer the auditor with evidence.
+When an auditor or a customer's security team asks what happened, show them the events: who acted, for whom, on which records, and what changed.
+What a match shows: Matching the file's SHA-256 and size to the export's completed record shows that the file you hold is the file Logbird produced for that export, not that the events were never changed before the export ran, and not who saved the file or when.
+[aria-hidden] Workspace activityFull size
+[img: A completed export's record in Workspace activity: 3,123 events from StayDesk as Complete (original payloads), with its period, query action:booking.*, row count, size in bytes, fixed query clock, format and SHA-256.]
+[img: A completed export's record in Workspace activity: 3,123 events from StayDesk as Complete (original payloads), with its period, query action:booking.*, row count, size in bytes, fixed query clock, format and SHA-256.]
+The completed export's record in Workspace activity: its period, query, row count, size, fixed query clock and SHA-256.
+[aria-hidden] What you can show
+[aria-hidden] The limit
+[sr-only: What you can show: ] Each event can name the actor, the staff member acting for them (impersonator), the customer account, the records, and the before and after values of up to 256 changes.
+[sr-only: The limit: ] Logbird records what your code sends. It can't add an actor or a change that your event leaves out.
+[sr-only: What you can show: ] Retention per project, from 7 days to 10 years. Expired events are permanently deleted every hour.
+[sr-only: The limit: ] An owner or admin can shorten retention at any time, and the deletion starts right away. There is no retention lock or legal hold yet.
+[sr-only: What you can show: ] The evidence export (jsonl-evidence) carries every matching event with its original payload. When the export completes, its record keeps the filter, the fixed query clock, the SHA-256, the size and the row count, so a file can be matched to its record.
+[sr-only: The limit: ] Matching the file's SHA-256 and size to the export's completed record shows that the file you hold is the file Logbird produced for that export, not that the events were never changed before the export ran, and not who saved the file or when.
+[sr-only: What you can show: ] Workspace activity records what your team does in Logbird: project and retention changes, keys, members and roles, saved views, invite links, exports, sign-ins, sign-outs and revoked sessions.
+[sr-only: The limit: ] It doesn't record who searched or opened events.
+How to answer an auditor
+Support investigations
+Answer "what happened in this account?" in one search.
+Support and operations open a customer account or a single record and see its events in order, with the before and after values you send.
+[aria-hidden] Event detailFull size
+[img: An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.]
+[img: An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.]
+An event in detail: who acted, what ran it, whose account, which records, and the before and after values sent for each change (the first 256 per event).
+Search
+actor:usr_42 action:booking.* outcome:failure, or a guarded SQL WHERE expression.
+Entity pages
+Actors, tenants, executors and records get their own pages and timelines.
+Operation trees
+The events that share an operation id, from the request to the jobs it spawned, as one tree.
+How support investigates an account
+For developers
+One call per action. No schema to migrate.
+Only an action string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into their own columns. Custom top-level fields and anything under metadata are searchable as attributes within the indexing limits, and the full parsed event is available as JSON. Recommended fields are optional: an event is never rejected for missing them.
+TypeScript SDK with batching, retries and an explicit flush and shutdown.
+Middleware for Hono, TanStack Start and Nuxt; a Vue read composable.
+jobAudit for queue workers: the job keeps the original actor and joins the request's operation.
+A conformance score on every event: the share of nine recommended checks it passes. The setup page shows which fields your events miss.
+Not on TypeScript? Any language that can POST JSON over HTTP works. A .NET package is in the repository and not yet on NuGet: sdks/dotnet.
+Read the developer guide
+Route
+Worker
+pre| // Route (Hono)
+pre| app.post('/bookings/:id/cancel', async (c) => {
+pre|   const id = c.req.param('id');
+pre|   // ...cancel the booking
+pre|   const eventId = c.var.audit('booking.cancelled', {
+pre|     targets: [{ type: 'booking', id }],
+pre|     changes: [
+pre|       { field: 'status', before: 'confirmed', after: 'cancelled' },
+pre|     ],
+pre|   });
+pre|   const carrier = await c.var.audit.carrier({ parentEventId: eventId });
+pre|   await refunds.add('refund', { bookingId: id, carrier });
+pre|   return c.json({ ok: true });
+pre| });
+The actor is Lina on both events. The worker only carried it out.
+Self-host or Cloud
+Run it on your servers, or on ours in early access.
+Self-host
+Every feature, MIT-licensed. Docker Compose on one VM, Coolify, or your own Postgres, ClickHouse and Redis. Your events stay on your infrastructure.
+Self-host it
+What's in the repository
+Logbird Cloud
+The same open-source codebase, and we run the servers, the upgrades and the backups. It is in early access: sign-ups are limited to invited teams for now.
+Request access
+About Logbird Cloud
+Guarantees and limits
+What Logbird promises, and where the promise ends.
+[aria-hidden] We guarantee
+[aria-hidden] The limit
+[sr-only: We guarantee: ] A 202 lists accepted event IDs in ids and rejected events in rejected.
+[sr-only: The limit: ] Delivery is at least once when the client retries unsettled events, as the SDK does. An exact retry with the same valid, non-blank string id is stored once while the project retains the event; changed content under that id is rejected with duplicate_id_conflict. An event sent without an id gets a new one on every retry.
+[sr-only: We guarantee: ] The SDK batches and retries for you.
+[sr-only: The limit: ] Its queue is in memory and bounded: a crash before the server acknowledges, or an outage long enough to fill the queue, can lose pending events.
+[sr-only: We guarantee: ] Only an action string is required, and each event must fit the ingest limits.
+[sr-only: The limit: ] Each event is checked on its own: rejected events are listed in rejected with a reason. On 202, the rest of the batch is accepted. When a 503 lists the unsettled events, retry only those; otherwise retry the whole batch with the same ids.
+[sr-only: We guarantee: ] Retention deletes expired events for good.
+[sr-only: The limit: ] There's no archive and no undo.
+[sr-only: We guarantee: ] Import history by sending events with their original occurredAt, up to 3650 days back.
+[sr-only: The limit: ] An older occurredAt is stored at receive time with a warning, and project retention still applies to imports. Logbird doesn't rebuild history from your database.
+Read how Logbird handles data
+Retrace every step.
+Start with one event.
+Self-host Logbird today, or request access to Logbird Cloud, where sign-ups are limited to invited teams for now.
+Request access
+Self-host it
+Logbird is being integrated with a hotel-booking SaaS, our first design partner.
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[sr-only: Logbird]
+Retrace every step.
+The open-source audit log for your product.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Sign in → https://app.example.test/login
+Request access → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Request access → /contact
+Sign in → https://app.example.test/login
+Request access → /contact
+Self-host it → /self-hosting
+Sign in → https://app.example.test/login
+Source on GitHub → https://github.com/example-org/logbird
+[img: The explorer with the query -actor.type:system: 9,415 events in the last seven days, a histogram, and a table of what people did.] [aria-label: Open the image full size: Explorer] → /media/explorer-hero-light-1440.webp?v=*
+[img: The explorer with the query -actor.type:system: 9,415 events in the last seven days, a histogram, and a table of what people did.] [aria-label: Open the image full size: Explorer] → /media/explorer-hero-dark-1440.webp?v=*
+How it is enforced → /security#scoped-reads
+How to show customers their history → /use-cases/customer-audit-logs
+[img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.] [aria-label: Open the image full size: Customer account] → /media/tenant-summary-light-1160.webp?v=*
+[img: One customer account in the console: Dar Al Wafa Hotels had 454 events in the last 24 hours and 2,632 in all. Support agent Leena Ashford performed 9 of the 454 while signed in as the customer.] [aria-label: Open the image full size: Customer account] → /media/tenant-summary-dark-1160.webp?v=*
+[img: A completed export's record in Workspace activity: 3,123 events from StayDesk as Complete (original payloads), with its period, query action:booking.*, row count, size in bytes, fixed query clock, format and SHA-256.] [aria-label: Open the image full size: Workspace activity] → /media/export-record-light-640.webp?v=*
+[img: A completed export's record in Workspace activity: 3,123 events from StayDesk as Complete (original payloads), with its period, query action:booking.*, row count, size in bytes, fixed query clock, format and SHA-256.] [aria-label: Open the image full size: Workspace activity] → /media/export-record-dark-640.webp?v=*
+How to answer an auditor → /use-cases/compliance-evidence
+[img: An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.] [aria-label: Open the image full size: Event detail] → /media/event-sheet-light-1440.webp?v=*
+[img: An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.] [aria-label: Open the image full size: Event detail] → /media/event-sheet-dark-1440.webp?v=*
+How support investigates an account → /use-cases/support-investigations
+sdks/dotnet → https://github.com/example-org/logbird/tree/master/sdks/dotnet
+Read the developer guide → /developers
+Self-host it → /self-hosting
+What's in the repository → /open-source
+Request access → /contact
+About Logbird Cloud → /cloud
+Read how Logbird handles data → /security
+Request access → /contact
+Self-host it → /self-hosting
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+Source on GitHub → https://github.com/example-org/logbird
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Copy code"
+button type="button" text="Route"
+button type="button" text="Worker"
+button type="button" aria-label="Copy code"

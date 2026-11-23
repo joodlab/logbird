@@ -1,0 +1,198 @@
+title: Pricing · Logbird
+description: Self-hosting Logbird is free under the MIT licence, with every feature. Logbird Cloud's pricing isn't set yet.
+
+headings:
+h1 Self-hosting is free. Cloud pricing isn’t set yet.
+h2 Pricing
+h3 Self-host
+h3 Cloud
+h3 Support and enterprise
+h2 What you get when you self-host.
+h2 What's on our roadmap.
+h2 Pricing questions.
+h3 Does self-hosting include every feature?
+h3 How much will Logbird Cloud cost?
+h3 How do I get early access?
+h2 Start with one event.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+[sr-only] Color theme
+Join the waitlist
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+Join the waitlist
+Theme
+[sr-only] Color theme
+Pricing
+Self-hosting is free. Cloud pricing isn’t set yet.
+Logbird is MIT-licensed, and every feature in the repository is yours to run. Logbird Cloud will run the same codebase for you; its pricing will be published before billing starts.
+[sr-only] Pricing
+Self-host
+Free, MIT
+Free and MIT-licensed. Every feature in the repository. You run it.
+Self-host it
+Cloud
+Waitlist
+We'll run it for you. Free during early access; waitlist only for now.
+Join the waitlist
+Support and enterprise
+Talk to us
+For teams that want help running Logbird, or terms we haven't covered here.
+Contact us
+Self-hosted
+What you get when you self-host.
+Every feature below is in the repository today, under the MIT licence.
+Ingest over HTTP or the TypeScript SDK
+One event per action; only action is required.
+Search
+The query language, or a guarded SQL WHERE expression.
+Entity pages
+Actors, tenants, executors and records get their own pages and timelines.
+Operation trees
+The events that share an operation id, from the request to the jobs it spawned.
+Exports
+CSV, JSON Lines, and an evidence export with every event’s original payload.
+Retention you choose
+Per project, from 7 days to 10 years. Expired events are permanently deleted.
+Workspace activity
+Logbird's own record of what your team does: projects, retention, keys, members, exports and sign-ins.
+Teams and roles
+Invitations, and owner, admin and member roles.
+Integrations
+Hono, TanStack Start, Vue and Nuxt.
+Customer-facing history
+Tenant-scoped read keys, and short-lived viewer tokens for the browser.
+On the roadmap
+What's on our roadmap.
+These are candidates from our public roadmap, not features or commitments. Order and timing can change.
+Project-level redaction controls, behind the redaction your client already does.
+Alerts on chosen actions.
+Signed webhooks and archive exports.
+Single sign-on for the console.
+Questions
+Pricing questions.
+Does self-hosting include every feature?
+Yes. Everything in the repository is MIT-licensed, and self-hosting gets all of it.
+How much will Logbird Cloud cost?
+It's free during early access. Pricing after that isn't set yet; we'll publish it before billing starts.
+How do I get early access?
+Join the waitlist through the contact form. We'll write when Logbird Cloud opens.
+Start with one event.
+Self-host Logbird today, or join the waitlist for Logbird Cloud.
+Join the waitlist
+Self-host it
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[sr-only: Logbird]
+Retrace every step.
+The open-source audit log for your product.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Join the waitlist → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Join the waitlist → /contact
+Self-host it → /self-hosting
+Join the waitlist → /contact
+Contact us → /contact
+Join the waitlist → /contact
+Self-host it → /self-hosting
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+Source on GitHub → https://github.com/example-org/logbird
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"

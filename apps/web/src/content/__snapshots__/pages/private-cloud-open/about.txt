@@ -1,0 +1,176 @@
+title: About · Logbird
+description: Logbird is an audit log for teams who owe their customers a trail of who did what.
+
+headings:
+h1 We built the audit log we needed.
+h2 Shaped by a real product.
+h2 Five decisions that don't change.
+h3 Require only an action.
+h3 Capture is your code's job.
+h3 Your code sends the history.
+h3 Retention means deletion.
+h3 We audit ourselves.
+h2 Logbird
+h2 Follow the build.
+h2 Start with one event.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+[sr-only] Color theme
+Sign in
+Request access
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+Request access
+Sign in
+Theme
+[sr-only] Color theme
+About
+We built the audit log we needed.
+Logbird started as the audit log a product team needed, where every support question begins the same way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves. It's MIT-licensed, and the source opens publicly soon, so any product team can do the same.
+Take the product tour
+Contact us
+First design partner
+Shaped by a real product.
+Logbird is being integrated with a hotel-booking SaaS, our first design partner. Integration feedback helps inform the roadmap.
+What we hold to
+Five decisions that don't change.
+[aria-hidden] 01
+Require only an action.
+An action string is the only required field, and each event must fit the ingest limits. We recommend a shape; we never reject an event for missing it.
+[aria-hidden] 02
+Capture is your code's job.
+We give you the SDK, the integrations and the patterns. Our guarantee starts at the 202.
+[aria-hidden] 03
+Your code sends the history.
+Logbird doesn't rebuild history from your database. Import past events by sending them with their original occurredAt, up to 3650 days back; an older value is stored at receive time with a warning, and project retention still applies.
+[aria-hidden] 04
+Retention means deletion.
+Expired events are deleted for good.
+[aria-hidden] 05
+We audit ourselves.
+Logbird records its own management actions in your workspace's activity stream.
+The name
+Logbird
+The bird that carries every event home. We chose a short name made of two words you already know, so anyone who hears it once can spell it.
+Building in public
+Follow the build.
+We write up what we ship as we go. Every post uses real captures from the product.
+Read the changelog
+Contact us
+Start with one event.
+The source opens soon. Request access to Logbird Cloud, where sign-ups are limited to invited teams for now, and we'll tell you when you can self-host.
+Request access
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[sr-only: Logbird]
+Retrace every step.
+The audit log for your product. The source opens soon.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub — coming soon.
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+Sign in → https://app.example.test/login
+Request access → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+Request access → /contact
+Sign in → https://app.example.test/login
+Take the product tour → /product
+Contact us → /contact
+Read the changelog → /changelog
+Contact us → /contact
+Request access → /contact
+Self-host when the source opens → /contact?interest=self-host
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"

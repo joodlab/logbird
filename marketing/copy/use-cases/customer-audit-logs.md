@@ -3,6 +3,8 @@ path: /use-cases/customer-audit-logs
 module: apps/web/src/content/use-cases/customer-audit-logs.ts
 ---
 
+Page text renders from `apps/web/src/content/use-cases/customer-audit-logs.ts`; edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Customer-facing audit logs: brief
 
 **The words live in the module.** The page renders `apps/web/src/content/use-cases/customer-audit-logs.ts` through the

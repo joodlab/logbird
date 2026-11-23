@@ -1,0 +1,199 @@
+title: Contact · Logbird
+description: Request access to Logbird Cloud or send us a question. We store your email only to contact you about Logbird. No trackers.
+
+headings:
+h1 Request access, or ask us anything.
+h2 Request access
+h2 Other ways to reach us.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+[sr-only] Color theme
+Sign in
+Request access
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+Request access
+Sign in
+Theme
+[sr-only] Color theme
+Contact
+Request access, or ask us anything.
+Logbird Cloud is in early access, with sign-ups limited to invited teams. Leave your email to request access. If you have a question about self-hosting, support or something else, choose it below.
+Request access
+[noscript] Thanks, we've got it. We'll reply by email.
+[noscript] Something in the form needs fixing. Check the email address and try again.
+[noscript] Something in the form needs fixing. Check the email address and try again.
+[noscript] Too many attempts. Wait a minute, then try again.
+[noscript] The form isn't available right now. Email us at hello@example.test instead.
+[noscript] We couldn't send that. Check your connection and try again, or email hello@example.test.
+Email
+Name
+Company
+What's this about?
+Access to Logbird Cloud
+Self-hosting
+Product updates only
+A correction to one of our pages
+A question, or support and enterprise
+A privacy request (access, deletion or another right)
+Expected events per month (optional)
+Choose one
+Not sure yet
+Under 100,000
+100,000 to under 1 million
+1 million to under 10 million
+10 million or more
+What do you need? (optional)
+Show our customers their own audit log
+Compliance evidence and retention
+Support investigations
+Help running it ourselves
+Something else
+Message
+What are you building, and what do you need from an audit log? For a privacy request, tell us what you'd like us to do.
+[aria-hidden] Website
+Send
+We use these details to reply to you and handle access requests, and send product updates only if you choose "Product updates only". No trackers. By sending, you confirm you've read the privacy policy.
+Elsewhere
+Other ways to reach us.
+Security issues
+Email security@example.test.
+Source and issues
+On GitHub: report bugs and ask questions in issues.
+Already invited?
+Sign in to Logbird Cloud.
+[sr-only: Logbird]
+Retrace every step.
+The open-source audit log for your product.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Sign in → https://app.example.test/login
+Request access → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Request access → /contact
+Sign in → https://app.example.test/login
+[noscript] hello@example.test → mailto:hello@example.test
+[noscript] hello@example.test → mailto:hello@example.test
+privacy policy → /legal/privacy
+security@example.test → mailto:security@example.test
+On GitHub → https://github.com/example-org/logbird
+issues → https://github.com/example-org/logbird/issues
+Sign in to Logbird Cloud → https://app.example.test/login
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+Source on GitHub → https://github.com/example-org/logbird
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+form action="/site-api/waitlist" method="post"
+input type="email" name="email" placeholder="you@example.test" required label="Email"
+input name="name" label="Name"
+input name="company" label="Company"
+input type="radio" name="interest" value="cloud" checked label="Access to Logbird Cloud"
+input type="radio" name="interest" value="self-host" label="Self-hosting"
+input type="radio" name="interest" value="updates" label="Product updates only"
+input type="radio" name="interest" value="correction" label="A correction to one of our pages"
+input type="radio" name="interest" value="other" label="A question, or support and enterprise"
+input type="radio" name="interest" value="privacy" label="A privacy request (access, deletion or another right)"
+select name="volume" label="Expected events per month (optional)"
+option value="" selected text="Choose one"
+option value="unsure" text="Not sure yet"
+option value="under-100k" text="Under 100,000"
+option value="100k-1m" text="100,000 to under 1 million"
+option value="1m-10m" text="1 million to under 10 million"
+option value="over-10m" text="10 million or more"
+input type="checkbox" name="needs" value="customer-audit-log" label="Show our customers their own audit log"
+input type="checkbox" name="needs" value="compliance" label="Compliance evidence and retention"
+input type="checkbox" name="needs" value="investigations" label="Support investigations"
+input type="checkbox" name="needs" value="self-host-support" label="Help running it ourselves"
+input type="checkbox" name="needs" value="other" label="Something else"
+textarea name="message" value="" label="Message"
+[aria-hidden] input name="website" label="Website"
+button type="submit" text="Send"

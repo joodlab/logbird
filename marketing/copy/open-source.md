@@ -4,6 +4,8 @@ description: Logbird is MIT-licensed. API, console, worker, SDK and integrations
 path: /open-source
 ---
 
+Page text renders from `apps/web/src/content/open-source.ts`; edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Open source
 
 ## hero
@@ -18,7 +20,8 @@ path: /open-source
   carry their own licence; each one says so.
   <!-- source: LICENSE (MIT). Its copyright line names the publisher: owner-gated (WEB_ORG_NAME), not quoted on the site until approved -->
 - **cta:** Source on GitHub — coming soon (disabled button, no link) · Self-host it → `/self-hosting`
-- **small print:** The repository opens publicly soon. Until then, the code isn't public.
+- **small print:** The repository opens publicly soon. Until then, the code isn't public. Private build only: the public
+  build shows no small print here.
 - **visual:** a LICENSE card: "MIT License", the copyright line only once the publisher name is approved (`WEB_ORG_NAME`,
   pending the owner), the licence's first sentence (truncated),
   and four checks: Read it · Run it · Change it · Ship it in your product.

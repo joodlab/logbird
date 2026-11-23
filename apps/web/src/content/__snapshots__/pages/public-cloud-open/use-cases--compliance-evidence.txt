@@ -1,0 +1,239 @@
+title: Compliance evidence · Logbird
+description: Answer an auditor with the events: who acted, for whom, on which records and what changed, an export you can match to its record, and the limits stated plainly.
+
+headings:
+h1 Answer the auditor with evidence.
+h2 Who acted, for whom, on which records, and what changed.
+h2 Keep events as long as you need, then they are gone.
+h2 Hand over a file, and show it matches the record.
+h3 Choose what to export
+h3 Download the complete export
+h3 Logbird records the export
+h3 Match the file to its record
+h2 The same check in PowerShell.
+h3 Compute the SHA-256 and size
+h2 Logbird's own record of what your team does.
+h2 Say these out loud before an auditor asks.
+h2 Start with one event.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+[sr-only] Color theme
+Sign in
+Request access
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+Request access
+Sign in
+Theme
+[sr-only] Color theme
+Use case · Compliance evidence
+Answer the auditor with evidence.
+When an auditor or a customer's security team asks what happened, show them the events, and hand them an export they can match to Logbird's record of it.
+What an event can show
+Who acted, for whom, on which records, and what changed.
+Each field is optional except action. The more your code sends, the more an auditor can see.
+Actor. Who caused the action: a person, a service or a scheduled job, with its id and name.
+Impersonator. When support acts for a customer, the staff member who acted for whom (impersonator).
+Executor. What performed it, such as the API or a worker, and on which attempt.
+Customer account. The tenant the event belongs to, so each account has its own history.
+Records. The records the action touched, by type and id. Logbird indexes up to 64 records per event; the evidence export carries the original JSON with all of them.
+Changes. The before and after values your code sends. Logbird keeps up to 256 changes per event in the event's change fields, which the console shows; the evidence export also carries the original JSON Logbird stored for the event.
+The limit: Logbird records what your code sends. It can't add an actor or a change that your event leaves out.
+[aria-hidden] Event detailFull size
+[img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.]
+[img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.]
+One event in the console: who caused it and what performed it, the customer account, the records it touched, the before and after value, and what caused it. Select the image to open it full size.
+Retention
+Keep events as long as you need, then they are gone.
+Per project. Choose a window from 7 days to 10 years. The default for a new project is 90 days.
+Hourly deletion. A worker deletes events older than the window every hour. Settings shows the latest run.
+Lowering it. Logbird shows an estimate of how many events will be deleted when it can, and you confirm by typing the project's slug. The deletion starts right away.
+[aria-hidden] What you can rely on
+[aria-hidden] The limit
+[sr-only: What you can rely on: ] Expired events are permanently deleted.
+[sr-only: The limit: ] There's no archive and no undo.
+[sr-only: What you can rely on: ] Only an owner or admin can change a project’s retention.
+[sr-only: The limit: ] An owner or admin can shorten retention at any time, and the deletion starts right away. There is no retention lock or legal hold yet.
+The evidence export
+Hand over a file, and show it matches the record.
+[aria-hidden] 1
+Choose what to export
+In the explorer, set the project, the time range and the filter. Every member of the workspace can export.
+[aria-hidden] 2
+Download the complete export
+Pick Complete (original payloads). Each line holds one event: the fields Logbird stored, and the original JSON it stored from what you sent, with every digit of its numbers (not its whitespace or how a number was spelled).
+[aria-hidden] 3
+Logbird records the export
+Workspace activity records each export Logbird admits when it starts, and records how it ended. When it completes, the completed record keeps the export's id, the format, the filter and time range it resolved, the fixed query clock, the SHA-256 of the file, its size and its number of rows. An export whose ending Logbird couldn't confirm has no digest to compare.
+[aria-hidden] 4
+Match the file to its record
+Set file to the name of the file you downloaded, compute its SHA-256 and size, and compare them with the export’s completed record.
+Linux and macOS
+pre| # The file you downloaded
+pre| file="logbird-events-EXPORT_ID-evidence.jsonl"
+pre|
+pre| # SHA-256 on Linux
+pre| sha256sum "$file"
+pre|
+pre| # SHA-256 on macOS
+pre| shasum -a 256 "$file"
+pre|
+pre| # Size in bytes
+pre| wc -c < "$file"
+What a match shows: Matching the file's SHA-256 and size to the export's completed record shows that the file you hold is the file Logbird produced for that export, not that the events were never changed before the export ran, and not who saved the file or when.
+On Windows
+The same check in PowerShell.
+[aria-hidden] 1
+Compute the SHA-256 and size
+Then compare both values with the completed export record.
+PowerShell
+pre| # The file you downloaded
+pre| $file = "logbird-events-EXPORT_ID-evidence.jsonl"
+pre|
+pre| Get-FileHash -Algorithm SHA256 $file
+pre|
+pre| # Size in bytes
+pre| (Get-Item $file).Length
+Which events are in it: An export holds the matching events Logbird had received when it started. An event received after that, even one that happened earlier, is not in it.
+Workspace activity
+Logbird's own record of what your team does.
+Projects and retention. Creating, changing and deleting projects, and every retention change with its before and after.
+Keys. Keys created, rolled and revoked, without the key itself.
+People. Invitations, members joining through an invitation or a link, members removed by an owner or admin, and role changes.
+Exports. Each export Logbird admits, and how it ended. A request refused at admission, because another export is running or the project is busy, leaves no record.
+Sessions. Sign-ins, sign-outs and revoked sessions, and failed sign-in attempts for members (repeated failures are summarised).
+The limit: It doesn't record who searched or opened events, or a member leaving the workspace on their own.
+What Logbird doesn't do
+Say these out loud before an auditor asks.
+[aria-hidden] Question
+[aria-hidden] Answer
+[sr-only: Question: ] Does Logbird hold a certification such as SOC 2 or ISO 27001?
+[sr-only: Answer: ] No. Logbird doesn't hold SOC 2, ISO 27001 or any other certification, and we don't claim that using it makes you compliant.
+[sr-only: Question: ] Can stored events be shown to be unchanged?
+[sr-only: Answer: ] No. Logbird has no way to show that stored events were never changed.
+[sr-only: Question: ] Can events be held past their retention, or deletion be blocked?
+[sr-only: Answer: ] No. There is no legal hold or retention lock yet.
+Read how Logbird handles data
+Start with one event.
+Self-host Logbird today, or request access to Logbird Cloud, where sign-ups are limited to invited teams for now.
+Request access
+Self-host it
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[sr-only: Logbird]
+Retrace every step.
+The open-source audit log for your product.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Sign in → https://app.example.test/login
+Request access → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Request access → /contact
+Sign in → https://app.example.test/login
+[img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.] [aria-label: Open the image full size: Event detail] → /media/event-detail-light-639.webp?v=*
+[img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.] [aria-label: Open the image full size: Event detail] → /media/event-detail-dark-639.webp?v=*
+Read how Logbird handles data → /security
+Request access → /contact
+Self-host it → /self-hosting
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+Source on GitHub → https://github.com/example-org/logbird
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"

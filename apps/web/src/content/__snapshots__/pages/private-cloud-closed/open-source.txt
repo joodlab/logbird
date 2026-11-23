@@ -1,0 +1,235 @@
+title: Open source · Logbird
+description: The Logbird product is MIT-licensed: API, console, worker, SDK and integrations, in one repository that opens publicly soon.
+
+headings:
+h1 The product is MIT-licensed.
+h2 One repository, one codebase.
+h2 How to contribute.
+h2 Be kind and constructive.
+h2 Found a vulnerability? Tell us privately.
+h2 Where the project is today.
+h2 Start with one event.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+[sr-only] Color theme
+Join the waitlist
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+Join the waitlist
+Theme
+[sr-only] Color theme
+Open source
+The product is MIT-licensed.
+The product is MIT-licensed: the API, the console, the retention worker, the SDK and the integrations, all in one repository. You can read the code, run it, change it and ship it in your own product. Experimental folders may carry their own licence; each one says so.
+Source on GitHub — coming soon
+Self-host when the source opens
+The repository opens publicly soon. Until then, the code isn't public.
+[aria-hidden] LICENSE
+MIT License
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software…
+Read it
+Run it
+Change it
+Ship it in your product
+What's in the repository
+One repository, one codebase.
+[sr-only] What each folder of the Logbird repository contains
+Path
+What it is
+apps/server
+The API: ingest and read on /v1, the console API on /api, OpenAPI and a Scalar reference. Hono on Node.
+apps/app
+The console. TanStack Start and React.
+apps/worker
+The retention worker: hourly purges and housekeeping. BullMQ on Redis or Dragonfly.
+apps/email
+Previews for the sign-in and invitation email templates.
+packages/contracts
+The API's request and response schemas. The source of truth for the API.
+packages/clickhouse
+ClickHouse client, migrations, query builder and query-language parser.
+packages/database
+Postgres schema (Prisma): workspaces, projects, keys, saved views.
+packages/auth
+Email one-time-code sign-in and workspaces, on better-auth.
+packages/sdk
+@logbird/sdk: the TypeScript client. No dependencies.
+packages/integrations/*
+@logbird/hono, @logbird/tanstack-start, @logbird/vue, @logbird/nuxt.
+packages/ui
+The console's design system.
+packages/seed
+A generator of fictional hotel-booking data, sent through the public API.
+examples/*
+Small runnable examples for each integration.
+apps/server
+The API: ingest and read on /v1, the console API on /api, OpenAPI and a Scalar reference. Hono on Node.
+apps/app
+The console. TanStack Start and React.
+apps/worker
+The retention worker: hourly purges and housekeeping. BullMQ on Redis or Dragonfly.
+apps/email
+Previews for the sign-in and invitation email templates.
+packages/contracts
+The API's request and response schemas. The source of truth for the API.
+packages/clickhouse
+ClickHouse client, migrations, query builder and query-language parser.
+packages/database
+Postgres schema (Prisma): workspaces, projects, keys, saved views.
+packages/auth
+Email one-time-code sign-in and workspaces, on better-auth.
+packages/sdk
+@logbird/sdk: the TypeScript client. No dependencies.
+packages/integrations/*
+@logbird/hono, @logbird/tanstack-start, @logbird/vue, @logbird/nuxt.
+packages/ui
+The console's design system.
+packages/seed
+A generator of fictional hotel-booking data, sent through the public API.
+examples/*
+Small runnable examples for each integration.
+Contributing
+How to contribute.
+Once the repository is public, contributions follow CONTRIBUTING.md. In short: Node 22.18+ and pnpm, focused branches, Conventional Commits, and pull requests that explain what changed, why, and how it was verified. UI changes include screenshots. Tests use fictional data only. Maintainers merge.
+Node 22.18+ and pnpm
+Focused branches and Conventional Commits
+Pull requests that explain what changed, why, and how it was verified
+Screenshots for UI changes
+Fictional data only in tests
+Maintainers merge
+API changes start in packages/contracts. The server and console change in the same pull request.
+GitHub Actions runs the checks on every pull request and push to master. A v* tag builds the release images for amd64 and arm64 and publishes them to GHCR.
+Code of conduct
+Be kind and constructive.
+The project follows the Contributor Covenant, version 2.1. Report conduct issues through the private channel described in SECURITY.md.
+Security reports
+Found a vulnerability? Tell us privately.
+Don't open a public issue. Email security@example.test. Include the affected version, a reproduction with fictional data, and the impact. We coordinate the fix and the disclosure with you privately. We don't offer a response-time SLA yet.
+Security and data handling
+Versions
+Where the project is today.
+The supported line is 0.2, and the latest release is 0.2.1, with Docker images on GHCR for amd64 and arm64. The SDK and the integrations share the platform's version. They aren't on npm yet.
+Read the changelog
+Supported line
+0.2
+Latest release
+0.2.1
+Docker images
+GHCR
+npm packages
+Not yet
+Start with one event.
+The source opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.
+Join the waitlist
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[sr-only: Logbird]
+Retrace every step.
+The audit log for your product. The source opens soon.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub — coming soon.
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+Join the waitlist → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+Join the waitlist → /contact
+Self-host when the source opens → /contact?interest=self-host
+security@example.test → mailto:security@example.test
+Security and data handling → /security
+Read the changelog → /changelog
+Join the waitlist → /contact
+Self-host when the source opens → /contact?interest=self-host
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"

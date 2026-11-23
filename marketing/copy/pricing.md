@@ -3,6 +3,8 @@ path: /pricing
 module: apps/web/src/content/pricing.ts
 ---
 
+Page text renders from `apps/web/src/content/pricing.ts`; edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Pricing: brief
 
 **The words and data live in the module.** `/pricing` and the plan cards on `/cloud` render

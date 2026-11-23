@@ -1,0 +1,399 @@
+title: Developers · Logbird
+description: Send audit events from TypeScript, Hono, TanStack Start, Nuxt or any HTTP client, and show history with the Vue helpers. Envelope guide, workers, delivery semantics and limits.
+
+headings:
+h1 Add an audit log in an afternoon. Keep it for years.
+h2 Install, create a client, track an event.
+h2 One request, one to a thousand events.
+h2 The fields that make an audit log useful.
+h3 The rules
+h3 Worked example
+h2 Middleware for the stacks we run.
+h2 Keep the actor when the work moves to a queue.
+h2 What happens between track() and the 202.
+h2 The numbers to design around.
+h2 Read your own history back.
+h2 Your server documents itself.
+h2 Start with one event.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+[sr-only] Color theme
+Join the waitlist
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+Join the waitlist
+Theme
+[sr-only] Color theme
+Developers
+Add an audit log in an afternoon. Keep it for years.
+Send events over HTTP or with the TypeScript SDK. Only action is required, so you can start with one line and fill in the envelope as you go. This page covers the SDK, the envelope, workers, delivery guarantees and limits.
+Quickstart
+Self-host a server
+The smallest event
+pre| curl https://audit.example.com/v1/events \
+pre|   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \
+pre|   -H 'Content-Type: application/json' \
+pre|   -d '{"action":"booking.cancelled"}'
+Quickstart
+HTTP
+Envelope
+Integrations
+Workers
+Delivery
+Limits
+Read API
+API reference
+SDK quickstart
+Install, create a client, track an event.
+The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.
+track(event) never throws and never waits for the network.
+flush() and shutdown() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through onError and onDrop instead.
+Call shutdown() from your host's own exit hook. The SDK installs no process handlers.
+Keep ingest keys on the server. Never ship one in a browser bundle.
+Redaction: beforeSend: redact() deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with [redacted] before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.
+server.ts
+pre| import { Logbird } from '@logbird/sdk';
+pre|
+pre| const client = new Logbird({
+pre|   endpoint: process.env.LOGBIRD_ENDPOINT, // your Logbird origin, e.g. https://audit.example.com
+pre|   apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
+pre|   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
+pre|   defaults: { environment: 'production' },
+pre|   onError: (error) => console.error(error.message), // capture errors, permanent rejections and background flush failures
+pre|   onDrop: (event) => console.warn('audit event dropped', event.action), // events the server rejects or a full queue discards
+pre| });
+pre|
+pre| client.track({
+pre|   action: 'booking.cancelled',
+pre|   actor: { type: 'user', id: 'usr_42', name: 'Lina Haddad' },
+pre|   tenant: { id: 'biz_7', name: 'Azure Hotels' },
+pre|   targets: [{ type: 'booking', id: 'bk_1042', name: 'Booking #1042' }],
+pre|   changes: [{ field: 'status', before: 'confirmed', after: 'cancelled' }],
+pre| });
+pre|
+pre| // flush() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send
+pre| // deadline passes. Unsettled events are then queued again, as far as the queue's capacity allows.
+pre| // Permanent rejections don't reject flush(): they arrive through onError and onDrop.
+pre| await client.flush().catch((error) => console.error('audit delivery pending', error));
+pre| // On exit: stop accepting events and drain the queue. Can reject like flush().
+pre| await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
+The packages aren't on npm yet.
+No SDK? Use HTTP.
+One request, one to a thousand events.
+POST /v1/events accepts one event, a JSON array, or { "events": [...] }. Authenticate with an ingest key. A 202 lists the stored event IDs in ids and rejected events in rejected.
+curl
+pre| curl https://audit.example.com/v1/events \
+pre|   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \
+pre|   -H 'Content-Type: application/json' \
+pre|   -d '[{"action":"booking.cancelled","actor":{"type":"user","id":"usr_42"}},
+pre|        {"action":"payment.refunded","actor":{"type":"user","id":"usr_42"}}]'
+The envelope
+The fields that make an audit log useful.
+Only an action string is required, and each event must fit the ingest limits. These recommended fields are normalized into columns: actor, tenant, executor, target and operation ids are indexed for search, and actors, workers, support agents, tenants, records and operations each get their own page in the console. The conformance score is the share of nine recommended checks an event passes.
+[sr-only] Recommended envelope fields
+Field
+Answers
+Example
+actor
+Who caused it
+{ type: "user", id: "usr_42", name: "Lina Haddad" }
+{ type: "user", id: "usr_42", name: "Lina Haddad" }
+executor
+What did the work, and on which try
+{ type: "worker", id: "refunds-worker", jobId: "job_981", attempt: 2 }
+{ type: "worker", id: "refunds-worker", jobId: "job_981", attempt: 2 }
+impersonator
+Which staff member acted for the actor
+{ id: "usr_1", name: "Support agent" }
+{ id: "usr_1", name: "Support agent" }
+tenant
+Whose account
+{ id: "biz_7", name: "Azure Hotels" }
+{ id: "biz_7", name: "Azure Hotels" }
+targets
+Which records
+[{ type: "booking", id: "bk_1042" }]
+[{ type: "booking", id: "bk_1042" }]
+changes
+What changed
+[{ field: "status", before: "confirmed", after: "cancelled" }]
+[{ field: "status", before: "confirmed", after: "cancelled" }]
+context.operationId, context.parentEventId
+Which unit of work, and what caused this event
+op_cancel_bk_1042
+op_cancel_bk_1042
+The rules
+The actor is who asked; the executor is what did the work. A refund Lina requested and a queue worker carried out has actor = Lina, executor = refunds-worker.
+Scheduled jobs nobody triggered use actor.type: "system".
+When support acts for a customer, the customer stays the actor and the staff member goes in impersonator.
+Never send secrets in changes. Send "[redacted]" to record that a secret changed.
+Everything else is kept. Custom top-level keys and anything under metadata stay in the event's JSON and are indexed as searchable attributes, for example metadata.channel:whatsapp: up to 256 custom attributes per event, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON).
+operation · op_cancel_bk_1042
+booking.cancelled
+API server · Lina Haddad
+payment.refunded
+Refunds worker · attempt 2 · Lina Haddad
+Actors: Lina Haddad
+Tenants: Azure Hotels
+Records: booking:bk_1042
+Both events land on Lina's page, Azure Hotels' page and booking bk_1042's page. The operation page shows the refund nested under the cancellation.
+Worked example
+Lina cancels booking #1042. The API records the cancellation and queues a refund. The refund worker fails once, then succeeds on attempt 2.
+Two events, one operation
+pre| [
+pre|   {
+pre|     "id": "evt_cancel_bk_1042",
+pre|     "action": "booking.cancelled",
+pre|     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
+pre|     "executor": { "type": "api", "id": "api-server" },
+pre|     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
+pre|     "targets": [{ "type": "booking", "id": "bk_1042" }],
+pre|     "changes": [{ "field": "status", "before": "confirmed", "after": "cancelled" }],
+pre|     "context": { "operationId": "op_cancel_bk_1042" }
+pre|   },
+pre|   {
+pre|     "action": "payment.refunded",
+pre|     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
+pre|     "executor": { "type": "worker", "id": "refunds-worker", "jobId": "job_981", "attempt": 2 },
+pre|     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
+pre|     "targets": [{ "type": "payment", "id": "pay_77" }, { "type": "booking", "id": "bk_1042" }],
+pre|     "context": { "operationId": "op_cancel_bk_1042", "parentEventId": "evt_cancel_bk_1042" }
+pre|   }
+pre| ]
+Integrations
+Middleware for the stacks we run.
+First-party packages for Hono, TanStack Start, Vue and Nuxt. On the server, the Hono, TanStack Start and Nuxt packages give you an audit(action, partialEvent) function per request. It resolves the actor, tenant, request id and operation id when you call it, so identity set by a per-route auth guard is still picked up. audit() returns the event id straight away and never waits for delivery.
+TanStack Start @logbird/tanstack-start
+Request middleware plus function middleware; call context.audit(...) inside server functions. Includes readAuditTrail and trailQuery for history routes.
+Vue @logbird/vue
+useAuditTrail and a headless AuditTimeline that read history through your authenticated backend, with loading, error, refresh and load-more states.
+Nuxt @logbird/nuxt
+A Nitro plugin adds event.context.audit. A built-in history route denies every request until your authorize(event, query) hook returns a trusted query.
+There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from those stacks.
+Hono
+pre| import { Hono } from 'hono';
+pre| import { Logbird } from '@logbird/sdk';
+pre| import { logbird, type AuditVariables } from '@logbird/hono';
+pre|
+pre| type User = { id: string; name: string };
+pre| const client = new Logbird({
+pre|   endpoint: process.env.LOGBIRD_ENDPOINT,
+pre|   apiKey: process.env.LOGBIRD_INGEST_KEY,
+pre|   onError: console.error,
+pre| });
+pre| const capture = logbird({
+pre|   client,
+pre|   actor: (c) => {
+pre|     const user = c.get('user') as User | undefined; // set by your auth middleware
+pre|     return user ? { type: 'user', id: user.id, name: user.name } : undefined;
+pre|   },
+pre|   autoTrack: {}, // also records POST, PUT, PATCH and DELETE requests automatically
+pre| });
+pre|
+pre| const app = new Hono<{ Variables: AuditVariables & { user?: User } }>();
+pre| app.use(capture);
+pre| app.post('/records', (c) => {
+pre|   c.var.audit('record.created', { targets: [{ type: 'record', id: 'rec_123' }] });
+pre|   return c.json({ ok: true });
+pre| });
+pre| // In your shutdown handler: await capture.shutdown();
+Workers and jobs
+Keep the actor when the work moves to a queue.
+audit.carrier() packs the operation id, request id, parent event, actor and tenant into plain JSON you put on the job. On the worker, jobAudit() turns it back into an audit function. The executor is filled from the job's queue, id and attempt number. There's no BullMQ dependency; any job object with id, name, queueName and attemptsMade works.
+A carrier is trusted internal data for correlation, not proof of identity.
+Request → job
+pre| // In the request handler
+pre| const eventId = c.var.audit('booking.cancelled', { targets: [{ type: 'booking', id: 'bk_1042' }] });
+pre| const carrier = await c.var.audit.carrier({ parentEventId: eventId });
+pre| await refunds.add('refund', { bookingId: 'bk_1042', carrier });
+pre|
+pre| // In the worker
+pre| import { jobAudit } from '@logbird/sdk/integration';
+pre|
+pre| new Worker('refunds', async (job) => {
+pre|   const audit = jobAudit({ client, job, carrier: job.data.carrier });
+pre|   // ...refund the payment
+pre|   audit('payment.refunded', { targets: [{ type: 'booking', id: job.data.bookingId }] });
+pre|   await audit.pending();
+pre| });
+Delivery semantics
+What happens between track() and the 202.
+Batched. By default, events go in batches of up to 100, or every second, whichever comes first.
+Retried. Rate limits (429), server errors and network failures are retried with exponential backoff and jitter. By default, five retries that make no progress end the attempt; a 503 that settles part of the batch counts as progress. A numeric Retry-After is honoured, capped at 60 seconds and the 5-minute send deadline.
+Acknowledged after storage. On 202, ids lists the accepted events and rejected names the entries that failed. An accepted event was written to ClickHouse by this request or an earlier identical one.
+At least once, stored once. The SDK gives every event an id before it queues it, so a retry after a lost response reuses the stored event while the project retains it. Raw HTTP clients should send their own string id: a missing, blank or non-string id gets a new generated id on every retry. A string id is rejected with invalid_event_id if it contains NUL or an unpaired surrogate, or exceeds 256 UTF-16 code units after trimming.
+Bounded under outage. The queue holds up to 10,000 events by default. When it's full, dropPolicy: 'oldest' (the default) or 'newest' decides what goes, and onDrop reports each event dropped.
+In memory. A crash before the server acknowledges can lose pending events. Call shutdown() on exit.
+Partial batches. Each event is checked on its own. Rejected events, such as one without an action or an id conflict, are listed in rejected. On 202 the rest are accepted. When a 503 lists the unsettled events, retry only those; otherwise retry the whole batch with the same ids. Permanent errors other than 429 drop the batch and report it through onError and onDrop, without rejecting flush().
+Ingest limits
+The numbers to design around.
+[sr-only] Ingest and read limits
+Events per request
+1 to 1000
+Request size
+5 MB
+Event size
+256 KB
+Attributes per event
+Up to 256 custom attributes indexed, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON)
+occurredAt
+ISO-8601 or epoch milliseconds, from 3650 days ago to 24 hours ahead
+Ingest rate (default, per project)
+3000 requests a minute
+Read rate (default, per project)
+1200 requests a minute
+Rate limits are shared by all keys of the same kind in a project, across replicas. Self-hosters can change them.
+Authenticated responses carry RateLimit-Limit, RateLimit-Remaining and RateLimit-Reset when the limiter can account for the request. A 429 includes Retry-After.
+An unusable occurredAt never drops the event. It is stored at receive time, the original value is kept, and the response lists a warning.
+Read API
+Read your own history back.
+GET /v1/events with a read key returns matching events, newest first, up to 200 per page, with a nextCursor for the next page. GET /v1/events/:eventId returns one event. Without from and to, the range is the last 24 hours.
+A read key can read the whole project. A query filter is not authorization: your backend must check the tenant and record on every request, including each next page. The read API accepts the query language, not SQL mode.
+Your backend
+pre| import { readAuditTrail, trailQuery } from '@logbird/sdk/read';
+pre|
+pre| // Server only. First check that the signed-in user may see this booking.
+pre| const page = await readAuditTrail(
+pre|   { endpoint: process.env.LOGBIRD_ENDPOINT!, readKey: process.env.LOGBIRD_READ_KEY! },
+pre|   trailQuery({
+pre|     target: { type: 'booking', id: 'bk_1042' },
+pre|     tenant: 'biz_7',
+pre|     range: { from: '2026-01-01T00:00:00Z', to: new Date().toISOString() },
+pre|   }),
+pre| );
+pre| // page.data: events; page.nextCursor: pass back as `cursor` for the next page
+API reference
+Your server documents itself.
+Every Logbird server serves its OpenAPI document at /openapi.json and an interactive reference at /docs, so the reference always matches the version you run. The API listener stays on the private network; your public origin forwards /api, /v1, the health checks and these two read-only reference paths, and nothing else. Open https://your-logbird-origin/docs, or localhost:4600/docs when you run locally.
+Self-host a server
+Start with one event.
+The source opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.
+Join the waitlist
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[sr-only: Logbird]
+Retrace every step.
+The audit log for your product. The source opens soon.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub — coming soon.
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+Join the waitlist → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+Join the waitlist → /contact
+Quickstart → #quickstart
+Self-host a server → /self-hosting
+Quickstart → #quickstart
+HTTP → #http
+Envelope → #envelope
+Integrations → #integrations
+Workers → #workers
+Delivery → #delivery
+Limits → #limits
+Read API → #read-api
+API reference → #reference
+Self-host a server → /self-hosting
+Join the waitlist → /contact
+Self-host when the source opens → /contact?interest=self-host
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"
+button type="button" text="Hono"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"

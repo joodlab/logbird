@@ -1,13 +1,16 @@
 ---
 title: Logbird website copy — index and messaging
-description: Source of truth for the Logbird marketing site copy. Messaging hierarchy, proof points, glossary and word list.
+description: Index of the Logbird marketing site's page briefs, plus the messaging hierarchy, proof points, glossary and word list.
 path: (not a page)
 ---
 
 # Logbird website copy
 
-This folder is the copy source of truth for the marketing site (`apps/web`, TanStack Start, prerendered). Engineering
-and design build pages from these files; wording changes happen here first.
+This folder holds the briefs for the marketing site (`apps/web`, TanStack Start, prerendered). **Page text renders from
+the typed modules in `apps/web/src/content/<module>.ts`; edit wording there.** Each file here is the brief for one page:
+the job of each section, the proof for every claim with its source, the visuals and the owner notes. The first line
+after each brief's front matter names its module. This README holds what applies to every page: the messaging, the CTA
+rules, the glossary and the word list.
 
 Facts come from the repository only (each number has a `<!-- source: path -->` comment). Competitor facts come from
 sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/brand.md` §2.
@@ -43,29 +46,38 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 
 ### How each page file is laid out
 
-Front matter: `title` (page `<title>`), `description` (meta description, 155 characters or fewer) and `path`.
-Then one `##` block per section, in page order:
+Front matter: `title` (the page `<title>` when the brief was written), `description` (meta description, 155 characters
+or fewer) and `path`. Then the line naming the module, and one `##` block per section, in page order. Briefs written
+before the move keep these fields as a record of each section's job and sources; the module, not the brief, holds the
+page text:
 
 - `id`: the section anchor.
 - `eyebrow`: optional small label above the heading.
 - `heading`: the section heading. On a page's first section it is the H1.
-- `body`, `bullets`: the copy.
+- `body`, `bullets`: what the section says, as the brief records it.
 - `cta`: label → target.
 - `visual`: an exact path under `marketing/media/`, or "code sample", or "diagram: …".
 
 ### Content modules and briefs (#250)
 
-Pages are moving to typed content modules under `apps/web/src/content/`, one per page, plus `shared.ts` for the calls to
-action and the closing band. A module is a function of the site's state (`content/site.ts`: repository public or
-private, Cloud open or closed, the latest release), and both variants of a state are required, so a missing one fails
-`tsc`. Once a page has moved, its file here becomes a **brief**: the section jobs, the proof for every claim with its
-source, the visuals and the owner notes, but not the page text. Change wording in the module, and check the claim
-against the brief's sources in the same pull request. `apps/web/src/content/content-modules.test.ts` fails if prose
-comes back into a moved route file or component.
+Pages render typed content modules under `apps/web/src/content/`, one per page, plus `shared.ts` for the calls to action
+and the closing band. A module is a function of the site's state (`content/site.ts`: repository public or private, Cloud
+open or closed, the latest release), and both variants of a state are required, so a missing one fails `tsc`. Each file
+here is a **brief**: the section jobs, the proof for every claim with its source, the visuals and the owner notes, but
+not the page text. Change wording in the module, and check the claim against the brief's sources in the same pull
+request. `apps/web/src/content/content-modules.test.ts` fails if prose comes back into a moved route file or component.
 
 Every page has moved (#250, groups #303, #305, #306, #307 and #310): each file here is the brief for the page it names, and the legal briefs (`legal-privacy.md`, `legal-terms.md`) list the code facts behind `apps/web/src/content/legal*.ts`. Where a page renders a data module (the comparison tables, sources, "what we couldn't verify" and the /compare cards come from `apps/web/src/content/comparisons.ts`), the brief doesn't restate it.
 
-The interim drift check that compared these files with the rendered pages (#249) was removed once every page rendered from its module (#250).
+The interim drift check that compared these files with the rendered pages (#249) was removed once every page rendered
+from its module (#250). Two checks replace it:
+
+- `apps/web/src/content/page-snapshots.test.ts` pins every rendered page in each repository and Cloud state as a text
+  snapshot (title, headings, visible text, links and form controls) under `apps/web/src/content/__snapshots__/pages/`.
+  Any change to what a page shows is a snapshot diff: update the snapshots on purpose (the test's header says how),
+  review the diff and commit it with the module change.
+- `apps/web/src/content/copy-briefs.test.ts` checks this folder: every brief is in the table above, every link in the
+  table resolves, every page brief starts with the line naming its module, and that module exists.
 
 ## Messaging hierarchy
 
@@ -148,9 +160,9 @@ to invited teams and approved domains, so the site never promises an account:
 ## Owner-gated copy
 
 **Marker:** an owner-gated variant is written only inside an HTML comment that starts with `<!-- owner-gated: <topic>`.
-Text inside those comments is never implemented on the site until the owner approves that topic; everything outside
-them is safe to implement verbatim. Topics: `org-name` (the publisher's name, `WEB_ORG_NAME`), `origin-story`,
-`design-partner-name`, `cloud-clause`.
+Text inside those comments is never implemented on the site until the owner approves that topic; everything outside them
+is approved for the site, where it is written in the page's module. Topics: `org-name` (the publisher's name,
+`WEB_ORG_NAME`), `origin-story`, `design-partner-name`, `cloud-clause`.
 
 
 These variants are **not** used anywhere on the site. The owner may approve them later.

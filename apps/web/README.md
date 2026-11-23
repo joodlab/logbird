@@ -1,7 +1,9 @@
 # @logbird/web — the marketing site
 
 TanStack Start, every page prerendered to static HTML, packaged for Cloudflare Workers with static assets. It reuses
-`@logbird/ui` (tokens, theme, highlighter). Copy lives in `marketing/copy/`; change wording there first.
+`@logbird/ui` (tokens, theme, highlighter). Page text renders from the typed modules in `src/content/<module>.ts`; edit
+wording there. The files in `marketing/copy/` are the briefs: section jobs, sources and owner notes, not the page text.
+`src/content/page-snapshots.test.ts` pins every rendered page; review its snapshot diff with any wording change.
 
 ## Commands
 

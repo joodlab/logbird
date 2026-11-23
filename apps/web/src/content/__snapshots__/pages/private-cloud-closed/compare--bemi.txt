@@ -1,0 +1,363 @@
+title: Bemi · Logbird
+description: Bemi captures every Postgres row change automatically. Logbird records the actions your app reports. Different tools, sometimes used together.
+
+headings:
+h1 Logbird and Bemi
+h2 At a glance
+h2 When to choose Bemi
+h2 When to choose Logbird
+h2 Sources
+h3 What we couldn't verify
+h2 Start with one event.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+[sr-only] Color theme
+Join the waitlist
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+Join the waitlist
+Theme
+[sr-only] Color theme
+Compare
+Logbird and Bemi
+Bemi is a different kind of tool. It connects to your Postgres write-ahead log and records every row change automatically: the table, the primary key, the operation, and the row before and after. Its ORM packages attach application context, such as the user or the endpoint, to each change. You don't instrument call sites, and nothing is missed because someone forgot an audit() call. Logbird works the other way round: your code reports actions, including ones that never touch your database. [B1, B2, B3, B4]
+A different category
+Bemi is automatic database change data capture for Postgres. Logbird is an application audit log. Many teams could use both: Bemi as the record of every row change, and Logbird as the readable history of who did what.
+Bemi
+Your app
+[aria-hidden] →
+Postgres
+[aria-hidden] →
+Write-ahead log
+[aria-hidden] →
+Bemi
+[aria-hidden] →
+changes table
+table, primary_key, operation, before, after, context
+Logbird
+Your app code
+audit('booking.cancelled')
+[aria-hidden] →
+Logbird
+[aria-hidden] →
+Explorer
+actor, tenant, executor, targets, changes
+Bemi reads every row change from Postgres's write-ahead log. Logbird stores the actions your code reports, including ones that never touch your database.
+Checked 7 November 2026
+At a glance
+Each claim about another product links to its source below. Anything we couldn't verify is left out.
+[sr-only] Logbird and Bemi compared, with a source for each claim about Bemi
+[sr-only: Topic]
+Logbird
+Bemi
+What it records
+Actions your code reports, in any shape
+Every insert, update and delete in tracked Postgres tables [B1, B3]
+How it captures
+SDK or HTTP calls you add
+Postgres logical replication (WAL), through Debezium and NATS JetStream [B1, B5]
+Databases
+Any; Logbird doesn't read your database
+PostgreSQL [B4, B5]
+Licence
+MIT
+Core: SSPL-1.0; ORM packages: LGPL-3.0 [B6, B7, B8]
+Self-host
+Docker Compose or Coolify, once the source opens
+Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production [B9]
+Hosted offering
+Logbird Cloud: waitlist only
+Bemi Cloud [B9]
+Data model
+Recommended envelope: actor, executor, tenant, targets, changes, operation
+changes table: database, schema, table, primary key, operation, before, after, context [B3]
+Query
+Query language and guarded SQL WHERE mode in a console
+SQL on the changes table, or ORM helpers (Prisma, Rails and others) [B3, B10, B11]
+Retention
+Per project, 7 days to 10 years; hourly permanent deletion; self-host included
+Automatic retention in Bemi Cloud; not included in the open-source self-hosted version [B3, B9]
+Storage engine
+ClickHouse for events, Postgres for metadata
+PostgreSQL [B3]
+Pricing
+Self-host free (MIT); Cloud pricing not set
+Starter $19/month, Business from $99/month, Enterprise custom (as listed on bemi.io on 2026-11-07) [B12]
+What it records
+Logbird
+Actions your code reports, in any shape
+Bemi
+Every insert, update and delete in tracked Postgres tables [B1, B3]
+How it captures
+Logbird
+SDK or HTTP calls you add
+Bemi
+Postgres logical replication (WAL), through Debezium and NATS JetStream [B1, B5]
+Databases
+Logbird
+Any; Logbird doesn't read your database
+Bemi
+PostgreSQL [B4, B5]
+Licence
+Logbird
+MIT
+Bemi
+Core: SSPL-1.0; ORM packages: LGPL-3.0 [B6, B7, B8]
+Self-host
+Logbird
+Docker Compose or Coolify, once the source opens
+Bemi
+Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production [B9]
+Hosted offering
+Logbird
+Logbird Cloud: waitlist only
+Bemi
+Bemi Cloud [B9]
+Data model
+Logbird
+Recommended envelope: actor, executor, tenant, targets, changes, operation
+Bemi
+changes table: database, schema, table, primary key, operation, before, after, context [B3]
+Query
+Logbird
+Query language and guarded SQL WHERE mode in a console
+Bemi
+SQL on the changes table, or ORM helpers (Prisma, Rails and others) [B3, B10, B11]
+Retention
+Logbird
+Per project, 7 days to 10 years; hourly permanent deletion; self-host included
+Bemi
+Automatic retention in Bemi Cloud; not included in the open-source self-hosted version [B3, B9]
+Storage engine
+Logbird
+ClickHouse for events, Postgres for metadata
+Bemi
+PostgreSQL [B3]
+Pricing
+Logbird
+Self-host free (MIT); Cloud pricing not set
+Bemi
+Starter $19/month, Business from $99/month, Enterprise custom (as listed on bemi.io on 2026-11-07) [B12]
+When to choose Bemi
+You want every row change in Postgres captured automatically, without touching hundreds of call sites.
+You need before-and-after rows for every change, including ones made by scripts or migrations outside your app's code paths.
+You want to query history from your ORM, next to your data.
+When to choose Logbird
+You want to record actions, not rows: a sign-in, a denied request, a failed payment, an export, or work done in a queue worker that touches no table.
+Your data lives in more than one store, or not in Postgres.
+You need the actor, the executor and the impersonator on each event, with operation trees across requests and jobs.
+You want an MIT-licensed, self-hosted audit log with retention controls included.
+Self-host when the source opens
+Join the waitlist
+Sources
+All accessed 7 November 2026. If something has changed, tell us and we'll fix it.
+Report an outdated fact
+All comparisons
+B1
+README: tracks changes by connecting to the WAL using Change Data Capture; no table alterations (github.com/BemiHQ/bemi now redirects to github.com/pgstack-io/bemi-io) [sr-only: (opens in a new tab)]
+github.com/BemiHQ/bemi
+B2
+Website: "Automatic Audit Trail for Postgres" [sr-only: (opens in a new tab)]
+bemi.io
+B3
+Destination database: changes table columns; Cloud retention; storage in PostgreSQL [sr-only: (opens in a new tab)]
+docs.bemi.io/postgresql/destination-database
+B4
+Docs home: "plugs into PostgreSQL and ORMs to track database changes automatically" [sr-only: (opens in a new tab)]
+docs.bemi.io
+B5
+Source database: wal_level = logical, replication slot and publication [sr-only: (opens in a new tab)]
+docs.bemi.io/postgresql/source-database
+B6
+Core licence file: Server Side Public License, version 1 [sr-only: (opens in a new tab)]
+github.com/pgstack-io/bemi-io/blob/main/LICENSE
+B7
+bemi-prisma licence file: LGPL-3.0 [sr-only: (opens in a new tab)]
+raw.githubusercontent.com/pgstack-io/bemi-prisma/main/LICENSE
+B8
+bemi-rails README: "Distributed under the terms of the LGPL-3.0 License" [sr-only: (opens in a new tab)]
+github.com/pgstack-io/bemi-rails
+B9
+Self-hosting: open-source version and Self-Hosting Enterprise; Cloud-only features [sr-only: (opens in a new tab)]
+docs.bemi.io/self-hosting
+B10
+Prisma integration [sr-only: (opens in a new tab)]
+docs.bemi.io/orms/prisma
+B11
+Rails integration [sr-only: (opens in a new tab)]
+docs.bemi.io/orms/rails
+B12
+Pricing [sr-only: (opens in a new tab)]
+bemi.io/pricing
+What we couldn't verify
+Left out of the table: Bemi's GitHub organization now redirects to pgstack-io (PgStack, from the same company, Bemi Technologies, Inc.), and pgstack.io lists a change-tracking product called "Audit" with different pricing. We found no announcement explaining the relationship, so this page describes Bemi as published on bemi.io and docs.bemi.io. Also unverified: which retention periods currently apply (the docs and the PgStack pricing page differ); supported PostgreSQL versions; whether a customer-facing viewer exists; licence files of the other ORM packages.
+All product names are trademarks of their respective owners. Logbird isn't affiliated with or endorsed by any of them.
+Start with one event.
+The source opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.
+Join the waitlist
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[sr-only: Logbird]
+Retrace every step.
+The audit log for your product. The source opens soon.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub — coming soon.
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+Join the waitlist → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+Join the waitlist → /contact
+B1 [aria-label: Source B1] → #source-B1
+B2 [aria-label: Source B2] → #source-B2
+B3 [aria-label: Source B3] → #source-B3
+B4 [aria-label: Source B4] → #source-B4
+B1 [aria-label: Source B1] → #source-B1
+B3 [aria-label: Source B3] → #source-B3
+B1 [aria-label: Source B1] → #source-B1
+B5 [aria-label: Source B5] → #source-B5
+B4 [aria-label: Source B4] → #source-B4
+B5 [aria-label: Source B5] → #source-B5
+B6 [aria-label: Source B6] → #source-B6
+B7 [aria-label: Source B7] → #source-B7
+B8 [aria-label: Source B8] → #source-B8
+B9 [aria-label: Source B9] → #source-B9
+B9 [aria-label: Source B9] → #source-B9
+B3 [aria-label: Source B3] → #source-B3
+B3 [aria-label: Source B3] → #source-B3
+B10 [aria-label: Source B10] → #source-B10
+B11 [aria-label: Source B11] → #source-B11
+B3 [aria-label: Source B3] → #source-B3
+B9 [aria-label: Source B9] → #source-B9
+B3 [aria-label: Source B3] → #source-B3
+B12 [aria-label: Source B12] → #source-B12
+B1 [aria-label: Source B1] → #source-B1
+B3 [aria-label: Source B3] → #source-B3
+B1 [aria-label: Source B1] → #source-B1
+B5 [aria-label: Source B5] → #source-B5
+B4 [aria-label: Source B4] → #source-B4
+B5 [aria-label: Source B5] → #source-B5
+B6 [aria-label: Source B6] → #source-B6
+B7 [aria-label: Source B7] → #source-B7
+B8 [aria-label: Source B8] → #source-B8
+B9 [aria-label: Source B9] → #source-B9
+B9 [aria-label: Source B9] → #source-B9
+B3 [aria-label: Source B3] → #source-B3
+B3 [aria-label: Source B3] → #source-B3
+B10 [aria-label: Source B10] → #source-B10
+B11 [aria-label: Source B11] → #source-B11
+B3 [aria-label: Source B3] → #source-B3
+B9 [aria-label: Source B9] → #source-B9
+B3 [aria-label: Source B3] → #source-B3
+B12 [aria-label: Source B12] → #source-B12
+Self-host when the source opens → /contact?interest=self-host
+Join the waitlist → /contact
+Report an outdated fact → /contact?interest=correction
+All comparisons → /compare
+README: tracks changes by connecting to the WAL using Change Data Capture; no table alterations (github.com/BemiHQ/bemi now redirects to github.com/pgstack-io/bemi-io) [sr-only: (opens in a new tab)] → https://github.com/BemiHQ/bemi
+Website: "Automatic Audit Trail for Postgres" [sr-only: (opens in a new tab)] → https://bemi.io
+Destination database: changes table columns; Cloud retention; storage in PostgreSQL [sr-only: (opens in a new tab)] → https://docs.bemi.io/postgresql/destination-database
+Docs home: "plugs into PostgreSQL and ORMs to track database changes automatically" [sr-only: (opens in a new tab)] → https://docs.bemi.io
+Source database: wal_level = logical, replication slot and publication [sr-only: (opens in a new tab)] → https://docs.bemi.io/postgresql/source-database
+Core licence file: Server Side Public License, version 1 [sr-only: (opens in a new tab)] → https://github.com/pgstack-io/bemi-io/blob/main/LICENSE
+bemi-prisma licence file: LGPL-3.0 [sr-only: (opens in a new tab)] → https://raw.githubusercontent.com/pgstack-io/bemi-prisma/main/LICENSE
+bemi-rails README: "Distributed under the terms of the LGPL-3.0 License" [sr-only: (opens in a new tab)] → https://github.com/pgstack-io/bemi-rails
+Self-hosting: open-source version and Self-Hosting Enterprise; Cloud-only features [sr-only: (opens in a new tab)] → https://docs.bemi.io/self-hosting
+Prisma integration [sr-only: (opens in a new tab)] → https://docs.bemi.io/orms/prisma
+Rails integration [sr-only: (opens in a new tab)] → https://docs.bemi.io/orms/rails
+Pricing [sr-only: (opens in a new tab)] → https://bemi.io/pricing
+Join the waitlist → /contact
+Self-host when the source opens → /contact?interest=self-host
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"

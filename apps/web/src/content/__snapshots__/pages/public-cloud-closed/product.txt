@@ -1,0 +1,333 @@
+title: Product · Logbird
+description: Search every event, follow actors, tenants, workers and records, and open operation trees. An hourly worker deletes events older than your project's retention window.
+
+headings:
+h1 Everything your team needs to answer "who did what".
+h2 Every event, in one table.
+h2 A query language you already half know.
+h2 Or write a SQL WHERE expression, safely.
+h3 Parsed by ClickHouse
+h3 Allowlisted
+h3 Run as a restricted user
+h3 Scoped to your project
+h2 A page for each actor, tenant, worker and record.
+h2 One request, every job it started, as a single tree.
+h2 The full story of one event.
+h2 And the parts you use every day.
+h3 Watch events arrive during a deploy.
+h3 Save the searches your team runs every week.
+h3 Logbird records its own management actions.
+h3 Owners and admins manage it. Members use it.
+h2 The setup page tells you what's still missing.
+h2 Keep events as long as you decide, then delete them.
+h2 Show history inside your own product.
+h2 What's on our roadmap.
+h2 Start with one event.
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+[sr-only] Color theme
+Join the waitlist
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+Join the waitlist
+Theme
+[sr-only] Color theme
+Product
+Everything your team needs to answer "who did what".
+The Logbird console is for the people who operate your product: engineers on call, support, and whoever answers the auditor. It is not a portal for your end customers. To show history inside your own product, use the read API.
+Join the waitlist
+Self-host it
+[aria-hidden] OverviewFull size
+[img: The overview: event, actor and tenant counts, failure rate, average conformance, events by outcome, and the top actions, actors, tenants and executors.]
+[img: The overview: event, actor and tenant counts, failure rate, average conformance, events by outcome, and the top actions, actors, tenants and executors.]
+The overview: events by outcome, the most frequent actions, and a setup checklist until your integration is complete.
+Explorer
+Search
+SQL mode
+Entity pages
+Operations
+Event detail
+Setup
+Retention
+Read API
+Explorer
+Every event, in one table.
+Pick a time range, type a query, and narrow it down with facets. Drag across the chart to zoom. Click a row to open the full event. The query, time range and columns live in the URL, so a link opens the same search for a teammate. A relative range such as the last hour resolves when they open it. Share an absolute range to preserve the time window, or a downloaded export to preserve the results.
+Facets with counts: click to include, Alt-click to exclude.
+Configurable columns and infinite scroll.
+Keyboard first: / focuses search, j and k move through events, Esc closes the panel, ⌘K opens the command palette.
+Export the current results as CSV or JSONL.
+[aria-hidden] Explorer
+Type a query, open an event, follow its operation.
+Search
+A query language you already half know.
+Type field:value and Logbird suggests fields and values as you go. It covers what you'd expect from Lucene-style search: wildcards, negation, ranges, regex and groups. If you type KQL-style syntax like f = v, it offers to convert it.
+Fields are suggested from what your project actually sends, with how often each one appears.
+Errors point at the exact token and say what was expected, for example "attempt is a number".
+Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 custom attributes, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.
+Query language
+pre| actor:usr_42 action:booking.* -env:staging
+pre| outcome:(failure OR denied) attempt:>2
+pre| tenant.name:"Azure Hotels" occurredAt:>now-7d
+pre| impersonator:*  metadata.channel:whatsapp
+[aria-hidden] SearchFull size
+[img: The search bar suggesting values for the outcome field, with how many events have each value.]
+[img: The search bar suggesting values for the outcome field, with how many events have each value.]
+Value suggestions with counts, and the operators that fit the field.
+SQL mode
+Or write a SQL WHERE expression, safely.
+Switch the bar to SQL and write a ClickHouse boolean expression, such as job_attempt > 2 AND attributes['metadata.channel'] = 'whatsapp'. You write only the condition. Logbird writes the rest of the statement.
+[aria-hidden] SQL modeFull size
+[img: SQL mode rejecting a subquery before it runs, with the message that subqueries are not allowed.]
+[img: SQL mode rejecting a subquery before it runs, with the message that subqueries are not allowed.]
+A subquery, rejected inline before anything runs.
+Guard 1
+Parsed by ClickHouse
+Logbird asks ClickHouse for the expression's syntax tree and checks it before running anything.
+Guard 2
+Allowlisted
+Only known columns and a fixed list of functions are allowed. Subqueries, joins, table functions, SETTINGS and system tables are rejected.
+Guard 3
+Run as a restricted user
+Queries run as a separate read-only ClickHouse user with its own CPU, memory and row limits.
+Guard 4
+Scoped to your project
+Database row policies limit that user to the project you're looking at, even if the expression is 1 OR 1.
+SQL mode is for the console only. The public read API accepts the query language, not SQL. A free-form SQL console isn't part of Logbird.
+Follow anything
+A page for each actor, tenant, worker and record.
+Actors, tenants, executors and records in your events get their own pages (records from the first 64 targets of each event). Each one shows an activity chart, its top actions, its outcome split, related entities and a full timeline. Directory pages list them all, most active first, with fuzzy search.
+Actors: who caused it. Users, API keys, integrations, the system.
+Tenants: whose account. "What happened at Azure Hotels last week?" is one click.
+Executors: what did the work. The API, each queue worker and cron job, with job ids and attempts.
+Records: what changed. booking:bk_1042 has a history of its own.
+[aria-hidden] TenantFull size
+[img: A tenant's page: event counts, how many events support did while signed in as the customer and by which agent, and the account's history with a chart and its events.]
+[img: A tenant's page: event counts, how many events support did while signed in as the customer and by which agent, and the account's history with a chart and its events.]
+A tenant's page: event counts, what support did while signed in as the customer, and its history with a chart and every event.
+Operation trees
+One request, every job it started, as a single tree.
+Send the same operationId on a request and the jobs it starts. Add parentEventId to say which event caused which. Logbird draws the tree: each step with its outcome, executor and timing. A failed first attempt and the retry that worked sit side by side.
+[aria-hidden] OperationFull size
+[img: An operation tree: a scheduler request, the worker jobs it started, two failed attempts and the retries that succeeded, each with its executor and attempt number.]
+[img: An operation tree: a scheduler request, the worker jobs it started, two failed attempts and the retries that succeeded, each with its executor and attempt number.]
+An operation tree: a scheduler request, the jobs it started, failed attempts and the retries that worked.
+Event detail
+The full story of one event.
+Open any event to read it as a sentence: who did what, in which account, to which records, and how it ended. The actor and the executor are on separate cards. When a support agent acted for a customer, the agent appears beside the customer.
+The before and after values you send, for the first 256 changes.
+The causation breadcrumb, with a link to the whole operation.
+Context ids (request, trace, IP), the indexed attributes, and the full parsed event as JSON.
+Copy a link, or copy the event as a curl command.
+Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent has a page.
+[aria-hidden] Event detailFull size
+[img: An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.]
+[img: An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.]
+An event in detail: actor and executor, tenant, targets, the status change and the causation chain.
+And the parts you use every day.
+Live
+Watch events arrive during a deploy.
+Turn on Live and new events appear at the top of the table as they arrive, with your current query still applied.
+Live tail polls over HTTP. It doesn't use WebSockets, so it works behind any proxy.
+Saved views
+Save the searches your team runs every week.
+Save a query, its time range and its columns as a view, in query or SQL mode. Views appear in the sidebar and in the search bar's suggestions. Anyone in the workspace can open them; members can delete their own.
+Workspace activity
+Logbird records its own management actions.
+Logbird records management actions (projects, keys, retention, invitations) in workspace activity. You read it with the same explorer.
+Workspaces and roles
+Owners and admins manage it. Members use it.
+Sign-in is by emailed one-time code. There are no passwords. Owners and admins manage projects, keys, retention and invitations. Members search, export, save views and read workspace activity. The server checks every role on every request.
+SSO isn't available yet. It's on the roadmap.
+Setup that checks itself
+The setup page tells you what's still missing.
+Send your first event and the setup page notices on its own. It then checks your integration against your real events: for actors, tenants, executors and targets it shows the coverage and links to the events missing each one; for operation ids it shows the coverage and links to the events that have one. Reviewing retention and inviting your team are separate checklist items.
+Onboarding picks up where you left off.
+"Send a test event" and "Load sample data" show the console before you integrate. Sample data is 2000 fictional events over seven days; it never counts as setup, and you can remove it.
+A conformance score on every event, and a Fields page that shows coverage for the single-value core fields and the attributes your events carry in the selected range.
+[aria-hidden] SetupFull size
+[img: The setup page checking each part of the integration against the events received.]
+[img: The setup page checking each part of the integration against the events received.]
+The setup page checks each part of the integration against the events it has received.
+Retention
+Keep events as long as you decide, then delete them.
+Each project keeps events for a window you choose, from 7 days to 10 years. New projects start at 90 days. A worker deletes expired events every hour. Before you lower the window, Logbird shows how many events will be deleted. To confirm, you type the project's slug, and the purge starts right away.
+Retention deletes are permanent. There's no archive and no undo. The count can change between preview and deletion.
+[aria-hidden] RetentionFull size
+[img: Retention settings showing the current retention window and available policies.]
+[img: Retention settings showing the current retention window and available policies.]
+A project's retention settings: the current window, the policies you can choose, and when the purge last ran.
+Read API
+Show history inside your own product.
+Give your customers a "History" tab. Your backend calls GET /v1/events with a read key and a query for that record and tenant, and checks that each returned event names that record, then returns the page to your UI. Results are paginated with a cursor. The Vue, Nuxt and TanStack Start packages include helpers for this.
+Read API on the developer page
+A read key can read the whole project. Your backend must check that the person asking may see that tenant or record, on every page it fetches.
+Your backend
+pre| import { readAuditTrail, trailQuery } from '@logbird/sdk/read';
+pre|
+pre| // Server only. First check that the signed-in user may see this booking.
+pre| const page = await readAuditTrail(
+pre|   { endpoint: process.env.LOGBIRD_ENDPOINT!, readKey: process.env.LOGBIRD_READ_KEY! },
+pre|   trailQuery({
+pre|     target: { type: 'booking', id: 'bk_1042' },
+pre|     tenant: 'biz_7',
+pre|     range: { from: '2026-01-01T00:00:00Z', to: new Date().toISOString() },
+pre|   }),
+pre| );
+pre| // Keep only events where one target is this booking (type and id on the same target).
+pre| const events = page.data.filter((event) => event.targets.some((t) => t.type === 'booking' && t.id === 'bk_1042'));
+pre| // page.nextCursor: pass back as `cursor` for the next page
+On the roadmap
+What's on our roadmap.
+These are candidates from our public roadmap, not features or commitments. Order and timing can change.
+Project-level redaction controls, behind the redaction your client already does.
+Alerts on chosen actions.
+Signed webhooks and archive exports.
+Single sign-on for the console.
+Start with one event.
+Self-host Logbird today, or join the waitlist for Logbird Cloud.
+Join the waitlist
+Self-host it
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[sr-only: Logbird]
+Retrace every step.
+The open-source audit log for your product.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Join the waitlist → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Join the waitlist → /contact
+Join the waitlist → /contact
+Self-host it → /self-hosting
+[img: The overview: event, actor and tenant counts, failure rate, average conformance, events by outcome, and the top actions, actors, tenants and executors.] [aria-label: Open the image full size: Overview] → /media/overview-light-1440.webp?v=*
+[img: The overview: event, actor and tenant counts, failure rate, average conformance, events by outcome, and the top actions, actors, tenants and executors.] [aria-label: Open the image full size: Overview] → /media/overview-dark-1440.webp?v=*
+Explorer → #explorer
+Search → #search
+SQL mode → #sql-mode
+Entity pages → #entities
+Operations → #operations
+Event detail → #event-detail
+Setup → #setup
+Retention → #retention
+Read API → #read-api
+[img: The search bar suggesting values for the outcome field, with how many events have each value.] [aria-label: Open the image full size: Search] → /media/query-suggestions-light-1440.webp?v=*
+[img: The search bar suggesting values for the outcome field, with how many events have each value.] [aria-label: Open the image full size: Search] → /media/query-suggestions-dark-1440.webp?v=*
+[img: SQL mode rejecting a subquery before it runs, with the message that subqueries are not allowed.] [aria-label: Open the image full size: SQL mode] → /media/sql-rejected-light-1440.webp?v=*
+[img: SQL mode rejecting a subquery before it runs, with the message that subqueries are not allowed.] [aria-label: Open the image full size: SQL mode] → /media/sql-rejected-dark-1440.webp?v=*
+[img: A tenant's page: event counts, how many events support did while signed in as the customer and by which agent, and the account's history with a chart and its events.] [aria-label: Open the image full size: Tenant] → /media/tenant-light-1440.webp?v=*
+[img: A tenant's page: event counts, how many events support did while signed in as the customer and by which agent, and the account's history with a chart and its events.] [aria-label: Open the image full size: Tenant] → /media/tenant-dark-1440.webp?v=*
+[img: An operation tree: a scheduler request, the worker jobs it started, two failed attempts and the retries that succeeded, each with its executor and attempt number.] [aria-label: Open the image full size: Operation] → /media/operation-light-1440.webp?v=*
+[img: An operation tree: a scheduler request, the worker jobs it started, two failed attempts and the retries that succeeded, each with its executor and attempt number.] [aria-label: Open the image full size: Operation] → /media/operation-dark-1440.webp?v=*
+[img: An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.] [aria-label: Open the image full size: Event detail] → /media/event-sheet-light-1440.webp?v=*
+[img: An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.] [aria-label: Open the image full size: Event detail] → /media/event-sheet-dark-1440.webp?v=*
+[img: The setup page checking each part of the integration against the events received.] [aria-label: Open the image full size: Setup] → /media/setup-light-1440.webp?v=*
+[img: The setup page checking each part of the integration against the events received.] [aria-label: Open the image full size: Setup] → /media/setup-dark-1440.webp?v=*
+[img: Retention settings showing the current retention window and available policies.] [aria-label: Open the image full size: Retention] → /media/retention-light-1440.webp?v=*
+[img: Retention settings showing the current retention window and available policies.] [aria-label: Open the image full size: Retention] → /media/retention-dark-1440.webp?v=*
+Read API on the developer page → /developers
+Join the waitlist → /contact
+Self-host it → /self-hosting
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+Source on GitHub → https://github.com/example-org/logbird
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Play video"
+button type="button" aria-label="Copy code"
+button type="button" aria-label="Copy code"

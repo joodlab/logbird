@@ -1,0 +1,197 @@
+title: Terms · Logbird
+description: The terms for using the Logbird website and Logbird Cloud during early access. The open-source software stays under the MIT licence.
+
+headings:
+h1 Terms of service
+h2 Contents
+h2 1. These terms
+h2 2. Early access
+h2 3. Your account
+h2 4. Acceptable use
+h2 5. Your data
+h2 6. Availability and changes
+h2 7. Fees
+h2 8. Ending the agreement
+h2 9. Warranties and liability
+h2 10. Changes to these terms
+h2 11. Governing law
+h2 Product
+h2 Developers
+h2 Compare
+h2 Resources
+h2 Company
+
+text:
+Skip to content
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+[sr-only] Color theme
+Sign in
+Request access
+Product
+Developers
+Self-host
+Cloud
+Pricing
+Open source
+Compare
+GitHub
+Request access
+Sign in
+Theme
+[sr-only] Color theme
+Legal
+Terms of service
+The terms for using this website and Logbird Cloud during early access. The open-source Logbird software stays under the MIT licence.
+Effective 11 November 2026.
+Contents
+1. These terms
+2. Early access
+3. Your account
+4. Acceptable use
+5. Your data
+6. Availability and changes
+7. Fees
+8. Ending the agreement
+9. Warranties and liability
+10. Changes to these terms
+11. Governing law
+1. These terms
+These terms are an agreement between you and the operator of Logbird Cloud ("we"). They cover this website and Logbird Cloud, the hosted Logbird console. If you use Logbird Cloud for an organisation, you accept them on its behalf and confirm you may do so. By creating an account or using the service you accept these terms.
+The Logbird software itself is open source under the MIT licence, published in its repository. These terms don't limit anything the MIT licence allows; they only cover the service we run.
+2. Early access
+Logbird Cloud is in early access: we limit sign-ups to invited teams (people with an invitation or an approved email domain). Features, limits and these terms may change as the service develops. Sending the contact form doesn't create an account or a contract.
+3. Your account
+You sign in with codes sent to your email address, so keep that mailbox secure and use an address you control.
+Workspace owners and admins decide who joins a workspace and what role they have. You're responsible for the people you invite and for what they do in your workspaces.
+Keep API keys secret. Anyone with a key can use it until you revoke it.
+Tell us promptly if you think someone has gained access to your account or keys.
+4. Acceptable use
+Don't use Logbird Cloud to:
+break the law, or store data you have no right to process;
+send secrets such as passwords, keys or full payment card numbers in events;
+attack, probe or overload the service, or try to reach other customers' data;
+get around rate limits, access restrictions or the sign-up policy;
+resell or provide the service to others as your own hosted product without our written agreement.
+We may suspend access that puts the service, other customers or the public at risk.
+5. Your data
+You keep all rights to the data you send to Logbird Cloud. You give us permission to store, process and display it only to provide the service to you. For personal data in it, we act as your processor, as the privacy policy explains. You're responsible for having a lawful basis to send it and for telling your users.
+You choose each project's retention period, and you can export events from the console at any time if your role allows. We don't look at your data except to operate and secure the service, to help when you ask us to, or when the law requires it. If you need a data processing agreement, contact us through hello@example.test.
+6. Availability and changes
+We work to keep Logbird Cloud available and we keep backups, but during early access there is no service level agreement and no guaranteed uptime. We may change or interrupt the service, for example for maintenance or upgrades, and will tell you in advance about changes that remove features you rely on. Keep your own exports of anything you can't afford to lose.
+7. Fees
+Logbird Cloud is free during early access. Before we introduce any fees we'll tell account holders at least 30 days in advance, and you can export your data (if your role allows) and ask us to close your account before they apply.
+8. Ending the agreement
+You can stop using Logbird Cloud at any time and ask us, through the contact form (choose "A privacy request"), to delete your account and any workspace where you're the only owner. We may suspend your access if you break these terms, and end it if you seriously or repeatedly break them or if we stop offering the service. Unless we must act at once (for example, for abuse or a legal requirement), we'll give you notice and time to export your data before ending your access. Once your account is closed, at your request or ours, we delete it, and each workspace where you were the only owner with its projects and events, within 30 days. In any other workspace, we only remove you. If others still use a workspace you own alone, make one of them an owner before you close your account. Copies in backups expire on their regular rotation.
+9. Warranties and liability
+During early access the service is provided "as is", without warranties of any kind, to the extent the law allows. We aren't liable for indirect or consequential losses, such as lost profits or lost data you could have exported, and our total liability for all claims together is limited to the greater of what you paid us in the 12 months before the claim and 100 euros (or the equivalent in your currency).
+Nothing in these terms limits liability that the law doesn't allow to be limited, or your rights as a consumer where consumer law applies.
+10. Changes to these terms
+We may update these terms. We'll change the effective date above and tell account holders about material changes before they apply.
+11. Governing law
+These terms are governed by the laws of the country where the operator is established. If any part of them can't be enforced, the rest still applies. Questions go to hello@example.test.
+[sr-only: Logbird]
+Retrace every step.
+The open-source audit log for your product.
+Product
+Product tour
+Cloud
+Pricing
+Compliance evidence
+Customer-facing audit logs
+Support investigations
+Developers
+Developer guide
+Self-host
+Open source
+Compare
+All comparisons
+Retraced
+WorkOS Audit Logs
+Pangea
+Bemi
+Resources
+Changelog
+Company
+Security
+About
+Contact
+Privacy
+Terms
+© 2026 Logbird contributors. Logbird is MIT-licensed.
+Source on GitHub
+
+links:
+Skip to content → #main
+(no text) [aria-label: Logbird home] → /
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Sign in → https://app.example.test/login
+Request access → /contact
+Product → /product
+Developers → /developers
+Self-host → /self-hosting
+Cloud → /cloud
+Pricing → /pricing
+Open source → /open-source
+Compare → /compare
+GitHub → https://github.com/example-org/logbird
+Request access → /contact
+Sign in → https://app.example.test/login
+1. These terms → #agreement
+2. Early access → #early-access
+3. Your account → #account
+4. Acceptable use → #acceptable-use
+5. Your data → #your-data
+6. Availability and changes → #availability
+7. Fees → #fees
+8. Ending the agreement → #ending
+9. Warranties and liability → #liability
+10. Changes to these terms → #changes
+11. Governing law → #law
+its repository → https://github.com/example-org/logbird
+privacy policy → /legal/privacy
+hello@example.test → mailto:hello@example.test
+contact form → /contact?interest=privacy
+hello@example.test → mailto:hello@example.test
+Product tour → /product
+Cloud → /cloud
+Pricing → /pricing
+Compliance evidence → /use-cases/compliance-evidence
+Customer-facing audit logs → /use-cases/customer-audit-logs
+Support investigations → /use-cases/support-investigations
+Developer guide → /developers
+Self-host → /self-hosting
+Open source → /open-source
+All comparisons → /compare
+Retraced → /compare/retraced
+WorkOS Audit Logs → /compare/workos-audit-logs
+Pangea → /compare/pangea
+Bemi → /compare/bemi
+Changelog → /changelog
+Security → /security
+About → /about
+Contact → /contact
+Privacy → /legal/privacy
+Terms → /legal/terms
+Source on GitHub → https://github.com/example-org/logbird
+
+controls:
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"
+button type="button" aria-label="Light theme"
+button type="button" aria-label="Dark theme"
+button type="button" aria-label="System theme"

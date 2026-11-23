@@ -4,6 +4,8 @@ description: What changed in Logbird, release by release, plus the build log of 
 path: /changelog
 ---
 
+Page text renders from `apps/web/src/content/changelog.ts`; edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Changelog and build log
 
 ## intro
