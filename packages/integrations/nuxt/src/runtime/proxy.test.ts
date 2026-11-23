@@ -24,9 +24,14 @@ it('reads inbound correlation headers only when the hooks opt in (#321)', async 
   const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
   const track = vi.spyOn(client, 'track').mockReturnValue(undefined as never);
   const headers = { 'x-request-id': 'req_from_client', 'x-logbird-operation': 'op_from_client' };
-  for (const optIn of [false, true]) {
+  for (const [options, request, operation] of [
+    [{}, false, false],
+    [{ useRequestIdHeader: true }, true, false],
+    [{ useOperationHeader: true }, false, true],
+    [{ useRequestIdHeader: true, useOperationHeader: true }, true, true],
+  ] as const) {
     const app = createApp();
-    const hooks = { authorize: () => false as const, useOperationHeader: optIn, useRequestIdHeader: optIn };
+    const hooks = { authorize: () => false as const, ...options };
     app.use(eventHandler((event) => attachAudit(event, client, hooks)));
     app.use(
       eventHandler(async (event) => {
@@ -37,8 +42,8 @@ it('reads inbound correlation headers only when the hooks opt in (#321)', async 
     );
     await toWebHandler(app)(new Request('http://local/', { headers }));
     const context = track.mock.lastCall?.[0].context;
-    expect(context?.requestId === 'req_from_client').toBe(optIn);
-    expect(context?.operationId === 'op_from_client').toBe(optIn);
+    expect(context?.requestId === 'req_from_client').toBe(request);
+    expect(context?.operationId === 'op_from_client').toBe(operation);
   }
   await client.shutdown();
 });

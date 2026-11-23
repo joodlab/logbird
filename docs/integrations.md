@@ -28,9 +28,11 @@ prefix, so it can match more than the named tenant, actor or record.
 
 Actor means who caused the action; executor means the API or worker performing it. Resolve
 actor and tenant from authenticated server state, never directly from untrusted headers.
-Each request gets an operationId, a requestId and a validated W3C trace ID. The operation and
-request ids are generated UUIDs; the inbound x-logbird-operation and x-request-id headers are
-used only with useOperationHeader and useRequestIdHeader (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent. Propagate operationId and parentEventId explicitly into jobs; this is correlation,
+Each request gets an operationId and a requestId, and a W3C trace ID when it carries a valid
+traceparent. An id set on the event, then a requestId or operationId resolver that returns a
+value, take precedence; otherwise the ids are generated UUIDs. The SDK reads the inbound
+x-logbird-operation and x-request-id headers only with useOperationHeader and
+useRequestIdHeader (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent. Propagate operationId and parentEventId explicitly into jobs; this is correlation,
 not proof of identity. Forwarded IP headers are deliberately ignored: supply a trusted IP through the optional ip(context) resolver.
 
 The synchronous audit(action, partialEvent) queues an envelope through Logbird.track. It never

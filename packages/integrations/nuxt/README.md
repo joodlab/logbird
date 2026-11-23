@@ -39,7 +39,7 @@ stay there until the next reload or trail change, and "load more" appends the ne
 
 `ModuleOptions`: endpoint, ingestKey, readKey (private runtimeConfig.logbird), hooks (server module path).
 Hook types: authorize(event, query) => false | Partial<SearchQuery> (async supported), optional actor,
-tenant, executor (sync/async), onError, useOperationHeader and useRequestIdHeader. The inbound
-x-logbird-operation and x-request-id headers are used only with those two (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent. Nitro request hooks create event.context.audit, afterResponse
+tenant, executor (sync/async), onError, useOperationHeader and useRequestIdHeader. The SDK reads the inbound
+x-logbird-operation and x-request-id headers only with those two (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent. Nitro request hooks create event.context.audit, afterResponse
 registers flush with event.waitUntil, close drains the SDK. Missing identity resolvers leave identity absent.
 See [design](../../../docs/integrations.md) and [example](../../../examples/nuxt).

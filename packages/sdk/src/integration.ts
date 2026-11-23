@@ -25,7 +25,9 @@ export interface CaptureOptions<C> {
   operationId?: Resolver<C, string | undefined>;
   /**
    * Use an inbound `x-logbird-operation` header as the operation id, so one operation can span services. When it is off,
-   * absent or longer than 256 characters, each request gets a new operation id. Defaults to `false`.
+   * absent or longer than 256 characters, each request gets a new operation id. Defaults to `false`. This sets only the
+   * SDK's fallback: an `operationId` resolver that returns a value, or an id set on the event, takes precedence, and
+   * what those return is up to your code.
    *
    * Turn it on only for traffic between your own services, behind a trusted ingress that strips or overwrites the header
    * on requests from outside. Any caller can send it, so without that a client can group its requests with someone else's
@@ -34,7 +36,8 @@ export interface CaptureOptions<C> {
   useOperationHeader?: boolean;
   /**
    * Use an inbound `x-request-id` header as the request id when present (a longer value than 256 characters is ignored,
-   * never cut); otherwise a generated id. Defaults to `false`.
+   * never cut); otherwise a generated id. Defaults to `false`. This sets only the SDK's fallback: a `requestId` resolver
+   * that returns a value, or an id set on the event, takes precedence, and what those return is up to your code.
    *
    * Turn it on only behind a trusted ingress (a gateway or load balancer) that sets this header itself, or strips or
    * overwrites one a client sent. Any caller can send the header, so without that a client chooses the request id its

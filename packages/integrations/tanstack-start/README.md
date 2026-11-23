@@ -15,7 +15,7 @@ export const update = createServerFn({ method: 'POST' }).middleware([capture.fun
 
 API route middleware can use `capture.requestMiddleware` and `context.audit` too.
 Options are `CaptureOptions<Request>`: client, required actor/tenant, optional executor and onError, and
-`useOperationHeader` / `useRequestIdHeader`: the inbound `x-logbird-operation` and `x-request-id` headers are used only
+`useOperationHeader` / `useRequestIdHeader`: the SDK reads the inbound `x-logbird-operation` and `x-request-id` headers only
 with those (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent.
 Await `capture.shutdown()` in the host's lifecycle. Never return context.audit to the browser.
 For a history server function, authorize the record then return
