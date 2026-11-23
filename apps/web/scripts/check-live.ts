@@ -72,7 +72,7 @@ const SITE_MARKER = 'logbird.site.theme';
 const api = process.env.NO_API === '1' ? [] : ['/site-api/no-such-endpoint', '/site-api/waitlist/x'];
 const problems: string[] = [];
 const rows: Record<string, string | number>[] = [];
-/** Fixed-name files the pages reference (src/lib/live-assets.ts), as path + query on the checked origin. */
+/** Fixed-name files the pages reference (src/lib/live-assets.ts), as the exact absolute URLs visitors request. */
 const assetUrls = new Set<string>();
 /** Pages that show console captures: each must reference at least one /media/ file, so a lost image fails the run. */
 const MEDIA_PAGES = ['/', '/product', '/use-cases/compliance-evidence', '/use-cases/customer-audit-logs', '/use-cases/support-investigations'];
@@ -85,9 +85,10 @@ function collectAssets(path: string, pageUrl: string, body: string, capturePage:
   for (const url of found) assetUrls.add(url);
   const fail = (problem: string) => problems.push(`${path}: ${problem}`);
   for (const { path: asset, problem } of collected) fail(`${asset}: ${problem}`);
-  if (capturePage && MEDIA_PAGES.includes(path) && ![...found].some((url) => url.startsWith('/media/'))) fail('references no /media/ file');
-  if (![...found].some((url) => url.startsWith('/brand/logbird-favicon.svg'))) fail('references no favicon');
-  if (![...found].some((url) => url.startsWith('/site.webmanifest'))) fail('references no web manifest');
+  const paths = [...found].map((url) => new URL(url).pathname);
+  if (capturePage && MEDIA_PAGES.includes(path) && !paths.some((p) => p.startsWith('/media/'))) fail('references no /media/ file');
+  if (!paths.includes('/brand/logbird-favicon.svg')) fail('references no favicon');
+  if (!paths.includes('/site.webmanifest')) fail('references no web manifest');
 }
 
 async function checkHtml(path: string, expected: number) {
@@ -180,14 +181,15 @@ for (const path of consoleOwned) {
   rows.push({ path: `console ${path}`, status: response.status, inline: '-', uncovered: '-', url: response.headers.get('content-type') ?? '-' });
 }
 // The manifest's own icons are fixed-name files too.
-for (const manifest of [...assetUrls].filter((url) => url.startsWith('/site.webmanifest'))) {
-  const response = await fetch(new URL(manifest, base));
-  if (!response.ok) continue;
+for (const manifest of [...assetUrls].filter((url) => new URL(url).pathname === '/site.webmanifest')) {
+  // A failed manifest fetch is reported by compareAssets below; its icons can only be read when it answers.
+  const response = await fetch(manifest).catch(() => undefined);
+  if (!response?.ok) continue;
   const icons = manifestIconUrls(await response.text(), response.url, [base, publicOrigin]);
   for (const icon of icons.urls) assetUrls.add(icon);
   for (const { path, problem } of icons.problems) problems.push(`${manifest}: ${path}: ${problem}`);
 }
-const assetProblems = await compareAssets(assetUrls, base);
+const assetProblems = await compareAssets(assetUrls);
 for (const { path, problem } of assetProblems) problems.push(`${path}: ${problem}`);
 rows.push({
   path: `assets ${assetUrls.size} URLs`,

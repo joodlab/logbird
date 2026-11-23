@@ -16,22 +16,23 @@ describe('live asset check', () => {
       <video src=/media/clip.webm?v=2222222222 poster="/media/clip-poster.webp?v=3333333333&amp;x=1"></video>
       <a href="/product">not an asset</a></body></html>`;
     const { urls, problems } = collectAssetUrls(html, base, [base, publicOrigin]);
+    // Absolute URLs keep their own origin: the check fetches the card and JSON-LD logo from the public origin.
     expect([...urls].sort()).toEqual([
-      '/brand/logbird-favicon.svg?v=aaaaaaaaaa',
-      '/brand/logbird-wordmark-light.svg?v=dddddddddd',
-      '/media/a-light-1024.avif?v=1111111111',
-      '/media/a-light-640.avif?v=1111111111',
-      '/media/clip-poster.webp?v=3333333333&x=1',
-      '/media/clip.webm?v=2222222222',
-      '/media/stale-light-640.webp?v=eeeeeeeeee',
-      '/og/home.png?v=cccccccc',
-      '/site.webmanifest?v=bbbbbbbbbb',
+      `${base}/brand/logbird-favicon.svg?v=aaaaaaaaaa`,
+      `${base}/media/a-light-1024.avif?v=1111111111`,
+      `${base}/media/a-light-640.avif?v=1111111111`,
+      `${base}/media/clip-poster.webp?v=3333333333&x=1`,
+      `${base}/media/clip.webm?v=2222222222`,
+      `${base}/media/stale-light-640.webp?v=eeeeeeeeee`,
+      `${base}/site.webmanifest?v=bbbbbbbbbb`,
+      `${publicOrigin}/brand/logbird-wordmark-light.svg?v=dddddddddd`,
+      `${publicOrigin}/og/home.png?v=cccccccc`,
     ]);
     expect(problems).toEqual([]);
     expect(
       manifestIconUrls('{"icons":[{"src":"/brand/logbird-favicon.svg?v=aaaaaaaaaa"}]}', `${base}/site.webmanifest`, [base, publicOrigin]),
     ).toEqual({
-      urls: ['/brand/logbird-favicon.svg?v=aaaaaaaaaa'],
+      urls: [`${base}/brand/logbird-favicon.svg?v=aaaaaaaaaa`],
       problems: [],
     });
   });
@@ -41,7 +42,7 @@ describe('live asset check', () => {
     expect([...urls]).toEqual([]);
     expect(problems).toEqual([
       {
-        path: '/product/media/a-light-640.webp?v=1111111111',
+        path: `${base}/product/media/a-light-640.webp?v=1111111111`,
         problem: "resolves outside the site's asset directories (media/a-light-640.webp?v=1111111111)",
       },
     ]);
@@ -50,31 +51,46 @@ describe('live asset check', () => {
   it('a page or manifest that redirected to another origin does not widen the allowed origins', () => {
     const redirected = 'http://127.0.0.1:9999/about/';
     expect(collectAssetUrls('<img src="/media/a-light-640.webp?v=1111111111">', redirected, [base, publicOrigin]).problems).toEqual([
-      { path: '/media/a-light-640.webp?v=1111111111', problem: "on http://127.0.0.1:9999, not the site's origin" },
+      { path: 'http://127.0.0.1:9999/media/a-light-640.webp?v=1111111111', problem: "on http://127.0.0.1:9999, not the site's origin" },
     ]);
     const manifest = '{"icons":[{"src":"/brand/logbird-favicon.svg?v=aaaaaaaaaa"}]}';
     expect(manifestIconUrls(manifest, 'http://127.0.0.1:9999/site.webmanifest', [base, publicOrigin]).problems).toEqual([
-      { path: '/brand/logbird-favicon.svg?v=aaaaaaaaaa', problem: "manifest icon on http://127.0.0.1:9999, not the site's origin" },
+      {
+        path: 'http://127.0.0.1:9999/brand/logbird-favicon.svg?v=aaaaaaaaaa',
+        problem: "manifest icon on http://127.0.0.1:9999, not the site's origin",
+      },
     ]);
   });
 
-  it('reports a manifest icon on another host', () => {
+  it('reports a manifest icon on another host, and a manifest that does not parse', () => {
     const manifest = '{"icons":[{"src":"https://missing.invalid/brand/logbird-favicon.svg?v=aaaaaaaaaa"}]}';
     expect(manifestIconUrls(manifest, `${base}/site.webmanifest`, [base, publicOrigin]).problems).toEqual([
-      { path: '/brand/logbird-favicon.svg?v=aaaaaaaaaa', problem: "manifest icon on https://missing.invalid, not the site's origin" },
+      {
+        path: 'https://missing.invalid/brand/logbird-favicon.svg?v=aaaaaaaaaa',
+        problem: "manifest icon on https://missing.invalid, not the site's origin",
+      },
     ]);
+    expect(manifestIconUrls('<!doctype html>', `${base}/site.webmanifest`, [base, publicOrigin])).toEqual({
+      urls: [],
+      problems: [{ path: `${base}/site.webmanifest`, problem: 'the web manifest does not parse' }],
+    });
   });
 
   it('reports an asset URL on another host', () => {
     const html = '<meta property="og:image" content="https://elsewhere.example/og/home.png?v=cccccccc">';
     expect(collectAssetUrls(html, base, [base, publicOrigin]).problems).toEqual([
-      { path: '/og/home.png?v=cccccccc', problem: "on https://elsewhere.example, not the site's origin" },
+      { path: 'https://elsewhere.example/og/home.png?v=cccccccc', problem: "on https://elsewhere.example, not the site's origin" },
     ]);
   });
 
-  it('fails a stale file, an unversioned URL and an HTML fallback under an image URL; passes a fresh one', async () => {
-    const fetcher = (async (input: URL | RequestInfo) => {
+  it('fails a stale file, an unversioned URL, an HTML fallback, a redirect and a failed fetch; passes a fresh one', async () => {
+    const requested: string[] = [];
+    const fetcher = (async (input: URL | RequestInfo, init?: RequestInit) => {
+      expect(init?.redirect).toBe('manual');
       const url = new URL(String(input));
+      requested.push(url.origin);
+      if (url.pathname.includes('down')) throw new Error('connect ECONNREFUSED');
+      if (url.pathname.includes('moved')) return new Response(null, { status: 301, headers: { location: '/media/moved-light-640.webp' } });
       if (url.pathname.includes('fallback') || (url.pathname.includes('half') && url.searchParams.has('cb'))) {
         return new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } });
       }
@@ -85,24 +101,34 @@ describe('live asset check', () => {
     }) as typeof fetch;
     const problems = await compareAssets(
       [
-        '/media/stale-light-640.webp?v=eeeeeeeeee',
-        '/media/fresh-light-640.webp?v=ffffffffff',
-        '/media/fallback-light-640.webp?v=0000000000',
-        '/brand/logo.svg',
-        '/media/half-light-640.webp?v=4444444444',
-        '/media/capture.wepb?v=5555555555',
+        `${base}/media/stale-light-640.webp?v=eeeeeeeeee`,
+        `${base}/media/fresh-light-640.webp?v=ffffffffff`,
+        `${base}/media/fallback-light-640.webp?v=0000000000`,
+        `${base}/brand/logo.svg`,
+        `${base}/media/half-light-640.webp?v=4444444444`,
+        `${base}/media/capture.wepb?v=5555555555`,
+        `${base}/media/moved-light-640.webp?v=6666666666`,
+        `${base}/media/down-light-640.webp?v=7777777777`,
+        `${publicOrigin}/og/home.webp?v=88888888`,
       ],
-      base,
       fetcher,
     );
     expect(problems.map((problem) => `${problem.path} ${problem.problem}`).sort()).toEqual([
-      '/brand/logo.svg unversioned URL to a fixed-name file',
-      '/media/capture.wepb?v=5555555555 not a known media, card, brand or manifest file type',
-      '/media/fallback-light-640.webp?v=0000000000 served as text/html (as written)',
-      '/media/fallback-light-640.webp?v=0000000000 served as text/html (uncached)',
-      '/media/half-light-640.webp?v=4444444444 served as text/html (uncached)',
-      '/media/half-light-640.webp?v=4444444444 stale: 9 bytes as written vs 15 bytes uncached',
-      '/media/stale-light-640.webp?v=eeeeeeeeee stale: 9 bytes as written vs 9 bytes uncached',
+      `${base}/brand/logo.svg unversioned URL to a fixed-name file`,
+      `${base}/media/capture.wepb?v=5555555555 not a known media, card, brand or manifest file type`,
+      `${base}/media/down-light-640.webp?v=7777777777 fetch failed: connect ECONNREFUSED`,
+      `${base}/media/fallback-light-640.webp?v=0000000000 served as text/html (as written)`,
+      `${base}/media/fallback-light-640.webp?v=0000000000 served as text/html (uncached)`,
+      `${base}/media/half-light-640.webp?v=4444444444 served as text/html (uncached)`,
+      `${base}/media/half-light-640.webp?v=4444444444 stale: 9 bytes as written vs 15 bytes uncached`,
+      `${base}/media/moved-light-640.webp?v=6666666666 answered 301 as written and 301 uncached`,
+      `${base}/media/moved-light-640.webp?v=6666666666 redirects (301 to /media/moved-light-640.webp, as written)`,
+      `${base}/media/moved-light-640.webp?v=6666666666 redirects (301 to /media/moved-light-640.webp, uncached)`,
+      `${base}/media/moved-light-640.webp?v=6666666666 served as no content type (as written)`,
+      `${base}/media/moved-light-640.webp?v=6666666666 served as no content type (uncached)`,
+      `${base}/media/stale-light-640.webp?v=eeeeeeeeee stale: 9 bytes as written vs 9 bytes uncached`,
     ]);
+    // The card on the public origin was fetched there, not on the checked origin.
+    expect(requested).toContain(publicOrigin);
   });
 });
