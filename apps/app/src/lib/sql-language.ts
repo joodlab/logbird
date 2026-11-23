@@ -249,14 +249,16 @@ export type SqlCompletion =
   | { kind: 'none' };
 
 /** ClickHouse's backslash escapes for control characters; any other escaped character stands for itself. */
-const SQL_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', 0: '\0', b: '\b', f: '\f' };
+const SQL_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', 0: '\0', b: '\b', f: '\f', a: '\x07', v: '\v' };
 
 /**
  * The text of a single-quoted literal's body, decoded in one pass: `\'` and `''` are each one apostrophe, so
  * `a\'\'b` (two apostrophes, as `sqlString` writes them) never collapses to one.
  */
 export function unquoteSql(raw: string): string {
-  return raw.replace(/\\([\s\S])|''/g, (_, escaped: string | undefined) => (escaped === undefined ? "'" : (SQL_ESCAPES[escaped] ?? escaped)));
+  return raw.replace(/\\x([0-9A-Fa-f]{2})|\\([\s\S])|''/g, (_, hex: string | undefined, escaped: string | undefined) =>
+    hex !== undefined ? String.fromCharCode(Number.parseInt(hex, 16)) : escaped === undefined ? "'" : (SQL_ESCAPES[escaped] ?? escaped),
+  );
 }
 
 /** A column reference ending at solid index `k`: an allowed identifier or `attributes['key']`. */
@@ -499,28 +501,31 @@ export function removeSqlConjuncts(q: string, test: (conjunct: string) => boolea
   return kept.length === parts.length ? q.trim() : joinConjuncts(kept);
 }
 
-/** Equality / membership predicates for one column, as facets write them. */
-function columnPredicatePrefixes(column: string, attr?: string): string[] {
+/** Equality / membership predicates for one column, as facets write them, with whether each opens a call. */
+function columnPredicatePrefixes(column: string, attr?: string): [string, boolean][] {
   const ref = attr !== undefined ? `attributes[${sqlString(attr)}]` : column;
-  return [`${ref} = '`, `${ref} != '`, `has(${ref}, '`, `NOT has(${ref}, '`];
+  return [
+    [`${ref} = '`, false],
+    [`${ref} != '`, false],
+    [`has(${ref}, '`, true],
+    [`NOT has(${ref}, '`, true],
+  ];
 }
 
 /**
  * Whether `conjunct` is exactly `prefix` followed by one closed string literal (and the `)` the prefix opened), with
  * nothing else: `outcome = 'failure' OR actor_id = 'A'` starts and ends like a facet predicate but is not one.
  */
-function isSinglePredicate(conjunct: string, prefix: string): boolean {
+function isSinglePredicate(conjunct: string, prefix: string, call: boolean): boolean {
   if (!conjunct.startsWith(prefix)) return false;
+  // `call` comes from the prefix's shape, never from scanning it: `attributes['phase(v2)'] = '` opens no call.
   const rest = tokenizeSql(conjunct.slice(prefix.length - 1)).filter((t) => t.kind !== 'space');
   const literal = rest[0];
-  const closers = prefix.includes('(') ? [')'] : [];
-  return (
-    literal?.kind === 'string' && literal.closed === true && rest.length === 1 + closers.length && closers.every((c, i) => rest[i + 1]?.raw === c)
-  );
+  return literal?.kind === 'string' && literal.closed === true && rest.length === (call ? 2 : 1) && (!call || rest[1]?.raw === ')');
 }
 
 export function isColumnPredicate(conjunct: string, column: string, attr?: string): boolean {
-  return columnPredicatePrefixes(column, attr).some((p) => isSinglePredicate(conjunct, p));
+  return columnPredicatePrefixes(column, attr).some(([p, call]) => isSinglePredicate(conjunct, p, call));
 }
 
 /** Facet toggle in SQL mode: include replaces this column's other equality predicates, exclude stacks. */
@@ -528,7 +533,7 @@ export function toggleSqlPredicate(q: string, predicate: string, column: string,
   if (hasSqlPredicate(q, predicate)) return removeSqlConjuncts(q, (c) => c === normalize(predicate));
   if (mode === 'include') {
     const ref = attr !== undefined ? `attributes[${sqlString(attr)}]` : column;
-    const cleaned = removeSqlConjuncts(q, (c) => isSinglePredicate(c, `${ref} = '`) || isSinglePredicate(c, `has(${ref}, '`));
+    const cleaned = removeSqlConjuncts(q, (c) => isSinglePredicate(c, `${ref} = '`, false) || isSinglePredicate(c, `has(${ref}, '`, true));
     return appendSqlPredicate(cleaned, predicate);
   }
   return appendSqlPredicate(q, predicate);

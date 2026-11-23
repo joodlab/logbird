@@ -45,8 +45,12 @@ const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
 const BARE_KEY = /^[A-Za-z_][\w.$@-]*$/;
 /** A quoted field name, as the server reads one: `"attr.ticket status":open`. */
 const QUOTED_KEY_RE = /^(-?)("(?:[^"\\]|\\[\s\S])*")\s*:/;
-/** A key whose leading `-` cannot negate (it follows `)`): the dash is part of the field name. */
-const LITERAL_DASH_KEY_RE = /^(-)([\w.$@-]*)\s*:/;
+/**
+ * A dash that cannot negate (it follows `)`) starts a bare word, as the server reads it: everything up to whitespace,
+ * a bracket or `:`, quotes and slashes included. Followed by `:` that word is a field name (`-/a"b"category`).
+ */
+const LITERAL_DASH_RUN = /^-[^\s():[\]{}<>]*/;
+const LITERAL_DASH_KEY_RE = /^(-)([^\s():[\]{}<>]*)\s*:/;
 const OPERATORS = new Set(['OR', 'AND', 'NOT']);
 
 /** End offset (exclusive) of a delimited run starting at `i` (`"…"`, `/…/`), honouring backslash escapes. */
@@ -181,7 +185,7 @@ export function tokenize(input: string): QueryToken[] {
       i = end;
       continue;
     }
-    const word = /^(-?)([^\s()"]+)/.exec(rest);
+    const word = ch === '-' && !negatable ? LITERAL_DASH_RUN.exec(rest) : /^(-?)([^\s()"]+)/.exec(rest);
     if (word) {
       const raw = word[0];
       const isOperator = OPERATORS.has(raw);
