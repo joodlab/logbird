@@ -48,6 +48,11 @@ describe('the id that free text could be', () => {
     expect(idFromFreeText('"acme west"')).toBe('acme west');
     // An escaped quote inside the quotes is part of the id, as the server reads it.
     expect(idFromFreeText('"acme\\"27"')).toBe('acme"27');
+    // Spaces inside the quotes are part of the id, as the server reads it: never trimmed into another id.
+    expect(idFromFreeText('" a\\"b "')).toBe(' a"b ');
+    expect(idFromFreeText('"   "')).toBe('');
+    // A leading slash starts a regex to the server, never an id.
+    expect(idFromFreeText('/x/')).toBe('');
     for (const text of ['', 'tenant:biz_27', 'two words', '"a"b"', 'biz*', '-biz_27', '(biz)', 'AND', 'NOT'])
       expect(idFromFreeText(text), text).toBe('');
   });

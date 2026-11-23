@@ -32,18 +32,10 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
-import {
-  ENTITY_SECTIONS,
-  entityMatchRank,
-  entityQuery,
-  exactPerKind,
-  isExactId,
-  paletteEntityValue,
-  resolveJump,
-  sectionForKind,
-} from '@/lib/entities';
+import { ENTITY_SECTIONS, entityMatchRank, entityQuery, exactPerKind, isExactId, resolveJump, sectionForKind } from '@/lib/entities';
 import { formatTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
+import { paletteEntityValue, paletteFilter } from './palette-filter';
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 
@@ -174,7 +166,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   return (
     <CommandDialog
       className="sm:max-w-xl"
-      commandProps={{ value: highlighted, onValueChange: setHighlighted }}
+      commandProps={{ value: highlighted, onValueChange: setHighlighted, filter: paletteFilter(others, search) }}
       description="Navigate, jump to an entity, event or operation, switch project or theme."
       onOpenChange={(next) => {
         onOpenChange(next);
@@ -271,8 +263,8 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                       }),
                     )
                   }
-                  // Every row starts with the typed text, so they score the same and keep the server's rank order.
-                  value={paletteEntityValue(search, e)}
+                  // Scored by paletteFilter: entity rows keep the server's rank order and are never dropped.
+                  value={paletteEntityValue(e)}
                 >
                   <EntityAvatar icon={e.kind === 'actor' && e.type === 'user' ? undefined : Icon} id={e.id} name={e.name || e.id} size="sm" />
                   <span className="truncate">{e.name || e.id}</span>

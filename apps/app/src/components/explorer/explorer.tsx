@@ -353,15 +353,21 @@ function ProjectExplorer({
     ...histogramQuery(projectId, ALL_RANGE, effectiveQ, lang),
     enabled: widerWanted && sqlCheckAsked,
   });
-  const olderMatches = current(wider)?.buckets.reduce((n, b) => n + b.total, 0);
-  // Until the check answers, no advice: it may yet say the range is the reason (#239).
-  const checking = widerWanted && sqlCheckAsked && !wider.isError && olderMatches === undefined;
+  // The check's answer counts only when it was run for this search: the all-time count is cached per expression, so an
+  // earlier check of the same expression in another range must not answer before the reader asks here (#239).
+  const checkRuns = widerWanted && sqlCheckAsked;
+  const olderMatches = checkRuns ? current(wider)?.buckets.reduce((n, b) => n + b.total, 0) : undefined;
+  const checkFailed = checkRuns && wider.isError;
+  // Until the check answers (a refetch of a cached answer included, and an id lookup still running before it), no
+  // advice: it may yet say the range is the reason (#239).
+  const checking =
+    showsEmpty && !complete && !idMatch && (!idSettled || (checkRuns && !checkFailed && (olderMatches === undefined || wider.isFetching)));
   const widen =
-    olderMatches && olderMatches > 0 ? (
+    olderMatches && olderMatches > 0 && !checking ? (
       <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
         Search all time
       </Button>
-    ) : wider.isError ? (
+    ) : checkFailed ? (
       <Button onClick={() => wider.refetch()} size="sm" variant="outline">
         Retry the check
       </Button>
@@ -371,7 +377,7 @@ function ProjectExplorer({
       </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
-  const outside = otherDatesLine({ failed: wider.isError, checking, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
+  const outside = otherDatesLine({ failed: checkFailed, checking, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
 
   // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
   // so a search opened straight from a link still gets its offer once they arrive).
@@ -405,7 +411,7 @@ function ProjectExplorer({
             Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>. {outside}
           </>
-        ) : wider.isError ? (
+        ) : checkFailed ? (
           `No events in ${rangeInSentence(rangeName)}. Could not check other dates.`
         ) : olderMatches ? (
           `No events in ${rangeInSentence(rangeName)}. ${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event is' : 'events are'} stored outside it.`

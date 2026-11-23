@@ -144,7 +144,8 @@ export const isExactId = (rank: EntityMatchRank) => rank <= 1;
 export function idFromFreeText(text: string): string {
   const t = text.trim();
   if (t.startsWith('"')) return quotedTerm(t);
-  return /^[^\s:()"'*-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
+  // A leading `/` starts a regex to the server (`/x/`), never a bare id.
+  return /^[^\s:()"'*/-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
 }
 
 /**
@@ -158,17 +159,12 @@ function quotedTerm(t: string): string {
     const expression = parseQueryExpression(t);
     const atom = expression.length === 1 && expression[0]?.length === 1 ? expression[0][0]?.atom : undefined;
     if (atom?.kind !== 'text' || atom.start !== 0 || atom.end !== t.length || atom.token.kind !== 'value') return '';
-    return atom.token.value.trim();
+    // Exactly as the server reads it: `" a\"b "` is ` a"b ` (an id is sent exactly), never trimmed into another id.
+    return atom.token.value.trim() ? atom.token.value : '';
   } catch {
     return '';
   }
 }
-
-/**
- * The palette's search value for an entity row. Every row starts with what was typed, so the palette scores them all
- * the same and keeps the server's rank order (exact id, id prefix, name prefix, …) instead of re-sorting by kind.
- */
-export const paletteEntityValue = (search: string, e: { kind: EntityKind; id: string }) => `${search.trim()} ${e.kind}:${e.id}`;
 
 export function resolveJump<E extends { kind?: EntityKind; id: string; name: string; type?: string }>(
   text: string,
