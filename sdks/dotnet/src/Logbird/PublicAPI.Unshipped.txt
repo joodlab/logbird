@@ -300,7 +300,7 @@ Logbird.LogbirdReadClient
 Logbird.LogbirdReadClient.Dispose() -> void
 Logbird.LogbirdReadClient.ExportAsync(Logbird.ExportQuery! query, System.IO.Stream! destination, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
 Logbird.LogbirdReadClient.FacetsAsync(Logbird.FacetQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.FacetResult!>!
-Logbird.LogbirdReadClient.GetAsync(string! eventId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.EventDetail?>!
+Logbird.LogbirdReadClient.GetEventAsync(string! eventId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.EventDetail?>!
 Logbird.LogbirdReadClient.LogbirdReadClient(Logbird.LogbirdReadOptions! options, System.Net.Http.HttpClient? httpClient = null) -> void
 Logbird.LogbirdReadClient.MintViewerTokenAsync(Logbird.ViewerScope! scope, System.TimeSpan? lifetime = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.ViewerToken!>!
 Logbird.LogbirdReadClient.SearchAllAsync(Logbird.EventSearch? search = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Logbird.StoredEvent!>!
@@ -321,26 +321,15 @@ Logbird.LogbirdRejectedException
 Logbird.LogbirdRejectedException.Codes.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Logbird.LogbirdRejectedException.Count.get -> int
 Logbird.LogbirdStats
-Logbird.LogbirdStats.Deconstruct(out long Tracked, out long Delivered, out long Rejected, out long Dropped, out long Filtered, out long FailedSends, out int QueueLength, out long Warnings) -> void
 Logbird.LogbirdStats.Delivered.get -> long
-Logbird.LogbirdStats.Delivered.init -> void
 Logbird.LogbirdStats.Dropped.get -> long
-Logbird.LogbirdStats.Dropped.init -> void
-Logbird.LogbirdStats.Equals(Logbird.LogbirdStats other) -> bool
 Logbird.LogbirdStats.FailedSends.get -> long
-Logbird.LogbirdStats.FailedSends.init -> void
 Logbird.LogbirdStats.Filtered.get -> long
-Logbird.LogbirdStats.Filtered.init -> void
 Logbird.LogbirdStats.LogbirdStats() -> void
-Logbird.LogbirdStats.LogbirdStats(long Tracked, long Delivered, long Rejected, long Dropped, long Filtered, long FailedSends, int QueueLength, long Warnings = 0) -> void
 Logbird.LogbirdStats.QueueLength.get -> int
-Logbird.LogbirdStats.QueueLength.init -> void
 Logbird.LogbirdStats.Rejected.get -> long
-Logbird.LogbirdStats.Rejected.init -> void
 Logbird.LogbirdStats.Tracked.get -> long
-Logbird.LogbirdStats.Tracked.init -> void
 Logbird.LogbirdStats.Warnings.get -> long
-Logbird.LogbirdStats.Warnings.init -> void
 Logbird.QueueFullBehavior
 Logbird.QueueFullBehavior.DropNewest = 1 -> Logbird.QueueFullBehavior
 Logbird.QueueFullBehavior.DropOldest = 0 -> Logbird.QueueFullBehavior
@@ -487,7 +476,7 @@ override Logbird.AuditTenant.ToString() -> string!
 override Logbird.EventSearch.Equals(object? obj) -> bool
 override Logbird.EventSearch.GetHashCode() -> int
 override Logbird.EventSearch.ToString() -> string!
-override Logbird.LogbirdStats.GetHashCode() -> int
+override Logbird.LogbirdStats.ToString() -> string!
 override Logbird.StoredChange.Equals(object? obj) -> bool
 override Logbird.StoredChange.GetHashCode() -> int
 override Logbird.StoredChange.ToString() -> string!
@@ -521,13 +510,9 @@ static Logbird.LogbirdClient.NewEventId() -> string!
 static Logbird.LogbirdClient.Version.get -> string!
 static Logbird.LogbirdClientExtensions.Flush(this Logbird.ILogbirdClient! client, System.TimeSpan timeout) -> bool
 static Logbird.LogbirdClientExtensions.FlushAsync(this Logbird.ILogbirdClient! client, System.TimeSpan timeout) -> System.Threading.Tasks.Task<bool>!
-static Logbird.LogbirdStats.operator !=(Logbird.LogbirdStats left, Logbird.LogbirdStats right) -> bool
-static Logbird.LogbirdStats.operator ==(Logbird.LogbirdStats left, Logbird.LogbirdStats right) -> bool
 static Logbird.Redactor.IdentifierFields.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static Logbird.StoredChange.operator !=(Logbird.StoredChange? left, Logbird.StoredChange? right) -> bool
 static Logbird.StoredChange.operator ==(Logbird.StoredChange? left, Logbird.StoredChange? right) -> bool
 static Logbird.WebhookVerifier.GenerateSecret() -> string!
 static Logbird.WebhookVerifier.Sign(string! id, long timestamp, string! payload, params string![]! secrets) -> string!
 static readonly Logbird.Redactor.DefaultSecretKeys -> System.Text.RegularExpressions.Regex!
-~override Logbird.LogbirdStats.Equals(object obj) -> bool
-~override Logbird.LogbirdStats.ToString() -> string

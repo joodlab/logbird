@@ -137,7 +137,7 @@ public class HardeningFollowUpTests
     public async Task An_incomplete_event_detail_is_refused(string body)
     {
         using var reader = Reader(new Answer(_ => Task.FromResult(Json(body.Replace("EVENT", EventJson)))));
-        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.GetAsync("evt_1"));
+        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.GetEventAsync("evt_1"));
         Assert.Equal("invalid_response", error.Code);
     }
 
@@ -171,7 +171,7 @@ public class HardeningFollowUpTests
         Assert.Equal("evt_1", Assert.Single(read.Events).Id);
         Assert.Null(read.NextCursor);
         Assert.Null(read.TotalExact);
-        Assert.Equal("evt_1", (await reader.GetAsync("evt_1"))!.Event.Id);
+        Assert.Equal("evt_1", (await reader.GetEventAsync("evt_1"))!.Event.Id);
         Assert.Equal(1, Assert.Single((await reader.FacetsAsync(new FacetQuery("outcome"))).Values).Count);
     }
 

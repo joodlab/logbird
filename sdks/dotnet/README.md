@@ -164,7 +164,8 @@ var options = new LogbirdOptions
   `MaxQueueSize` (at least 1,000) notifications behind, further notifications are skipped and counted on the
   `logbird.notifications.lost` meter; the counters below still record every event. `FlushAsync` returns after the
   callbacks for what it settled have run.
-- `client.Stats` gives counts of tracked, delivered, rejected, dropped, filtered and warned events. The `Logbird` meter
+- `client.Stats` gives counts of tracked, delivered, rejected, dropped, filtered and warned events, as a snapshot only
+  the SDK fills (a test double for `ILogbirdClient` can return `default(LogbirdStats)`, every count zero). The `Logbird` meter
   publishes the same counts for OpenTelemetry (`logbird.events.*`, `logbird.batches.failed`, `logbird.queue.length`,
   `logbird.notifications.lost`). The instruments are observable: a listener reads the counters when it collects, on its
   own thread, so a slow or failing exporter never runs on your request path.
@@ -212,7 +213,7 @@ not confirmed until it is acknowledged.
 **If your application must not lose events:**
 
 - Keep your own record of the event (an outbox row, see below) until you have confirmed that the server holds this
-  event: `LogbirdReadClient.GetAsync(id)` returns it, and its stored payload (`EventDetail.Payload`) matches your record.
+  event: `LogbirdReadClient.GetEventAsync(id)` returns it, and its stored payload (`EventDetail.Payload`) matches your record.
   The id alone is not enough, because a different event can be stored under the same id. Neither is a `FlushAsync`
   that returned `true`: it means every event it covered was settled, and a settled event can be a rejection whose
   `OnDrop` notification was skipped because the notification queue was full.
@@ -312,7 +313,7 @@ await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: inv
     Console.WriteLine($"{e.Timestamp:u} {e.Actor?.Name} {e.Action}");
 }
 
-EventDetail? detail = await reader.GetAsync(eventId);   // null when it does not exist
+EventDetail? detail = await reader.GetEventAsync(eventId);   // null when it does not exist
 ```
 
 Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores

@@ -15,16 +15,10 @@ Logbird.AspNetCore.AuditCarrier.RequestId.get -> string?
 Logbird.AspNetCore.AuditCarrier.RequestId.init -> void
 Logbird.AspNetCore.AuditCarrier.Tenant.get -> Logbird.AuditTenant?
 Logbird.AspNetCore.AuditCarrier.Tenant.init -> void
+Logbird.AspNetCore.AuditCarrier.ToJson() -> string!
+Logbird.AspNetCore.AuditCarrier.ToJsonUtf8Bytes() -> byte[]!
 Logbird.AspNetCore.AuditCarrier.TraceId.get -> string?
 Logbird.AspNetCore.AuditCarrier.TraceId.init -> void
-Logbird.AspNetCore.AuditCarrierJsonContext
-Logbird.AspNetCore.AuditCarrierJsonContext.AuditActor.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<Logbird.AuditActor!>!
-Logbird.AspNetCore.AuditCarrierJsonContext.AuditCarrier.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<Logbird.AspNetCore.AuditCarrier!>!
-Logbird.AspNetCore.AuditCarrierJsonContext.AuditCarrierJsonContext() -> void
-Logbird.AspNetCore.AuditCarrierJsonContext.AuditCarrierJsonContext(System.Text.Json.JsonSerializerOptions! options) -> void
-Logbird.AspNetCore.AuditCarrierJsonContext.AuditImpersonator.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<Logbird.AuditImpersonator!>!
-Logbird.AspNetCore.AuditCarrierJsonContext.AuditTenant.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<Logbird.AuditTenant!>!
-Logbird.AspNetCore.AuditCarrierJsonContext.String.get -> System.Text.Json.Serialization.Metadata.JsonTypeInfo<string!>!
 Logbird.AspNetCore.AuditFill
 Logbird.AspNetCore.AuditFill.Actor = 1 -> Logbird.AspNetCore.AuditFill
 Logbird.AspNetCore.AuditFill.All = Logbird.AspNetCore.AuditFill.Actor | Logbird.AspNetCore.AuditFill.Tenant | Logbird.AspNetCore.AuditFill.Impersonator | Logbird.AspNetCore.AuditFill.Executor | Logbird.AspNetCore.AuditFill.Correlation | Logbird.AspNetCore.AuditFill.Ip | Logbird.AspNetCore.AuditFill.UserAgent -> Logbird.AspNetCore.AuditFill
@@ -67,10 +61,10 @@ const Microsoft.Extensions.DependencyInjection.LogbirdServiceCollectionExtension
 override Logbird.AspNetCore.AuditCarrier.Equals(object? obj) -> bool
 override Logbird.AspNetCore.AuditCarrier.GetHashCode() -> int
 override Logbird.AspNetCore.AuditCarrier.ToString() -> string!
-override Logbird.AspNetCore.AuditCarrierJsonContext.GetTypeInfo(System.Type! type) -> System.Text.Json.Serialization.Metadata.JsonTypeInfo?
+static Logbird.AspNetCore.AuditCarrier.FromJson(System.ReadOnlySpan<byte> utf8Json) -> Logbird.AspNetCore.AuditCarrier!
+static Logbird.AspNetCore.AuditCarrier.FromJson(string! json) -> Logbird.AspNetCore.AuditCarrier!
 static Logbird.AspNetCore.AuditCarrier.operator !=(Logbird.AspNetCore.AuditCarrier? left, Logbird.AspNetCore.AuditCarrier? right) -> bool
 static Logbird.AspNetCore.AuditCarrier.operator ==(Logbird.AspNetCore.AuditCarrier? left, Logbird.AspNetCore.AuditCarrier? right) -> bool
-static Logbird.AspNetCore.AuditCarrierJsonContext.Default.get -> Logbird.AspNetCore.AuditCarrierJsonContext!
 static Microsoft.Extensions.DependencyInjection.LogbirdApplicationBuilderExtensions.UseLogbird(this Microsoft.AspNetCore.Builder.IApplicationBuilder! app) -> Microsoft.AspNetCore.Builder.IApplicationBuilder!
 static Microsoft.Extensions.DependencyInjection.LogbirdServiceCollectionExtensions.AddLogbird(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! section, System.Action<Logbird.LogbirdOptions!>? configure = null, System.Action<Logbird.AspNetCore.LogbirdRequestOptions!>? configureRequests = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Microsoft.Extensions.DependencyInjection.LogbirdServiceCollectionExtensions.AddLogbird(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Logbird.LogbirdOptions!>! configure, System.Action<Logbird.AspNetCore.LogbirdRequestOptions!>? configureRequests = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

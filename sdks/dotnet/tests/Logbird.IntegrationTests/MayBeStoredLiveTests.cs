@@ -55,7 +55,7 @@ public class MayBeStoredLiveTests(ITestOutputHelper output)
         var until = DateTime.UtcNow + wait;
         while (DateTime.UtcNow < until)
         {
-            if (await reader.GetAsync(id) is not null)
+            if (await reader.GetEventAsync(id) is not null)
             {
                 return true;
             }
@@ -63,7 +63,7 @@ public class MayBeStoredLiveTests(ITestOutputHelper output)
             await Task.Delay(500);
         }
 
-        return await reader.GetAsync(id) is not null;
+        return await reader.GetEventAsync(id) is not null;
     }
 
     [LiveFact]
