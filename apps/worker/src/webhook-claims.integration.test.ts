@@ -18,9 +18,31 @@ import { deliverWebhooks } from './webhook-delivery';
 
 const ch = createClickHouseClient();
 const runId = randomUUID();
-const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11', 'p12', 'p13', 'p14', 'p15', 'p16', 'p17', 'p18', 'p19'].map(
-  (name) => `qa-webhook-claims-${name}-${runId}`,
-);
+const projects = [
+  'p1',
+  'p2',
+  'p3',
+  'p4',
+  'p5',
+  'p6',
+  'p7',
+  'p8',
+  'p9',
+  'p10',
+  'p11',
+  'p12',
+  'p13',
+  'p14',
+  'p15',
+  'p16',
+  'p17',
+  'p18',
+  'p19',
+  'p20',
+  'p21',
+  'p22',
+  'p23',
+].map((name) => `qa-webhook-claims-${name}-${runId}`);
 const secretKey = Buffer.alloc(32, 9);
 const received: { path: string; id: string }[] = [];
 const receiver = createServer(async (req, res) => {
@@ -696,7 +718,7 @@ it("claims a project's healthy endpoint on the first pass when its sibling endpo
   try {
     // Test hook: a 300 ms claim statement timeout, and a 1 s sleep in the slow endpoint's scan, so every statement that
     // scans that endpoint times out deterministically.
-    await deliverWebhooks(ch, { ...options(), claimTimeoutMs: 300, claimScanDelay: { endpointId: slow.id, seconds: 1 } }, project);
+    await deliverWebhooks(ch, { ...options(), claimTimeoutMs: 300, claimScanDelay: { endpointIds: [slow.id], seconds: 1 } }, project);
     expect(sent(healthyRow.eventId)).toBe(1);
     const endpointFailures = errors.mock.calls
       .map(([message]) => String(message))
@@ -710,4 +732,70 @@ it("claims a project's healthy endpoint on the first pass when its sibling endpo
     expect(sent(row.eventId)).toBe(0);
     expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
   }
+});
+
+const logged = (spy: { mock: { calls: unknown[][] } }, event: string) =>
+  spy.mock.calls.map(([message]) => String(message)).filter((message) => message.includes(`"event":"${event}"`));
+
+it("costs one claim timeout, not the pass, when the fallback's endpoint listing stalls", { timeout: 60_000 }, async () => {
+  const project = projects[19] ?? '';
+  const { now } = await webhookCursorClock(prisma);
+  const slow = await endpoint(project, 'listing-slow');
+  const row = await ping(slow.id, 'listing-slow', new Date(+now - 60_000));
+  const errors = vi.spyOn(console, 'error');
+  let elapsed = 0;
+  try {
+    // Test hook: a 300 ms statement timeout, and a 5 s sleep in the slow endpoint's scans and in the fallback listing. The
+    // fair statement, the project claim and the listing each end at their timeout; an unbounded listing would wait 5 s.
+    const started = performance.now();
+    await deliverWebhooks(ch, { ...options(), claimTimeoutMs: 300, claimScanDelay: { endpointIds: [slow.id], seconds: 5, listing: true } }, project);
+    elapsed = performance.now() - started;
+    expect(logged(errors, 'webhook.claim_endpoints_failed').some((message) => message.includes(project))).toBe(true);
+  } finally {
+    errors.mockRestore();
+  }
+  expect(elapsed).toBeLessThan(3000);
+  expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+    status: 'pending',
+    attemptNumber: 0,
+    leaseUntil: null,
+  });
+});
+
+it('stops claiming once the pass budget is spent, dispatches what it claimed and leaves the rest to the next pass', { timeout: 60_000 }, async () => {
+  const group = projects.slice(20, 23);
+  const { now } = await webhookCursorClock(prisma);
+  const healthy: { eventId: string }[] = [];
+  const slowIds: string[] = [];
+  for (const [index, project] of group.entries()) {
+    const slow = await endpoint(project, `budget-slow-${index}`);
+    const fine = await endpoint(project, `budget-healthy-${index}`);
+    slowIds.push(slow.id);
+    // The healthy row is older, so a project's fallback tries its healthy endpoint first.
+    healthy.push(await ping(fine.id, `budget-healthy-${index}`, new Date(+now - 120_000 + index)));
+    await ping(slow.id, `budget-slow-${index}`, new Date(+now - 60_000 + index));
+  }
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const errors = vi.spyOn(console, 'error');
+  let elapsed = 0;
+  try {
+    // Test hook: every statement that scans a slow endpoint times out after 500 ms. With a 1.4 s budget the first ranked
+    // project's fallback claims its healthy row; then the budget is spent and the other projects wait. Without the budget
+    // each project's fallback and fill would run their own timeouts (about 6 s here).
+    const started = performance.now();
+    await deliverWebhooks(
+      ch,
+      { ...options(), concurrency: 6, claimTimeoutMs: 500, claimBudgetMs: 1400, claimScanDelay: { endpointIds: slowIds, seconds: 2 } },
+      group,
+    );
+    elapsed = performance.now() - started;
+    expect(logged(errors, 'webhook.claim_budget_spent')).toHaveLength(1);
+  } finally {
+    errors.mockRestore();
+  }
+  expect(elapsed).toBeLessThan(3500);
+  expect(healthy.map(({ eventId }) => sent(eventId)).sort()).toEqual([0, 0, 1]);
+  // The next pass, without slow scans, claims what the spent budget left.
+  await deliverWebhooks(ch, { ...options(), concurrency: 6 }, group);
+  expect(healthy.map(({ eventId }) => sent(eventId))).toEqual([1, 1, 1]);
 });

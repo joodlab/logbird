@@ -33,11 +33,19 @@ type DeliveryOptions = {
   failureLimit: number;
   transport?: WebhookTransportOptions;
   beforeRequest?: (tx: Prisma.TransactionClient, delivery: WebhookDelivery) => Promise<void>;
-  /** Internal: statement timeout of each claim statement. Default 2 s. */
+  /** Internal: statement timeout of each claim statement, including the fallback's endpoint listing. Default 2 s. */
   claimTimeoutMs?: number;
-  /** Tests only, ignored outside Vitest: make the claim scan of one endpoint slow, to force a statement timeout there. */
-  claimScanDelay?: { endpointId: string; seconds: number };
+  /** Internal: total time one pass may spend claiming before it stops and dispatches what it has claimed. Default 10 s. */
+  claimBudgetMs?: number;
+  /**
+   * Tests only, ignored outside Vitest: make the claim scans of these endpoints slow (with `listing`, the fallback's
+   * endpoint listing too), to force statement timeouts there.
+   */
+  claimScanDelay?: { endpointIds: string[]; seconds: number; listing?: boolean };
 };
+
+/** The most a pass spends claiming. Normal passes take milliseconds; this bounds a pass whose statements keep timing out. */
+const CLAIM_BUDGET_MS = 10_000;
 
 const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }: ScopeColumns) => ({
   scopeTenantId,
@@ -55,8 +63,15 @@ type PassScope = {
   perEndpoint: number;
   excludeEndpoints: string[];
   timeoutMs: number;
+  /** `performance.now()` after which the pass starts no further claim statement. */
+  claimDeadline: number;
   scanDelay?: DeliveryOptions['claimScanDelay'];
 };
+
+const scanSleep = (scope: PassScope) =>
+  scope.scanDelay
+    ? Prisma.sql`AND CASE WHEN e.id = ANY(${scope.scanDelay.endpointIds}::text[]) THEN (SELECT true FROM pg_sleep(${scope.scanDelay.seconds}) WHERE e.id IS NOT NULL) ELSE true END`
+    : Prisma.empty;
 
 const eligibleEndpoint = (excludeEndpoints: string[]) => Prisma.sql`
   e.enabled AND NOT e."scopeReviewRequired" AND NOT e."filterReviewRequired" AND NOT (e.id = ANY(${excludeEndpoints}::text[]))`;
@@ -113,7 +128,7 @@ function claimableRows(scope: PassScope, project: Prisma.Sql, cap?: number, endp
     ) row
     WHERE e."projectId" = ${project} AND ${eligibleEndpoint(scope.excludeEndpoints)}
       ${endpointId ? Prisma.sql`AND e.id = ${endpointId}` : Prisma.empty}
-      ${scope.scanDelay ? Prisma.sql`AND CASE WHEN e.id = ${scope.scanDelay.endpointId} THEN (SELECT true FROM pg_sleep(${scope.scanDelay.seconds}) WHERE e.id IS NOT NULL) ELSE true END` : Prisma.empty}`;
+      ${scanSleep(scope)}`;
 }
 
 /**
@@ -215,7 +230,10 @@ async function claimFair(scope: PassScope, ranked: string[], limit: number): Pro
 /** A project's eligible endpoints with a due, lease-free row, by their oldest due row. At most 10 per project. */
 async function projectEndpoints(scope: PassScope, projectId: string) {
   const { now } = scope;
-  const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+  // The same statement timeout as the claims, so a stalled listing costs one timeout, not the pass.
+  const [, rows] = await prisma.$transaction([
+    prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', ${`${scope.timeoutMs}ms`}, true)`,
+    prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
     SELECT e.id FROM "WebhookEndpoint" e
     CROSS JOIN LATERAL (
       SELECT "nextAttemptAt" FROM "WebhookDelivery"
@@ -224,7 +242,9 @@ async function projectEndpoints(scope: PassScope, projectId: string) {
       ORDER BY "nextAttemptAt", id LIMIT 1
     ) due
     WHERE e."projectId" = ${projectId} AND ${eligibleEndpoint(scope.excludeEndpoints)}
-    ORDER BY due."nextAttemptAt", e.id`);
+      ${scope.scanDelay?.listing ? scanSleep(scope) : Prisma.empty}
+    ORDER BY due."nextAttemptAt", e.id`),
+  ]);
   return rows.map(({ id }) => id);
 }
 
@@ -283,17 +303,21 @@ async function invalidScopedEndpoints(now: Date, projects?: string[]) {
  * Implementation: the fair phase is one statement per pass (`claimFair`) and the fill phase claims per project. A failed
  * fair-phase statement rolls back as a whole (no lease, attempt or rotation change), and the pass then retries the fair
  * phase one project at a time. A project whose claim fails or times out is retried one endpoint at a time (at most its
- * 10 endpoints, oldest due row first), so one endpoint's scan cannot block a sibling. Only a failure before any claim
+ * 10 endpoints, oldest due row first), so one endpoint's scan cannot block a sibling. The fallback's endpoint listing has
+ * the same statement timeout. A pass starts no claim statement after its claim budget (10 s; normal passes take
+ * milliseconds), so statements that keep timing out cannot use up the dispatch budget of rows already claimed; the budget
+ * binds only when claim statements fail, outside the conditions of the bound above. Only a failure before any claim
  * (holding scopes, ranking) fails the pass. These bounds hold for row locks Logbird itself creates; see the self-hosting
  * guide for transactions held by other clients.
  */
 export async function claimWebhookDeliveries(
-  options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimScanDelay'>,
+  options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimBudgetMs' | 'claimScanDelay'>,
   projectId?: string | readonly string[],
 ) {
   const projects = projectId === undefined ? undefined : typeof projectId === 'string' ? [projectId] : [...projectId];
   // Sample before PostgreSQL's clock so the local retry deadline is conservative and immune to host clock skew.
-  const leaseDeadline = performance.now() + LEASE_MS;
+  const passStart = performance.now();
+  const leaseDeadline = passStart + LEASE_MS;
   const now = await webhookDatabaseTime();
   // The delivery queue's global concurrency is one. Limit each endpoint independently and exclude live leases
   // from its allowance, even after a worker restarts while some requests are still in flight.
@@ -308,6 +332,8 @@ export async function claimWebhookDeliveries(
     perEndpoint: options.perEndpoint,
     excludeEndpoints: [],
     timeoutMs: options.claimTimeoutMs ?? 2000,
+    // Claims share the lease clock started above, so time spent here comes out of every claimed delivery's dispatch budget.
+    claimDeadline: passStart + (options.claimBudgetMs ?? CLAIM_BUDGET_MS),
     // The pg_sleep hook exists only for the timeout regression; no production caller can turn it on.
     scanDelay: process.env.VITEST === 'true' ? options.claimScanDelay : undefined,
   };
@@ -319,7 +345,18 @@ export async function claimWebhookDeliveries(
   const ranked = (await rankProjects(scope, projects)).map(({ projectId: id }) => id);
   const claims: Claim[] = [];
   const claimable = new Set<string>();
+  let budgetLogged = false;
+  const spent = () => {
+    if (performance.now() < scope.claimDeadline) return false;
+    if (!budgetLogged) {
+      budgetLogged = true;
+      // The rest waits for the next pass; what is claimed so far is dispatched now.
+      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_budget_spent', claimed: claims.length, projects: ranked.length }));
+    }
+    return true;
+  };
   const claim = async (project: string, limit: number) => {
+    if (spent()) return 0;
     try {
       const claimed = await claimProject(scope, project, limit);
       claims.push(...claimed);
@@ -332,13 +369,14 @@ export async function claimWebhookDeliveries(
     // scan fails or times out (for example behind rows another transaction holds) cannot keep its siblings from claiming.
     let count = 0;
     let endpoints: string[] = [];
+    if (spent()) return count;
     try {
       endpoints = await projectEndpoints(scope, project);
     } catch {
       console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_endpoints_failed', projectId: project }));
     }
     for (const endpointId of endpoints) {
-      if (count >= limit || claims.length >= capacity) break;
+      if (count >= limit || claims.length >= capacity || spent()) break;
       try {
         const claimed = await claimProject(scope, project, Math.min(limit - count, capacity - claims.length), endpointId);
         claims.push(...claimed);
@@ -358,12 +396,12 @@ export async function claimWebhookDeliveries(
     // hold up the others in this pass.
     console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_fair_failed', projects: ranked.length }));
     for (const project of ranked) {
-      if (claims.length >= capacity) break;
+      if (claims.length >= capacity || spent()) break;
       if (await claim(project, 1)) claimable.add(project);
     }
   }
   for (const project of ranked) {
-    if (claims.length >= capacity) break;
+    if (claims.length >= capacity || spent()) break;
     if (claimable.has(project)) await claim(project, capacity - claims.length);
   }
   return claims;
