@@ -58,10 +58,18 @@ describe('landing visuals', () => {
   it('a capture that opens full size shows a visible hint beside it, and its link never overrides the theme switch', async () => {
     const [page] = await renderPages(['/']);
     const html = page?.html ?? '';
-    // The hint sits in the window bar of each zoomable frame (outside the image): one per zoomable capture.
-    const zoomable = (html.match(/aria-label="Open the image full size: /g) ?? []).length;
-    expect(zoomable).toBeGreaterThan(0);
-    expect((html.match(/>Full size</g) ?? []).length).toBeGreaterThan(0);
+    // The hint sits in the window bar of each zoomable frame (outside the image): exactly one per zoomable frame, and
+    // none on a frame that does not open full size. Frames are counted, not links: a themed frame has two links.
+    const frames = [...html.matchAll(/<div class="frame">([\s\S]*?)<\/figure>/g)].map(([, inner]) => inner ?? '');
+    const zoomable = frames.filter((frame) => frame.includes('aria-label="Open the image full size: '));
+    expect(zoomable.length).toBeGreaterThanOrEqual(4);
+    for (const frame of frames) {
+      const expected = zoomable.includes(frame) ? 1 : 0;
+      const bar = frame.slice(0, frame.indexOf('class="screenshot"'));
+      // Counted inside the bar and across the whole frame, so a second hint over the image fails too.
+      expect((bar.match(/>Full size</g) ?? []).length, bar.slice(0, 160)).toBe(expected);
+      expect((frame.match(/>Full size</g) ?? []).length, frame.slice(0, 160)).toBe(expected);
+    }
     // `.screenshot a` must not set display: it would outrank `.theme-dark { display: none }` and show both themes.
     const css = readFileSync(fileURLToPath(new URL('../styles.css', import.meta.url)), 'utf8');
     const rule = /\.screenshot a \{([^}]*)\}/.exec(css)?.[1] ?? '';
