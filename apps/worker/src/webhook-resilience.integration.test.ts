@@ -319,7 +319,7 @@ it('keeps scan time monotonic and delivers relative-time matches once on a worke
     await expect(discoverWebhookDeliveries(limited, committed, clock)).rejects.toThrow('Query exceeded its resource budget');
     const failed = await refetch();
     expect(failed.cursorReceivedAt).toEqual(committed.cursorReceivedAt);
-    expect(failed.lastScannedAt?.getTime()).toBeGreaterThanOrEqual(committed.lastScannedAt?.getTime() ?? Number.POSITIVE_INFINITY);
+    expect(failed.lastScannedAt).toEqual(committed.lastScannedAt);
     await discoverWebhookDeliveries(ch, failed, clock);
     expect(await refetch()).toMatchObject({ cursorReviewRequired: false });
     expect(await queuedIds()).toEqual(['qa-after-failure', 'qa-before-failure']);

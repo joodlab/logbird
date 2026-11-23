@@ -160,16 +160,21 @@ async function purgeLoginMail() {
   assert(removed.ok, 'Mailpit fixture cleanup');
 }
 
-let mine = false;
+async function scratchDatabaseOid() {
+  const { rows } = await admin.query<{ oid: string }>('SELECT oid::text FROM pg_database WHERE datname = $1', [name]);
+  return rows[0]?.oid;
+}
+
+let createdDatabaseOid: string | undefined;
 let loginStarted = false;
 const errors: unknown[] = [];
 try {
   freeMemory();
   await admin.connect();
-  const existing = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [name]);
-  assert.equal(existing.rowCount, 0, `Scratch database ${name} already exists. Stopping without changing it.`);
+  assert.equal(await scratchDatabaseOid(), undefined, `Scratch database ${name} already exists. Stopping without changing it.`);
   await admin.query(`CREATE DATABASE "${name}" TEMPLATE template0`);
-  mine = true;
+  createdDatabaseOid = await scratchDatabaseOid();
+  assert(createdDatabaseOid, `Could not record the identity of scratch database ${name}`);
   process.env.DATABASE_URL = databaseUrl.toString();
   process.env.BULLMQ_PREFIX = '{logbird-t2w}';
   process.env.AUTH_SIGNUP = 'open';
@@ -421,10 +426,13 @@ try {
     }
   } finally {
     try {
-      if (mine) {
+      if (createdDatabaseOid) {
+        assert.equal(await scratchDatabaseOid(), createdDatabaseOid, `Scratch database ${name} changed identity. Cleanup stopped.`);
         await admin.query(`DROP DATABASE "${name}"`);
-        console.log(`Dropped scratch database ${name}`);
+        console.log(`Dropped scratch database ${name} with OID ${createdDatabaseOid}`);
       }
+    } catch (error) {
+      errors.push(error);
     } finally {
       await admin.end();
     }

@@ -21,6 +21,34 @@ it.each([
 });
 
 it.each([
+  { offset: -11, review: true },
+  { offset: -59_000, review: true },
+  { offset: 0, review: false },
+])('returns review=$review for a legacy cursor $offset ms from rollout', ({ offset, review }) => {
+  expect(
+    webhookCursorNeedsReview(
+      {
+        createdAt: new Date(+clock.rollout - 120_000),
+        cursorReceivedAt: new Date(+clock.rollout + offset),
+        cursorEventId: null,
+        cursorVerifiedFloor: null,
+        lastScannedAt: null,
+      },
+      clock,
+    ),
+  ).toBe(review);
+});
+
+it('reviews a cursor with an event ID at creation and no recorded scan', () => {
+  expect(
+    webhookCursorNeedsReview(
+      { createdAt, cursorReceivedAt: createdAt, cursorEventId: 'qa-event', cursorVerifiedFloor: null, lastScannedAt: null },
+      clock,
+    ),
+  ).toBe(true);
+});
+
+it.each([
   { lastScannedAt: null, cursorEventId: 'qa-event' },
   { lastScannedAt: clock.now, cursorEventId: null },
   { lastScannedAt: clock.now, cursorEventId: 'qa-event' },

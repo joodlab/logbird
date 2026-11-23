@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { createClient } from '@clickhouse/client';
 import { createClickHouseClient, createMaintenanceClickHouseClient, insertEvents, normalizeEvent, purgeProject } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma } from '@logbird/database';
+import { encryptWebhookSecret, webhookCursorClock } from '@logbird/database/webhooks';
+import { generateWebhookSecret } from '@logbird/sdk';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-import { discoverWebhookDeliveries } from './webhook-discovery';
+import { deliverWebhooks } from './webhook-delivery';
+import { discoverWebhookDeliveries, scanWebhooks } from './webhook-discovery';
 
 const ch = createClickHouseClient();
 const projectId = `qa-webhook-discovery-${randomUUID()}`;
@@ -45,6 +51,97 @@ afterAll(async () => {
     }
   }
 }, 360_000);
+
+it('scans and sends the 33rd endpoint when the first 32 cannot finish their first scan', async () => {
+  const { now } = await webhookCursorClock(prisma);
+  const from = new Date(+now - 60_000);
+  const rollout = new Date(+from - 1000);
+  const blockedStart = new Date(+from + 1000);
+  const early = new Date(+blockedStart - 11);
+  const eventId = 'qa-fair-scan';
+  const receiptId = 'qa-fair-scan-pending';
+  const received: string[] = [];
+  const receiver = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += String(chunk);
+    received.push(JSON.parse(body).id);
+    res.writeHead(204).end();
+  });
+  const blockedIds = Array.from({ length: 32 }, (_, index) => `qa-scan-first-${String(index).padStart(2, '0')}`);
+  const healthyId = 'qa-scan-last';
+  const secretKey = Buffer.alloc(32, 7);
+  const receiptKey = { projectId, eventId: receiptId };
+  try {
+    receiver.listen(0, '127.0.0.1');
+    await once(receiver, 'listening');
+    const { port } = receiver.address() as AddressInfo;
+    await prisma.webhookEndpoint.createMany({
+      data: blockedIds.map((id) => ({
+        id,
+        projectId,
+        url: 'https://fixture.example.invalid',
+        createdAt: blockedStart,
+        cursorReceivedAt: early,
+        cursorVerifiedFloor: rollout,
+      })),
+    });
+    await prisma.webhookEndpoint.create({
+      data: {
+        id: healthyId,
+        projectId,
+        url: `http://127.0.0.1:${port}/test`,
+        createdAt: from,
+        cursorReceivedAt: from,
+        cursorVerifiedFloor: rollout,
+        secrets: { create: { ciphertext: encryptWebhookSecret(generateWebhookSecret(), secretKey) } },
+      },
+    });
+    // The pending receipt fences the watermark below the early endpoints' nominal start.
+    // The healthy endpoint's event was received before the fence.
+    const pendingAt = new Date(+early + 1);
+    await prisma.ingestReceipt.create({
+      data: { ...receiptKey, organizationId: projectId, fingerprint: 'qa-pending', receivedAt: pendingAt, eventAt: pendingAt },
+    });
+    const event = normalizeEvent({ action: 'qa.webhook.fair-scan', id: eventId }, { projectId, receivedAt: from });
+    if (!event.ok) throw new Error(event.reason);
+    await insertEvents(ch, [event.row]);
+
+    const pass = async () => {
+      await scanWebhooks(ch);
+      await deliverWebhooks(
+        ch,
+        { secretKey, concurrency: 1, perEndpoint: 1, failureLimit: 50, transport: { allowHttp: true, allowAddress: (ip) => ip === '127.0.0.1' } },
+        projectId,
+      );
+    };
+    await pass();
+    expect(await queuedIds(healthyId)).toEqual([]);
+    await pass();
+    expect(received).toEqual([eventId]);
+    await pass();
+    expect(received).toEqual([eventId]);
+    expect(await prisma.webhookDelivery.findMany({ where: { endpointId: healthyId } })).toMatchObject([
+      { eventId, status: 'succeeded', attemptNumber: 1 },
+    ]);
+    const blocked = await prisma.webhookEndpoint.findMany({ where: { id: { in: blockedIds } } });
+    expect(blocked).toHaveLength(32);
+    for (const hook of blocked) {
+      expect(hook).toMatchObject({
+        cursorReceivedAt: early,
+        cursorEventId: null,
+        scanAttemptedAt: expect.any(Date),
+        lastScannedAt: null,
+        cursorReviewRequired: false,
+      });
+    }
+    expect(await prisma.webhookDelivery.count({ where: { endpointId: { in: blockedIds } } })).toBe(0);
+  } finally {
+    receiver.closeAllConnections();
+    await new Promise<void>((done) => receiver.close(() => done()));
+    await prisma.ingestReceipt.deleteMany({ where: receiptKey });
+    await prisma.webhookEndpoint.deleteMany({ where: { id: { in: [...blockedIds, healthyId] } } });
+  }
+});
 
 it('includes the creation millisecond across delivery batches with the same received_at', async () => {
   const from = new Date(Date.now() - 60_000);
@@ -224,7 +321,12 @@ it.each([
   });
   try {
     await expect(discoverWebhookDeliveries(limited, hook, scanClock(from))).rejects.toThrow('Query exceeded its resource budget');
-    expect(await refetch(hook.id)).toMatchObject({ cursorReceivedAt: from, cursorEventId: null });
+    expect(await refetch(hook.id)).toMatchObject({
+      cursorReceivedAt: from,
+      cursorEventId: null,
+      scanAttemptedAt: expect.any(Date),
+      lastScannedAt: null,
+    });
     expect(await queuedIds(hook.id)).toEqual([]);
     await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
     expect(await queuedIds(hook.id)).toEqual(ids);

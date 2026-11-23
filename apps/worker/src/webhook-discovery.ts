@@ -119,6 +119,11 @@ export async function discoverWebhookDeliveries(
     scopeMask: { equals: endpoint.scopeMask },
     filterQuery: endpoint.filterQuery,
   };
+  // Scheduling records every attempt independently of cursor progress and configuration edits.
+  await prisma.webhookEndpoint.updateMany({
+    where: { ...snapshot, OR: [{ scanAttemptedAt: null }, { scanAttemptedAt: { lt: cursorClock.now } }] },
+    data: { scanAttemptedAt: cursorClock.now, updatedAt: endpoint.updatedAt },
+  });
   const earlyDelivery =
     early && endpoint.lastScannedAt && endpoint.cursorEventId
       ? await prisma.webhookDelivery.findUnique({
@@ -137,70 +142,57 @@ export async function discoverWebhookDeliveries(
     if (blocked.count) console.warn(JSON.stringify({ event: 'webhook.cursor_review_required', endpointId: endpoint.id }));
     return;
   }
-  let scanRecorded = false;
-  // The compare-and-swap includes lastScannedAt, so a stale scan cannot overwrite a newer timestamp.
-  let lastScannedAt = new Date(Math.max(+cursorClock.now, +(endpoint.lastScannedAt ?? cursorClock.now)));
-  try {
-    const scope = storedWebhookScope(endpoint);
-    if (scope === undefined) return;
-    const bounds = await captureScanBounds(endpoint.projectId);
-    if (!bounds) return;
-    if (bounds.now > lastScannedAt) lastScannedAt = bounds.now;
-    if (bounds.watermark < endpoint.cursorReceivedAt) return;
-    // Wait until a short page can advance to the nominal start. A partially committed early page
-    // can resume from its last delivery, whose row was committed with the cursor.
-    if (early && +bounds.watermark + 1 < start) return;
-    // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
-    const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +bounds.watermark + 1));
-    const rows = await readWebhookCandidates(ch, endpoint, scope, sliceEnd, bounds.now);
-    const expiresAt = new Date(+bounds.now + WEBHOOK_LOG_RETENTION_MS);
-    const commit = async (cursorReceivedAt: Date, cursorEventId: string | null, deliveries?: Prisma.WebhookDeliveryCreateManyInput[]) => {
-      const position = { cursorReceivedAt, cursorEventId, lastScannedAt };
-      const committed = await prisma.$transaction(async (tx) => {
-        const updated = await tx.webhookEndpoint.updateMany({ where: snapshot, data: { ...position, updatedAt: endpoint.updatedAt } });
-        if (!updated.count) return false;
-        if (deliveries) await tx.webhookDelivery.createMany({ data: deliveries, skipDuplicates: true });
-        return true;
-      });
-      if (committed) {
-        Object.assign(snapshot, position);
-        scanRecorded = true;
-      }
-      return committed;
-    };
-    for (let offset = 0; offset < rows.length; offset += DELIVERY_BATCH_SIZE) {
-      const deliveries = rows.slice(offset, offset + DELIVERY_BATCH_SIZE).map(({ event_id: eventId, received_ms }) => {
-        const receivedAt = new Date(Number(received_ms));
-        // NUL is forbidden in event IDs, so this namespace cannot overlap legacy lb1_ headers.
-        const occurrence = `\0${JSON.stringify([endpoint.projectId, eventId, receivedAt])}`;
-        return {
-          endpointId: endpoint.id,
-          eventId,
-          receivedAt,
-          webhookId: `lb1_${Buffer.from(occurrence, 'utf8').toString('base64url')}`,
-          // Re-evaluate relative-time filters at this same database instant on every send.
-          createdAt: bounds.now,
-          expiresAt,
-        };
-      });
-      const last = deliveries.at(-1);
-      // Keep each cursor advance atomic with its bounded set of deliveries. A stale endpoint stops this page.
-      if (last && !(await commit(last.receivedAt, last.eventId, deliveries))) return;
-    }
-    // Only a fully consumed short page proves the remainder of the slice is empty.
-    if (rows.length < DISCOVERY_PAGE_SIZE) await commit(sliceEnd, null);
-  } finally {
-    // Move a busy/failing endpoint to the back of the scan without changing its cursor.
-    // An untouched early cursor must retain its never-scanned state until its first successful commit.
-    if (!scanRecorded && (!early || endpoint.lastScannedAt))
-      await prisma.webhookEndpoint.updateMany({ where: snapshot, data: { lastScannedAt, updatedAt: endpoint.updatedAt } });
+  const scope = storedWebhookScope(endpoint);
+  if (scope === undefined) return;
+  const bounds = await captureScanBounds(endpoint.projectId);
+  if (!bounds) return;
+  const lastScannedAt = new Date(Math.max(+bounds.now, +cursorClock.now, +(endpoint.lastScannedAt ?? cursorClock.now)));
+  if (bounds.watermark < endpoint.cursorReceivedAt) return;
+  // Wait until a short page can advance to the nominal start. A partially committed early page
+  // can resume from its last delivery, whose row was committed with the cursor.
+  if (early && +bounds.watermark + 1 < start) return;
+  // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
+  const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +bounds.watermark + 1));
+  const rows = await readWebhookCandidates(ch, endpoint, scope, sliceEnd, bounds.now);
+  const expiresAt = new Date(+bounds.now + WEBHOOK_LOG_RETENTION_MS);
+  const commit = async (cursorReceivedAt: Date, cursorEventId: string | null, deliveries?: Prisma.WebhookDeliveryCreateManyInput[]) => {
+    const position = { cursorReceivedAt, cursorEventId, lastScannedAt };
+    const committed = await prisma.$transaction(async (tx) => {
+      const updated = await tx.webhookEndpoint.updateMany({ where: snapshot, data: { ...position, updatedAt: endpoint.updatedAt } });
+      if (!updated.count) return false;
+      if (deliveries) await tx.webhookDelivery.createMany({ data: deliveries, skipDuplicates: true });
+      return true;
+    });
+    if (committed) Object.assign(snapshot, position);
+    return committed;
+  };
+  for (let offset = 0; offset < rows.length; offset += DELIVERY_BATCH_SIZE) {
+    const deliveries = rows.slice(offset, offset + DELIVERY_BATCH_SIZE).map(({ event_id: eventId, received_ms }) => {
+      const receivedAt = new Date(Number(received_ms));
+      // NUL is forbidden in event IDs, so this namespace cannot overlap legacy lb1_ headers.
+      const occurrence = `\0${JSON.stringify([endpoint.projectId, eventId, receivedAt])}`;
+      return {
+        endpointId: endpoint.id,
+        eventId,
+        receivedAt,
+        webhookId: `lb1_${Buffer.from(occurrence, 'utf8').toString('base64url')}`,
+        // Re-evaluate relative-time filters at this same database instant on every send.
+        createdAt: bounds.now,
+        expiresAt,
+      };
+    });
+    const last = deliveries.at(-1);
+    // Keep each cursor advance atomic with its bounded set of deliveries. A stale endpoint stops this page.
+    if (last && !(await commit(last.receivedAt, last.eventId, deliveries))) return;
   }
+  // Only a fully consumed short page proves the remainder of the slice is empty.
+  if (rows.length < DISCOVERY_PAGE_SIZE) await commit(sliceEnd, null);
 }
 
 export async function scanWebhooks(ch: ClickHouseClient) {
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: { enabled: true, cursorReviewRequired: false, filterReviewRequired: false },
-    orderBy: [{ lastScannedAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
+    orderBy: [{ scanAttemptedAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
     take: 32,
   });
   if (!endpoints.length) return;

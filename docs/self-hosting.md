@@ -295,17 +295,19 @@ for signal handling; its live acceptance is pending in #77.
 An existing enabled endpoint with an empty filter starts automatically. Its first eligible delivery is the first matching event
 received at or after the delivery migration's UTC start time (`20261122140000_webhook_deliveries`).
 Events received before that millisecond are excluded. An endpoint created by the new API starts at its creation millisecond, inclusive.
-During a rolling upgrade, an old API can set a never-scanned endpoint's cursor up to 60 seconds before that nominal start
-through the transaction-time default. The worker keeps the stored cursor and can deliver matching events received
-from that earlier millisecond, inclusive.
+For endpoints created at or after rollout by the old API, the transaction-time default can set a never-scanned cursor
+up to 60 seconds before creation. The worker keeps that stored cursor and can deliver matching events received from
+that earlier millisecond, inclusive.
 
 An existing endpoint with a non-empty filter delivers nothing until an owner or admin confirms the filter in the console.
 The worker sends one review email to the workspace owners and admins. Saving the filter in the console sends an explicit
 `filterQuery` in PATCH, even when its text stays the same. The endpoint keeps its rollout cursor during the hold.
 After confirmation, discovery picks up at that cursor and queues each event received during the hold that matches the confirmed
 filter and current scope and is still stored. The project's event retention governs which events remain available, and the
-five-minute scan slices and 10,000-position pages govern how fast discovery catches up. The separate 30-day delivery log
-retention governs attempts and delivery records. A genuinely untrusted cursor follows the
+five-minute scan slices and 10,000-position pages govern how fast discovery catches up. Each pass takes up to 32 eligible
+endpoints in order of oldest scan attempt, with never-attempted endpoints first and endpoint ID breaking ties. Blocked
+or failed attempts also update this order. Only recorded progress updates the cursor and its scan timestamp.
+The separate 30-day delivery log retention governs attempts and delivery records. A genuinely untrusted cursor follows the
 [operator reconciliation procedure](#reconcile-a-webhook-discovery-cursor).
 
 ### Upgrading to the arrival-time index (010)
@@ -1180,10 +1182,11 @@ cursor shifted by the former database session time zone. Discovery compares
 the stored cursor to database time, the later of endpoint creation and the UTC
 rollout, and the last recorded scan. A verified original rollout stored on the
 endpoint takes precedence over the live ledger's time. The scan bound allows a
-minute for prior workers to acquire their watermark. An early cursor inside the
-60-second startup tolerance can continue after a partial scan when its stored
-delivery confirms the position. A future cursor, a cursor outside the accepted
-bounds, or an early position with missing evidence is held in place.
+minute for prior workers to acquire their watermark. For an endpoint created at or
+after rollout, an early cursor inside the 60-second startup tolerance can continue
+after a partial scan when its stored delivery confirms the position. A future
+cursor, a cursor outside the accepted bounds, an event ID without a recorded scan,
+or an early position with missing evidence is held in place.
 The worker logs `webhook.cursor_review_required` and the endpoint API returns
 `cursorWarning: webhook_cursor_review_required`. The hold persists until an
 operator clears it. The check detects impossible positions and cannot establish

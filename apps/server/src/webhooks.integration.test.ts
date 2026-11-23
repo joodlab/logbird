@@ -247,10 +247,14 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
     { legacy: 'qaNumber:1e-7', confirmed: 'qaNumber:0.0000001', id: 'qa-legacy-number', qaNumber: 1e-7 },
   ];
   const target = { id: 'qa-new-target', targets: [{ type: 'site', id: '12' }] };
-  const time = new Date(Date.now() - 45_000);
+  const { now } = await webhookCursorClock(prisma);
+  // Model a settled rollout independently of when the test database was migrated.
+  const time = new Date(+now - 45_000);
   const cursorReceivedAt = new Date(+time - 1000);
-  const expiresAt = new Date(Date.now() + 86_400_000);
+  const rollout = new Date(+cursorReceivedAt - 1000);
+  const expiresAt = new Date(+now + 86_400_000);
   const lookup = (id: string) => prisma.webhookEndpoint.findUniqueOrThrow({ where: { id } });
+  const scan = async (id: string) => discoverWebhookDeliveries(clickhouse, await lookup(id), { now, rollout });
   const warning = 'webhook_filter_review_required';
   const { endpoint: current, secret } = await create('owner', { url: receiver, filterQuery: 'record:site:12' });
   const { endpoint: empty } = await create();
@@ -293,15 +297,15 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
       for (const { id } of legacy) {
         await prisma.webhookEndpoint.update({
           where: { id },
-          data: { url: liveReceiver, filterReviewRequired: true, cursorReceivedAt, createdAt: cursorReceivedAt },
+          data: { url: liveReceiver, filterReviewRequired: true, cursorReceivedAt: rollout, createdAt: new Date(+rollout - 1000) },
         });
         const path = `${base()}/${id}`;
         expect(await (await request(path)).json()).toMatchObject({ filterWarning: warning });
         const ping = await request(`${path}/test`, 'POST');
         expect(ping.status).toBe(409);
         expect(await ping.json()).toMatchObject({ error: { code: warning } });
-        await discoverWebhookDeliveries(clickhouse, await lookup(id));
-        expect(await lookup(id)).toMatchObject({ cursorReceivedAt, cursorEventId: null, lastScannedAt: null });
+        await scan(id);
+        expect(await lookup(id)).toMatchObject({ cursorReceivedAt: rollout, cursorEventId: null, lastScannedAt: null });
       }
       const resend = await request(`${base()}/${first.id}/deliveries/${completed.id}/resend`, 'POST');
       expect(resend.status).toBe(409);
@@ -317,7 +321,10 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
       await send();
       expect(received).toHaveLength(0);
       expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: queued.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
-      await discoverWebhookDeliveries(clickhouse, await lookup(current.id));
+      await scan(current.id);
+      expect(await prisma.webhookDelivery.findMany({ where: { endpointId: current.id }, select: { eventId: true } })).toEqual([
+        { eventId: target.id },
+      ]);
       await send();
       expect(received).toHaveLength(1);
       const [targetWire] = received;
@@ -329,8 +336,8 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
         const patch = await request(path, 'PATCH', { filterQuery: fixture.confirmed });
         expect(patch.status, await patch.clone().text()).toBe(200);
         expect(await patch.json()).not.toHaveProperty('filterWarning');
-        expect(await lookup(id)).toMatchObject({ filterReviewRequired: false, cursorReceivedAt });
-        await discoverWebhookDeliveries(clickhouse, await lookup(id));
+        expect(await lookup(id)).toMatchObject({ filterReviewRequired: false, cursorReceivedAt: rollout });
+        await scan(id);
         await send();
         await send();
         expect(received).toHaveLength(index + 2);
@@ -553,7 +560,7 @@ it('advances discovery while HTTP ingest keeps arriving behind a slow admitted w
     const admitted = Promise.resolve(fixture.post({ id: 'qa-slow', action: 'qa.webhook' }));
     ongoing = [admitted];
     await expect.poll(() => held, { interval: 20, timeout: 20_000 }).toBe(true);
-    const scan = discoverWebhookDeliveries(clickhouse, hook);
+    const scan = discoverWebhookDeliveries(clickhouse, hook, { now: new Date(), rollout: from });
     const arrivals = [0, 100, 250, 400].map(async (ms) => {
       await delay(ms);
       return fixture.post({ id: `qa-arrival-${ms}`, action: 'qa.webhook' });
@@ -1238,7 +1245,10 @@ it('signs identical masked bytes on initial delivery and resend of a target-only
   try {
     await insertEvents(clickhouse, [event.row]);
     await withLocalReceiver(endpoint.id, async (received) => {
-      await discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } }));
+      await discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } }), {
+        now: new Date(),
+        rollout: at,
+      });
       await send();
       const delivery = await prisma.webhookDelivery.findFirstOrThrow({ where: { endpointId: endpoint.id, status: 'succeeded' } });
       expect((await request(`${base()}/${endpoint.id}/deliveries/${delivery.id}/resend`, 'POST')).status).toBe(202);

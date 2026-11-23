@@ -23,14 +23,16 @@ export function webhookCursorNeedsReview(
   { now, rollout }: Awaited<ReturnType<typeof webhookCursorClock>>,
   hasEarlyDelivery = false,
 ) {
+  if (endpoint.lastScannedAt === null && endpoint.cursorEventId !== null) return true;
   const start = webhookCursorStart(endpoint, rollout);
   // Former workers recorded lastScannedAt before acquiring the watermark. Allow a minute for that gap.
   const scanLimit = endpoint.lastScannedAt ? +endpoint.lastScannedAt + 60_000 : start;
   const cursor = +endpoint.cursorReceivedAt;
   if (cursor > +now || cursor > Math.max(start, scanLimit)) return true;
   if (cursor >= start) return false;
+  if (endpoint.createdAt < (endpoint.cursorVerifiedFloor ?? rollout)) return true;
   if (cursor < start - CURSOR_START_TOLERANCE_MS) return true;
   // The old API's client-set creation time can follow the transaction's cursor default.
   // After any progress in that interval, require the delivery committed with the cursor.
-  return endpoint.lastScannedAt === null ? endpoint.cursorEventId !== null : endpoint.cursorEventId === null || !hasEarlyDelivery;
+  return endpoint.lastScannedAt !== null && (endpoint.cursorEventId === null || !hasEarlyDelivery);
 }

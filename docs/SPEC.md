@@ -526,9 +526,9 @@ An invalid legacy scope returns `scopeWarning: webhook_invalid_scope` and blocks
 Create and update reject filters on masked fields with HTTP 422 `invalid_query`.
 An existing enabled endpoint with an empty filter starts automatically at the delivery migration's UTC start time.
 Its first eligible delivery is the first matching event received at or after that millisecond. Events received before it are excluded.
-A new endpoint starts at its creation millisecond, inclusive. During a rolling upgrade, the old API can leave a never-scanned
-cursor up to 60 seconds before that nominal start. The worker keeps that cursor and can deliver matching events received
-from the stored cursor, inclusive.
+A new endpoint starts at its creation millisecond, inclusive. For endpoints created at or after rollout by the old API,
+the worker accepts a never-scanned cursor up to 60 seconds before creation and can deliver matching events received
+from that stored cursor, inclusive.
 
 An existing endpoint with a non-empty filter delivers nothing until an owner or admin confirms its filter in the console.
 It returns `filterWarning: webhook_filter_review_required` and keeps the rollout cursor while held.
@@ -547,7 +547,9 @@ target. The scan window ends at the earlier of:
 - The millisecond before the project's oldest unconfirmed ingest receipt.
 
 The worker queues for the receipt gate while writers assign their arrival clocks and register receipts.
-Unconfirmed receipts then fence the scan during ClickHouse writes. Each query examines up to five minutes of
+Unconfirmed receipts then fence the scan during ClickHouse writes. Each discovery pass takes up to 32 eligible endpoints
+in order of oldest scan attempt, with never-attempted endpoints first and endpoint ID breaking ties. Blocked or failed
+attempts also update this order. Only recorded progress updates the cursor and its scan timestamp. Each query examines up to five minutes of
 receive time and reads up to 10,000 matching event positions, ordered by receive time and ID. Empty slices advance
 the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
 through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
@@ -555,7 +557,8 @@ sorts by event time. On very large projects delivery can stall until the arrival
 A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
 Larger pages shorten that delay by requiring fewer ClickHouse queries to drain the import.
 The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an untrusted cursor, including a future
-position, an early position outside the tolerance or without evidence of progress, or a position beyond the allowed scan bound.
+position, an early position outside the tolerance or without evidence of progress, an event ID without a recorded scan,
+or a position beyond the allowed scan bound.
 The API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
 The worker commits at most 100 deliveries with their cursor position in each Postgres transaction. An interrupted page
 resumes after the last committed position. Deliveries are unique
