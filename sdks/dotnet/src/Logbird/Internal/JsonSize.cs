@@ -253,6 +253,11 @@ internal static class JsonSize
     }
 
     /// <summary>The fewest bytes a leaf writes: its text and quotes for a string, its literal, or a number's digits.</summary>
+    /// <remarks>
+    /// Read with value-type probes first: each is compiled for its own type and never boxes, where asking a value built in
+    /// code for its kind (<c>GetValueKind</c>) serializes it on System.Text.Json 8, and probing a number as a string boxes
+    /// it. Only a value none of them match is probed as a string.
+    /// </remarks>
     private static long LeafBytes(JsonNode leaf)
     {
         if (leaf is not JsonValue value)
@@ -260,36 +265,37 @@ internal static class JsonSize
             return 1;
         }
 
-        // The kind first: it reads the value without allocating, where probing a number as a string boxes it. A value whose
-        // kind cannot be computed (NaN or an infinity on some targets, which JavaScript writes as null) is probed instead.
-        JsonValueKind kind;
-        try
+        if (value.TryGetValue<JsonElement>(out var parsed))
         {
-            kind = value.GetValueKind();
-        }
-        catch (Exception e) when (e is ArgumentException or InvalidOperationException or NotSupportedException or JsonException)
-        {
-            kind = JsonValueKind.Undefined;
+            return parsed.ValueKind switch
+            {
+                // A parsed string's code units, counted from its raw text without decoding it.
+                JsonValueKind.String => JsJson.DecodedLength(parsed.GetRawText()) + 2,
+
+                // A parsed number is sent exactly as written, so its digits count.
+                JsonValueKind.Number => parsed.GetRawText().Length,
+                JsonValueKind.True => 4,
+                JsonValueKind.False => 5,
+                JsonValueKind.Null => 4,
+                _ => 1,
+            };
         }
 
-        switch (kind)
+        if (value.TryGetValue<bool>(out var flag))
         {
-            case JsonValueKind.Number:
-                // A parsed number is sent exactly as written, so its digits count; one built in code writes at least one.
-                return value.TryGetValue<JsonElement>(out var number) ? number.GetRawText().Length : 1;
-            case JsonValueKind.Null:
-                return 4;
-            case JsonValueKind.True:
-                return 4;
-            case JsonValueKind.False:
-                return 5;
+            return flag ? 4 : 5;
         }
 
-        if (JsJson.TryGetStringLength(value, out var units))
+        // Numbers and other values built in code write at least one byte.
+        if (value.TryGetValue<int>(out _) || value.TryGetValue<long>(out _) || value.TryGetValue<double>(out _)
+            || value.TryGetValue<decimal>(out _) || value.TryGetValue<float>(out _) || value.TryGetValue<short>(out _)
+            || value.TryGetValue<uint>(out _) || value.TryGetValue<ulong>(out _) || value.TryGetValue<byte>(out _)
+            || value.TryGetValue<sbyte>(out _) || value.TryGetValue<ushort>(out _) || value.TryGetValue<char>(out _)
+            || value.TryGetValue<Guid>(out _) || value.TryGetValue<DateTime>(out _) || value.TryGetValue<DateTimeOffset>(out _))
         {
-            return units + 2;
+            return 1;
         }
 
-        return value.TryGetValue<bool>(out var flag) ? (flag ? 4 : 5) : 1;
+        return value.TryGetValue<string>(out var text) ? text.Length + 2 : 1;
     }
 }
