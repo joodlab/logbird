@@ -340,10 +340,15 @@ public class MayBeStoredTests
     public async Task An_event_tracked_after_shutdown_was_never_sent_and_has_no_payload()
     {
         var drops = new ConcurrentQueue<DroppedEvent>();
-        var client = Client(Options(drops), new FakeServer());
+        var dropped = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = Client(Options(drops, o => o.OnDrop = d =>
+        {
+            drops.Enqueue(d);
+            dropped.TrySetResult(true);
+        }), new FakeServer());
         await client.DisposeAsync();
         client.Track(new AuditEvent("late") { Id = "evt_late" });
-        await Task.Delay(200);
+        await WithinAsync(dropped.Task, "the drop notification");
         var drop = Assert.Single(drops);
         Assert.Equal((DropReason.Shutdown, false), (drop.Reason, drop.MayBeStored));
         Assert.True(drop.Json.IsEmpty);
@@ -469,6 +474,88 @@ public class MayBeStoredTests
         Assert.Equal(
             [("evt_held", false), ("evt_sent", true)],
             drops.Where(d => d.Reason == DropReason.Shutdown).Select(d => (d.Id!, d.MayBeStored)).OrderBy(d => d.Item1, StringComparer.Ordinal));
+    }
+
+    /// <summary>A body that never arrives and ignores cancellation; it signals when the client starts reading it.</summary>
+    private sealed class BlockedBody(TaskCompletionSource<bool> reading) : System.IO.Stream
+    {
+        private readonly TaskCompletionSource<int> _never = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            reading.TrySetResult(true);
+            return _never.Task;
+        }
+
+#if NET
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            reading.TrySetResult(true);
+            return new ValueTask<int>(_never.Task);
+        }
+#endif
+
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, System.IO.SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            _never.TrySetException(new System.IO.IOException("fictional body closed"));
+            base.Dispose(disposing);
+        }
+    }
+
+    [Fact]
+    public async Task A_401_whose_body_is_still_coming_when_the_host_abandons_says_not_stored()
+    {
+        // The 401 headers arrive, the body never does, and the host's budget runs out: the event was not stored.
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var dropped = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reading = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new FakeServer().Then(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StreamContent(new BlockedBody(reading)) });
+        var client = Client(Options(drops, o =>
+        {
+            o.OnDrop = d =>
+            {
+                drops.Enqueue(d);
+                dropped.TrySetResult(true);
+            };
+            o.ShutdownTimeout = TimeSpan.FromSeconds(30);
+        }), server);
+        try
+        {
+            client.Track(new AuditEvent("x") { Id = "evt_401" });
+            _ = client.FlushAsync();
+            await WithinAsync(reading.Task, "reading the 401 body");
+            _ = client.AbandonNow();
+            await WithinAsync(dropped.Task, "the shutdown drop");
+        }
+        finally
+        {
+            await client.DisposeAsync();
+        }
+
+        var drop = Assert.Single(drops);
+        Assert.Equal(("evt_401", DropReason.Shutdown, false), (drop.Id, drop.Reason, drop.MayBeStored));
     }
 
     [Fact]

@@ -619,7 +619,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             if (abandoned > 0)
             {
                 Notify(() => LogShutdownDropped(_logger, abandoned));
-                Report(new LogbirdDeliveryException($"{abandoned} audit event(s) were not sent before shutdown."), log: false);
+                Report(new LogbirdDeliveryException($"{abandoned} audit event(s) were not delivered before shutdown."), log: false);
             }
         }
         catch (Exception e)

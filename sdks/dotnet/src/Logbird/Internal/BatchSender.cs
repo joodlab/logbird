@@ -189,7 +189,25 @@ internal sealed class BatchSender
                 }
 
                 dispatched = true;
-                (response, responseBody, error) = await AttemptAsync(body, remaining < _requestTimeout ? remaining : _requestTimeout, headersStatus, stop).ConfigureAwait(false);
+
+                // A 4xx counts the moment its headers arrive, before the body is read: shutdown can take the events while
+                // the body is still coming, and must then see that the server did not store them.
+                var carried = attempt;
+                void OnHeaders(int status)
+                {
+                    if (status is >= 400 and < 500)
+                    {
+                        foreach (var index in carried)
+                        {
+                            if (!state.IsSettled(index))
+                            {
+                                batch[index].OnNotStored();
+                            }
+                        }
+                    }
+                }
+
+                (response, responseBody, error) = await AttemptAsync(body, remaining < _requestTimeout ? remaining : _requestTimeout, headersStatus, OnHeaders, stop).ConfigureAwait(false);
             }
 
             // The status counts as soon as the headers arrived, even when the body could not be read afterwards.
@@ -423,12 +441,12 @@ internal sealed class BatchSender
         }
     }
 
-    private async Task<(HttpResponseMessage? Response, byte[]? Body, Exception? Error)> AttemptAsync(byte[] body, TimeSpan limit, StrongBox<int> headersStatus, CancellationToken stop)
+    private async Task<(HttpResponseMessage? Response, byte[]? Body, Exception? Error)> AttemptAsync(byte[] body, TimeSpan limit, StrongBox<int> headersStatus, Action<int> onHeaders, CancellationToken stop)
     {
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop);
 
         // Dispatch on the thread pool: a handler that blocks before returning its task cannot hold the deadline below.
-        var send = Task.Run(() => SendOnceAsync(body, headersStatus, cancellation.Token), CancellationToken.None);
+        var send = Task.Run(() => SendOnceAsync(body, headersStatus, onHeaders, cancellation.Token), CancellationToken.None);
         var first = await Task.WhenAny(send, Task.Delay(limit, stop)).ConfigureAwait(false);
         if (first != send)
         {
@@ -482,11 +500,12 @@ internal sealed class BatchSender
         }
     }
 
-    private async Task<(HttpResponseMessage Response, byte[] Body)> SendOnceAsync(byte[] body, StrongBox<int> headersStatus, CancellationToken cancellationToken)
+    private async Task<(HttpResponseMessage Response, byte[] Body)> SendOnceAsync(byte[] body, StrongBox<int> headersStatus, Action<int> onHeaders, CancellationToken cancellationToken)
     {
         using var request = CreateRequest(body);
         var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         Volatile.Write(ref headersStatus.Value, (int)response.StatusCode);
+        onHeaders((int)response.StatusCode);
         try
         {
             return (response, await ReadBodyAsync(response, MaxResponseBytes, cancellationToken).ConfigureAwait(false));

@@ -190,17 +190,19 @@ audit log. A request can reach the server and store the event while its answer i
 `MayBeStored` follows what happened on the wire, not the reason. These are the values each reason can have:
 
 An answer "says it was not stored" when it is a 4xx, 429 included. No answer (a network error or a timeout), a 5xx, a
-redirect, or a success that does not acknowledge the event leaves the outcome unknown, and once that has happened to an
-event it stays unknown.
+redirect, or a success that does not acknowledge the event leaves the outcome **unresolved**. Once a request carrying an
+event has had an unresolved outcome, a later "not stored" answer cannot clear it: the earlier request may have stored the
+event. Only a rejection about the event's own content settles it as not stored, because the earlier request would have
+met the same rejection.
 
 | `Reason` | Why | `MayBeStored` |
 | --- | --- | --- |
-| `Rejected` | The server rejected this event (see `Code` and `Detail`) | `false`, except `true` for `stored_event_unreadable` or `unverified_after_parse_failure` when an earlier request carrying it got no answer |
+| `Rejected` | The server rejected this event (see `Code` and `Detail`) | `false`, except `true` for `stored_event_unreadable` or `unverified_after_parse_failure` when an earlier request carrying it had an unresolved outcome |
 | `TooLarge` | The serialized event is larger than 256 KB | always `false` |
 | `Invalid` | The event could not be prepared, for example `BeforeSend` threw | always `false` |
-| `QueueFull` | Evicted from a full queue | `false` if it was never sent, or every answer said it was not stored; `true` if a request carrying it got no settling answer |
-| `HttpError` | A 4xx other than 429, or a redirect | `false` if every answer said it was not stored; `true` if an earlier request got no settling answer, or the final answer was a redirect |
-| `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if it was never sent, or every answer said it was not stored; `true` if it was in flight, or an earlier request got no settling answer |
+| `QueueFull` | Evicted from a full queue | `false` if it was never sent, or every answer said it was not stored; `true` if a request carrying it had an unresolved outcome |
+| `HttpError` | A 4xx other than 429, or a redirect | `false` if every answer said it was not stored; `true` if an earlier request had an unresolved outcome, or the final answer was a redirect |
+| `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if it was never sent, or every answer said it was not stored; `true` if it was in flight without a "not stored" answer, or an earlier request had an unresolved outcome |
 | `Unacknowledged` | A success response never acknowledged it | always `true` |
 
 **Resending is safe.** The server deduplicates by event id: the same event sent again (`DroppedEvent.Json`, byte for
@@ -209,12 +211,14 @@ not confirmed until it is acknowledged.
 
 **If your application must not lose events:**
 
-- Keep your own record of the event (an outbox row, see below) until its delivery is confirmed: it was acknowledged,
-  so it never reached `OnDrop` and a `FlushAsync` covering it returned `true`, or `LogbirdReadClient.GetAsync(id)`
-  found it.
-- When `MayBeStored` is `true`, resend the same bytes later. A lookup that finds the id confirms it. A lookup that
-  misses right after the drop proves nothing, because a write the server already accepted can still become visible
-  later. Resend rather than treat the event as lost.
+- Keep your own record of the event (an outbox row, see below) until you have confirmed that the server holds this
+  event: `LogbirdReadClient.GetAsync(id)` returns it, and its stored payload (`EventDetail.Payload`) matches your record.
+  The id alone is not enough, because a different event can be stored under the same id. Neither is a `FlushAsync`
+  that returned `true`: it means every event it covered was settled, and a settled event can be a rejection whose
+  `OnDrop` notification was skipped because the notification queue was full.
+- When `MayBeStored` is `true`, resend the same bytes later. A lookup that misses right after the drop proves nothing,
+  because a write the server already accepted can still become visible later. Resend rather than treat the event as
+  lost.
 - When it is `false`, the event is not stored. For `Rejected`, act on `Code`: fix the event, or for
   `duplicate_id_conflict` send a correction with a new id. For `TooLarge` and `Invalid`, fix the event. For
   `QueueFull`, `Shutdown` and `HttpError` (once the cause, such as the key, is fixed), resend it.

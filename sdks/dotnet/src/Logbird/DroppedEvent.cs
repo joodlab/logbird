@@ -82,8 +82,9 @@ public sealed class DroppedEvent
     /// Whether the server may have stored this event even though the SDK dropped it. True when the event was put on the
     /// wire at least once and no answer settled it: a request ended without an answer, or with a 5xx, or with a success
     /// that did not acknowledge it, or it was still in flight at shutdown. False when the event was never sent, or every
-    /// answer for it said it was not stored (<see cref="DropReason.Rejected"/>, <see cref="DropReason.TooLarge"/> and
-    /// <see cref="DropReason.Invalid"/> are always false). A "dropped" event is not necessarily absent: when this is true,
+    /// answer for it said it was not stored. <see cref="DropReason.TooLarge"/> and <see cref="DropReason.Invalid"/> are
+    /// always false; <see cref="DropReason.Rejected"/> is false too, except for the codes <c>stored_event_unreadable</c>
+    /// and <c>unverified_after_parse_failure</c>, which keep an earlier unresolved outcome. A "dropped" event is not necessarily absent: when this is true,
     /// resend <see cref="Json"/> (the server deduplicates by id) or look the id up before treating the event as lost.
     /// </summary>
     public bool MayBeStored { get; }
