@@ -438,11 +438,12 @@ public class Step4FollowUpTests
     }
 
     [Fact]
-    public async Task A_shallow_value_under_many_ancestors_outside_the_event_is_copied_and_sent_from_a_small_stack()
+    public async Task A_value_under_many_ancestors_outside_the_event_is_refused_before_anything_reads_it()
     {
         // The value attached to the event is small, but it sits under 100,000 levels of the caller's own tree, none with
-        // options. Asking it for its options would climb all of them; the copy never asks.
-        JsonNode outer = new JsonObject { ["value"] = new JsonObject { ["plan"] = "pro", ["seats"] = 3, ["tags"] = new JsonArray("a", true) } };
+        // options. System.Text.Json would climb all of them to look options up; the depth check counts them first (Parent
+        // reads only) and refuses the event as Invalid, on a 256 KB stack, before anything reads or copies the value.
+        JsonNode outer = new JsonObject { ["value"] = new JsonObject { ["plan"] = "pro", ["seats"] = 3 } };
         var value = outer["value"]!;
         for (var i = 0; i < 100_000; i++)
         {
@@ -458,7 +459,6 @@ public class Step4FollowUpTests
             {
                 try
                 {
-                    Assert.Equal(value.ToJsonString(), JsonTree.Clone(value)!.ToJsonString());
                     client.Track(new AuditEvent("subtree").Change("plan", null, value));
                 }
                 catch (Exception e)
@@ -472,9 +472,66 @@ public class Step4FollowUpTests
         Assert.Null(failure);
         Assert.True(await client.FlushAsync());
 
-        Assert.Empty(drops);
-        var sent = Assert.Single(server.Requests.SelectMany(r => r.Events));
-        Assert.Equal("pro", sent.GetProperty("changes")[0].GetProperty("after").GetProperty("plan").GetString());
+        Assert.Empty(server.Requests);
+        var drop = Assert.Single(drops);
+        Assert.Equal(DropReason.Invalid, drop.Reason);
+        Assert.Equal(LogbirdClient.DepthDetail, drop.Detail);
+    }
+
+    [Fact]
+    public void Parents_outside_the_event_count_toward_the_depth_limit_exactly()
+    {
+        // {"leaf":1} under k parents: the object is at level k + 1 and its leaf at k + 2, which may be at most 1,000.
+        static JsonNode Under(int parents)
+        {
+            JsonNode outer = new JsonObject { ["value"] = new JsonObject { ["leaf"] = 1 } };
+            var value = outer["value"]!;
+            for (var i = 1; i < parents; i++)
+            {
+                outer = new JsonObject { ["n"] = outer };
+            }
+
+            return value;
+        }
+
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(new AuditEvent("x").Change("f", null, Under(998)), long.MaxValue));
+        Assert.Equal(JsonSize.Shape.TooDeep, JsonSize.Measure(new AuditEvent("x").Change("f", null, Under(999)), long.MaxValue));
+        Assert.Equal(JsonSize.Shape.Ok, JsonSize.Measure(new AuditEvent("x").Change("f", null, Under(3)), long.MaxValue));
+    }
+
+    [Fact]
+    public void A_copy_keeps_a_case_insensitive_rule_when_the_first_key_is_the_Kelvin_sign()
+    {
+        // The Kelvin sign's lower case is a different key under the case-insensitive comparer, so it cannot tell the rule;
+        // the next key does, and a hook's case-insensitive removal still works on the copy.
+        var metadata = (JsonObject)JsonNode.Parse("{\"" + (char)0x212A + "\":1,\"InternalNote\":\"fictional\"}", CaseInsensitive)!;
+        var copy = (JsonObject)JsonTree.Clone(metadata)!;
+        Assert.True(copy.Remove("internalnote"));
+
+        var cloned = new AuditEvent("x") { Metadata = metadata }.Clone();
+        Assert.True(cloned.Metadata.Remove("internalnote"));
+    }
+
+    [Fact]
+    public void A_copy_keeps_a_custom_converters_representation()
+    {
+        var options = new JsonSerializerOptions { TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver() };
+        options.Converters.Add(new InvoiceNumberConverter());
+        var typeInfo = (System.Text.Json.Serialization.Metadata.JsonTypeInfo<int>)options.GetTypeInfo(typeof(int));
+        var auditEvent = new AuditEvent("x");
+        auditEvent.Metadata["invoice"] = JsonValue.Create(741, typeInfo);
+
+        Assert.Equal("\"invoice-741\"", auditEvent.Clone().Metadata["invoice"]!.ToJsonString());
+        Assert.Equal("\"invoice-741\"", JsonTree.Clone(auditEvent.Metadata)!["invoice"]!.ToJsonString());
+    }
+
+    private sealed class InvoiceNumberConverter : System.Text.Json.Serialization.JsonConverter<int>
+    {
+        public override int Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            => int.Parse(reader.GetString()!.Remove(0, "invoice-".Length), System.Globalization.CultureInfo.InvariantCulture);
+
+        public override void Write(Utf8JsonWriter writer, int value, JsonSerializerOptions options)
+            => writer.WriteStringValue("invoice-" + value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     [Fact]

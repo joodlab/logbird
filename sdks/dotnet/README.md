@@ -277,7 +277,8 @@ What the client's own methods guarantee:
   redaction replaces does not drop the event. Separately, data measuring more than 1 MiB before redaction is refused
   before anything copies it (a memory guard; it counts one byte per character of text, plus punctuation and parsed
   numbers' digits, so it never refuses JSON smaller than that). Metadata and each change value may nest up to 1,000
-  levels, checked on the event as given: a deep part that `BeforeSend` or redaction would remove still counts, because
+  levels (a value that is part of a larger tree of yours also counts the parents it has there, which System.Text.Json
+  walks through), checked on the event as given: a deep part that `BeforeSend` or redaction would remove still counts, because
   walking it is the risk. The SDK walks them without recursion, and that depth is tested on a 256 KB thread stack. The
   number is the server's limit for exact numbers, which the server applies to the objects and arrays of the whole event,
   and only when the event holds, anywhere, a number a double cannot keep exactly. So a deeper tree in an event without

@@ -20,7 +20,8 @@ internal static class JsonSize
 {
     /// <summary>
     /// Levels allowed inside metadata and each change value (a non-null member deeper than this is refused), checked on the
-    /// caller's data before anything copies it. Every SDK step that walks the data (measuring, copying, redaction, writing)
+    /// caller's data before anything copies it. A value that is part of a larger tree of the caller's also counts the
+    /// parents it has there. Every SDK step that walks the data (measuring, copying, redaction, writing)
     /// is iterative; what still recurses per level is inside System.Text.Json (a node looks its options up through its
     /// parents), which this limit keeps well inside a 256 KB thread stack (tested). The number is the server's
     /// EXACT_NUMBER_MAX_DEPTH, which the server applies to the whole event and only when it holds a number a double cannot
@@ -155,6 +156,18 @@ internal static class JsonSize
             return Shape.Ok;
         }
 
+        // A value that is part of a larger tree of the caller's counts the parents it has there: System.Text.Json walks
+        // through them, recursively, whenever it looks a node's options up. Reading Parent is a field read, so they are
+        // counted without that walk, and a value too deep to read is refused before anything reads it.
+        var outside = 0;
+        for (var parent = root.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (++outside >= max)
+            {
+                return Shape.TooDeep;
+            }
+        }
+
         if (root is not (JsonObject or JsonArray))
         {
             size += LeafBytes(root);
@@ -163,7 +176,7 @@ internal static class JsonSize
 
         var frames = new Frame[16];
         var open = 0;
-        size += Open(root, 1, ref frames, ref open);
+        size += Open(root, 1 + outside, ref frames, ref open);
         if (size > maxBytes)
         {
             // An empty root is counted whole and opens no level, so the loop below would not check it.

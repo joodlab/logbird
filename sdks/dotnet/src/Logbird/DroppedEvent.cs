@@ -38,7 +38,8 @@ public enum DropReason
 
     /// <summary>
     /// The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw, or its metadata
-    /// or a change value nests JSON deeper than 1,000 levels, checked on the event as given (before
+    /// or a change value nests JSON deeper than 1,000 levels (a value that is part of a larger tree of yours also counts
+    /// the parents it has there), checked on the event as given (before
     /// <see cref="LogbirdOptions.BeforeSend"/> and redaction: a deep part they would remove still counts, because walking it
     /// is the risk). The limit keeps System.Text.Json's internal recursion (a node looks its options up through its parents)
     /// within the stack, where an overflow would end the host process; it is tested on a 256 KB thread stack. It is the

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Logbird.Internal;
@@ -11,11 +10,12 @@ namespace Logbird.Internal;
 /// copied on any thread.
 /// </summary>
 /// <remarks>
-/// It never asks a source node for its <see cref="JsonNode.Options"/> (except a root with no parent): a node without its own
-/// options looks them up through its parents, recursively and without caching when none has any, and those parents can
-/// lie outside the event, beyond any limit the SDK checks. Instead, each copied object gets the case rule its source
-/// dictionary actually follows, read from the dictionary itself, and every copied node gets explicit options, so filling
-/// the copy never looks up through its own parents either.
+/// Each copied object gets the case rule its source dictionary actually follows, read from the dictionary itself (not from
+/// inherited options, which can differ for an object filled before it was attached), and every copied container gets
+/// explicit options, so filling the copy never looks options up through its own parents. Leaves are copied with their own
+/// <see cref="JsonNode.DeepClone"/>, which keeps a custom converter's representation; System.Text.Json looks their
+/// options up through the source's parents, which <see cref="JsonSize"/> has counted, outside parents included, before
+/// anything copies the event.
 /// </remarks>
 internal static class JsonTree
 {
@@ -71,8 +71,6 @@ internal static class JsonTree
                 var array = new JsonArray(inherited);
                 pending.Push((node, array, inherited));
                 return array;
-            case JsonValue value:
-                return Leaf(value, inherited);
             default:
                 return node.DeepClone();
         }
@@ -89,11 +87,13 @@ internal static class JsonTree
         foreach (var pair in source)
         {
             var key = pair.Key;
+            // Only a variant the case-insensitive comparer itself treats as the same key can tell (the Kelvin sign's
+            // lower case, for one, is a different key under it).
             var variant = key.ToUpperInvariant();
-            if (string.Equals(variant, key, StringComparison.Ordinal))
+            if (string.Equals(variant, key, StringComparison.Ordinal) || !string.Equals(variant, key, StringComparison.OrdinalIgnoreCase))
             {
                 variant = key.ToLowerInvariant();
-                if (string.Equals(variant, key, StringComparison.Ordinal))
+                if (string.Equals(variant, key, StringComparison.Ordinal) || !string.Equals(variant, key, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -120,105 +120,5 @@ internal static class JsonTree
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// A copy of a leaf with explicit options. <see cref="JsonNode.DeepClone"/> would look the options up through the
-    /// source's parents; it is used only for a value of a type not listed here.
-    /// </summary>
-    private static JsonNode? Leaf(JsonValue value, JsonNodeOptions options)
-    {
-        // Parsed JSON first, then exact types; integers before floating point, so no value is ever read as a wider type.
-        if (value.TryGetValue<JsonElement>(out var element))
-        {
-            return JsonValue.Create(element.Clone(), options);
-        }
-
-        if (value.TryGetValue<string>(out var text))
-        {
-            return JsonValue.Create(text, options);
-        }
-
-        if (value.TryGetValue<bool>(out var flag))
-        {
-            return JsonValue.Create(flag, options);
-        }
-
-        if (value.TryGetValue<int>(out var int32))
-        {
-            return JsonValue.Create(int32, options);
-        }
-
-        if (value.TryGetValue<long>(out var int64))
-        {
-            return JsonValue.Create(int64, options);
-        }
-
-        if (value.TryGetValue<ulong>(out var uint64))
-        {
-            return JsonValue.Create(uint64, options);
-        }
-
-        if (value.TryGetValue<uint>(out var uint32))
-        {
-            return JsonValue.Create(uint32, options);
-        }
-
-        if (value.TryGetValue<short>(out var int16))
-        {
-            return JsonValue.Create(int16, options);
-        }
-
-        if (value.TryGetValue<ushort>(out var uint16))
-        {
-            return JsonValue.Create(uint16, options);
-        }
-
-        if (value.TryGetValue<byte>(out var uint8))
-        {
-            return JsonValue.Create(uint8, options);
-        }
-
-        if (value.TryGetValue<sbyte>(out var int8))
-        {
-            return JsonValue.Create(int8, options);
-        }
-
-        if (value.TryGetValue<decimal>(out var money))
-        {
-            return JsonValue.Create(money, options);
-        }
-
-        if (value.TryGetValue<double>(out var number))
-        {
-            return JsonValue.Create(number, options);
-        }
-
-        if (value.TryGetValue<float>(out var single))
-        {
-            return JsonValue.Create(single, options);
-        }
-
-        if (value.TryGetValue<char>(out var character))
-        {
-            return JsonValue.Create(character, options);
-        }
-
-        if (value.TryGetValue<Guid>(out var guid))
-        {
-            return JsonValue.Create(guid, options);
-        }
-
-        if (value.TryGetValue<DateTime>(out var dateTime))
-        {
-            return JsonValue.Create(dateTime, options);
-        }
-
-        if (value.TryGetValue<DateTimeOffset>(out var dateTimeOffset))
-        {
-            return JsonValue.Create(dateTimeOffset, options);
-        }
-
-        return value.DeepClone();
     }
 }
