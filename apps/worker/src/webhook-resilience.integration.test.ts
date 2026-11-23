@@ -61,11 +61,11 @@ async function endpoint(path: string, enabled = true, filterQuery = '') {
   });
 }
 
-async function storeEvents(ids: string[], receivedAt = new Date(Date.now() - 45_000), action = 'qa.webhook') {
+async function storeEvents(ids: string[], receivedAt = new Date(Date.now() - 45_000), action = 'qa.webhook', occurredAt?: Date) {
   await insertEvents(
     ch,
     ids.map((id) => {
-      const normalized = normalizeEvent({ action, id }, { projectId, receivedAt });
+      const normalized = normalizeEvent({ action, id, ...(occurredAt && { occurredAt: occurredAt.toISOString() }) }, { projectId, receivedAt });
       if (!normalized.ok) throw new Error(normalized.reason);
       return normalized.row;
     }),
@@ -298,7 +298,8 @@ it('keeps scan time monotonic and delivers relative-time matches once on a worke
   const queuedIds = async () =>
     (await prisma.webhookDelivery.findMany({ where: { endpointId: hook.id }, orderBy: { eventId: 'asc' } })).map((d) => d.eventId);
   await prisma.webhookEndpoint.update({ where, data: { createdAt: from, cursorReceivedAt: from } });
-  await storeEvents(['qa-outside-window'], from, action);
+  // In a webhook filter, now is each event's arrival time: this event occurred ten minutes before it arrived.
+  await storeEvents(['qa-outside-window'], from, action, new Date(+from - 10 * 60_000));
   await storeEvents(['qa-before-failure'], new Date(+from + 4 * 60_000), action);
   await storeEvents(['qa-after-failure'], new Date(+from + 6 * 60_000), action);
   const clock = { now, rollout: new Date(+from - 1) };
