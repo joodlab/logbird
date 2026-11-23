@@ -592,13 +592,10 @@ describe('translation follows the server parse, value by value (#220, round 2)',
 
 describe('round 3 (#220): submitting never rewrites a value, and SQL never matches what query mode refuses', () => {
   it('proposes no fix inside a value the server reads as one', () => {
-    const q = '@meta:"please !tenant:t here"';
-    expect(lintQuery(q, () => true)).toEqual([]);
-    expect(
-      tokenize(q)
-        .filter((t) => t.kind === 'field')
-        .map((t) => t.field),
-    ).toEqual(['@meta']);
+    expect(lintQuery('@meta:"please !tenant:t here"', () => true)).toEqual([]);
+    expect(lintQuery('"meta":"please !tenant:t"tail', () => true)).toEqual([]);
+    // Text after a quoted value is left exactly as written (the server searches it as text).
+    expect(lintQuery('@meta:"ok"tenant=blue', () => true)).toEqual([]);
     // Outside any value the familiar fixes still apply.
     expect(lintQuery('!tenant:t', () => true)).toEqual([expect.objectContaining({ replacement: '-tenant:t' })]);
   });

@@ -42,9 +42,9 @@ export interface QueryToken {
   keyEnd?: number;
 }
 
-const KEY_RE = /^(-?)([A-Za-z_@][\w.$@-]*)\s*:/;
+const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
 /** A field name that needs no quotes: the keys `KEY_RE` reads. */
-const BARE_KEY = /^[A-Za-z_@][\w.$@-]*$/;
+const BARE_KEY = /^[A-Za-z_][\w.$@-]*$/;
 /** A quoted field name, as the server reads one: `"attr.ticket status":open`. */
 const QUOTED_KEY_RE = /^(-?)("(?:[^"\\]|\\[\s\S])*")\s*:/;
 /**

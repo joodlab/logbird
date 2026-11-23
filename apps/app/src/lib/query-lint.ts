@@ -41,9 +41,10 @@ function rewrite(field: string, op: string, value: string, negated: boolean): { 
  * only then is `word = value` read as a comparison rather than free text.
  */
 export function lintQuery(q: string, isField: (name: string) => boolean): QueryFix[] {
-  // Never inside a value the server reads as one: text in `@meta:"please !tenant:t here"` is data, not syntax to fix.
+  // Never from inside a value the server reads as one: text in `@meta:"please !tenant:t here"` is data, not syntax to
+  // fix, even when the proposed span runs on past the value's end (`"meta":"please !tenant:t"tail`).
   const values = serverValueSpans(q);
-  return lintTokens(q, isField).filter((f) => !values.some((v) => f.start >= v.start && f.end <= v.end));
+  return lintTokens(q, isField).filter((f) => !values.some((v) => f.start >= v.start && f.start < v.end));
 }
 
 /** Where the server's parse has field values (none when it does not parse: then every fix is a candidate). */
