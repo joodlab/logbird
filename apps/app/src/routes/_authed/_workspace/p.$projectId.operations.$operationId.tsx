@@ -13,12 +13,12 @@ import { z } from 'zod';
 import { ActionName } from '@/components/action-name';
 import { EntityLink } from '@/components/entity-link';
 import { EventSheet } from '@/components/explorer/event-sheet';
-import { NotRecorded } from '@/components/not-recorded';
+import { NotRecorded, UnlinkedParty } from '@/components/not-recorded';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { operationQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
-import { eventSentence } from '@/lib/events';
+import { distinctParties, eventSentence } from '@/lib/events';
 import { formatDuration, formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { formatTerm } from '@/lib/query-language';
@@ -106,8 +106,8 @@ function OperationPage() {
   const spanRange = times.length ? absoluteRange(t0, t1 + 1) : undefined;
   const titleEvent = nodes[0]?.event ?? unplaced[0];
   const failures = events.filter((e) => e.outcome === 'failure' || e.outcome === 'denied').length;
-  const executors = [...new Map(events.filter((e) => e.executor?.id).map((e) => [e.executor?.id, e.executor])).values()];
-  const actors = [...new Map(events.filter((e) => e.actor).map((e) => [e.actor?.id, e.actor])).values()];
+  const executors = distinctParties(events.map((e) => e.executor));
+  const actors = distinctParties(events.map((e) => e.actor));
   const selectedId = search.ev;
   // The drawer steps through the tree, then any events the tree could not place.
   const ordered = [...nodes.map((n) => n.event), ...unplaced];
@@ -224,14 +224,24 @@ function OperationPage() {
             {actors.length === 0 ? <NotRecorded /> : null}
             {actors
               .slice(0, 4)
-              .map((a) => (a ? <EntityLink id={a.id} key={a.id} kind="actor" name={a.name} projectId={projectId} type={a.type} /> : null))}
+              .map((a) =>
+                a.id ? (
+                  <EntityLink id={a.id} key={`id:${a.id}`} kind="actor" name={a.name} projectId={projectId} type={a.type} />
+                ) : (
+                  <UnlinkedParty key={`anon:${a.type}:${a.name}`} party={a} />
+                ),
+              )}
             {actors.length > 4 ? <span className="text-muted-foreground text-xs">and {formatNumber(actors.length - 4)} more</span> : null}
           </span>
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">Performed by</span>
             {executors.length === 0 ? <NotRecorded /> : null}
             {executors.map((x) =>
-              x ? <EntityLink id={x.id} key={x.id} kind="executor" meta={x.type} name={x.name} projectId={projectId} type={x.type} /> : null,
+              x.id ? (
+                <EntityLink id={x.id} key={`id:${x.id}`} kind="executor" meta={x.type} name={x.name} projectId={projectId} type={x.type} />
+              ) : (
+                <UnlinkedParty key={`anon:${x.type}:${x.name}`} party={x} />
+              ),
             )}
           </span>
         </div>

@@ -4,9 +4,14 @@
  * end in RTL, so callers convert with `logicalScroll` / `physicalScroll` and never compare raw offsets.
  */
 
-/** The strip's scroll position as a distance from its inline start (≥ 0 in both directions). */
-export function logicalScroll(scrollLeft: number): number {
-  return Math.abs(scrollLeft);
+/**
+ * The strip's scroll position as a distance from its inline start, clamped to the scrollable range `[0, max]`. The sign
+ * is read by direction (positive towards the end in LTR, negative in RTL), so an elastic overscroll past either end (a
+ * Safari bounce reporting -20 at an LTR start) clamps to that end instead of reading as a scroll towards the other.
+ */
+export function logicalScroll(scrollLeft: number, rtl: boolean, max: number): number {
+  const logical = rtl ? -scrollLeft : scrollLeft;
+  return Math.min(Math.max(0, max), Math.max(0, logical));
 }
 
 /** The `scrollLeft` value for a logical scroll position. */

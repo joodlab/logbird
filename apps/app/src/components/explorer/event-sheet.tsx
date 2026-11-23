@@ -49,6 +49,7 @@ import {
   parentActor,
   personLabel,
   roundsLargeNumbers,
+  unlinkedPartyLabel,
 } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
 import { andQuery, formatTerm } from '@/lib/query-language';
@@ -622,14 +623,16 @@ function EventDetailBody({
             <PartyCard hint={e.impersonator ? 'whose account' : 'who caused it'} icon={<UserIcon className="size-3" />} label="Actor">
               {e.actor ? (
                 <div className="flex min-w-0 flex-col gap-1">
-                  {projectId ? (
+                  {!e.actor.id ? (
+                    <PartyWithoutId party={e.actor} />
+                  ) : projectId ? (
                     <EntityLink id={e.actor.id} kind="actor" name={e.actor.name} projectId={projectId} type={e.actor.type} />
                   ) : (
                     <span className="truncate text-sm">{personLabel(e.actor)}</span>
                   )}
                   <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
                     <TypePill>{e.actor.type || 'unknown'}</TypePill>
-                    <span className="truncate font-mono">{e.actor.id}</span>
+                    {e.actor.id ? <span className="truncate font-mono">{e.actor.id}</span> : null}
                   </span>
                   {e.actor.email ? <span className="truncate text-muted-foreground text-xs">{e.actor.email}</span> : null}
                 </div>
@@ -638,9 +641,11 @@ function EventDetailBody({
               )}
             </PartyCard>
             <PartyCard hint="who performed it" icon={<CogIcon className="size-3" />} label="Executor">
-              {e.executor?.id ? (
+              {e.executor ? (
                 <div className="flex min-w-0 flex-col gap-1">
-                  {projectId ? (
+                  {!e.executor.id ? (
+                    <PartyWithoutId party={e.executor} />
+                  ) : projectId ? (
                     <EntityLink
                       id={e.executor.id}
                       kind="executor"
@@ -878,5 +883,17 @@ function EventDetailBody({
         </Collapsible>
       </div>
     </div>
+  );
+}
+
+/** The drawer's first line for a party recorded without an id: its name or email as plain text; the type pill below says what it is. */
+function PartyWithoutId({ party }: { party: { name?: string; email?: string } }) {
+  const label = unlinkedPartyLabel(party);
+  return label ? (
+    <bdi className="truncate text-sm" title="Recorded without an ID">
+      {label}
+    </bdi>
+  ) : (
+    <span className="text-muted-foreground text-sm">No ID recorded</span>
   );
 }

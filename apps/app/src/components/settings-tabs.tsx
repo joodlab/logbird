@@ -9,9 +9,14 @@ const FADE = 28;
 /**
  * Scroll only the strip (scrollIntoView would also scroll the page): bring `tab` fully into view, clear of the fades.
  */
-function revealTab(nav: HTMLElement, tab: HTMLElement) {
+/** The strip's direction and scroll position from its inline start, clamped to what it can scroll. */
+function stripScroll(nav: HTMLElement): { rtl: boolean; scroll: number } {
   const rtl = getComputedStyle(nav).direction === 'rtl';
-  const scroll = logicalScroll(nav.scrollLeft);
+  return { rtl, scroll: logicalScroll(nav.scrollLeft, rtl, nav.scrollWidth - nav.clientWidth) };
+}
+
+function revealTab(nav: HTMLElement, tab: HTMLElement) {
+  const { rtl, scroll } = stripScroll(nav);
   const span = logicalTabSpan(nav.getBoundingClientRect(), tab.getBoundingClientRect(), scroll, rtl);
   const target = revealScroll(span, { scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
   if (target !== null) nav.scrollLeft = physicalScroll(target, rtl);
@@ -28,8 +33,8 @@ export function useTabStrip(activeKey: string) {
     const nav = ref.current;
     if (!nav) return;
     const update = () => {
-      const rtl = getComputedStyle(nav).direction === 'rtl';
-      const edges = stripFades({ scroll: logicalScroll(nav.scrollLeft), width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
+      const { rtl, scroll } = stripScroll(nav);
+      const edges = stripFades({ scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
       setState((prev) => (prev.start === edges.start && prev.end === edges.end && prev.rtl === rtl ? prev : { ...edges, rtl }));
     };
     update();
@@ -39,8 +44,17 @@ export function useTabStrip(activeKey: string) {
       if (event.target instanceof HTMLElement && event.target !== nav) revealTab(nav, event.target);
     };
     nav.addEventListener('focusin', onFocusIn);
-    const observer = new ResizeObserver(update);
+    // Geometry changed (the viewport narrowed, a web font swapped in and widened the tabs): refresh the fades and bring the
+    // focused tab, else the current one, back into view. Observing the tabs too catches a width change the nav box hides.
+    // Scrolling by hand only refreshes the fades, so the strip still pans freely.
+    const observer = new ResizeObserver(() => {
+      update();
+      const focused = nav.contains(document.activeElement) && document.activeElement !== nav ? document.activeElement : null;
+      const target = (focused as HTMLElement | null) ?? nav.querySelector<HTMLElement>('[aria-current="page"]');
+      if (target) revealTab(nav, target);
+    });
     observer.observe(nav);
+    for (const tab of nav.children) observer.observe(tab);
     return () => {
       nav.removeEventListener('scroll', update);
       nav.removeEventListener('focusin', onFocusIn);

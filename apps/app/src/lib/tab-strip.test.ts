@@ -9,8 +9,8 @@ const FADE = 28;
 
 describe('tab strip geometry', () => {
   it('converts scrollLeft to a distance from the inline start and back, in both directions', () => {
-    expect(logicalScroll(120)).toBe(120);
-    expect(logicalScroll(-120)).toBe(120);
+    expect(logicalScroll(120, false, 242)).toBe(120);
+    expect(logicalScroll(-120, true, 242)).toBe(120);
     expect(physicalScroll(120, false)).toBe(120);
     expect(physicalScroll(120, true)).toBe(-120);
   });
@@ -49,5 +49,21 @@ describe('tab strip geometry', () => {
     // A pixel of rounding is not a hidden tab.
     expect(stripFades({ scroll: 0, width: 358, scrollWidth: 359 }, FADE)).toEqual({ start: 0, end: 0 });
     expect(stripMask({ start: 0, end: 3 }, false)).toBe('linear-gradient(to right, #000, #000 0px, #000 calc(100% - 3px), transparent)');
+  });
+
+  it('clamps an elastic overscroll to the end it went past, in both directions', () => {
+    // 3px of overflow: 361px of tabs in a 358px strip.
+    const max = 3;
+    // LTR: a bounce past the start reports a negative offset, past the end more than the maximum.
+    expect(logicalScroll(-20, false, max)).toBe(0);
+    expect(logicalScroll(23, false, max)).toBe(max);
+    // RTL: the start is 0 and the end negative, so a bounce past the start is positive.
+    expect(logicalScroll(20, true, max)).toBe(0);
+    expect(logicalScroll(-23, true, max)).toBe(max);
+    // So the fades stay where the hidden pixels are: none at the start, the 3px at the end.
+    expect(stripFades({ scroll: logicalScroll(-20, false, max), width: 358, scrollWidth: 361 }, FADE)).toEqual({ start: 0, end: 3 });
+    expect(stripFades({ scroll: logicalScroll(-23, true, max), width: 358, scrollWidth: 361 }, FADE)).toEqual({ start: 3, end: 0 });
+    // Nothing to scroll: always 0.
+    expect(logicalScroll(5, false, 0)).toBe(0);
   });
 });

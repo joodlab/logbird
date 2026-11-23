@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { actorLabel, causedCount, directChildren, eventSentence, humanizeNoun } from './events';
+import { actorLabel, causedCount, directChildren, distinctParties, eventSentence, humanizeNoun, unlinkedPartyLabel } from './events';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -246,5 +246,32 @@ describe('directChildren de-duplication', () => {
     expect(directChildren([child('2026-11-05T10:00:02.000Z'), child('2026-11-05T10:00:01.000Z')], 'root').map((e) => e.timestamp)).toEqual([
       '2026-11-05T10:00:01.000Z',
     ]);
+  });
+});
+
+describe('distinctParties', () => {
+  const p = (id: string, type = 'user', name = '') => ({ id, type, name });
+  it('keeps each id once, in first-seen order, and skips events that recorded no party', () => {
+    expect(distinctParties([p('u1'), null, p('u2'), p('u1'), undefined, p('', '', '')])).toEqual([p('u1'), p('u2')]);
+  });
+  it('never collapses two different parties recorded without an id', () => {
+    const parties = distinctParties([p('', 'worker', 'Billing worker'), p('', 'worker', 'Mailer'), p('', 'user'), p('', 'worker', 'Mailer')]);
+    expect(parties).toEqual([p('', 'worker', 'Billing worker'), p('', 'worker', 'Mailer'), p('', 'user')]);
+  });
+  it('counts five distinct actors as five, so "and 1 more" follows the first four', () => {
+    const five = distinctParties([p('a'), p('b'), p('', 'user', 'Lina'), p('c'), p('', 'user', 'Omar'), p('a')]);
+    expect(five).toHaveLength(5);
+    expect(distinctParties([p('a'), p('b'), p('c'), p('d'), p('d')])).toHaveLength(4);
+  });
+  it('is empty while there are no events yet', () => {
+    expect(distinctParties([])).toEqual([]);
+  });
+});
+
+describe('unlinkedPartyLabel', () => {
+  it('reads the name, else the email, else nothing', () => {
+    expect(unlinkedPartyLabel({ name: ' Billing worker ' })).toBe('Billing worker');
+    expect(unlinkedPartyLabel({ name: '', email: 'lina@example.test' })).toBe('lina@example.test');
+    expect(unlinkedPartyLabel({ name: '' })).toBe('');
   });
 });

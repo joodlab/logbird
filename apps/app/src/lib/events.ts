@@ -246,3 +246,25 @@ export function directChildren(events: readonly AuditEvent[], eventId: string): 
 export function causedCount(detail: { childCount: number }, e: Pick<AuditEvent, 'id' | 'context'>): number {
   return Math.max(0, detail.childCount - (e.context.parentEventId === e.id ? 1 : 0));
 }
+
+type Party = { id: string; type: string; name: string };
+
+/**
+ * Who an operation's events name as a party (actors, or executors), each once and in first-seen order. A party with an
+ * id is the same party wherever it appears; one recorded without an id (a type, a name, or both) is told apart by those,
+ * so two different id-less parties never collapse into one. Events that recorded nothing for the party add nothing.
+ */
+export function distinctParties<P extends Party>(parties: readonly (P | null | undefined)[]): P[] {
+  const byKey = new Map<string, P>();
+  for (const p of parties) {
+    if (!p || !(p.id || p.type || p.name)) continue;
+    const key = p.id ? `id\u0000${p.id}` : `anon\u0000${p.type}\u0000${p.name}`;
+    if (!byKey.has(key)) byKey.set(key, p);
+  }
+  return [...byKey.values()];
+}
+
+/** A party recorded without an id has no profile to link to: its name, else its email, else empty (callers show the type). */
+export function unlinkedPartyLabel(p: { name?: string; email?: string }): string {
+  return p.name?.trim() || p.email?.trim() || '';
+}
