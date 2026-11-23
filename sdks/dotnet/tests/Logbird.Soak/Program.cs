@@ -18,15 +18,15 @@ namespace Logbird.Soak;
 /// </summary>
 internal static class Program
 {
-    /// <summary>Drop reasons the documentation lists (docs/sdk-dotnet.md and sdks/dotnet/README.md), by the DropReason name.</summary>
-    private static readonly HashSet<DropReason> Documented =
+    /// <summary>Drop reasons the documentation lists (docs/sdk-dotnet.md and sdks/dotnet/README.md).</summary>
+    internal static readonly HashSet<DropReason> Documented =
     [
         DropReason.QueueFull, DropReason.Rejected, DropReason.HttpError, DropReason.TooLarge, DropReason.Shutdown,
         DropReason.Invalid, DropReason.InvalidEntityId, DropReason.Unacknowledged,
     ];
 
     /// <summary>Drops the documentation calls "not confirmed": the server may already have stored the event.</summary>
-    private static readonly HashSet<DropReason> Unconfirmed = [DropReason.HttpError, DropReason.Unacknowledged, DropReason.Shutdown];
+    internal static readonly HashSet<DropReason> Unconfirmed = [DropReason.HttpError, DropReason.Unacknowledged, DropReason.Shutdown];
 
     private static async Task<int> Main(string[] args)
     {
@@ -43,86 +43,152 @@ internal static class Program
         }
 
         Directory.CreateDirectory(options.ReportDirectory);
-        var run = new SoakRun(options);
-        var report = await run.ExecuteAsync().ConfigureAwait(false);
-        File.WriteAllText(Path.Combine(options.ReportDirectory, "report.json"), report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        var reportPath = Path.Combine(options.ReportDirectory, "report.json");
+
+        // A watchdog independent of everything the run awaits: if the run has not finished well after its duration (a
+        // hung flush, disposal or read-back), it still leaves a failing report and exits red before the CI job times out.
+        var watchdog = new Timer(_ =>
+        {
+            File.WriteAllText(reportPath, new JsonObject
+            {
+                ["checks"] = new JsonArray(new JsonObject { ["name"] = "the run finished", ["passed"] = false, ["detail"] = "still running 15 minutes after its duration; see metrics.csv" }),
+            }.ToJsonString());
+            Console.Error.WriteLine("soak: FAILED: the run did not finish 15 minutes after its duration");
+            Environment.Exit(1);
+        }, null, options.Duration + TimeSpan.FromMinutes(15), Timeout.InfiniteTimeSpan);
+
+        var report = await new SoakRun(options).ExecuteAsync().ConfigureAwait(false);
+        watchdog.Dispose();
+        File.WriteAllText(reportPath, report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         var failed = report["checks"]!.AsArray().Where(c => !c!["passed"]!.GetValue<bool>()).Select(c => c!["name"]!.GetValue<string>()).ToArray();
         Console.WriteLine(failed.Length == 0 ? "soak: every check passed" : "soak: FAILED: " + string.Join(", ", failed));
         return failed.Length == 0 ? 0 : 1;
     }
 
-    private sealed class SoakRun(SoakOptions options)
+    internal static string Runtime() => System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription.Trim() + " on " + System.Runtime.InteropServices.RuntimeInformation.OSDescription.Trim();
+
+    internal static JsonObject Check(string name, bool passed, string detail)
     {
-        private readonly ConcurrentDictionary<Guid, byte> _tracked = new();
-        private readonly ConcurrentDictionary<Guid, DropReason> _dropped = new();
-        private readonly ConcurrentDictionary<DropReason, long> _dropReasons = new();
-        private readonly ConcurrentDictionary<string, long> _errors = new();
-        private readonly LatencyHistogram _trackLatency = new();
-        private readonly List<ResourceSample> _samples = [];
-        private readonly List<double> _flushSeconds = [];
-        private readonly List<LogbirdStats> _finishedStats = [];
-        private readonly string _runId = Guid.NewGuid().ToString("N").Substring(0, 12);
-        private long _doubleDrops;
-        private long _droppedWithoutId;
-        private long _trackThrew;
-        private long _flushesStuck;
-        private long _restarts;
-        private LogbirdClient? _client;
+        Console.WriteLine((passed ? "  ok   " : "  FAIL ") + name + ": " + detail);
+        return new JsonObject { ["name"] = name, ["passed"] = passed, ["detail"] = detail };
+    }
 
-        public async Task<JsonObject> ExecuteAsync()
+    internal static async Task<T?> WithinAsync<T>(Task<T> task, TimeSpan limit)
+        where T : struct
+        => await Task.WhenAny(task, Task.Delay(limit)).ConfigureAwait(false) == task ? await task.ConfigureAwait(false) : null;
+}
+
+internal sealed class SoakRun(SoakOptions options)
+{
+    private readonly LongMap _tracked = new(options.ExpectedEvents);
+    private readonly LongMap _dropped = new(options.ExpectedEvents / 4);
+    private readonly ConcurrentDictionary<DropReason, long> _dropReasons = new();
+    private readonly ConcurrentDictionary<string, long> _errors = new(StringComparer.Ordinal);
+    private readonly LatencyHistogram _trackLatency = new();
+    private readonly List<ResourceSample> _samples = [];
+    private readonly List<double> _flushSeconds = [];
+    private readonly List<LogbirdClient> _clients = [];
+    private readonly string _runId = Guid.NewGuid().ToString("N").Substring(0, 12);
+    private long _doubleDrops;
+    private long _droppedWithoutId;
+    private long _trackThrew;
+    private long _flushesFailed;
+    private long _restarts;
+    private long _queueHighWater;
+    private LogbirdClient? _client;
+    private double _loadSeconds;
+
+    public async Task<JsonObject> ExecuteAsync()
+    {
+        var weights = options.Upstream is null ? options.Faults : options.Faults.Where(f => f.Key != Fault.Reject).ToDictionary(f => f.Key, f => f.Value);
+        var samples = new Samples(weights, options.Upstream is null ? "stand-in" : "upstream");
+        using var standIn = new StandIn(weights, options.Seed, options.RequestTimeout + TimeSpan.FromSeconds(3), options.IngestKey, samples, options.Upstream, options.ExpectedEvents);
+        standIn.Start();
+        Console.WriteLine($"soak {_runId}: {options.Duration} at {options.Rate} events/s on {Program.Runtime()}, {(options.Upstream is null ? "stand-in" : "proxy to " + options.Upstream)} at {standIn.Endpoint}");
+        var started = DateTimeOffset.UtcNow;
+
+        using var clickHouse = options.Upstream is null ? null : new ClickHouseCheck(options.ClickHouseUrl!, options.ClickHouseUser!, options.ClickHousePassword!, options.ClickHouseDatabase!, options.ProjectId!);
+        var preflight = new JsonArray();
+        if (options.Upstream is not null && !await PreflightAsync(clickHouse!, started, preflight).ConfigureAwait(false))
         {
-            var samples = new Samples();
-            var weights = options.Upstream is null ? options.Faults : options.Faults.Where(f => f.Key != Fault.Reject).ToDictionary(f => f.Key, f => f.Value);
-            using var standIn = new StandIn(weights, options.Seed, options.RequestTimeout + TimeSpan.FromSeconds(3), samples, options.Upstream);
-            standIn.Start();
-            Console.WriteLine($"soak {_runId}: {options.Duration} at {options.Rate} events/s on {Runtime()}, {(options.Upstream is null ? "stand-in" : "proxy to " + options.Upstream)} at {standIn.Endpoint}");
-
-            var started = DateTimeOffset.UtcNow;
-            var clock = Stopwatch.StartNew();
-            using var stop = new CancellationTokenSource(options.Duration);
-            _client = NewClient(standIn.Endpoint);
-            using var csv = new StreamWriter(Path.Combine(options.ReportDirectory, "metrics.csv"));
-            csv.WriteLine("seconds,tracked,delivered,rejected,dropped,queue,heap_mb,working_set_mb,handles,threads,restarts");
-
-            var producers = Enumerable.Range(0, options.Producers).Select(p => Task.Run(() => ProduceAsync(p, stop.Token))).ToArray();
-            var sampler = Task.Run(() => SampleAsync(csv, clock, stop.Token));
-            var restarter = Task.Run(() => RestartAsync(standIn.Endpoint, stop.Token));
-            var flusher = Task.Run(() => FlushAsync(stop.Token));
-            await Task.WhenAll(producers).ConfigureAwait(false);
-            await Task.WhenAll(sampler, restarter, flusher).ConfigureAwait(false);
-
-            // Drain: no more faults, then a final flush and shutdown must settle everything.
-            standIn.Healthy = true;
-            var final = _client!;
-            var drain = Stopwatch.StartNew();
-            using var drainLimit = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-            bool drained;
-            try
-            {
-                drained = await final.FlushAsync(drainLimit.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                drained = false;
-            }
-
-            var drainSeconds = drain.Elapsed.TotalSeconds;
-            await final.DisposeAsync().ConfigureAwait(false);
-            lock (_finishedStats)
-            {
-                _finishedStats.Add(final.Stats);
-            }
-
-            // Late OnDrop notifications run on the client's background thread; give them a moment.
-            await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
-            WriteSample(csv, clock);
-            samples.WriteTo(Path.Combine(options.ReportDirectory, "stand-in-samples.jsonl"));
-
-            var stored = options.Upstream is null ? new HashSet<Guid>(standIn.Stored.Keys) : await ReadBackAsync(started).ConfigureAwait(false);
-            return Report(standIn, stored, drained, drainSeconds, clock.Elapsed);
+            return new JsonObject { ["run"] = _runId, ["runtime"] = Program.Runtime(), ["mode"] = "upstream", ["checks"] = preflight };
         }
 
-        private LogbirdClient NewClient(Uri endpoint) => new(new LogbirdOptions
+        var clock = Stopwatch.StartNew();
+        using var stop = new CancellationTokenSource(options.Duration);
+        _client = NewClient(standIn.Endpoint);
+        using var csv = new StreamWriter(Path.Combine(options.ReportDirectory, "metrics.csv"));
+        csv.WriteLine("seconds,tracked,delivered,rejected,dropped,queue,heap_mb,working_set_mb,handles,threads,restarts");
+
+        var producers = Enumerable.Range(0, options.Producers).Select(p => Task.Run(() => ProduceAsync(p, clock, stop.Token))).ToArray();
+        var background = new[]
+        {
+            Task.Run(() => SampleAsync(csv, clock, stop.Token)),
+            Task.Run(() => RestartAsync(standIn.Endpoint, stop.Token)),
+            Task.Run(() => FlushAsync(stop.Token)),
+            Task.Run(() => QueuePollAsync(stop.Token)),
+        };
+        await Task.WhenAll(producers).ConfigureAwait(false);
+        _loadSeconds = clock.Elapsed.TotalSeconds;
+        await Task.WhenAll(background).ConfigureAwait(false);
+
+        // Drain: no more faults, then a final flush and shutdown must settle everything, each under its own watchdog.
+        standIn.Healthy = true;
+        var final = Volatile.Read(ref _client)!;
+        var drain = Stopwatch.StartNew();
+        var drained = await Program.WithinAsync(final.FlushAsync(), TimeSpan.FromMinutes(2)).ConfigureAwait(false) == true;
+        var drainSeconds = drain.Elapsed.TotalSeconds;
+        var disposing = final.DisposeAsync().AsTask();
+        var disposed = await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromMinutes(1))).ConfigureAwait(false) == disposing && !disposing.IsFaulted;
+        var quiet = await standIn.QuiesceAsync(TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+
+        // Late OnDrop notifications run on the client's background thread; give them a moment.
+        await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        WriteSample(csv, clock);
+        samples.WriteTo(Path.Combine(options.ReportDirectory, "stand-in-samples.jsonl"));
+
+        LongMap stored;
+        var upstreamChecks = new JsonArray();
+        if (options.Upstream is null)
+        {
+            stored = standIn.Stored;
+        }
+        else
+        {
+            stored = await ReadBackAsync(started, standIn.Acknowledged, clickHouse!, upstreamChecks).ConfigureAwait(false);
+        }
+
+        return Report(standIn, stored, drained, drainSeconds, disposed, quiet, clock.Elapsed, preflight, upstreamChecks);
+    }
+
+    /// <summary>Layer 2 only: the server must accept a canary event and the duplicate check must prove itself.</summary>
+    private async Task<bool> PreflightAsync(ClickHouseCheck clickHouse, DateTimeOffset started, JsonArray checks)
+    {
+        var canary = new LogbirdClient(new LogbirdOptions { Endpoint = options.Upstream, IngestKey = options.IngestKey, AllowInsecureHttp = true, Environment = "soak" });
+        canary.Track(new AuditEvent("soak.canary").WithMetadata("soakRun", _runId + "-canary"));
+        var flushed = await Program.WithinAsync(canary.FlushAsync(), TimeSpan.FromSeconds(60)).ConfigureAwait(false) == true;
+        var delivered = canary.Stats.Delivered;
+        await canary.DisposeAsync().ConfigureAwait(false);
+        checks.Add(Program.Check("the server accepted a canary event with the ingest key", flushed && delivered == 1, $"flushed {flushed}, delivered {delivered}"));
+
+        long found;
+        try
+        {
+            found = await clickHouse.SelfTestAsync(_runId + "-selftest", started).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException)
+        {
+            checks.Add(Program.Check("the raw-row duplicate check detects two identical rows", false, e.Message));
+            return false;
+        }
+
+        checks.Add(Program.Check("the raw-row duplicate check detects two identical rows", found == 1, $"{found} duplicated id(s) reported for the two self-test rows"));
+        return flushed && delivered == 1 && found == 1;
+    }
+
+    private LogbirdClient NewClient(Uri endpoint)
+    {
+        var client = new LogbirdClient(new LogbirdOptions
         {
             Endpoint = endpoint,
             IngestKey = options.IngestKey,
@@ -134,390 +200,486 @@ internal static class Program
             OnDrop = OnDrop,
             OnError = e => _errors.AddOrUpdate(e.GetType().Name, 1, (_, n) => n + 1),
         });
-
-        private void OnDrop(DroppedEvent drop)
+        lock (_clients)
         {
-            _dropReasons.AddOrUpdate(drop.Reason, 1, (_, n) => n + 1);
-            if (drop.Id is null || !Guid.TryParse(drop.Id, out var id))
+            _clients.Add(client);
+        }
+
+        return client;
+    }
+
+    private void OnDrop(DroppedEvent drop)
+    {
+        _dropReasons.AddOrUpdate(drop.Reason, 1, (_, n) => n + 1);
+        if (string.IsNullOrEmpty(drop.Id))
+        {
+            Interlocked.Increment(ref _droppedWithoutId);
+            return;
+        }
+
+        if (!_dropped.TryAdd(LongMap.Hash(drop.Id!), (long)drop.Reason))
+        {
+            Interlocked.Increment(ref _doubleDrops);
+        }
+    }
+
+    private async Task ProduceAsync(int producer, Stopwatch clock, CancellationToken stop)
+    {
+        // Paced against elapsed time with fractional credit, so the total holds the requested rate at any setting.
+        var perSecond = options.Rate / (double)options.Producers;
+        var actions = new[] { "booking.created", "booking.cancelled", "invoice.paid", "user.signed_in", "settings.updated" };
+        long sent = 0;
+        while (!stop.IsCancellationRequested)
+        {
+            var due = (long)(clock.Elapsed.TotalSeconds * perSecond) - sent;
+            for (var i = 0; i < due && i < 10_000; i++)
             {
-                Interlocked.Increment(ref _droppedWithoutId);
+                var id = LogbirdClient.NewEventId();
+                _tracked.TryAdd(LongMap.Hash(id), 0);
+                var n = sent++;
+                var e = new AuditEvent(actions[n % actions.Length])
+                {
+                    Id = id,
+                    Actor = AuditActor.User("soak_user_" + (n % 97), "Soak User", "soak." + (n % 97) + "@example.invalid"),
+                    Tenant = new AuditTenant("soak_tenant_" + (n % 7)),
+                }
+                .Target("record", "soak_" + producer + "_" + n)
+                .WithMetadata("soakRun", _runId);
+                var started = Stopwatch.GetTimestamp();
+                try
+                {
+                    Volatile.Read(ref _client)!.Track(e);
+                }
+                catch (Exception)
+                {
+                    Interlocked.Increment(ref _trackThrew);
+                }
+
+                _trackLatency.Add(Stopwatch.GetTimestamp() - started);
+            }
+
+            try
+            {
+                await Task.Delay(10, stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    private async Task RestartAsync(Uri endpoint, CancellationToken stop)
+    {
+        while (true)
+        {
+            try
+            {
+                await Task.Delay(options.RestartEvery, stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
                 return;
             }
 
-            if (!_dropped.TryAdd(id, drop.Reason))
+            // Swap first, then dispose the old client while producers already write to the new one.
+            var old = Interlocked.Exchange(ref _client, NewClient(endpoint))!;
+            await Task.Delay(100).ConfigureAwait(false);
+            var disposing = old.DisposeAsync().AsTask();
+            if (await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromMinutes(1))).ConfigureAwait(false) != disposing || disposing.IsFaulted)
             {
-                Interlocked.Increment(ref _doubleDrops);
+                Interlocked.Increment(ref _flushesFailed);
+            }
+
+            Interlocked.Increment(ref _restarts);
+        }
+    }
+
+    private async Task FlushAsync(CancellationToken stop)
+    {
+        // A flush settles what was queued before it; under faults that can take a batch's full retry budget (five
+        // minutes), so a flush fails only when it reports false or passes that budget plus slack. The watchdog does not
+        // rely on the flush honouring its token.
+        var limit = TimeSpan.FromMinutes(6);
+        while (true)
+        {
+            try
+            {
+                await Task.Delay(options.FlushEvery, stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            var client = Volatile.Read(ref _client)!;
+            var watch = Stopwatch.StartNew();
+            using var timeout = new CancellationTokenSource(limit);
+            Task<bool> flush;
+            try
+            {
+                flush = client.FlushAsync(timeout.Token);
+            }
+            catch (ObjectDisposedException)
+            {
+                continue;
+            }
+
+            var result = await Program.WithinAsync(SafeFlush(flush), limit + TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+
+            // A restart may dispose the client mid-flush; its shutdown then settles the rest and reports it.
+            if (result is null || (result == false && Volatile.Read(ref _client) == client))
+            {
+                Interlocked.Increment(ref _flushesFailed);
+            }
+
+            lock (_flushSeconds)
+            {
+                _flushSeconds.Add(watch.Elapsed.TotalSeconds);
             }
         }
+    }
 
-        private async Task ProduceAsync(int producer, CancellationToken stop)
+    private static async Task<bool> SafeFlush(Task<bool> flush)
+    {
+        try
         {
-            // Each producer sends its share in small bursts every 20 ms, so the total rate holds without a tight loop.
-            var perTick = Math.Max(1, (int)Math.Round(options.Rate / (double)options.Producers / 50.0));
-            var tick = TimeSpan.FromMilliseconds(20);
-            var actions = new[] { "booking.created", "booking.cancelled", "invoice.paid", "user.signed_in", "settings.updated" };
-            var n = 0;
-            while (!stop.IsCancellationRequested)
+            return await flush.ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
+        {
+            return false;
+        }
+    }
+
+    private async Task QueuePollAsync(CancellationToken stop)
+    {
+        // A queue high-water mark between the 5-second samples.
+        while (!stop.IsCancellationRequested)
+        {
+            long length = Volatile.Read(ref _client)!.Stats.QueueLength;
+            long seen;
+            while (length > (seen = Interlocked.Read(ref _queueHighWater)) && Interlocked.CompareExchange(ref _queueHighWater, length, seen) != seen)
             {
-                for (var i = 0; i < perTick; i++)
-                {
-                    var id = LogbirdClient.NewEventId();
-                    _tracked.TryAdd(Guid.Parse(id), 0);
-                    var e = new AuditEvent(actions[n++ % actions.Length])
-                    {
-                        Id = id,
-                        Actor = AuditActor.User("soak_user_" + (n % 97), "Soak User", "soak." + (n % 97) + "@example.invalid"),
-                        Tenant = new AuditTenant("soak_tenant_" + (n % 7)),
-                    }
-                    .Target("record", "soak_" + producer + "_" + n)
-                    .WithMetadata("soakRun", _runId);
-                    var started = Stopwatch.GetTimestamp();
-                    try
-                    {
-                        Volatile.Read(ref _client)!.Track(e);
-                    }
-                    catch (Exception)
-                    {
-                        Interlocked.Increment(ref _trackThrew);
-                    }
+            }
 
-                    _trackLatency.Add(Stopwatch.GetTimestamp() - started);
-                }
-
-                try
-                {
-                    await Task.Delay(tick, stop).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
+            try
+            {
+                await Task.Delay(50, stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
         }
+    }
 
-        private async Task RestartAsync(Uri endpoint, CancellationToken stop)
+    private async Task SampleAsync(StreamWriter csv, Stopwatch clock, CancellationToken stop)
+    {
+        while (true)
         {
-            while (true)
+            WriteSample(csv, clock);
+            try
             {
-                try
-                {
-                    await Task.Delay(options.RestartEvery, stop).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-
-                // Swap first, then dispose the old client while producers already write to the new one.
-                var old = Interlocked.Exchange(ref _client, NewClient(endpoint))!;
-                await Task.Delay(100).ConfigureAwait(false);
-                await old.DisposeAsync().ConfigureAwait(false);
-                lock (_finishedStats)
-                {
-                    _finishedStats.Add(old.Stats);
-                }
-
-                Interlocked.Increment(ref _restarts);
+                await Task.Delay(options.SampleEvery, stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
         }
+    }
 
-        private async Task FlushAsync(CancellationToken stop)
+    /// <summary>Counters summed over every client the run created (active, retiring and disposed), each exactly once.</summary>
+    private (long Delivered, long Rejected, long Dropped) Totals()
+    {
+        lock (_clients)
         {
-            // A flush settles what was queued before it; under faults that can take a batch's full retry budget (five
-            // minutes), so a flush is stuck only beyond that budget plus slack.
-            var limit = TimeSpan.FromMinutes(6);
-            while (true)
-            {
-                try
-                {
-                    await Task.Delay(options.FlushEvery, stop).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-
-                var client = Volatile.Read(ref _client)!;
-                var watch = Stopwatch.StartNew();
-                using var timeout = new CancellationTokenSource(limit);
-                try
-                {
-                    await client.FlushAsync(timeout.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (timeout.IsCancellationRequested)
-                {
-                    Interlocked.Increment(ref _flushesStuck);
-                }
-                catch (ObjectDisposedException)
-                {
-                    // A restart disposed this client meanwhile; its shutdown settles the rest.
-                }
-
-                lock (_flushSeconds)
-                {
-                    _flushSeconds.Add(watch.Elapsed.TotalSeconds);
-                }
-            }
+            return (_clients.Sum(c => c.Stats.Delivered), _clients.Sum(c => c.Stats.Rejected), _clients.Sum(c => c.Stats.Dropped));
         }
+    }
 
-        private async Task SampleAsync(StreamWriter csv, Stopwatch clock, CancellationToken stop)
+    private void WriteSample(StreamWriter csv, Stopwatch clock)
+    {
+        using var process = Process.GetCurrentProcess();
+        var queue = Volatile.Read(ref _client)!.Stats.QueueLength;
+        var totals = Totals();
+        var sample = new ResourceSample(clock.Elapsed.TotalSeconds, GC.GetTotalMemory(forceFullCollection: true), process.WorkingSet64, process.HandleCount, process.Threads.Count, queue);
+        lock (_samples)
         {
-            while (true)
-            {
-                WriteSample(csv, clock);
-                try
-                {
-                    await Task.Delay(options.SampleEvery, stop).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-            }
-        }
-
-        private void WriteSample(StreamWriter csv, Stopwatch clock)
-        {
-            using var process = Process.GetCurrentProcess();
-            var stats = Volatile.Read(ref _client)!.Stats;
-            var sample = new ResourceSample(
-                clock.Elapsed.TotalSeconds,
-                GC.GetTotalMemory(forceFullCollection: true),
-                process.WorkingSet64,
-                process.HandleCount,
-                process.Threads.Count,
-                stats.QueueLength,
-                _tracked.Count);
-            lock (_samples)
-            {
-                _samples.Add(sample);
-            }
-
+            _samples.Add(sample);
             csv.WriteLine(string.Join(",",
                 sample.Seconds.ToString("F0", CultureInfo.InvariantCulture),
-                _tracked.Count, Total(s => s.Delivered, stats), Total(s => s.Rejected, stats), Total(s => s.Dropped, stats), stats.QueueLength,
+                _tracked.Count, totals.Delivered, totals.Rejected, totals.Dropped, queue,
                 (sample.Heap / 1048576.0).ToString("F1", CultureInfo.InvariantCulture),
                 (sample.WorkingSet / 1048576.0).ToString("F1", CultureInfo.InvariantCulture),
                 sample.Handles, sample.Threads, Interlocked.Read(ref _restarts)));
             csv.Flush();
         }
-
-        private long Total(Func<LogbirdStats, long> pick, LogbirdStats current)
-        {
-            lock (_finishedStats)
-            {
-                return _finishedStats.Sum(pick) + pick(current);
-            }
-        }
-
-        private async Task<HashSet<Guid>> ReadBackAsync(DateTimeOffset started)
-        {
-            // Layer 2: what the real server stored, by the run tag. Waits until the count stops changing.
-            using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = options.Upstream, ReadKey = options.ReadKey, AllowInsecureHttp = true });
-            var search = new EventSearch { Query = "metadata.soakRun:" + (char)34 + _runId + (char)34, From = started.AddMinutes(-5), Limit = 200 };
-            var ids = new List<Guid>();
-            var previous = -1;
-            for (var attempt = 0; attempt < 30; attempt++)
-            {
-                ids.Clear();
-                await foreach (var e in reader.SearchAllAsync(search).ConfigureAwait(false))
-                {
-                    ids.Add(Guid.Parse(e.Id));
-                }
-
-                if (ids.Count == previous)
-                {
-                    break;
-                }
-
-                previous = ids.Count;
-                await Task.Delay(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-            }
-
-            _readBackDuplicates = ids.Count - ids.Distinct().Count();
-            return [.. ids];
-        }
-
-        private long _readBackDuplicates;
-
-        private JsonObject Report(StandIn standIn, HashSet<Guid> stored, bool drained, double drainSeconds, TimeSpan elapsed)
-        {
-            var tracked = new HashSet<Guid>(_tracked.Keys);
-            var dropped = new Dictionary<Guid, DropReason>(_dropped);
-            var lost = tracked.Where(id => !stored.Contains(id) && !dropped.ContainsKey(id)).Count();
-            var both = dropped.Where(d => stored.Contains(d.Key)).ToList();
-            var bothConfirmedReason = both.Count(d => !Unconfirmed.Contains(d.Value));
-            var strangers = stored.Count(id => !tracked.Contains(id));
-            LogbirdStats[] stats;
-            lock (_finishedStats)
-            {
-                stats = [.. _finishedStats];
-            }
-
-            var delivered = stats.Sum(s => s.Delivered);
-            var rejectedOrDropped = stats.Sum(s => s.Rejected + s.Dropped);
-            var storedNotDropped = stored.Count(id => !dropped.ContainsKey(id));
-            var undocumented = _dropReasons.Keys.Where(r => !Documented.Contains(r)).Select(r => r.ToString()).ToArray();
-            var unexpected = _dropReasons.Keys.Where(r => r is DropReason.TooLarge or DropReason.Invalid or DropReason.InvalidEntityId).Select(r => r.ToString()).ToArray();
-
-            ResourceSample[] samples;
-            lock (_samples)
-            {
-                samples = [.. _samples];
-            }
-
-            var resources = Resources(samples);
-            var p99 = _trackLatency.Percentile(0.99);
-            var checks = new JsonArray
-            {
-                Check("every tracked event is stored or reported dropped", lost == 0, $"{lost} of {tracked.Count} neither stored nor reported"),
-                Check("no event is reported dropped twice", Interlocked.Read(ref _doubleDrops) == 0 && Interlocked.Read(ref _droppedWithoutId) == 0, $"{_doubleDrops} repeated, {_droppedWithoutId} without an id"),
-                Check("an event both stored and dropped has an unconfirmed reason", bothConfirmedReason == 0, $"{both.Count} stored and dropped, {bothConfirmedReason} with a confirmed reason"),
-                Check("nothing is stored that was not tracked", strangers == 0, $"{strangers} unknown ids stored"),
-                Check("no stored event changed content on retry", standIn.Conflicts == 0, $"{standIn.Conflicts} conflicts"),
-                Check("every reported drop reason is documented", undocumented.Length == 0 && unexpected.Length == 0, "reasons: " + string.Join(", ", _dropReasons.Select(r => r.Key + "=" + r.Value))),
-                Check("Track never threw", Interlocked.Read(ref _trackThrew) == 0, $"{_trackThrew} throws"),
-                Check("no flush was stuck", Interlocked.Read(ref _flushesStuck) == 0, $"{_flushesStuck} flushes over 6 minutes"),
-                Check("the final drain settled everything", drained, $"final flush {(drained ? "completed" : "did not complete")} in {drainSeconds:F1} s"),
-                Check("Track p99 latency under 5 ms", p99 < 5.0, $"p50 {_trackLatency.Percentile(0.5):F3} ms, p99 {p99:F3} ms, max {_trackLatency.Max:F3} ms"),
-                Check("the queue never exceeded MaxQueueSize", samples.All(s => s.Queue <= options.MaxQueueSize), $"max queue {samples.Max(s => s.Queue)}"),
-                Check("heap stayed bounded", resources.HeapBounded, resources.HeapDetail),
-                Check("handle count stayed bounded", resources.HandlesBounded, resources.HandlesDetail),
-                Check("thread count stayed bounded", resources.ThreadsBounded, resources.ThreadsDetail),
-            };
-            if (options.Upstream is null)
-            {
-                checks.Add(Check("delivered counts match stored events", delivered == storedNotDropped, $"Stats.Delivered {delivered}, stored and not dropped {storedNotDropped}"));
-                checks.Add(Check("rejected and dropped counts match drop reports", rejectedOrDropped == dropped.Count, $"Stats.Rejected + Dropped {rejectedOrDropped}, reports {dropped.Count}"));
-            }
-            else
-            {
-                checks.Add(Check("the server stored no event twice", _readBackDuplicates == 0, $"{_readBackDuplicates} duplicate ids read back"));
-            }
-
-            var faults = new JsonObject();
-            foreach (var f in standIn.Faults.OrderBy(f => f.Key))
-            {
-                faults[f.Key.ToString()] = f.Value;
-            }
-
-            var reasons = new JsonObject();
-            foreach (var r in _dropReasons.OrderBy(r => r.Key))
-            {
-                reasons[r.Key.ToString()] = r.Value;
-            }
-
-            var errors = new JsonObject();
-            foreach (var e in _errors.OrderBy(e => e.Key, StringComparer.Ordinal))
-            {
-                errors[e.Key] = e.Value;
-            }
-
-            return new JsonObject
-            {
-                ["run"] = _runId,
-                ["runtime"] = Runtime(),
-                ["mode"] = options.Upstream is null ? "stand-in" : "upstream",
-                ["config"] = options.ToJson(),
-                ["elapsedSeconds"] = Math.Round(elapsed.TotalSeconds),
-                ["totals"] = new JsonObject
-                {
-                    ["tracked"] = tracked.Count,
-                    ["stored"] = stored.Count,
-                    ["delivered"] = delivered,
-                    ["dropReports"] = dropped.Count,
-                    ["storedAndDropped"] = both.Count,
-                    ["restarts"] = Interlocked.Read(ref _restarts),
-                    ["requests"] = standIn.Requests,
-                    ["connections"] = standIn.Connections,
-                    ["resendsAfterStore"] = standIn.Resends,
-                },
-                ["faults"] = faults,
-                ["dropReasons"] = reasons,
-                ["errorsReported"] = errors,
-                ["trackLatencyMs"] = new JsonObject
-                {
-                    ["p50"] = Math.Round(_trackLatency.Percentile(0.5), 4),
-                    ["p99"] = Math.Round(p99, 4),
-                    ["p999"] = Math.Round(_trackLatency.Percentile(0.999), 4),
-                    ["max"] = Math.Round(_trackLatency.Max, 4),
-                },
-                ["flushSeconds"] = new JsonObject
-                {
-                    ["count"] = _flushSeconds.Count,
-                    ["max"] = _flushSeconds.Count == 0 ? 0 : Math.Round(_flushSeconds.Max(), 2),
-                },
-                ["resources"] = resources.ToJson(),
-                ["checks"] = checks,
-            };
-        }
-
-        /// <summary>
-        /// Compares the last third of the run with a baseline taken after warm-up (the first sample after 10% of the run).
-        /// Heap is measured after a full collection and may grow by the harness's own bookkeeping (about 200 bytes per
-        /// tracked event across its id sets and the stand-in's store) plus 32 MB of slack.
-        /// </summary>
-        private static ResourceReport Resources(ResourceSample[] samples)
-        {
-            if (samples.Length < 4)
-            {
-                return new ResourceReport(true, "too few samples", true, "too few samples", true, "too few samples", samples);
-            }
-
-            var end = samples[samples.Length - 1].Seconds;
-            var baseline = samples.FirstOrDefault(s => s.Seconds >= end * 0.1) ?? samples[1];
-            var late = samples.Where(s => s.Seconds >= end * 2 / 3).ToArray();
-            var heapLimit = baseline.Heap + ((late.Max(s => s.Tracked) - baseline.Tracked) * 200L) + (32L << 20);
-            var heapMax = late.Max(s => s.Heap);
-            var handleLimit = (baseline.Handles * 3 / 2) + 100;
-            var handleMax = late.Max(s => s.Handles);
-            var threadLimit = baseline.Threads + 50;
-            var threadMax = late.Max(s => s.Threads);
-            return new ResourceReport(
-                heapMax <= heapLimit, $"baseline {baseline.Heap >> 20} MB, late max {heapMax >> 20} MB, limit {heapLimit >> 20} MB",
-                handleMax <= handleLimit, $"baseline {baseline.Handles}, late max {handleMax}, limit {handleLimit}",
-                threadMax <= threadLimit, $"baseline {baseline.Threads}, late max {threadMax}, limit {threadLimit}",
-                samples);
-        }
-
-        private static JsonObject Check(string name, bool passed, string detail)
-        {
-            Console.WriteLine((passed ? "  ok   " : "  FAIL ") + name + ": " + detail);
-            return new JsonObject { ["name"] = name, ["passed"] = passed, ["detail"] = detail };
-        }
     }
 
-    internal static string Runtime() => System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription + " on " + System.Runtime.InteropServices.RuntimeInformation.OSDescription;
-
-    private sealed record ResourceSample(double Seconds, long Heap, long WorkingSet, int Handles, int Threads, int Queue, int Tracked);
-
-    private sealed record ResourceReport(bool HeapBounded, string HeapDetail, bool HandlesBounded, string HandlesDetail, bool ThreadsBounded, string ThreadsDetail, ResourceSample[] Samples)
+    /// <summary>
+    /// Layer 2: what the real server stored, by the run tag, read until every id it acknowledged to the client is there
+    /// (or five minutes pass), with transient read errors retried; then the raw-row duplicate check.
+    /// </summary>
+    private async Task<LongMap> ReadBackAsync(DateTimeOffset started, LongMap acknowledged, ClickHouseCheck clickHouse, JsonArray checks)
     {
-        public JsonObject ToJson() => new()
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = options.Upstream, ReadKey = options.ReadKey, AllowInsecureHttp = true });
+        var search = new EventSearch { Query = "metadata.soakRun:" + (char)34 + _runId + (char)34, From = started.AddMinutes(-5), Limit = 200 };
+        var expected = acknowledged.Entries().Select(e => e.Key).ToArray();
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(5);
+        var stored = new LongMap(options.ExpectedEvents);
+        var missing = expected.Length;
+        string? lastError = null;
+        while (true)
         {
-            ["heap"] = HeapDetail,
-            ["handles"] = HandlesDetail,
-            ["threads"] = ThreadsDetail,
-            ["samples"] = Samples.Length,
-            ["peakWorkingSetMb"] = Samples.Length == 0 ? 0 : Samples.Max(s => s.WorkingSet) >> 20,
+            try
+            {
+                var found = new LongMap(options.ExpectedEvents);
+                await foreach (var e in reader.SearchAllAsync(search).ConfigureAwait(false))
+                {
+                    found.TryAdd(LongMap.Hash(e.Id), 0);
+                }
+
+                stored = found;
+                missing = expected.Count(id => !stored.Contains(id));
+                lastError = null;
+            }
+            catch (LogbirdApiException e)
+            {
+                lastError = e.Code;
+            }
+
+            if ((missing == 0 && lastError is null) || DateTime.UtcNow > deadline)
+            {
+                break;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        }
+
+        checks.Add(Program.Check("every event the server acknowledged is read back", missing == 0 && lastError is null, $"{missing} of {expected.Length} acknowledged ids missing{(lastError is null ? string.Empty : ", last read error " + lastError)}"));
+        try
+        {
+            var rows = await clickHouse.RowsAsync(_runId).ConfigureAwait(false);
+            var duplicated = await clickHouse.DuplicatedIdsAsync(_runId).ConfigureAwait(false);
+            checks.Add(Program.Check("the run's events are raw rows in ClickHouse", rows >= stored.Count && rows > 0, $"{rows} raw rows for {stored.Count} ids read back"));
+            checks.Add(Program.Check("the server stored no event twice (raw rows, no FINAL)", duplicated == 0, $"{duplicated} event ids with more than one raw row"));
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException)
+        {
+            checks.Add(Program.Check("the server stored no event twice (raw rows, no FINAL)", false, e.Message));
+        }
+
+        return stored;
+    }
+
+    private JsonObject Report(StandIn standIn, LongMap stored, bool drained, double drainSeconds, bool disposed, bool quiet, TimeSpan elapsed, JsonArray preflight, JsonArray upstreamChecks)
+    {
+        var tracked = _tracked.Entries().Select(e => e.Key).ToArray();
+        var dropped = _dropped.Entries().ToDictionary(e => e.Key, e => (DropReason)e.Value);
+        var trackedSet = new HashSet<long>(tracked);
+        var storedKeys = stored.Entries().Select(e => e.Key).ToArray();
+        var lost = tracked.Count(id => !stored.Contains(id) && !dropped.ContainsKey(id));
+        var dropsNotTracked = dropped.Keys.Count(id => !trackedSet.Contains(id));
+        var both = dropped.Where(d => stored.Contains(d.Key)).ToList();
+        var bothConfirmed = both.Count(d => !Program.Unconfirmed.Contains(d.Value));
+        var strangers = storedKeys.Count(id => !trackedSet.Contains(id));
+        var acknowledgedNotDropped = standIn.Acknowledged.Entries().Count(e => trackedSet.Contains(e.Key) && !dropped.ContainsKey(e.Key));
+        var totals = Totals();
+        var undocumented = _dropReasons.Keys.Where(r => !Program.Documented.Contains(r)).ToArray();
+        var unexpected = _dropReasons.Keys.Where(r => r is DropReason.TooLarge or DropReason.Invalid or DropReason.InvalidEntityId).ToArray();
+        var achieved = _loadSeconds > 0 ? tracked.Length / _loadSeconds : 0;
+
+        ResourceSample[] samples;
+        lock (_samples)
+        {
+            samples = [.. _samples];
+        }
+
+        var resources = ResourceReport.From(samples, _loadSeconds);
+        var slow = _trackLatency.OverThreshold;
+        var calls = _trackLatency.Count;
+        var checks = new JsonArray();
+        foreach (var c in preflight)
+        {
+            checks.Add(c!.DeepClone());
+        }
+
+        foreach (var c in new[]
+        {
+            Program.Check("every tracked event is stored or reported dropped", lost == 0, $"{lost} of {tracked.Length} neither stored nor reported"),
+            Program.Check("no event is reported dropped twice", Interlocked.Read(ref _doubleDrops) == 0 && Interlocked.Read(ref _droppedWithoutId) == 0, $"{_doubleDrops} repeated, {_droppedWithoutId} without an id"),
+            Program.Check("every drop report names a tracked event", dropsNotTracked == 0, $"{dropsNotTracked} drop reports for ids never tracked"),
+            Program.Check("an event both stored and dropped has an unconfirmed reason", bothConfirmed == 0, $"{both.Count} stored and dropped, {bothConfirmed} with a confirmed reason"),
+            Program.Check("nothing is stored that was not tracked", strangers == 0, $"{strangers} unknown ids stored"),
+            Program.Check("no event changed content on retry", standIn.Conflicts == 0, $"{standIn.Conflicts} arrivals differed from the id's first arrival"),
+            Program.Check("every reported drop reason is documented", undocumented.Length == 0 && unexpected.Length == 0, "reasons: " + string.Join(", ", _dropReasons.OrderBy(r => r.Key).Select(r => r.Key + "=" + r.Value))),
+            Program.Check("Stats.Delivered matches the ids acknowledged to the client", totals.Delivered == acknowledgedNotDropped, $"Delivered {totals.Delivered}, acknowledged and not dropped {acknowledgedNotDropped}"),
+            Program.Check("Stats.Rejected + Dropped matches the drop reports", totals.Rejected + totals.Dropped == dropped.Count + Interlocked.Read(ref _droppedWithoutId), $"Rejected + Dropped {totals.Rejected + totals.Dropped}, reports {dropped.Count + _droppedWithoutId}"),
+            Program.Check("Track never threw", Interlocked.Read(ref _trackThrew) == 0, $"{_trackThrew} throws"),
+            Program.Check("no flush or shutdown failed or hung", Interlocked.Read(ref _flushesFailed) == 0, $"{_flushesFailed} flushes reported false or passed 6 minutes, or shutdowns passed 1 minute"),
+            Program.Check("the final drain settled everything", drained && disposed && quiet, $"final flush {(drained ? "completed" : "did not complete")} in {drainSeconds:F1} s, shutdown {(disposed ? "completed" : "hung")}, stand-in {(quiet ? "idle" : "still busy")}"),
+            Program.Check("at most 1% of Track calls took over 5 ms", calls > 0 && slow * 100 <= calls, $"{slow} of {calls} over 5 ms; p50 {_trackLatency.Percentile(0.5)}, p99 {_trackLatency.Percentile(0.99)}, max {_trackLatency.Max:F3} ms"),
+            Program.Check("the requested rate was held", achieved >= options.Rate * 0.9, $"achieved {achieved:F0} of {options.Rate} events/s"),
+            Program.Check("the queue never exceeded MaxQueueSize", Interlocked.Read(ref _queueHighWater) <= options.MaxQueueSize, $"high-water mark {_queueHighWater} (polled every 50 ms)"),
+            Program.Check("enough samples to judge resources", resources.Valid, resources.ValidDetail),
+            Program.Check("heap stayed bounded", resources.Valid && resources.HeapBounded, resources.HeapDetail),
+            Program.Check("handle count stayed bounded", resources.Valid && resources.HandlesBounded, resources.HandlesDetail),
+            Program.Check("thread count stayed bounded", resources.Valid && resources.ThreadsBounded, resources.ThreadsDetail),
+        })
+        {
+            checks.Add(c);
+        }
+
+        foreach (var c in upstreamChecks)
+        {
+            checks.Add(c!.DeepClone());
+        }
+
+        var faults = new JsonObject();
+        foreach (var f in standIn.Faults.OrderBy(f => f.Key))
+        {
+            faults[f.Key.ToString()] = f.Value;
+        }
+
+        var reasons = new JsonObject();
+        foreach (var r in _dropReasons.OrderBy(r => r.Key))
+        {
+            reasons[r.Key.ToString()] = r.Value;
+        }
+
+        var errors = new JsonObject();
+        foreach (var e in _errors.OrderBy(e => e.Key, StringComparer.Ordinal))
+        {
+            errors[e.Key] = e.Value;
+        }
+
+        return new JsonObject
+        {
+            ["run"] = _runId,
+            ["runtime"] = Program.Runtime(),
+            ["mode"] = options.Upstream is null ? "stand-in" : "upstream",
+            ["config"] = options.ToJson(),
+            ["elapsedSeconds"] = Math.Round(elapsed.TotalSeconds),
+            ["achievedRate"] = Math.Round(achieved, 1),
+            ["totals"] = new JsonObject
+            {
+                ["tracked"] = tracked.Length,
+                ["stored"] = storedKeys.Length,
+                ["acknowledged"] = standIn.Acknowledged.Count,
+                ["delivered"] = totals.Delivered,
+                ["rejected"] = totals.Rejected,
+                ["dropped"] = totals.Dropped,
+                ["dropReports"] = dropped.Count,
+                ["storedAndDropped"] = both.Count,
+                ["clients"] = _clients.Count,
+                ["restarts"] = Interlocked.Read(ref _restarts),
+                ["requests"] = standIn.Requests,
+                ["connections"] = standIn.Connections,
+                ["resendsAfterStore"] = standIn.Resends,
+                ["bookkeepingTableGrowths"] = _tracked.Growths + standIn.Stored.Growths + standIn.Acknowledged.Growths + standIn.FirstSeen.Growths,
+            },
+            ["faults"] = faults,
+            ["dropReasons"] = reasons,
+            ["errorsReported"] = errors,
+            ["trackLatencyMs"] = new JsonObject
+            {
+                ["p50"] = _trackLatency.Percentile(0.5),
+                ["p99"] = _trackLatency.Percentile(0.99),
+                ["p999"] = _trackLatency.Percentile(0.999),
+                ["max"] = Math.Round(_trackLatency.Max, 3),
+                ["over5ms"] = slow,
+            },
+            ["flushSeconds"] = new JsonObject
+            {
+                ["count"] = _flushSeconds.Count,
+                ["max"] = _flushSeconds.Count == 0 ? 0 : Math.Round(_flushSeconds.Max(), 2),
+            },
+            ["resources"] = resources.ToJson(),
+            ["checks"] = checks,
         };
     }
 }
 
-/// <summary>A fixed-size histogram of Track durations (Stopwatch ticks), so recording never allocates.</summary>
+internal sealed record ResourceSample(double Seconds, long Heap, long WorkingSet, int Handles, int Threads, int Queue);
+
+/// <summary>
+/// Resource bounds: the last third of the load against a baseline, the median of the samples taken between 10% and 25% of
+/// the load (after warm-up). The heap is measured after a full collection; the harness's own per-event bookkeeping lives
+/// in tables allocated before the baseline, so the heap may grow only by 32 MB of slack. A run needs at least 10 samples
+/// over at least 60 seconds of load to be judged.
+/// </summary>
+internal sealed record ResourceReport(bool Valid, string ValidDetail, bool HeapBounded, string HeapDetail, bool HandlesBounded, string HandlesDetail, bool ThreadsBounded, string ThreadsDetail, int Samples, long PeakWorkingSet)
+{
+    public static ResourceReport From(ResourceSample[] all, double loadSeconds)
+    {
+        var load = all.Where(s => s.Seconds <= loadSeconds + 1).ToArray();
+        var valid = load.Length >= 10 && loadSeconds >= 60;
+        var validDetail = $"{load.Length} samples over {loadSeconds:F0} s of load";
+        var window = load.Where(s => s.Seconds >= loadSeconds * 0.10 && s.Seconds <= loadSeconds * 0.25).ToArray();
+        if (!valid || window.Length == 0)
+        {
+            return new ResourceReport(false, validDetail + " (need 10 over 60 s)", false, "not judged", false, "not judged", false, "not judged", all.Length, all.Length == 0 ? 0 : all.Max(s => s.WorkingSet));
+        }
+
+        var late = load.Where(s => s.Seconds >= loadSeconds * 2 / 3).ToArray();
+        long Median(Func<ResourceSample, long> pick) => window.Select(pick).OrderBy(v => v).ElementAt(window.Length / 2);
+        var heapBase = Median(s => s.Heap);
+        var handleBase = Median(s => s.Handles);
+        var threadBase = Median(s => s.Threads);
+        var heapLimit = heapBase + (32L << 20);
+        var handleLimit = (handleBase * 3 / 2) + 100;
+        var threadLimit = threadBase + 50;
+        var heapMax = late.Max(s => s.Heap);
+        var handleMax = late.Max(s => s.Handles);
+        var threadMax = late.Max(s => s.Threads);
+        return new ResourceReport(
+            true, validDetail,
+            heapMax <= heapLimit, $"baseline {heapBase / 1048576.0:F1} MB, late max {heapMax / 1048576.0:F1} MB, limit {heapLimit / 1048576.0:F1} MB",
+            handleMax <= handleLimit, $"baseline {handleBase}, late max {handleMax}, limit {handleLimit}",
+            threadMax <= threadLimit, $"baseline {threadBase}, late max {threadMax}, limit {threadLimit}",
+            all.Length, all.Max(s => s.WorkingSet));
+    }
+
+    public JsonObject ToJson() => new()
+    {
+        ["samples"] = ValidDetail,
+        ["heap"] = HeapDetail,
+        ["handles"] = HandlesDetail,
+        ["threads"] = ThreadsDetail,
+        ["peakWorkingSetMb"] = PeakWorkingSet >> 20,
+    };
+}
+
+/// <summary>
+/// Track durations: an exact count of calls over 5 ms (the checked threshold) and a histogram for the reported
+/// percentiles (1 microsecond buckets to 1 ms, 100 microsecond buckets to 100 ms; above that only a lower bound).
+/// Recording never allocates.
+/// </summary>
 internal sealed class LatencyHistogram
 {
-    // Buckets of 1 microsecond up to 1 ms, then 100 microseconds up to 100 ms, then one overflow bucket.
+    private static readonly long FiveMs = Stopwatch.Frequency / 200;
     private readonly long[] _fine = new long[1000];
     private readonly long[] _coarse = new long[990];
     private long _overflow;
     private long _count;
+    private long _over;
     private long _maxTicks;
+
+    public long Count => Interlocked.Read(ref _count);
+
+    public long OverThreshold => Interlocked.Read(ref _over);
 
     public double Max => Interlocked.Read(ref _maxTicks) * 1000.0 / Stopwatch.Frequency;
 
     public void Add(long ticks)
     {
+        if (ticks > FiveMs)
+        {
+            Interlocked.Increment(ref _over);
+        }
+
         var micros = ticks * 1_000_000 / Stopwatch.Frequency;
         if (micros < 1000)
         {
@@ -539,17 +701,17 @@ internal sealed class LatencyHistogram
         }
     }
 
-    /// <summary>The percentile in milliseconds (bucket upper bound).</summary>
-    public double Percentile(double p)
+    /// <summary>The percentile as text in milliseconds: a bucket's upper bound, or "over 100 ms" beyond the histogram.</summary>
+    public string Percentile(double p)
     {
-        var target = (long)Math.Ceiling(Interlocked.Read(ref _count) * p);
+        var target = (long)Math.Ceiling(Count * p);
         long seen = 0;
         for (var i = 0; i < _fine.Length; i++)
         {
             seen += Interlocked.Read(ref _fine[i]);
             if (seen >= target)
             {
-                return (i + 1) / 1000.0;
+                return ((i + 1) / 1000.0).ToString("F3", CultureInfo.InvariantCulture) + " ms";
             }
         }
 
@@ -558,10 +720,10 @@ internal sealed class LatencyHistogram
             seen += Interlocked.Read(ref _coarse[i]);
             if (seen >= target)
             {
-                return (1000 + ((i + 1) * 100)) / 1000.0;
+                return ((1000 + ((i + 1) * 100)) / 1000.0).ToString("F1", CultureInfo.InvariantCulture) + " ms";
             }
         }
 
-        return 100.0;
+        return "over 100 ms";
     }
 }

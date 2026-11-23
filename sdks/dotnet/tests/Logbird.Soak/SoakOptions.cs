@@ -6,14 +6,19 @@ using System.Text.Json.Nodes;
 
 namespace Logbird.Soak;
 
-/// <summary>Command-line options. Keys for an upstream server come from the environment, never from arguments.</summary>
+/// <summary>Command-line options. Keys and the ClickHouse login come from the environment, never from arguments.</summary>
 internal sealed class SoakOptions
 {
-    public const string Usage =
-        "usage: Logbird.Soak [--duration 30m] [--rate 200] [--producers 4] [--restart-every 2m] [--flush-every 1m]\n" +
-        "                    [--sample-every 5s] [--request-timeout 5s] [--max-queue 10000] [--seed 1] [--report soak-report]\n" +
-        "                    [--faults ok=50,latency=10,partial=6,unavailable=4,ratelimited=4,reset=3,resetafterstore=4,hang=2,emptyack=3,reject=4,toolarge=1]\n" +
-        "                    [--upstream http://127.0.0.1:4741]   (then LOGBIRD_SOAK_INGEST_KEY and LOGBIRD_SOAK_READ_KEY are required)";
+    public static readonly string Usage = string.Join(Environment.NewLine,
+    [
+        "usage: Logbird.Soak [--duration 30m] [--rate 200] [--producers 4] [--restart-every 2m] [--flush-every 1m]",
+        "                    [--sample-every 5s] [--request-timeout 10s] [--max-queue 10000] [--seed 1] [--report soak-report]",
+        "                    [--faults ok=50,latency=10,partial=6,unavailable=4,ratelimited=4,reset=3,resetafterstore=4,hang=2,emptyack=3,reject=4,toolarge=1]",
+        "                    [--upstream http://127.0.0.1:4741]",
+        "Durations end in s, m or h; --duration is 10s to 5h. --upstream accepts only a loopback address and needs",
+        "LOGBIRD_SOAK_INGEST_KEY, LOGBIRD_SOAK_READ_KEY, LOGBIRD_SOAK_PROJECT_ID and LOGBIRD_SOAK_CLICKHOUSE_URL (loopback),",
+        "LOGBIRD_SOAK_CLICKHOUSE_USER, LOGBIRD_SOAK_CLICKHOUSE_PASSWORD, LOGBIRD_SOAK_CLICKHOUSE_DATABASE.",
+    ]);
 
     public static readonly IReadOnlyDictionary<Fault, int> DefaultFaults = new Dictionary<Fault, int>
     {
@@ -42,7 +47,7 @@ internal sealed class SoakOptions
 
     public TimeSpan SampleEvery { get; private set; } = TimeSpan.FromSeconds(5);
 
-    public TimeSpan RequestTimeout { get; private set; } = TimeSpan.FromSeconds(5);
+    public TimeSpan RequestTimeout { get; private set; } = TimeSpan.FromSeconds(10);
 
     public int MaxQueueSize { get; private set; } = 10_000;
 
@@ -58,7 +63,32 @@ internal sealed class SoakOptions
 
     public string? ReadKey { get; private set; }
 
+    public string? ProjectId { get; private set; }
+
+    public Uri? ClickHouseUrl { get; private set; }
+
+    public string? ClickHouseUser { get; private set; }
+
+    public string? ClickHousePassword { get; private set; }
+
+    public string? ClickHouseDatabase { get; private set; }
+
+    /// <summary>An estimate of the events the run tracks, to size the bookkeeping tables once.</summary>
+    public long ExpectedEvents => (long)(Rate * Duration.TotalSeconds * 1.3) + 10_000;
+
     public static SoakOptions Parse(string[] args)
+    {
+        try
+        {
+            return ParseCore(args);
+        }
+        catch (Exception e) when (e is FormatException or OverflowException or UriFormatException)
+        {
+            throw new ArgumentException(e.Message, e);
+        }
+    }
+
+    private static SoakOptions ParseCore(string[] args)
     {
         var o = new SoakOptions();
         for (var i = 0; i < args.Length; i++)
@@ -72,37 +102,37 @@ internal sealed class SoakOptions
             var value = args[++i];
             switch (name)
             {
-                case "--duration": o.Duration = Span(value); break;
-                case "--rate": o.Rate = Positive(value, name); break;
-                case "--producers": o.Producers = Positive(value, name); break;
-                case "--restart-every": o.RestartEvery = Span(value); break;
-                case "--flush-every": o.FlushEvery = Span(value); break;
-                case "--sample-every": o.SampleEvery = Span(value); break;
-                case "--request-timeout": o.RequestTimeout = Span(value); break;
-                case "--max-queue": o.MaxQueueSize = Positive(value, name); break;
-                case "--seed": o.Seed = int.Parse(value, CultureInfo.InvariantCulture); break;
+                case "--duration": o.Duration = Span(value, TimeSpan.FromSeconds(10), TimeSpan.FromHours(5), name); break;
+                case "--rate": o.Rate = Range(value, 1, 5000, name); break;
+                case "--producers": o.Producers = Range(value, 1, 64, name); break;
+                case "--restart-every": o.RestartEvery = Span(value, TimeSpan.FromSeconds(5), TimeSpan.FromHours(5), name); break;
+                case "--flush-every": o.FlushEvery = Span(value, TimeSpan.FromSeconds(5), TimeSpan.FromHours(5), name); break;
+                case "--sample-every": o.SampleEvery = Span(value, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(5), name); break;
+                case "--request-timeout": o.RequestTimeout = Span(value, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(2), name); break;
+                case "--max-queue": o.MaxQueueSize = Range(value, 100, 1_000_000, name); break;
+                case "--seed": o.Seed = int.Parse(value, NumberStyles.Integer, CultureInfo.InvariantCulture); break;
                 case "--report": o.ReportDirectory = value; break;
                 case "--faults": o.Faults = ParseFaults(value); break;
-                case "--upstream": o.Upstream = new Uri(value.TrimEnd('/') + "/"); break;
+                case "--upstream": o.Upstream = Loopback(value, "--upstream"); break;
                 default: throw new ArgumentException("unknown option " + name);
             }
         }
 
         if (o.Upstream is not null)
         {
-            o.IngestKey = Environment.GetEnvironmentVariable("LOGBIRD_SOAK_INGEST_KEY") ?? throw new ArgumentException("--upstream needs LOGBIRD_SOAK_INGEST_KEY");
-            o.ReadKey = Environment.GetEnvironmentVariable("LOGBIRD_SOAK_READ_KEY") ?? throw new ArgumentException("--upstream needs LOGBIRD_SOAK_READ_KEY");
-            if (o.Upstream.Host.IndexOf("joodlab.com", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                // Production limits forbid a soak run there (at most 100 events/s and 300,000 per campaign).
-                throw new ArgumentException("--upstream must be a local or test server, never production");
-            }
+            o.IngestKey = Required("LOGBIRD_SOAK_INGEST_KEY");
+            o.ReadKey = Required("LOGBIRD_SOAK_READ_KEY");
+            o.ProjectId = Required("LOGBIRD_SOAK_PROJECT_ID");
+            o.ClickHouseUrl = Loopback(Required("LOGBIRD_SOAK_CLICKHOUSE_URL"), "LOGBIRD_SOAK_CLICKHOUSE_URL");
+            o.ClickHouseUser = Required("LOGBIRD_SOAK_CLICKHOUSE_USER");
+            o.ClickHousePassword = Environment.GetEnvironmentVariable("LOGBIRD_SOAK_CLICKHOUSE_PASSWORD") ?? string.Empty;
+            o.ClickHouseDatabase = Required("LOGBIRD_SOAK_CLICKHOUSE_DATABASE");
         }
 
         return o;
     }
 
-    /// <summary>The configuration for the report (no keys).</summary>
+    /// <summary>The configuration for the report (no keys, no credentials).</summary>
     public JsonObject ToJson()
     {
         var faults = new JsonObject();
@@ -126,30 +156,64 @@ internal sealed class SoakOptions
         };
     }
 
-    private static TimeSpan Span(string value)
+    /// <summary>
+    /// A loopback http(s) URL with no user info, query or fragment. Requests carry keys, and production limits forbid a
+    /// soak run on any shared server, so only this machine is accepted.
+    /// </summary>
+    private static Uri Loopback(string value, string name)
     {
-        var unit = value.Length > 0 ? value[value.Length - 1] : ' ';
-        var number = double.Parse(value.Substring(0, value.Length - 1), CultureInfo.InvariantCulture);
-        return unit switch
+        var uri = new Uri(value, UriKind.Absolute);
+        var host = uri.Host.Trim('[', ']');
+        if ((uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || !(host == "127.0.0.1" || host == "::1" || string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ArgumentException(name + " must be http(s)://127.0.0.1, ::1 or localhost: a soak run never targets another machine");
+        }
+
+        if (uri.UserInfo.Length > 0 || uri.Query.Length > 0 || uri.Fragment.Length > 0)
+        {
+            throw new ArgumentException(name + " must not carry user info, a query or a fragment (credentials come from the environment)");
+        }
+
+        return new Uri(uri.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/");
+    }
+
+    private static string Required(string variable)
+        => Environment.GetEnvironmentVariable(variable) is { Length: > 0 } value ? value : throw new ArgumentException("--upstream needs " + variable);
+
+    private static TimeSpan Span(string value, TimeSpan min, TimeSpan max, string name)
+    {
+        if (value.Length < 2)
+        {
+            throw new ArgumentException(name + ": durations end in s, m or h");
+        }
+
+        var number = double.Parse(value.Substring(0, value.Length - 1), NumberStyles.Float, CultureInfo.InvariantCulture);
+        if (double.IsNaN(number) || double.IsInfinity(number) || number <= 0)
+        {
+            throw new ArgumentException(name + " must be a positive duration");
+        }
+
+        var span = value[value.Length - 1] switch
         {
             's' => TimeSpan.FromSeconds(number),
             'm' => TimeSpan.FromMinutes(number),
             'h' => TimeSpan.FromHours(number),
-            _ => throw new ArgumentException("durations end in s, m or h: " + value),
+            _ => throw new ArgumentException(name + ": durations end in s, m or h"),
         };
+        return span >= min && span <= max ? span : throw new ArgumentException($"{name} must be between {min} and {max}");
     }
 
-    private static int Positive(string value, string name)
+    private static int Range(string value, int min, int max, string name)
     {
-        var n = int.Parse(value, CultureInfo.InvariantCulture);
-        return n > 0 ? n : throw new ArgumentException(name + " must be positive");
+        var n = int.Parse(value, NumberStyles.Integer, CultureInfo.InvariantCulture);
+        return n >= min && n <= max ? n : throw new ArgumentException($"{name} must be {min} to {max}");
     }
 
     private static Dictionary<Fault, int> ParseFaults(string value)
     {
         var names = Enum.GetValues(typeof(Fault)).Cast<Fault>().ToDictionary(f => f.ToString().ToLowerInvariant(), f => f);
         names["partial"] = Fault.PartialUnavailable;
-        names["unavailable"] = Fault.Unavailable;
         var faults = new Dictionary<Fault, int>();
         foreach (var pair in value.Split(','))
         {
@@ -159,9 +223,9 @@ internal sealed class SoakOptions
                 throw new ArgumentException("unknown fault " + pair);
             }
 
-            faults[fault] = int.Parse(parts[1], CultureInfo.InvariantCulture);
+            faults[fault] = Range(parts[1], 0, 1000, "fault weight");
         }
 
-        return faults;
+        return faults.Values.Any(w => w > 0) ? faults : throw new ArgumentException("--faults needs at least one positive weight");
     }
 }

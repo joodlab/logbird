@@ -9,101 +9,147 @@ cd sdks/dotnet
 dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --duration 30m --rate 200 --report ../../soak-report
 ```
 
-The run ends with a list of checks and exits 1 if any fails. `soak-report/` holds `report.json` (configuration, totals,
-fault and drop counts, latency, resource summary, every check), `metrics.csv` (a row every 5 seconds: tracked,
-delivered, rejected, dropped, queue length, heap, working set, handles, threads, restarts) and
-`stand-in-samples.jsonl`.
+The run ends with a list of checks and exits 1 if any fails. A watchdog writes a failing report and exits 1 if the run
+is still going 15 minutes after its duration. `soak-report/` holds:
+- `report.json`: configuration, achieved rate, totals, fault and drop counts, latency, resources and every check;
+- `metrics.csv`: one row per sample, summed over every client the run created;
+- `stand-in-samples.jsonl`.
 
 ## Two layers
 
 **Layer 1: stand-in (CI).** The SDK talks over a real loopback socket to an in-process HTTP/1.1 stand-in
-(`StandIn.cs`) that records every event it stores. It injects one fault per request, by weight (`--faults`):
+(`StandIn.cs`). It checks the ingest key and records every event it stores, every id it acknowledges in an answer that
+reached the client, and each id's first-seen content. It injects one fault per request, by weight (`--faults`). The
+first requests of a run go once through every configured fault, so even a short run exercises each:
 
 | Fault | What the client sees |
 | --- | --- |
-| `latency` | up to 2 s, then 202 |
+| `latency` | up to 2 s, then the answer |
 | `partial` | 503 `ingest_pending` whose details settle some events and list the rest as unresolved |
-| `unavailable` | 503 `ingest_unavailable`, no details |
+| `unavailable` | 503 `ingest_unavailable`, no details, `Retry-After: 1` |
 | `ratelimited` | 429 `rate_limited`, `Retry-After: 1` |
-| `reset` | connection reset before the request is read |
+| `reset` | connection reset after the request headers, before the body is read |
 | `resetafterstore` | the events are stored, then the connection is reset before the answer |
-| `hang` | no answer until after the request timeout, then a reset |
-| `emptyack` | 202 `{}`: a proxy answering for the server, acknowledging nothing |
+| `hang` | no answer until 3 s after the request timeout, then a reset |
+| `emptyack` | the events are stored, then 202 `{}`: a proxy answering for the server, acknowledging nothing |
 | `reject` | 202 with some not-yet-stored events rejected (`invalid_event`) |
 | `toolarge` | 413 `payload_too_large` |
 
 **Layer 2: real server (manual, part of the pre-publication gate).** `--upstream <url>` turns the stand-in into a
-proxy in front of a real Logbird. It forwards every batch and injects the same transport faults: resets, hangs, 429,
-503, a 202 replaced by `{}`, a reset after the server stored the batch, and a 503 that reports stored events as
-unresolved. The run then reads back every event of the run by its tag (`metadata.soakRun`) and fails if the server
-holds any id twice. Keys come from the environment, never from arguments:
+proxy in front of a real Logbird.
+- **Faults that reach the server:** `latency`, `resetafterstore`, `emptyack` and `partial` forward the batch first,
+  then act on the server's answer. `partial` reports some events the server stored as unresolved, so the client
+  resends them and the server's deduplication is exercised.
+- **Faults that never reach the server:** `reset`, `hang`, `ratelimited`, `unavailable` and `toolarge` answer without
+  forwarding, as a broken network or gateway would. `reject` is not used.
+- **Canary:** before the load, one event goes straight to the server and must be delivered, so a wrong ingest key
+  fails the run at once.
+- **Completeness:** after the load, the run reads its events back by tag (`metadata.soakRun`), retrying transient
+  errors, until every id the server acknowledged to the client is there, or five minutes pass.
+- **Duplicates:** search answers one row per event id, so it cannot show a duplicate. The run counts, in the local
+  server's ClickHouse, the run's event ids with more than one **raw row** (no `FINAL`). It proves that check first by
+  inserting two identical rows under a self-test tag in the same fictional project and requiring them to be reported.
+  A background merge can collapse duplicates before the count, so a pass is evidence, not proof; a fail is a real
+  duplicate.
+
+Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse, with no user
+info, query or fragment, so keys never leave the machine and a production host is refused. Everything else comes from
+the environment:
 
 ```bash
-export LOGBIRD_SOAK_INGEST_KEY=... LOGBIRD_SOAK_READ_KEY=...   # a fictional project on a local server
+export LOGBIRD_SOAK_INGEST_KEY=... LOGBIRD_SOAK_READ_KEY=... LOGBIRD_SOAK_PROJECT_ID=...    # a fictional fixture project
+export LOGBIRD_SOAK_CLICKHOUSE_URL=http://127.0.0.1:8123 LOGBIRD_SOAK_CLICKHOUSE_USER=... \
+       LOGBIRD_SOAK_CLICKHOUSE_PASSWORD=... LOGBIRD_SOAK_CLICKHOUSE_DATABASE=logbird
 dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --upstream http://127.0.0.1:4741 --duration 2h --rate 50
 ```
 
-It refuses a production host. Before NuGet publishing is enabled, the gate needs one layer-2 run of at least 2 hours
-against a local server built from master, with its report attached to the gate brief.
+Create the fixture project with `sdks/dotnet/tests/integration/fixture.ts` and delete it afterwards: that also purges
+the self-test rows. Before NuGet publishing is enabled, the gate needs one layer-2 run of at least 2 hours against a
+local server built from master, with its report attached to the gate brief.
 
 ## Checks
 
-- **Exact accounting**, where tracked means every id given to `Track`, stored means what the stand-in stored (or, in
-  layer 2, what the server returns), and dropped means each `OnDrop` report:
+- **Exact accounting** (tracked = every id given to `Track`; stored = what the stand-in stored or, in layer 2, what
+  the server returns; dropped = each `OnDrop` report):
   - every tracked event is stored or reported dropped;
   - no event is reported dropped twice;
+  - every drop report names a tracked event;
   - nothing untracked is stored;
-  - no retried event changed content;
+  - no event arrived with content different from its first arrival;
   - an event both stored and dropped has a reason the docs call "not confirmed" (`HttpError`, `Unacknowledged`,
     `Shutdown`).
-- **The client's own counters**, layer 1 only:
-  - the summed `Stats.Delivered` equals the events stored and not dropped;
+- **The client's own counters, in both layers:**
+  - the summed `Stats.Delivered` equals the ids acknowledged to the client and not reported dropped;
   - `Rejected + Dropped` equals the drop reports.
-- **Only documented drop reasons** (the `DropReason` values the docs list). `TooLarge`, `Invalid` and
-  `InvalidEntityId` fail the run, because the harness never sends such events.
+- **Only documented drop reasons.** `TooLarge`, `Invalid` and `InvalidEntityId` also fail, because the harness never
+  sends such events.
 - **Never throws into the caller**: no `Track` call throws.
-- **No stuck flush**: a periodic `FlushAsync` takes at most 6 minutes (a batch's 5-minute retry budget plus slack), and
-  the final flush, with faults off, completes within 2 minutes.
-- **Latency**: `Track` p99 stays under 5 ms. p50, p99, p99.9 and max are reported.
-- **Bounded resources** in the last third of the run, against a baseline taken after 10% of it:
-  - heap after a full collection grows by at most the harness's own bookkeeping (200 bytes per tracked event) plus
-    32 MB;
-  - handles stay within 1.5 × baseline + 100;
-  - threads stay within baseline + 50;
-  - the queue never exceeds `MaxQueueSize`.
+- **No failed or hung flush or shutdown:**
+  - a periodic `FlushAsync` must return true within 6 minutes (a batch's 5-minute retry budget plus slack);
+  - a restart's shutdown must end within 1 minute;
+  - the final drain, with faults off, must flush within 2 minutes and shut down within 1;
+  - each is watched by a timer that does not rely on the SDK honouring cancellation.
+- **Latency:** at most 1% of `Track` calls take over 5 ms, counted exactly. p50, p99, p99.9 and max are reported.
+- **Load:** the achieved rate is at least 90% of the requested rate. Producers pace against elapsed time.
+- **Bounded resources**, judged only with at least 10 samples over 60 seconds of load:
+  - **Comparison:** the last third of the load against a baseline, the median of the samples taken between 10% and
+    25% of it.
+  - **Heap:** measured after a full collection, it may grow by at most 32 MB. The harness's per-event bookkeeping
+    lives in tables allocated before the baseline, so it does not count.
+  - **Handles:** at most 1.5 × baseline + 100.
+  - **Threads:** at most baseline + 50.
+  - **Queue:** its high-water mark, polled every 50 ms, stays within `MaxQueueSize`.
 
 ## Fidelity
 
-The stand-in's answers follow `packages/contracts`:
-- 202 bodies follow `ingestResponseSchema`, and rejection codes come from `ingestRejectionCodeSchema`;
-- 503 details follow `ingestPendingDetailsSchema` and the server's settle-or-list rule;
-- error bodies follow `apiErrorSchema`, with the server's own codes and messages for 413, 429 and 503.
+The stand-in answers the way the server does:
+- **Rules it mirrors:**
+  - from `apps/server/src/ingest.ts`: 401 `invalid_api_key` without the key; a body that is an array,
+    `{ events }` or one event; 400 `invalid_json`; 422 `validation_error` for an empty batch; 413 for more than
+    1,000 events or 5 MB;
+  - from `packages/clickhouse/src/normalize.ts`: per-event refusals when the action is not a string, the id is
+    invalid, or the event is over 256 KB;
+  - a missing id gets a generated one;
+  - a changed retry of a stored id is answered with `duplicate_id_conflict`.
+- **Answer shapes**, from `packages/contracts`: `ingestResponseSchema`, `ingestPendingDetailsSchema` and
+  `apiErrorSchema`, with the server's settle-or-list rule for partial results and its 413, 429 and 503 messages.
 
-It refuses what the server refuses: more than 1,000 events or 5 MB a batch, an event over 256 KB, or a missing action.
-A stand-in that accepted what the real server rejects would make the accounting meaningless, so every run keeps a
-sample of each answer and accepted batch, and CI checks them with `tests/cross-sdk/validate-stand-in.ts` against the
-contracts' zod schemas. The `reject` fault rejects valid events on purpose, to exercise the rejection path; that is the
-safe direction.
+Every run samples each kind of exchange: request, fault, status, `Retry-After`, answer and what happened to each event.
+CI checks the samples with `tests/cross-sdk/validate-stand-in.ts`:
+- **Answer shapes:** the contracts' schemas, strict for 202 bodies and 503 details.
+- **Settlement:** `accepted` equals the number of ids, and every event of the batch is settled exactly once (by
+  rejection, unresolved index or id). `ingest_pending` always carries details, and `eventIds` names the unresolved
+  events.
+- **Headers and codes:** 429 and 503 carry `Retry-After`, and every error code is the server's for its status.
+- **Events:** every accepted event is valid by `eventInputSchema`.
+- **Coverage:** every configured fault appears.
+
+The `reject` fault rejects valid events on purpose, to exercise the rejection path; that is the safe direction.
 
 ## What a 30-minute run can and cannot show
 
 It catches:
-- an event lost or counted twice under any of the faults above;
+- an event lost, stored twice or counted twice under any of the faults above;
 - a retry that changes an event;
+- a counter that disagrees with what was acknowledged;
 - an undocumented drop reason;
-- a stuck flush;
+- a failed or hung flush or shutdown;
 - an exception into the caller;
-- growth that happens per restart, per connection or per failure. With a restart every 2 minutes and hundreds of
-  faults, a leak of a few objects each time shows within 30 minutes.
+- a run that cannot hold its rate;
+- growth larger than the margins: more than 32 MB of heap, more than 50 threads, or handles beyond 1.5 × baseline +
+  100.
+
+With the defaults (a restart every 2 minutes, about 15 restarts and hundreds of faults in 30 minutes), a leak is
+caught only if it exceeds about 2 MB, 3 threads or 20 handles per restart (with a handle baseline near 420, as
+measured), or the same share per fault.
 
 It does not catch:
-- a slow leak (a few bytes per event, or memory that grows only after hours), which hides inside the 32 MB slack and
-  the noise of a full collection;
-- handle or thread growth below the margins;
+- smaller leaks, or memory that grows only after hours, which hide inside the margins and the noise of a full
+  collection;
 - problems that only appear with real server latency, real TLS or real storage (layer 1 has none).
 
-The long manual run (`workflow_dispatch` with `duration: 2h` or more) and the layer-2 run are there for those, and the
-CSV shows any trend directly.
+The long manual run (`workflow_dispatch` with `duration: 2h` or more) and layer 2 are there for those, and
+`metrics.csv` shows any trend directly.
 
 ## CI
 
