@@ -7,11 +7,8 @@ import { PageSkeleton } from '@/components/route-states';
 import { AppShell } from '@/components/shell/app-shell';
 import { ApiRequestError } from '@/lib/api/errors';
 import { projectQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
-import { projectIsListed } from '@/lib/project-listed';
+import { PROJECT_MISSING, projectIsListed } from '@/lib/project-listed';
 import { rememberProject } from '@/lib/session';
-
-/** What this route's notFound carries when the project itself is missing (not a page under it). */
-const PROJECT_MISSING = 'project-missing';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // A shared URL can carry `range=0` or `range=true`, which the router decodes as a number or boolean: drop it, so the page
