@@ -230,9 +230,10 @@ publishes a package:
   deterministic build makes it the same symbols.
 
 The job also refuses to publish a version that could break the last published one unseen. Before packing, it asks
-nuget.org for the latest published version of each package, and fails when a version exists and
+nuget.org for the latest version of each package published before the release version, and fails when one exists and
 `PackageValidationBaselineVersion` (`sdks/dotnet/Directory.Build.props`) is unset or older than it. Before the first
-publication it passes with a notice. Package validation then compares the new packages with that version and fails on
+publication it passes with a notice. Versions at or above the release version are ignored, so rerunning a release that
+pushed one package but not the other still passes. Package validation then compares the new packages with that version and fails on
 any breaking change. See `sdks/dotnet/CONTRIBUTING.md` for what each check catches.
 
 In the release that publishes a version to nuget.org, also:

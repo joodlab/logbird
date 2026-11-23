@@ -39,7 +39,7 @@ The analyzer does not record these, so before the first publication only a reade
 - generic constraints and variance;
 - `required` members, `readonly`/`ref` structs, and `ref readonly` returns;
 - `protected internal` becoming `protected`, or a protected accessor becoming public;
-- an implemented interface added or removed;
+- an implemented interface removed;
 - an event replaced by a field.
 
 ## What no layer catches
@@ -48,5 +48,6 @@ Read these by hand in every API change:
 
 - nullability attributes such as `[AllowNull]` and `[NotNullWhen]`, and other attributes (`[Obsolete]`,
   `[EditorBrowsable]`);
+- an implemented interface added (not breaking, so package validation allows it, but still a change to the surface);
 - XML documentation, and what a member does: a behaviour change behind an unchanged signature;
 - defaults of types outside the audited list, such as read models filled from the server (`StoredEvent`).
