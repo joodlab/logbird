@@ -32,7 +32,8 @@ internal static class LogbirdMetrics
     internal static readonly long[] DroppedTotals = new long[LogbirdClient.DropReasonCount];
     private static readonly Meter? Meter = Create(() => new Meter(MeterName, LogbirdClient.Version));
 
-    // Kept alive by these fields; each callback sums over the live clients.
+    // Kept alive by these fields. The counters read the process-wide totals above, which every client adds to and which
+    // outlive it; only queue length sums over the live clients.
     private static readonly object?[] Instruments =
     [
         Counter("logbird.events.tracked", "{event}", "Events accepted into the in-memory queue.", () => Interlocked.Read(ref TrackedTotal)),
@@ -43,7 +44,7 @@ internal static class LogbirdMetrics
         Counter("logbird.batches.failed", "{batch}", "Batches that failed after all retries and were queued again.", () => Interlocked.Read(ref FailedSendsTotal)),
         Create(() => Meter?.CreateObservableCounter("logbird.events.dropped", DroppedByReason, "{event}", "Events the SDK stopped trying to deliver, by reason; some may already be stored (DroppedEvent.MayBeStored).")),
         Create(() => Meter?.CreateObservableCounter(
-            "logbird.notifications.lost", () => Interlocked.Read(ref NotificationsLostTotal), "{notification}", "OnDrop/OnError notifications skipped because the callbacks fell too far behind.")),
+            "logbird.notifications.lost", () => Interlocked.Read(ref NotificationsLostTotal), "{notification}", "OnDrop/OnError notifications skipped because the callbacks fell too far behind or could not be scheduled on the thread pool.")),
         Create(() => Meter?.CreateObservableCounter(
             "logbird.callbacks.failed", () => Interlocked.Read(ref CallbackFailuresTotal), "{exception}", "Exceptions thrown by OnDrop, OnError or a logger; each was swallowed.")),
         Create(() => Meter?.CreateObservableUpDownCounter("logbird.queue.length", () => Sum(client => client.Stats.QueueLength), "{event}", "Events waiting to be sent.")),

@@ -145,7 +145,7 @@ internal sealed class BatchSender
         var attempt = Enumerable.Range(0, batch.Length).ToArray();
         var body = EventJson.BuildBatchBody(batch, attempt);
         var retries = 0;
-        for (var attemptNumber = 0; ; attemptNumber++)
+        for (long attemptNumber = 0; ; attemptNumber++)
         {
             var remaining = deadline - _elapsed();
             if (remaining <= TimeSpan.Zero)

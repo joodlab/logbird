@@ -104,10 +104,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private long _warnings;
     private long _notificationsLost;
     private long _callbackFailures;
-    private readonly long[] _droppedByReason = new long[DropReasonCount];
 
     [ThreadStatic]
     private static List<EntityIds.Warning>? _identifierWarnings;
+
+    /// <summary>The capacity of this thread's reusable warning list, or null when it has none (for tests).</summary>
+    internal static int? IdentifierWarningCapacity => _identifierWarnings?.Capacity;
 
     /// <summary>Creates a client.</summary>
     /// <param name="options">Settings. They are read once; later changes have no effect.</param>
@@ -315,12 +317,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                     WarnAll(eventId, eventAction, identifierWarnings.ToArray());
                 }
 
-                // A rare event with many identifier warnings must not keep a large reusable list alive on this thread.
-                if (identifierWarnings.Capacity > 256)
-                {
-                    _identifierWarnings = null;
-                }
-
                 Count(ref _tracked, ref LogbirdMetrics.TrackedTotal);
                 if (count == 1)
                 {
@@ -335,10 +331,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (overflow is not null)
             {
-                if (added is not null)
-                {
-                }
-
                 overflow.TrySettle();
                 Drop(DropReason.QueueFull, overflow.Id, overflow.Action, overflow.Json, "The queue is full.", mayBeStored: overflow.MayBeStored);
                 LogQueueFull();
@@ -354,6 +346,13 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         finally
         {
+            // A rare event with many identifier warnings must not keep a large reusable list alive on this thread,
+            // however it ended (queued, dropped, refused or failed).
+            if (_identifierWarnings is { Capacity: > 256 })
+            {
+                _identifierWarnings = null;
+            }
+
             InsideLogbird.Value = false;
         }
 
@@ -937,9 +936,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     /// <summary>Counts a drop (counters only, so it can run under the queue lock).</summary>
     private void CountDrop(DropReason reason)
     {
-        if ((int)reason >= 0 && (int)reason < _droppedByReason.Length)
+        if ((int)reason >= 0 && (int)reason < LogbirdMetrics.DroppedTotals.Length)
         {
-            Count(ref _droppedByReason[(int)reason], ref LogbirdMetrics.DroppedTotals[(int)reason]);
+            Interlocked.Increment(ref LogbirdMetrics.DroppedTotals[(int)reason]);
         }
 
         if (reason == DropReason.Rejected)

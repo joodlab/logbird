@@ -79,18 +79,32 @@ internal static class JsJson
         }
     }
 
-    private static void WriteValue(StringBuilder builder, JsonValue value)
+    /// <summary>
+    /// The text of a string value. A parsed JSON string can hold an escaped lone surrogate ("\ud800"), which
+    /// JsonElement.GetString refuses (and TryGetValue&lt;string&gt; throws for): its UTF-16 code units are decoded from
+    /// the raw text instead, so every reader of an event (the shape check, redaction, the writer) sees it exactly as parsed.
+    /// </summary>
+    internal static bool TryGetString(JsonValue value, out string text)
     {
-        // A parsed JSON string can hold an escaped lone surrogate ("\ud800"), which JsonElement.GetString refuses (and
-        // TryGetValue<string> can throw for). Its UTF-16 code units are decoded from the raw text instead and written
-        // with the same escaping as any other string, so the event is sent exactly as parsed.
-        if (value.TryGetValue<JsonElement>(out var parsed) && parsed.ValueKind == JsonValueKind.String)
+        if (value.TryGetValue<JsonElement>(out var parsed))
         {
-            AppendString(builder, DecodeString(parsed.GetRawText()));
-            return;
+            text = parsed.ValueKind == JsonValueKind.String ? DecodeString(parsed.GetRawText()) : string.Empty;
+            return parsed.ValueKind == JsonValueKind.String;
         }
 
-        if (value.TryGetValue<string>(out var text))
+        if (value.TryGetValue<string>(out var own))
+        {
+            text = own;
+            return true;
+        }
+
+        text = string.Empty;
+        return false;
+    }
+
+    private static void WriteValue(StringBuilder builder, JsonValue value)
+    {
+        if (TryGetString(value, out var text))
         {
             AppendString(builder, text);
             return;
