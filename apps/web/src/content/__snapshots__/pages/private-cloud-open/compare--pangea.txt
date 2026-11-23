@@ -1,0 +1,246 @@
+title: Pangea · Logbird
+description: Pangea Secure Audit Log, now part of CrowdStrike, is a hosted, tamperproof audit log. How it compares with Logbird, sourced and dated.
+
+headings:
+h1 Logbird and Pangea Secure Audit Log
+h2 At a glance
+h2 When to choose Pangea Secure Audit Log
+h2 When to choose Logbird
+h2 Sources
+h3 What we couldn't verify
+h2 Start with one event.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Compare
+Logbird and Pangea Secure Audit Log
+Pangea Secure Audit Log is a managed service built around tamper evidence. Every event goes into a Merkle tree. Pangea publishes the tree's root hashes to Arweave, a public, append-only ledger, and every search result can come with a proof that it hasn't been altered. Events can also be signed. Logs move through hot, warm and cold storage, and an embeddable React viewer lets your customers search and verify their logs. If you need to prove that logs weren't changed, that's what it was built for, and Logbird doesn't do it. [P1, P2, P3, P4]
+Ownership, as of 7 November 2026
+As of 7 November 2026: CrowdStrike completed its acquisition of Pangea on 26 September 2025, and Pangea's product and signup pages redirect to CrowdStrike, while the Secure Audit Log documentation and API are still published. Check current availability with CrowdStrike. [P5, P6, P7]
+Checked 7 November 2026
+At a glance
+Each claim about another product links to its source below. Anything we couldn't verify is left out.
+[sr-only] Logbird and Pangea Secure Audit Log compared, with a source for each claim about Pangea Secure Audit Log
+[sr-only: Topic]
+Logbird
+Pangea Secure Audit Log
+Licence and source
+MIT
+Hosted service, no source published; SDKs and the viewer component are MIT [P8, P9]
+Self-host
+Docker Compose or Coolify, once the source opens
+No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service [P10, P11]
+Hosting model
+Self-hosted when the source opens (MIT); Logbird Cloud early access (invited teams)
+Hosted by Pangea [P12]
+Schema
+Only an action string is required; recommended envelope
+Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation [P13]
+Tamper evidence
+None
+Merkle-tree tamperproofing, roots published to Arweave, optional event signing [P2]
+Search
+Query language and guarded SQL WHERE mode
+field:value with AND, OR, parentheses and quotes; up to 10,000 results per search [P14, P12]
+Retention
+Per project, 7 days to 10 years; hourly permanent deletion
+Hot up to 14 days, warm up to 10 years, cold up to 10 years (cold retrievable on request) [P15]
+Customer-facing viewer
+None yet; read API plus headless Vue helpers
+Embeddable React component, @pangeacyber/react-mui-audit-log-viewer, wired to your backend [P9]
+Pricing
+Self-host free (MIT); Cloud pricing not set
+No public price list; signup redirects to CrowdStrike [P7, P16]
+Licence and source
+Logbird
+MIT
+Pangea Secure Audit Log
+Hosted service, no source published; SDKs and the viewer component are MIT [P8, P9]
+Self-host
+Logbird
+Docker Compose or Coolify, once the source opens
+Pangea Secure Audit Log
+No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service [P10, P11]
+Hosting model
+Logbird
+Self-hosted when the source opens (MIT); Logbird Cloud early access (invited teams)
+Pangea Secure Audit Log
+Hosted by Pangea [P12]
+Schema
+Logbird
+Only an action string is required; recommended envelope
+Pangea Secure Audit Log
+Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation [P13]
+Tamper evidence
+Logbird
+None
+Pangea Secure Audit Log
+Merkle-tree tamperproofing, roots published to Arweave, optional event signing [P2]
+Search
+Logbird
+Query language and guarded SQL WHERE mode
+Pangea Secure Audit Log
+field:value with AND, OR, parentheses and quotes; up to 10,000 results per search [P14, P12]
+Retention
+Logbird
+Per project, 7 days to 10 years; hourly permanent deletion
+Pangea Secure Audit Log
+Hot up to 14 days, warm up to 10 years, cold up to 10 years (cold retrievable on request) [P15]
+Customer-facing viewer
+Logbird
+None yet; read API plus headless Vue helpers
+Pangea Secure Audit Log
+Embeddable React component, @pangeacyber/react-mui-audit-log-viewer, wired to your backend [P9]
+Pricing
+Logbird
+Self-host free (MIT); Cloud pricing not set
+Pangea Secure Audit Log
+No public price list; signup redirects to CrowdStrike [P7, P16]
+When to choose Pangea Secure Audit Log
+You need cryptographic proof that audit events haven't been changed, with verifiable published roots.
+You want event signing with managed or imported keys.
+You want a ready-made, embeddable viewer that also verifies integrity.
+You want tiered storage for very long retention and don't need to self-host.
+When to choose Logbird
+Your events must stay on your own servers, under an MIT licence.
+You want to send any shape without designing a fixed schema first.
+Your team investigates with an operator console: entity pages, operation trees, workers and retries, and SQL.
+You want SQL-level questions answered against your own ClickHouse, under documented limits.
+Self-host when the source opens
+Request access
+Sources
+All accessed 7 November 2026. If something has changed, tell us and we'll fix it.
+Report an outdated fact
+All comparisons
+P1
+About: "transparent, immutable, and cryptographically verifiable tamperproof audit logging" [sr-only: (opens in a new tab)]
+pangea.cloud/docs/audit/overview/about
+P2
+Tamperproofing: Merkle trees, roots published to Arweave, membership and consistency proofs, signing [sr-only: (opens in a new tab)]
+pangea.cloud/docs/audit/about-tamperproofing
+P3
+Secure Audit Log docs home [sr-only: (opens in a new tab)]
+pangea.cloud/docs/audit/
+P4
+Settings: log signing, retention tiers [sr-only: (opens in a new tab)]
+pangea.cloud/docs/audit/getting-started/settings
+P5
+CrowdStrike press release, 16 Sep 2025: agreement to acquire Pangea [sr-only: (opens in a new tab)]
+www.crowdstrike.com/en-us/press-releases/crowdstrike-to-acquire-pangea-to-secure-every-layer-of-enterprise-ai/
+P6
+CrowdStrike FY2026 10-K: acquisition completed 26 Sep 2025 [sr-only: (opens in a new tab)]
+www.sec.gov/Archives/edgar/data/1535527/000153552726000010/crwd-20260131.htm
+P7
+pangea.cloud/services/secure-audit-log/ and /signup/ return 301 redirects to this CrowdStrike page (checked by HTTP request) [sr-only: (opens in a new tab)]
+www.crowdstrike.com/en-us/platform/falcon-aidr-ai-detection-and-response/
+P8
+SDK repositories (licence field: MIT) [sr-only: (opens in a new tab)]
+github.com/pangeacyber
+P9
+React viewer docs and package [sr-only: (opens in a new tab)]
+pangea.cloud/docs/libraries/react-mui-audit-log-viewer/
+Also: github.com/pangeacyber/pangea-javascript/tree/main/packages/react-mui-audit-log-viewer [sr-only: (opens in a new tab)]
+P10
+Deployment models [sr-only: (opens in a new tab)]
+pangea.cloud/docs/deployment-models/
+Also: pangea.cloud/docs/deployment-models/edge [sr-only: (opens in a new tab)]
+P11
+Private Cloud [sr-only: (opens in a new tab)]
+pangea.cloud/docs/deployment-models/private-cloud
+P12
+API reference: base URL, /v2/log (1–1000 events), search limits [sr-only: (opens in a new tab)]
+pangea.cloud/docs/api/audit/
+P13
+Configuration and schemas [sr-only: (opens in a new tab)]
+pangea.cloud/docs/audit/getting-started/configuration
+P14
+Searching the logs [sr-only: (opens in a new tab)]
+pangea.cloud/docs/audit/using-secure-audit-log/searching-the-logs
+P15
+Retention tiers (same page as P4); cold export [sr-only: (opens in a new tab)]
+pangea.cloud/docs/audit/using-secure-audit-log/cold-export
+P16
+Billing page: renders no price list ("Loading billing information…") [sr-only: (opens in a new tab)]
+pangea.cloud/docs/admin-guide/organizations/billing/
+What we couldn't verify
+Left out of the table: Which storage engine holds the events; whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (the public billing page describes credit-based pay-as-you-go with a monthly credit, but doesn't render the figures, which exist only in the page's script source, and signup now redirects to CrowdStrike); the signing and hash algorithms; the storage engine; whether message is required in the default template.
+All product names are trademarks of their respective owners. Logbird isn't affiliated with or endorsed by any of them.
+Start with one event.
+The source opens soon. Request access to Logbird Cloud, where sign-ups are limited to invited teams for now, and we'll tell you when you can self-host.
+Request access
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+P1 [aria-label: Source P1] → #source-P1
+P2 [aria-label: Source P2] → #source-P2
+P3 [aria-label: Source P3] → #source-P3
+P4 [aria-label: Source P4] → #source-P4
+P5 [aria-label: Source P5] → #source-P5
+P6 [aria-label: Source P6] → #source-P6
+P7 [aria-label: Source P7] → #source-P7
+P8 [aria-label: Source P8] → #source-P8
+P9 [aria-label: Source P9] → #source-P9
+P10 [aria-label: Source P10] → #source-P10
+P11 [aria-label: Source P11] → #source-P11
+P12 [aria-label: Source P12] → #source-P12
+P13 [aria-label: Source P13] → #source-P13
+P2 [aria-label: Source P2] → #source-P2
+P14 [aria-label: Source P14] → #source-P14
+P12 [aria-label: Source P12] → #source-P12
+P15 [aria-label: Source P15] → #source-P15
+P9 [aria-label: Source P9] → #source-P9
+P7 [aria-label: Source P7] → #source-P7
+P16 [aria-label: Source P16] → #source-P16
+P8 [aria-label: Source P8] → #source-P8
+P9 [aria-label: Source P9] → #source-P9
+P10 [aria-label: Source P10] → #source-P10
+P11 [aria-label: Source P11] → #source-P11
+P12 [aria-label: Source P12] → #source-P12
+P13 [aria-label: Source P13] → #source-P13
+P2 [aria-label: Source P2] → #source-P2
+P14 [aria-label: Source P14] → #source-P14
+P12 [aria-label: Source P12] → #source-P12
+P15 [aria-label: Source P15] → #source-P15
+P9 [aria-label: Source P9] → #source-P9
+P7 [aria-label: Source P7] → #source-P7
+P16 [aria-label: Source P16] → #source-P16
+Self-host when the source opens → /contact?interest=self-host
+Request access → /contact
+Report an outdated fact → /contact?interest=correction
+All comparisons → /compare
+About: "transparent, immutable, and cryptographically verifiable tamperproof audit logging" [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/audit/overview/about
+Tamperproofing: Merkle trees, roots published to Arweave, membership and consistency proofs, signing [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/audit/about-tamperproofing
+Secure Audit Log docs home [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/audit/
+Settings: log signing, retention tiers [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/audit/getting-started/settings
+CrowdStrike press release, 16 Sep 2025: agreement to acquire Pangea [sr-only: (opens in a new tab)] → https://www.crowdstrike.com/en-us/press-releases/crowdstrike-to-acquire-pangea-to-secure-every-layer-of-enterprise-ai/
+CrowdStrike FY2026 10-K: acquisition completed 26 Sep 2025 [sr-only: (opens in a new tab)] → https://www.sec.gov/Archives/edgar/data/1535527/000153552726000010/crwd-20260131.htm
+pangea.cloud/services/secure-audit-log/ and /signup/ return 301 redirects to this CrowdStrike page (checked by HTTP request) [sr-only: (opens in a new tab)] → https://www.crowdstrike.com/en-us/platform/falcon-aidr-ai-detection-and-response/
+SDK repositories (licence field: MIT) [sr-only: (opens in a new tab)] → https://github.com/pangeacyber
+React viewer docs and package [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/libraries/react-mui-audit-log-viewer/
+github.com/pangeacyber/pangea-javascript/tree/main/packages/react-mui-audit-log-viewer [sr-only: (opens in a new tab)] → https://github.com/pangeacyber/pangea-javascript/tree/main/packages/react-mui-audit-log-viewer
+Deployment models [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/deployment-models/
+pangea.cloud/docs/deployment-models/edge [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/deployment-models/edge
+Private Cloud [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/deployment-models/private-cloud
+API reference: base URL, /v2/log (1–1000 events), search limits [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/api/audit/
+Configuration and schemas [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/audit/getting-started/configuration
+Searching the logs [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/audit/using-secure-audit-log/searching-the-logs
+Retention tiers (same page as P4); cold export [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/audit/using-secure-audit-log/cold-export
+Billing page: renders no price list ("Loading billing information…") [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/admin-guide/organizations/billing/
+Request access → /contact
+Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

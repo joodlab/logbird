@@ -1,0 +1,190 @@
+title: Security · Logbird
+description: How Logbird isolates projects, stores keys, guards SQL, deletes expired data and records its own management actions, and what we don't claim yet.
+
+headings:
+h1 How Logbird handles your data.
+h2 Self-hosted, your events stay on your servers.
+h2 Expired events are permanently deleted.
+h2 Every key belongs to one project and does one job.
+h3 Project-bound keys
+h3 Two kinds
+h3 Stored hashed
+h3 Revocable
+h3 Workspace boundaries
+h3 Scoped reads: one customer account per key or token.
+h3 One account per scope
+h3 Two layers
+h3 Browser origins
+h2 SQL search that can only read your project.
+h3 Checked against ClickHouse's own parse
+h3 Allowlisted
+h3 A restricted user
+h3 Row policies
+h2 Permissions are checked by the server.
+h3 One-time sign-in codes
+h3 Rate-limited sign-in
+h2 When staff act for a customer, both names are recorded.
+h2 Logbird records its own management actions.
+h2 Bounded by design.
+h2 Report a vulnerability privately.
+h2 No certifications yet.
+h2 Start with one event.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Security
+How Logbird handles your data.
+An audit log holds sensitive history, so this page says what Logbird does with it and where each protection stops.
+On this page
+Where data lives
+Retention
+Projects and keys
+SQL mode
+Roles
+Impersonation
+Workspace activity
+Rate limits and delivery
+Responsible disclosure
+What we don't claim
+Where data lives
+Self-hosted, your events stay on your servers.
+When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the SMTP provider you choose, and resolves a webhook endpoint's hostname when you save it.
+Your server
+Console
+API
+Worker
+Postgres
+ClickHouse
+Redis
+[aria-hidden] sign-in codes, invitations
+Your SMTP provider
+The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. Outbound, the server connects to your SMTP provider (sign-in codes, invitations and membership notices) and looks up a webhook endpoint's hostname when you save it. With your own databases, it also connects to them.
+Retention
+Expired events are permanently deleted.
+Each project has a retention window, from 7 days to 10 years. New projects start at 90 days.
+A worker deletes events older than the window every hour. Each run is recorded and shown in Settings.
+Before you lower retention, Logbird shows roughly how many events it will delete. To confirm, you type the project's slug. The purge starts right away.
+Deleting a project deletes all of its events.
+There's no archive and no undo.
+Projects and keys
+Every key belongs to one project and does one job.
+[aria-hidden: ]
+Project-bound keys
+An API key works for exactly one project.
+[aria-hidden: ]
+Two kinds
+Ingest keys (lb_ingest_...) can only write. Read keys (lb_read_...) can only read.
+[aria-hidden: ]
+Stored hashed
+Logbird keeps a SHA-256 hash and a short display prefix. The full key is shown once, when you create it.
+[aria-hidden: ]
+Revocable
+Revoke a key in Settings; the console shows when each key was last used.
+[aria-hidden: ]
+Workspace boundaries
+The server checks on every request that the project belongs to your active workspace. A request for another workspace's project gets a 404 and reveals nothing about it.
+Scoped reads: one customer account per key or token.
+[aria-hidden: ]
+One account per scope
+One customer account per scope, matched on the id Logbird stored.
+[aria-hidden: ]
+Two layers
+Logbird's query builders always apply the scope. ClickHouse checks the customer account as well once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade, and a source installation runs create-query-user once.
+[aria-hidden: ]
+Browser origins
+A web page on another origin can read with a token only if that origin is listed on the key.
+SQL mode
+SQL search that can only read your project.
+SQL mode accepts a single boolean WHERE expression. Four layers stand between it and other people's data.
+[aria-hidden] 1
+Checked against ClickHouse's own parse
+The server asks ClickHouse for the statement's syntax tree. It rejects anything that isn't exactly Logbird's own query with your condition in it.
+[aria-hidden] 2
+Allowlisted
+Only known columns and a fixed list of functions may appear. Subqueries, UNION, WITH, SETTINGS, table functions, system tables, comments and semicolons are rejected.
+[aria-hidden] 3
+A restricted user
+Queries run as a separate read-only ClickHouse user. It can only SELECT, and it has fixed ceilings on time, rows read, memory and result size.
+[aria-hidden] 4
+Row policies
+Database row policies limit that user to the project you're authorized for. Even 1 OR 1 can't return another project's rows.
+Where these layers stop
+These layers protect against a broadened or malformed filter. They don't replace the server's own authorization, and they don't protect against stolen database credentials. SQL mode is for the console only; the public API rejects it.
+Roles
+Permissions are checked by the server.
+Owners and admins manage projects, keys, retention and invitations. Members search, export, save views and read workspace activity. Any action that isn't explicitly allowed is denied, for every role. The UI hides what you can't do, but the API is what enforces it.
+One-time sign-in codes
+Sign-in is by a one-time code sent by email. There are no passwords to leak.
+Rate-limited sign-in
+Sign-in requests are rate-limited per client.
+Impersonation
+When staff act for a customer, both names are recorded.
+Send the staff member as impersonator and keep the customer as actor. The event detail shows both. Search impersonator:* to list every event done on someone's behalf. In the console, those rows are marked "via support", the "Done by support" filter lists them, and each support agent has a page with everything they did while signed in as a customer.
+Support changes a rate for Lina
+pre| {
+pre|   "action": "room.rate.updated",
+pre|   "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad", "email": "lina@example.test" },
+pre|   "impersonator": { "id": "usr_7", "name": "Omar Saleh" },
+pre|   "tenant": { "id": "biz_7", "name": "Azure Hotels" },
+pre|   "targets": [{ "type": "room", "id": "room_12", "name": "Room 12" }]
+pre| }
+Lina stays the actor. Omar, from support, is on the event as the impersonator.
+Workspace activity
+Logbird records its own management actions.
+Logbird records management actions (projects, keys, retention, invitations) in workspace activity. Every member can read it.
+[aria-hidden: ] project.createdworkspace
+[aria-hidden: ] api_key.createdworkspace
+[aria-hidden: ] api_key.revokedworkspace
+[aria-hidden: ] project.retention.changedworkspace
+Examples of management actions in the activity stream.
+Rate limits and delivery
+Bounded by design.
+Each project has its own ingest and read rate limits, shared across replicas through Redis.
+Failed authentication attempts are limited per client, so repeated bad keys are throttled. Valid keys keep working behind a shared network address.
+If Redis fails, sign-in limits fail closed (requests are refused) and ingest and read limits fail open (requests continue).
+Delivery is at least once when the client retries unsettled events, as the SDK does. An exact retry with the same valid, non-blank string id reuses the stored event while the project retains it, so retries from the SDK, which sets ids, don't add copies; changed content under that id is rejected with duplicate_id_conflict. An event sent without an id gets a new one on every retry. Once retention deletes an event, its id can be used again.
+Don't send secrets. The SDK's redact() helper replaces common secret fields before sending.
+Responsible disclosure
+Report a vulnerability privately.
+Please don't post details in a public issue. Email security@example.test. Include the affected version, a reproduction using fictional data, and the impact. We'll coordinate the fix and the disclosure with you. We don't offer a response-time SLA yet.
+Email security@example.test
+What we don't claim
+No certifications yet.
+Logbird doesn't hold SOC 2, ISO 27001 or any other certification today, and we don't claim that using it makes you compliant with any law or standard. Logbird can help you answer an auditor's questions: who did what, when, in which account, and what changed. The rest of the work is yours, and we'll say so plainly.
+Start with one event.
+The source opens soon. Request access to Logbird Cloud, where sign-ups are limited to invited teams for now, and we'll tell you when you can self-host.
+Request access
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+Where data lives → #self-host
+Retention → #retention
+Projects and keys → #isolation
+SQL mode → #sql-guard
+Roles → #roles
+Impersonation → #impersonation
+Workspace activity → #self-audit
+Rate limits and delivery → #limits
+Responsible disclosure → #reporting
+What we don't claim → #dont-claim
+security@example.test → mailto:security@example.test
+Email security@example.test → mailto:security@example.test
+Request access → /contact
+Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]
+button type="button" aria-label="Copy code"
