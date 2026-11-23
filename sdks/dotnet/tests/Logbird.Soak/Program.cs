@@ -210,11 +210,14 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
     private async Task<bool> PreflightAsync(ClickHouseCheck clickHouse, DateTimeOffset started, JsonArray checks)
     {
         // The canary goes through the ingest key, so it can only land in the project that key belongs to; nothing is written
-        // directly anywhere until that project is confirmed below.
+        // to ClickHouse directly, and no load is sent, until that project is confirmed below. If the key belongs to another
+        // project on the same local server, this one event is the whole cost, so it says plainly what it is.
         using var canaryHttp = NoProxyHttp()!;
         var canary = new LogbirdClient(new LogbirdOptions { Endpoint = options.Upstream, IngestKey = options.IngestKey, AllowInsecureHttp = true, Environment = "soak" }, canaryHttp);
         var canaryId = LogbirdClient.NewEventId();
-        canary.Track(new AuditEvent("soak.canary") { Id = canaryId }.WithMetadata("soakRun", _runId + "-canary"));
+        canary.Track(new AuditEvent("soak.canary") { Id = canaryId, Source = "logbird-soak-canary" }
+            .WithMetadata("soakRun", _runId + "-canary")
+            .WithMetadata("note", "Logbird.Soak preflight canary (fictional, one per run); safe to delete"));
         var flushed = await Program.WithinAsync(canary.FlushAsync(), TimeSpan.FromSeconds(60)).ConfigureAwait(false) == true;
         var delivered = canary.Stats.Delivered;
         await canary.DisposeAsync().ConfigureAwait(false);
@@ -248,7 +251,15 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         }
 
         var sameProject = string.Equals(project, options.ProjectId, StringComparison.Ordinal);
-        checks.Add(Program.Check("LOGBIRD_SOAK_PROJECT_ID is the keys' project", sameProject, project is null ? "the canary could not be read back with the read key" : sameProject ? "the canary was stored in that project" : "the canary was stored in a different project; nothing is written to ClickHouse"));
+        var canaryText = $"one canary event (action soak.canary, source logbird-soak-canary, id {canaryId}, metadata.soakRun {_runId}-canary)";
+        checks.Add(Program.Check(
+            "LOGBIRD_SOAK_PROJECT_ID is the keys' project",
+            sameProject,
+            project is null
+                ? $"the canary could not be read back with the read key; the ingest key may belong to another project, where {canaryText} was written; nothing else was written and no load was sent"
+                : sameProject
+                    ? "the canary was stored in that project"
+                    : $"the canary was stored in project {project}, not LOGBIRD_SOAK_PROJECT_ID: {canaryText} was written there; nothing else was written, nothing went to ClickHouse directly and no load was sent"));
         if (!sameProject)
         {
             return false;
@@ -652,6 +663,12 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
                     continue;
                 }
 
+                // The deadline may have passed while the page was being read: it never counts then.
+                if (deadline.IsCancellationRequested)
+                {
+                    break;
+                }
+
                 foreach (var e in page.Events)
                 {
                     found.TryAdd(LongMap.Hash(e.Id), 0);
@@ -687,13 +704,16 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         checks.Add(Program.Check("every event the server acknowledged is read back", missing == 0 && lastError is null, $"{missing} of {expected.Length} acknowledged ids missing{(lastError is null ? string.Empty : ", last read error " + lastError)} (deadline {budget.TotalMinutes:F0} min)"));
         try
         {
-            var raw = await clickHouse.DistinctIdsAsync(_runId, options.ExpectedEvents).ConfigureAwait(false);
-            var rawIds = raw.Entries().Select(e => e.Key).ToArray();
-            var rawStrangers = rawIds.Count(id => !_tracked.Contains(id));
-            var readNotRaw = stored.Entries().Count(e => !raw.Contains(e.Key));
+            var (rawMap, invalid) = await clickHouse.DistinctIdsAsync(_runId, options.ExpectedEvents).ConfigureAwait(false);
+            var raw = (Ids: rawMap, Invalid: invalid);
+            var rawIds = raw.Ids.Entries().Select(e => e.Key).ToArray();
+            // An id that is not valid UTF-8 can never be one the harness tracked: it counts as never tracked.
+            var rawStrangers = rawIds.Count(id => !_tracked.Contains(id)) + raw.Invalid;
+            var readNotRaw = stored.Entries().Count(e => !raw.Ids.Contains(e.Key));
 
-            // A tracked raw id the read-back did not return (it settled after the last page) is still stored: it joins the
-            // stored set, so the accounting below (stored or dropped, stored and dropped with an unconfirmed reason) covers it.
+            // A tracked id present in the raw rows but absent from the read-back (it settled after the last page, or search
+            // left it out) is still stored: it joins the stored set, so the accounting below (stored or dropped, stored and
+            // dropped with an unconfirmed reason) covers it.
             var late = 0;
             foreach (var id in rawIds)
             {
@@ -703,7 +723,7 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
                 }
             }
 
-            checks.Add(Program.Check("every raw row of the run is a tracked event, and every event read back has a raw row", rawStrangers == 0 && readNotRaw == 0, $"{rawIds.Length} distinct raw ids: {rawStrangers} never tracked; {readNotRaw} read-back ids without a raw row; {late} raw ids not read back, counted as stored"));
+            checks.Add(Program.Check("every raw row of the run is a tracked event, and every event read back has a raw row", rawStrangers == 0 && readNotRaw == 0, $"{rawIds.Length + raw.Invalid} distinct raw ids: {rawStrangers} never tracked ({raw.Invalid} not valid UTF-8); {readNotRaw} read-back ids without a raw row; {late} tracked raw ids absent from the read-back, counted as stored"));
             var duplicated = await clickHouse.DuplicatedIdsAsync(_runId).ConfigureAwait(false);
             checks.Add(Program.Check("no event id has more than one raw row (no FINAL)", duplicated == 0, $"{duplicated} event ids with more than one raw row at the time of the count"));
         }

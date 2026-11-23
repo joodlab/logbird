@@ -57,9 +57,13 @@ each event.
   used.
 - **Canary:** before the load, one event goes straight to the server and must be delivered, so a wrong ingest key fails
   at once.
-  - It goes through the ingest key, so it can only land in that key's own project. An ingest key for another project
-    on the same local server therefore leaves that one fictional event there before the mismatch below stops the run;
-    nothing else is written.
+  - It goes through the ingest key, so it can only land in that key's own project. Nothing is written to ClickHouse
+    directly, and no load is sent, until the canary has confirmed the project.
+  - The server offers no way to learn an ingest key's project without writing, so an ingest key for another project on
+    the same local server leaves that one fictional event there before the mismatch below stops the run. The event says
+    what it is (action `soak.canary`, source `logbird-soak-canary`, the run tag and a note that it is safe to delete),
+    and the failed check names the project it landed in, when the read key can see it, and that one event was written
+    there.
   - It is then read back with the read key, and its project must be `LOGBIRD_SOAK_PROJECT_ID`.
   - It must also be found in the configured ClickHouse database under that project before anything is written there
     directly.
@@ -69,8 +73,10 @@ each event.
   retried with the same cursor and the earlier pages are kept. It continues until every id the server acknowledged to
   the client is there, or a deadline of five minutes plus 100 ms per expected page passes.
 - **Reconciliation:** the run's distinct event ids in the raw ClickHouse rows must all be tracked events, and every
-  event read back must have a raw row. A tracked raw id the read-back did not return (it settled after the last page)
-  counts as stored, so the accounting checks cover it; the report gives their number. An empty run passes.
+  event read back must have a raw row. A tracked id present in the raw rows but absent from the read-back (it settled
+  after the last page, or search left it out; the two observations cannot tell which) counts as stored, so the
+  accounting checks cover it; the report gives their number. An id that is not valid UTF-8 counts as never tracked. An
+  empty run passes.
 - **Duplicates:** the run counts its event ids with more than one raw row (no `FINAL`).
 - **Deduplication exercised:** whenever `partial`, `resetafterstore` or `emptyack` is configured, the server must have
   acknowledged at least one event id again after an earlier answer of its own had already acknowledged it. A resend that
@@ -82,7 +88,8 @@ each event.
   - Reads also send every other overflow mode as `throw` (`read`, `read_leaf`, `distinct`, `sort`, `set`, `join`,
     `transfer`, `timeout`, `timeout_leaf`), so a limit a profile sets fails the query instead of returning part of it.
   - Reads also send `limit=0`, `offset=0`, `additional_table_filters={}`, `additional_result_filter=` (empty) and
-    `use_query_cache=0`: no profile-wide row cap, filter or cached answer.
+    `use_query_cache=0`: no profile-wide row cap, filter or cached answer. They send `extremes=0`, so no extra rows follow
+    a count.
   - The self-test insert sends `optimize_on_insert=0`, `async_insert=0`, `insert_deduplicate=0`, `limit=0` and
     `offset=0`.
   - Event ids are read as hex, one prefixed line each, so the text format can neither drop nor alter one.
@@ -109,9 +116,11 @@ each event.
   - **Hash collisions.** Ids are compared as 64-bit hashes; the chance of a collision is about n² / 2⁶⁵, under one in a
     million for the 4 million events a run may track.
   - **Receipt by the SDK.** "Acknowledged to the client" means the proxy finished writing that answer. If the SDK had
-    already abandoned the request, `Stats.Delivered` would come out lower and the counter check would fail spuriously.
-    The check compares totals, so it could pass wrongly only if an SDK overcount elsewhere exactly offset such a missed
-    answer. It has not happened in a run: answers come within the fault's 2 s, well inside the 10 s request timeout.
+    already abandoned the request, `Stats.Delivered` would come out lower and the counter check would fail spuriously,
+    unless the SDK then reported that event dropped. The check leaves dropped ids out, and that is the documented outcome
+    for an event whose answer was lost: an unconfirmed drop reason, checked by "an event both stored and dropped has an
+    unconfirmed reason". Otherwise the check compares totals, so it could pass wrongly only if an SDK overcount elsewhere
+    exactly offset a missed answer. It has not happened in a run: answers come within the fault's 2 s, well inside the 10 s request timeout.
 
 **Safety.** Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse,
 with no user info, query or fragment. Every HTTP client it uses, the SDK clients included, is given a handler that never

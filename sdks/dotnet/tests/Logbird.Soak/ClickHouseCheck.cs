@@ -24,10 +24,11 @@ namespace Logbird.Soak;
 /// every other <c>*_overflow_mode=throw</c> (read, read leaf, distinct, sort, set, join, transfer, timeout, timeout leaf:
 /// a limit a profile sets fails the query instead of returning part of it), <c>limit=0</c> and <c>offset=0</c> (no
 /// profile-wide row cap), <c>additional_table_filters={}</c> and <c>additional_result_filter=</c> (no profile-wide
-/// filter), and <c>use_query_cache=0</c> (no cached, stale answer);
+/// filter), <c>use_query_cache=0</c> (no cached, stale answer) and <c>extremes=0</c> (no extra rows after a count);
 /// the self-test insert sends <c>optimize_on_insert=0</c>, <c>async_insert=0</c> (its rows must be visible to the count
 /// that follows), <c>insert_deduplicate=0</c>, <c>limit=0</c> and <c>offset=0</c> (both rows of its SELECT are inserted).
-/// Ids are read as hex, one prefixed line per id, so no id is lost or altered by the text format.
+/// Ids are read as hex, one prefixed line per id, so no id is lost or altered by the text format; an id that is not valid
+/// UTF-8 is counted apart, since it can never equal a tracked id.
 /// </para>
 /// </summary>
 internal sealed class ClickHouseCheck : IDisposable
@@ -54,6 +55,7 @@ internal sealed class ClickHouseCheck : IDisposable
         ("!additional_table_filters", "{}"),
         ("!additional_result_filter", ""),
         ("!use_query_cache", "0"),
+        ("!extremes", "0"),
     ];
 
     private static readonly (string Name, string Value)[] InsertSettings =
@@ -64,6 +66,8 @@ internal sealed class ClickHouseCheck : IDisposable
         ("!limit", "0"),
         ("!offset", "0"),
     ];
+
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly HttpClient _http;
     private readonly string _baseUrl;
@@ -100,14 +104,16 @@ internal sealed class ClickHouseCheck : IDisposable
 
     /// <summary>
     /// The run's distinct event ids in the raw rows, as id hashes. Each id comes back as <c>x</c> plus its bytes in hex, so
-    /// an empty id is a line of its own and no character is escaped or lost by the text format.
+    /// an empty id is a line of its own and no character is escaped or lost by the text format. Ids that are not valid
+    /// UTF-8 are only counted: decoding would map different byte strings to the same text.
     /// </summary>
-    public async Task<LongMap> DistinctIdsAsync(string runTag, long expected)
+    public async Task<(LongMap Ids, int Invalid)> DistinctIdsAsync(string runTag, long expected)
     {
         var text = await QueryAsync(
             "SELECT DISTINCT concat('x', hex(event_id)) FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String} FORMAT TabSeparated",
             With(ReadSettings, ("p", _projectId), ("r", runTag))).ConfigureAwait(false);
         var ids = new LongMap(expected);
+        var invalid = 0;
         foreach (var line in text.Split([(char)10], StringSplitOptions.RemoveEmptyEntries))
         {
             var hex = line.TrimEnd((char)13);
@@ -122,10 +128,21 @@ internal sealed class ClickHouseCheck : IDisposable
                 bytes[i] = (byte)((Nibble(hex[1 + (2 * i)]) << 4) | Nibble(hex[2 + (2 * i)]));
             }
 
-            ids.TryAdd(LongMap.Hash(Encoding.UTF8.GetString(bytes)), 0);
+            string id;
+            try
+            {
+                id = StrictUtf8.GetString(bytes);
+            }
+            catch (DecoderFallbackException)
+            {
+                invalid++;
+                continue;
+            }
+
+            ids.TryAdd(LongMap.Hash(id), 0);
         }
 
-        return ids;
+        return (ids, invalid);
     }
 
     private static int Nibble(char c)

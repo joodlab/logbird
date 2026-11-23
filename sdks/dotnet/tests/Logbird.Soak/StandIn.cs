@@ -936,9 +936,11 @@ internal sealed class StandIn : IDisposable
             : status == 202 ? root["ids"] as JsonArray
             : status == 503 && root["error"] is JsonObject error && error["details"] is JsonObject details ? details["ids"] as JsonArray
             : null;
+        // Each id once per answer: an id listed twice in one answer was not acknowledged by an earlier one.
+        var inThisAnswer = new HashSet<long>();
         foreach (var id in ids ?? [])
         {
-            if (id is JsonValue v && v.TryGetValue<string>(out var text) && !_upstreamAcknowledged!.TryAdd(LongMap.Hash(text), 0))
+            if (id is JsonValue v && v.TryGetValue<string>(out var text) && inThisAnswer.Add(LongMap.Hash(text)) && !_upstreamAcknowledged!.TryAdd(LongMap.Hash(text), 0))
             {
                 Interlocked.Increment(ref _upstreamResends);
             }
@@ -1064,7 +1066,11 @@ internal sealed class StandIn : IDisposable
             var colon = line.IndexOf(':');
             if (colon > 0)
             {
-                headers[line.Substring(0, colon).Trim()] = line.Substring(colon + 1).Trim();
+                // A field sent on several lines is one comma-separated list (RFC 9110 5.3): no line may overwrite another,
+                // so every Connection line still names its hop-by-hop headers and every repeated field is forwarded whole.
+                var name = line.Substring(0, colon).Trim();
+                var value = line.Substring(colon + 1).Trim();
+                headers[name] = headers.TryGetValue(name, out var earlier) ? earlier + ", " + value : value;
             }
         }
 
