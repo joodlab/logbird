@@ -51,10 +51,16 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
     source = `SELECT ${recordValue('record_type', 'substring(entity_id,length(record_type)+2)')} value,label,count
       FROM (SELECT entity_id,anyLast(type) record_type,anyLast(name) label,sum(events) count
         FROM entities WHERE project_id={p:String} AND kind='target' GROUP BY entity_id)`;
+  } else if (f.key === 'target') {
+    // A target's rollup key is `type:id`, and a type may hold colons: the id is what follows the stored type, never what
+    // follows the first colon (`order:archived` + `A1` suggests `A1`, not `archived:A1`). Ids shared by types sum up.
+    source = `SELECT substring(entity_id,length(record_type)+2) value,anyLast(label) label,sum(count) count
+      FROM (SELECT entity_id,anyLast(type) record_type,anyLast(name) label,sum(events) count
+        FROM entities WHERE project_id={p:String} AND kind='target' GROUP BY entity_id) GROUP BY value`;
   } else if (f.suggest === 'entities') {
     const name = f.key.endsWith('.name'),
       type = f.key.endsWith('.type');
-    const v = name ? 'name' : type ? 'type' : f.key === 'target' ? "substring(entity_id,position(entity_id,':')+1)" : 'entity_id';
+    const v = name ? 'name' : type ? 'type' : 'entity_id';
     source = `SELECT ${v} value,anyLast(${type ? 'type' : 'name'}) label,sum(events) count FROM entities WHERE project_id={p:String} AND kind={kind:String} GROUP BY value`;
   } else {
     source = `SELECT ${f.column} value,value label,sum(events) count FROM events_by_minute WHERE project_id={p:String} AND bucket>=now()-INTERVAL 7 DAY GROUP BY value`;

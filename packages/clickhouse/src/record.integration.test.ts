@@ -198,6 +198,32 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
     60_000,
   );
 
+  it('suggests a target id as stored after its type, never split at the first colon (#220)', async () => {
+    const suggestProject = `record-suggest-${randomUUID()}`;
+    const targets = [
+      { type: 'order:archived', id: 'A1' },
+      { type: '', id: 'A2' },
+      { type: 'commande:é', id: 'B7' },
+    ];
+    try {
+      await insertEvents(
+        ch,
+        targets.map((target, i) => {
+          const event = normalizeEvent(
+            { id: `suggest-${i}`, action: 'record.suggested', occurredAt: now.toISOString(), targets: [target] },
+            { projectId: suggestProject, receivedAt: now },
+          );
+          if (!event.ok) throw new Error(`Invalid suggest fixture ${JSON.stringify(target)}`);
+          return event.row;
+        }),
+      );
+      const suggested = await suggestValues(ch, suggestProject, { field: 'target', limit: 10 });
+      expect(suggested.values.map((v) => v.value).sort()).toEqual(['A1', 'A2', 'B7']);
+    } finally {
+      await purgeProject(ch, suggestProject);
+    }
+  }, 120_000);
+
   it('keeps histories and names separate when two pairs share the directory key', async () => {
     const collisionProject = `record-collision-${randomUUID()}`;
     const sqlClient = createQueryClickHouseClient();
