@@ -403,6 +403,12 @@ const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'imperson
  * every value is read, and every `toJSON` applied, exactly as sending the event reads them, and a matched value is
  * replaced before it is serialized (a value JSON cannot hold, such as a `BigInt` under a secret key, never stops the
  * event). An object reached twice becomes two copies, and an event with a cycle throws a `TypeError`, as sending it would.
+ *
+ * The contract: `redact()` is exact for JSON data, which is what `EventInput` types: plain objects, arrays, primitives,
+ * and `toJSON` values (such as `Date`) without side effects on other parts of the event. Getters or `toJSON` with side
+ * effects on other parts of the event, or anything that changes the event while it is serialized, are outside it. A
+ * change whose `field` is not a plain own string (a getter, an inherited or non-enumerable property, or a value with a
+ * `toJSON`) has its `before` and `after` redacted, whatever the pattern.
  */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
   const keys = options.keys ?? DEFAULT_SECRET_KEYS;
@@ -447,13 +453,18 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
     };
     const plain: Context = { level: 'plain', whole: false, changed: false };
     const nested: Context = { level: 'nested', whole: false, changed: false };
-    // A change's field is read to decide its values: directly when it is a plain data property, otherwise from a copy
-    // made once (each getter still runs once), which is then what is serialized.
+    // A change's values are decided from its field's property descriptor, before anything is serialized and without
+    // reading the field. An own, enumerable string data property is matched against the change pattern. A field whose
+    // value JSON cannot tell this way (a getter, an inherited or non-enumerable property, or a value with a toJSON) fails
+    // closed: the entry's before and after are redacted. Any other JSON value, or no field, is not matched, as in .NET.
     const changeEntry = (entry: Record<string, unknown>) => {
       const own = Object.getOwnPropertyDescriptor(entry, 'field');
-      const source = own && !('value' in own) ? Object.fromEntries(Object.entries(entry)) : entry;
-      const field: unknown = source.field;
-      return keep(source, { level: 'change', whole: false, changed: typeof field === 'string' && matches(fields, field) });
+      let changed: boolean;
+      if (own === undefined) changed = 'field' in entry;
+      else if (!('value' in own) || !own.enumerable) changed = true;
+      else if (typeof own.value === 'string') changed = matches(fields, own.value);
+      else changed = !!own.value && typeof own.value === 'object' && typeof (own.value as { toJSON?: unknown }).toJSON === 'function';
+      return keep(entry, { level: 'change', whole: false, changed });
     };
     function replacer(this: unknown, key: string, value: unknown): unknown {
       const holder = this && typeof this === 'object' ? contexts.get(this) : undefined;

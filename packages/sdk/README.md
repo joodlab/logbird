@@ -147,7 +147,12 @@ change pattern matches. The .NET SDK redacts by the same rules, checked against 
 fixture: with `DEFAULT_SECRET_KEYS` both redact exactly the same keys. A pattern of your
 own runs on each platform's engine, which differ at the edges (in .NET `$` also matches
 before a final line feed, and flags such as `i` fold case differently), so keep a pattern
-you share between the SDKs to plain alternatives and anchors.
+you share between the SDKs to plain alternatives and anchors. `redact()` is exact for JSON
+data, which is what `EventInput` types (plain objects, arrays, primitives, and `toJSON`
+values such as `Date` without side effects on other parts of the event); getters or
+`toJSON` with such side effects are outside that contract. A change whose `field` is not a
+plain own string (a getter, an inherited or non-enumerable property, or a value with a
+`toJSON`) has its `before` and `after` redacted, whatever the pattern.
 `DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
 cookies, credentials and private keys. Add email/phone patterns for your PII policy;
 the default secret pattern does not cover all PII. Supplying `keys` replaces the default pattern; combine them to retain secret protection. `changeFields` defaults to the resulting `keys` pattern. Hooks compose:

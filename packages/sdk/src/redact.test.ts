@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { type EventInput, IDENTIFIER_FIELDS, redact } from './index';
 
 it('redacts nested metadata, actor fields, arrays and change values without mutation', () => {
@@ -155,6 +155,52 @@ it('tells a boxed primitive as JSON does, by its internal slot, so nothing escap
   expect(JSON.stringify(redact({ keys: /actor/ })({ id: 'e', action: 'a', actor: foreign } as unknown as EventInput))).toBe(
     '{"id":"e","action":"a","actor":"[redacted]"}',
   );
+});
+
+// TypeScript only, kept out of the shared fixture: these shapes cannot be written as JSON, so the .NET SDK never sees
+// them. A change whose field is not a plain own string fails closed (the master's ruling on #345).
+describe('a change whose field JSON cannot tell fails closed', () => {
+  const values = (change: object) => {
+    const result = redact({ keys: /^never$/, changeFields: /^password$/ })({ id: 'e', action: 'a', changes: [change] } as unknown as EventInput);
+    const entry = (result as unknown as { changes: Array<Record<string, unknown>> }).changes[0]!;
+    return [entry.before, entry.after];
+  };
+  const redacted = ['[redacted]', '[redacted]'];
+
+  it('redacts a getter field, without reading it', () => {
+    let reads = 0;
+    const change = {
+      get field() {
+        reads += 1;
+        return 'public';
+      },
+      before: 'b',
+      after: 'a',
+    };
+    expect(values(change)).toEqual(redacted);
+    expect(reads).toBe(1);
+  });
+
+  it('redacts an inherited field', () => {
+    expect(values(Object.assign(Object.create({ field: 'public' }), { before: 'b', after: 'a' }))).toEqual(redacted);
+  });
+
+  it('redacts a non-enumerable field', () => {
+    const change = { before: 'b', after: 'a' };
+    Object.defineProperty(change, 'field', { value: 'public', enumerable: false });
+    expect(values(change)).toEqual(redacted);
+  });
+
+  it('redacts a field whose value has a toJSON', () => {
+    expect(values({ field: { toJSON: () => 'public' }, before: 'b', after: 'a' })).toEqual(redacted);
+  });
+
+  it('keeps the shared rule for a plain own field', () => {
+    expect(values({ field: 'public', before: 'b', after: 'a' })).toEqual(['b', 'a']);
+    expect(values({ field: 'password', before: 'b', after: 'a' })).toEqual(redacted);
+    expect(values({ field: 7, before: 'b', after: 'a' })).toEqual(['b', 'a']);
+    expect(values({ before: 'b', after: 'a' })).toEqual(['b', 'a']);
+  });
 });
 
 it('lists the same identifier fields as the .NET SDK', () => {
