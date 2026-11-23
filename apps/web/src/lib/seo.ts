@@ -1,8 +1,24 @@
 import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME, SITE_URL } from '../env';
+import { brandUrl } from './asset-url';
+import { OG_DESIGN_VERSION } from './asset-versions';
 import { type Post, postPath } from './publications';
 import { pageIndexable, siteIndexable } from './release';
-import { getPage, isReady } from './site-map';
+import { getPage, isReady, type SitePage, siteMap } from './site-map';
 export const canonicalHref = (path: string) => new URL(path, `${SITE_URL}/`).href;
+/**
+ * An OG card's URL with a version of what scripts/og.ts draws for that slug: the words of the site-map page that owns
+ * it (home's card words for home) and the card's design (OG_DESIGN_VERSION). Every page that shares a card, posts
+ * included, gets the same URL, and a changed card gets a new one instead of a cached old image.
+ */
+export function ogImageHref(ogSlug: string) {
+  const page = siteMap.find((entry) => entry.ogSlug === ogSlug) as (SitePage & { ogTitle?: string; ogDescription?: string }) | undefined;
+  const words = page ? (ogSlug === 'home' ? `${page.ogTitle}|${page.ogDescription}` : `${page.title}|${page.description}`) : '';
+  let hash = 0x81_1c_9d_c5;
+  for (const char of `${OG_DESIGN_VERSION}|${ogSlug}|${words}`) {
+    hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 0x01_00_01_93) >>> 0;
+  }
+  return canonicalHref(`/og/${ogSlug}.png?v=${hash.toString(16).padStart(8, '0')}`);
+}
 export function pageMeta({
   title,
   description,
@@ -20,7 +36,7 @@ export function pageMeta({
   fullTitle?: string;
 }) {
   const fullTitle = givenTitle ?? `${title} · Logbird`;
-  const image = canonicalHref(`/og/${ogSlug}.png`);
+  const image = ogImageHref(ogSlug);
   return [
     { title: fullTitle },
     { name: 'description', content: description },
@@ -53,7 +69,7 @@ export const organizationLd = () =>
         name: ORG_NAME,
         alternateName: 'Logbird',
         url: SITE_URL,
-        logo: canonicalHref('/brand/logbird-wordmark-light.svg'),
+        logo: canonicalHref(brandUrl('logbird-wordmark-light.svg')),
         ...(GITHUB_PUBLIC && GITHUB_URL ? { sameAs: [GITHUB_URL] } : {}),
       })
     : null;
@@ -101,7 +117,7 @@ export const articleLd = (article: {
     dateModified: article.modified ?? article.published,
     author: { '@type': 'Person', name: article.author },
     ...(ORG_NAME ? { publisher: { '@id': `${SITE_URL}/#organization` } } : {}),
-    image: canonicalHref(`/og/${article.ogSlug}.png`),
+    image: ogImageHref(article.ogSlug),
   });
 export const faqLd = (items: { q: string; a: string }[]) =>
   ld({
