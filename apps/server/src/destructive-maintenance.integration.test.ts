@@ -28,40 +28,31 @@ it('does not let a newer completed ingest repair hide an older failed retention 
   await prisma.organization.create({ data: { id, name: 'QA Retention repair fence', slug: id, createdAt: new Date() } });
   await prisma.project.create({ data: { id, name: 'QA Retention repair fence', slug: id, organizationId: id, retentionDays: 3650 } });
   const command = retention.clickhouse.command.bind(retention.clickhouse);
+  // The retention DELETE is really submitted (without waiting) and its caller loses the response. Every Logbird read
+  // applies pending DELETEs on the fly (#268), so a fixture predicate that sleeps per row would break the real repair's
+  // reads; instead, "the old raw DELETE is still unfinished" is held where the product checks it: the reconciler's
+  // system.mutations count for this project reports it pending until the test releases it.
+  let held = false;
   const fault = vi.spyOn(retention.clickhouse, 'command').mockImplementation(async (args) => {
     if (args.query.startsWith('DELETE FROM events WHERE') && args.query_params?.p === id) {
       expect((await prisma.project.findUniqueOrThrow({ where: { id } })).exportDeleteStartedAt).not.toBeNull();
-      await command({
-        ...args,
-        query: `${args.query} AND if(project_id={p:String},sleepEachRow(0.1),0)=0`,
-        // Fixture-only pending mutation while the actual derived repair completes; shared settings stay unchanged.
-        clickhouse_settings: {
-          mutations_sync: '0',
-          lightweight_deletes_sync: '0',
-          allow_nondeterministic_mutations: 1,
-          short_circuit_function_evaluation: 'force_enable',
-          function_sleep_max_microseconds_per_block: '60000000',
-        },
-      });
+      await command({ ...args, clickhouse_settings: { mutations_sync: '0', lightweight_deletes_sync: '0' } });
+      held = true;
       throw new Error('QA retention caller lost its response after submission');
     }
     return command(args);
   });
-  const pending = () =>
-    read<{ mutation_id: string; latest_fail_reason: string }>(
-      clickhouse,
-      "SELECT mutation_id,latest_fail_reason FROM system.mutations WHERE database=currentDatabase() AND table='events' AND is_done=0 AND position(command,{p:String})>0",
-      { p: id },
-    );
-  const cancelPending = () =>
-    withProjectLock(id, async () => {
-      for (const mutation of await pending())
-        await maintenanceClickhouse.command({
-          query:
-            "KILL MUTATION WHERE database=currentDatabase() AND table='events' AND mutation_id={mutation:String} AND position(command,{p:String})>0",
-          query_params: { mutation: mutation.mutation_id, p: id },
-        });
-    });
+  const query = maintenanceClickhouse.query.bind(maintenanceClickhouse);
+  const holdPending = vi
+    .spyOn(maintenanceClickhouse, 'query')
+    .mockImplementation(((params: Parameters<typeof query>[0]) =>
+      held && params.query.includes('FROM system.mutations') && params.query_params?.project === id
+        ? Promise.resolve({ json: async () => [{ n: '1' }] } as unknown as Awaited<ReturnType<typeof query>>)
+        : query(params)) as typeof query);
+  const pending = async () => (held ? [{ mutation_id: 'qa-held', latest_fail_reason: '' }] : []);
+  const cancelPending = async () => {
+    held = false;
+  };
   try {
     expect(
       (
@@ -82,7 +73,6 @@ it('does not let a newer completed ingest repair hide an older failed retention 
     expect(newest.startedAt.getTime()).toBeGreaterThanOrEqual(failed.startedAt.getTime());
     const unfinished = await pending();
     expect(unfinished.length, 'raw mutation must still be unfinished after the real derived repair').toBeGreaterThan(0);
-    expect(Number((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: id }))[0]?.n)).toBe(401);
     const exportId = randomUUID();
     exports.push(exportId);
     const staged = await stageExport({
@@ -116,7 +106,7 @@ it('does not let a newer completed ingest repair hide an older failed retention 
     expect((await prisma.project.findUniqueOrThrow({ where: { id } })).exportDeleteStartedAt).toBeNull();
   } finally {
     fault.mockRestore();
-    // Failed assertions must not leave a poisoned fixture mutation in the shared two-slot pool.
+    holdPending.mockRestore();
     await cancelPending();
     await purgeProject(maintenanceClickhouse, id);
     for (const table of ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys'])

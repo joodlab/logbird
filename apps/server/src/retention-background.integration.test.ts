@@ -408,3 +408,53 @@ it(
     }
   },
 );
+
+it(
+  'answers store_maintenance_blocking when a pending foreign mutation is applied on the fly but its predicate fails the read',
+  purgeLimit(180_000),
+  async () => {
+    await f.authorize();
+    // An operator's mutation on this project's own rows. 20,000 rows in one part: the background mutation sleeps 0.3 ms
+    // a row per 8,192-row block (about 2.5 s, under ClickHouse's 3 s cap, so it completes and never blocks other work);
+    // a read takes the part as one larger block, so applying the predicate exceeds the cap and fails the read. Only
+    // reads that reach these rows fail; that is the case readers must report clearly.
+    await insertEvents(
+      clickhouse,
+      Array.from({ length: 20_000 }, (_, i) => f.row({ id: `held-${i}`, action: 'qa.held', occurredAt: new Date(Date.now() - DAY).toISOString() })),
+    );
+    try {
+      await maintenanceClickhouse.command({
+        query:
+          "ALTER TABLE events DELETE WHERE project_id = {p:String} AND action = 'qa.held' AND if(project_id = {p:String}, sleepEachRow(0.0003), 0) = 0",
+        query_params: { p: f.project },
+        clickhouse_settings: { mutations_sync: '0', allow_nondeterministic_mutations: 1, short_circuit_function_evaluation: 'force_enable' } as never,
+      });
+      expect((await pendingProjectMutations(maintenanceClickhouse, f.project)).length).toBe(1);
+      // The read fails because the predicate errors when applied, not because the mutation cannot be applied on the fly.
+      const direct = await clickhouse
+        .query({ query: 'SELECT count() n FROM events WHERE project_id={p:String}', query_params: { p: f.project }, format: 'JSONEachRow' })
+        .then((r) => r.json())
+        .then(
+          () => '',
+          (error: Error) => error.message,
+        );
+      expect(direct).toMatch(/maximum sleep time/i);
+      expect(direct).not.toMatch(/cannot be applied on fly/);
+      // Ingest is not refused (its identity lookups read plain).
+      expect((await f.post(liveEvent(8000))).status).toBe(202);
+      // The console read reaching those rows answers clearly and retryably, never a 500.
+      const blocked = await f.management(`/api/projects/${f.project}/events?from=${new Date(Date.now() - 7 * DAY).toISOString()}`);
+      expect(blocked.status).toBe(503);
+      expect(blocked.headers.get('Retry-After')).toBe('30');
+      expect((await blocked.json()).error.code).toBe('store_maintenance_blocking');
+      expect((await f.management('/readyz')).status).toBe(200);
+    } finally {
+      // Never leave the held mutation behind, even when an assertion failed.
+      for (const m of await pendingProjectMutations(maintenanceClickhouse, f.project))
+        if (m.table === 'events')
+          await maintenanceClickhouse.command({
+            query: `KILL MUTATION WHERE database = currentDatabase() AND mutation_id = '${m.mutationId.replace(/[^\w.-]/g, '')}' SYNC`,
+          });
+    }
+  },
+);
