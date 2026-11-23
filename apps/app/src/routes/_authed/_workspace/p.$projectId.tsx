@@ -7,6 +7,7 @@ import { PageSkeleton } from '@/components/route-states';
 import { AppShell } from '@/components/shell/app-shell';
 import { ApiRequestError } from '@/lib/api/errors';
 import { projectQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
+import { projectIsListed } from '@/lib/project-listed';
 import { rememberProject } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
@@ -15,12 +16,10 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   validateSearch: z.object({ range: z.string().optional().catch(undefined) }),
   search: { middlewares: [retainSearchParams(['range'])] },
   // A project this workspace does not list (deleted, another workspace's, a stale bookmark) is not found before any of
-  // its requests runs: the loader and the page's own queries would each answer 404 into the console. A project created
-  // since the list was cached is re-read once before it counts as missing.
+  // its requests runs: the loader and the page's own queries would each answer 404 into the console. A project the
+  // cached list lacks is checked against a fresh list first, so one created since is never shown as not found.
   beforeLoad: async ({ context, params }) => {
-    const listed = (projects: readonly { id: string }[]) => projects.some((p) => p.id === params.projectId);
-    if (listed(await context.queryClient.ensureQueryData(projectsQuery()))) return;
-    if (!listed(await context.queryClient.fetchQuery({ ...projectsQuery(), staleTime: 0 }))) throw notFound();
+    if (!(await projectIsListed(context.queryClient, params.projectId))) throw notFound();
   },
   loader: async ({ context, params }) => {
     try {
