@@ -6,9 +6,7 @@ on:
       - 'sdks/dotnet/**'
       - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
-      - 'packages/contracts/src/record-selector.ts'
-      - 'packages/contracts/src/api.ts'
-      - 'packages/contracts/src/query.ts'
+      - 'packages/contracts/**'
       - '.github/workflows/dotnet.yml'
   push:
     branches: [master]
@@ -16,9 +14,7 @@ on:
       - 'sdks/dotnet/**'
       - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
-      - 'packages/contracts/src/record-selector.ts'
-      - 'packages/contracts/src/api.ts'
-      - 'packages/contracts/src/query.ts'
+      - 'packages/contracts/**'
       - '.github/workflows/dotnet.yml'
 
 permissions:

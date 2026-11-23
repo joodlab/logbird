@@ -137,7 +137,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _onError = options.OnError;
         _onDrop = options.OnDrop;
         _logger = logger ?? NullLogger.Instance;
-        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Interlocked.Add(ref _notificationsLost, lost), () => Interlocked.Increment(ref _callbackFailures));
+        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Count(ref _notificationsLost, ref LogbirdMetrics.NotificationsLostTotal, lost), () => Count(ref _callbackFailures, ref LogbirdMetrics.CallbackFailuresTotal));
         List<string>? identifierFields = null;
         try
         {
@@ -165,7 +165,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         var http = httpClient ?? (_ownedHttp = CreateHttpClient());
         _queue = new EventQueue(options.MaxQueueSize, options.QueueFullBehavior, OnEvicted);
         _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay,
-            delivered: () => Interlocked.Increment(ref _delivered),
+            delivered: () => Count(ref _delivered, ref LogbirdMetrics.DeliveredTotal),
             countDrop: CountDrop,
             settle: (item, count) => _queue!.Settle(item, count));
         _loop = Task.Run(RunAsync);
@@ -210,7 +210,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
         if (InsideLogbird.Value)
         {
-            Interlocked.Increment(ref _filtered);
+            Count(ref _filtered, ref LogbirdMetrics.FilteredTotal);
             return auditEvent?.Id;
         }
 
@@ -253,7 +253,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 var result = _beforeSend(copy);
                 if (result is null)
                 {
-                    Interlocked.Increment(ref _filtered);
+                    Count(ref _filtered, ref LogbirdMetrics.FilteredTotal);
                     return id ?? auditEvent?.Id;
                 }
 
@@ -315,7 +315,13 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                     WarnAll(eventId, eventAction, identifierWarnings.ToArray());
                 }
 
-                Interlocked.Increment(ref _tracked);
+                // A rare event with many identifier warnings must not keep a large reusable list alive on this thread.
+                if (identifierWarnings.Capacity > 256)
+                {
+                    _identifierWarnings = null;
+                }
+
+                Count(ref _tracked, ref LogbirdMetrics.TrackedTotal);
                 if (count == 1)
                 {
                     Interlocked.Exchange(ref _firstQueuedAtTicks, _clock.Elapsed.Ticks);
@@ -380,7 +386,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
         if (InsideLogbird.Value)
         {
-            Interlocked.Increment(ref _filtered);
+            Count(ref _filtered, ref LogbirdMetrics.FilteredTotal);
             return;
         }
 
@@ -793,7 +799,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (result.Failure is { } failure)
             {
-                Interlocked.Increment(ref _failedSends);
+                Count(ref _failedSends, ref LogbirdMetrics.FailedSendsTotal);
                 _consecutiveFailures++;
                 var backoff = TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, Math.Min(_consecutiveFailures - 1, 6))));
                 if (backoff < _flushInterval)
@@ -895,7 +901,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     private void Warn(string id, string action, string reason, string message)
     {
-        Interlocked.Increment(ref _warnings);
+        Count(ref _warnings, ref LogbirdMetrics.WarningsTotal);
         Report(new LogbirdEventWarning(id, action, reason, message));
     }
 
@@ -905,7 +911,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     /// </summary>
     private void WarnAll(string id, string action, EntityIds.Warning[] warnings)
     {
-        Interlocked.Add(ref _warnings, warnings.Length);
+        Count(ref _warnings, ref LogbirdMetrics.WarningsTotal, warnings.Length);
         Notify(() =>
         {
             foreach (var warning in warnings)
@@ -916,29 +922,29 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         });
     }
 
+    /// <summary>Counts on this client's Stats and on the process-wide totals the meters read.</summary>
+    private static void Count(ref long own, ref long total, long amount = 1)
+    {
+        Interlocked.Add(ref own, amount);
+        Interlocked.Add(ref total, amount);
+    }
+
     internal long NotificationsLost => Interlocked.Read(ref _notificationsLost);
 
     internal long CallbackFailures => Interlocked.Read(ref _callbackFailures);
 
-    internal void AddDroppedByReason(long[] totals)
-    {
-        for (var i = 0; i < totals.Length && i < _droppedByReason.Length; i++)
-        {
-            totals[i] += Interlocked.Read(ref _droppedByReason[i]);
-        }
-    }
 
     /// <summary>Counts a drop (counters only, so it can run under the queue lock).</summary>
     private void CountDrop(DropReason reason)
     {
         if ((int)reason >= 0 && (int)reason < _droppedByReason.Length)
         {
-            Interlocked.Increment(ref _droppedByReason[(int)reason]);
+            Count(ref _droppedByReason[(int)reason], ref LogbirdMetrics.DroppedTotals[(int)reason]);
         }
 
         if (reason == DropReason.Rejected)
         {
-            Interlocked.Increment(ref _rejected);
+            Count(ref _rejected, ref LogbirdMetrics.RejectedTotal);
         }
         else
         {
@@ -978,7 +984,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             }
             catch
             {
-                Interlocked.Increment(ref _callbackFailures);
+                Count(ref _callbackFailures, ref LogbirdMetrics.CallbackFailuresTotal);
             }
         }
 
@@ -993,7 +999,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         catch
         {
-            Interlocked.Increment(ref _callbackFailures);
+            Count(ref _callbackFailures, ref LogbirdMetrics.CallbackFailuresTotal);
         }
     }
 
