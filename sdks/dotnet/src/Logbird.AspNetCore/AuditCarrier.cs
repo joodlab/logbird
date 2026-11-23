@@ -15,12 +15,17 @@ public sealed record AuditCarrier
 {
     /// <summary>
     /// The carrier as JSON (camelCase, absent values left out), safe under trimming and Native AOT. Whatever it writes,
-    /// <see cref="FromJson(string)"/> reads back.
+    /// <see cref="FromJson(string)"/> reads back unchanged.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The carrier names an actor, impersonator or tenant without its id (or an actor without its type), which
-    /// <see cref="FromJson(string)"/> would refuse. A request's <see cref="IAuditLog.Carrier"/> never does; a job's keeps the
-    /// parties of the carrier it was started with, so a carrier built or read outside these methods can still fail here.
+    /// The carrier could not be read back as it is: it names an actor, impersonator or tenant without its id (or an actor
+    /// without its type), which <see cref="FromJson(string)"/> would refuse, or one of its values holds a lone surrogate,
+    /// which JSON cannot carry (it would be read back as U+FFFD, a different id). It is refused here, before you store it,
+    /// rather than changed. A request's <see cref="IAuditLog.Carrier"/> never fails here: it leaves out a resolved party or
+    /// id that would, and reports it. A job's <see cref="IAuditLog.Carrier"/> keeps the request, trace and party values of
+    /// the carrier the job was started with, and its operation id (a new one when that carrier had none); its parent event
+    /// id is the one you pass. A carrier built or changed outside these methods, or a job started from one, can still fail
+    /// here.
     /// </exception>
     public string ToJson() => JsonSerializer.Serialize(Writable(), AuditCarrierJsonContext.Default.AuditCarrier);
 
@@ -28,16 +33,56 @@ public sealed record AuditCarrier
     /// <exception cref="InvalidOperationException">As for <see cref="ToJson"/>.</exception>
     public byte[] ToJsonUtf8Bytes() => JsonSerializer.SerializeToUtf8Bytes(Writable(), AuditCarrierJsonContext.Default.AuditCarrier);
 
-    /// <summary>This carrier, refused when the JSON it would write could not be read back.</summary>
+    /// <summary>This carrier, refused when the JSON it would write could not be read back unchanged.</summary>
     private AuditCarrier Writable()
-        => HasPartyWithoutIdentity(this)
-            ? throw new InvalidOperationException("The carrier names an actor, impersonator or tenant without its id (or an actor without its type); it cannot be read back.")
-            : this;
+    {
+        if (HasPartyWithoutIdentity(this))
+        {
+            throw new InvalidOperationException("The carrier names an actor, impersonator or tenant without its id (or an actor without its type); it cannot be read back.");
+        }
+
+        if (HasLoneSurrogate(this))
+        {
+            throw new InvalidOperationException("A value of the carrier holds a lone surrogate, which JSON cannot carry; it would be read back changed.");
+        }
+
+        return this;
+    }
 
     private static bool HasPartyWithoutIdentity(AuditCarrier carrier)
-        => (carrier.Actor is { } actor && (actor.Type is null || actor.Id is null))
-            || (carrier.Impersonator is { } impersonator && impersonator.Id is null)
-            || (carrier.Tenant is { } tenant && tenant.Id is null);
+        => (carrier.Actor is { } actor && !Identified(actor))
+            || (carrier.Impersonator is { } impersonator && !Identified(impersonator))
+            || (carrier.Tenant is { } tenant && !Identified(tenant));
+
+    private static bool HasLoneSurrogate(AuditCarrier carrier)
+        => Lone(carrier.OperationId) || Lone(carrier.RequestId) || Lone(carrier.TraceId) || Lone(carrier.ParentEventId)
+            || (carrier.Actor is { } actor && !Clean(actor))
+            || (carrier.Impersonator is { } impersonator && !Clean(impersonator))
+            || (carrier.Tenant is { } tenant && !Clean(tenant));
+
+    // Parties as a request resolves them: each one is kept only when the carrier can write and read it back unchanged.
+    internal static bool Writable(AuditActor actor) => Identified(actor) && Clean(actor);
+
+    internal static bool Writable(AuditImpersonator impersonator) => Identified(impersonator) && Clean(impersonator);
+
+    internal static bool Writable(AuditTenant tenant) => Identified(tenant) && Clean(tenant);
+
+    /// <summary>Whether a carrier id can be written and read back unchanged (null counts: it is left out).</summary>
+    internal static bool Writable(string? id) => !Lone(id);
+
+    private static bool Identified(AuditActor actor) => actor.Type is not null && actor.Id is not null;
+
+    private static bool Identified(AuditImpersonator impersonator) => impersonator.Id is not null;
+
+    private static bool Identified(AuditTenant tenant) => tenant.Id is not null;
+
+    private static bool Clean(AuditActor actor) => !Lone(actor.Type) && !Lone(actor.Id) && !Lone(actor.Name) && !Lone(actor.Email);
+
+    private static bool Clean(AuditImpersonator impersonator) => !Lone(impersonator.Id) && !Lone(impersonator.Name);
+
+    private static bool Clean(AuditTenant tenant) => !Lone(tenant.Id) && !Lone(tenant.Name);
+
+    private static bool Lone(string? value) => value is not null && Logbird.Internal.EntityIds.HasLoneSurrogate(value);
 
     /// <summary>
     /// Reads a carrier from the JSON <see cref="ToJson"/> writes. Member names are matched without regard to case, so the

@@ -260,7 +260,8 @@ public class FinalCycleTests
         Assert.Equal(1, copies);
         Assert.All(drops, d => Assert.Equal(DropReason.TooLarge, d.Reason));
         Assert.Equal(2, drops.Count);
-        Assert.All(drops, d => Assert.True(d.Action.Length <= 256));
+        Assert.All(drops, d => Assert.True(d.Action.Length <= DroppedEvent.MaxIdLength));
+        Assert.Single(drops, d => d.Truncated && d.Action.Length == DroppedEvent.MaxIdLength);
     }
 
     [Fact]
