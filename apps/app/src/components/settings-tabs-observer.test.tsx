@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SettingsTabs } from './settings-tabs';
 
 // The strip only needs links and a router to subscribe to (one router, as the real hook returns).
-/** Does nothing: the router unsubscribe and the observer methods the test never needs. */
+/** Does nothing: the router unsubscribe. */
 const unsubscribe = () => undefined;
 const router = { subscribe: () => unsubscribe };
 vi.mock('@tanstack/react-router', () => ({
@@ -19,14 +19,26 @@ vi.mock('@tanstack/react-router', () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** The ResizeObserver callbacks the strip registered: a test fires them as if the layout changed. */
-let observers: (() => void)[] = [];
+/** The ResizeObservers the strip registered, with the elements each observes. */
+let observers: FakeResizeObserver[] = [];
 class FakeResizeObserver {
-  constructor(private readonly callback: () => void) {
-    observers.push(() => this.callback());
+  readonly targets = new Set<Element>();
+  constructor(readonly callback: () => void) {
+    observers.push(this);
   }
-  observe = unsubscribe;
-  disconnect = unsubscribe;
+  observe(target: Element) {
+    this.targets.add(target);
+  }
+  disconnect() {
+    this.targets.clear();
+  }
+}
+
+/** Resizes one element: only the observers watching it hear about it, as in a browser. */
+function resize(target: Element) {
+  act(() => {
+    for (const observer of observers) if (observer.targets.has(target)) observer.callback();
+  });
 }
 
 let root: Root | undefined;
@@ -95,9 +107,8 @@ function mount(rtl: boolean) {
 it.each([false, true])('brings the current tab back into view and moves the fade when the strip narrows (rtl: %s)', (rtl) => {
   const nav = mount(rtl);
   const scroll = layOut(nav, rtl);
-  act(() => {
-    for (const fire of observers) fire();
-  });
+  // The nav keeps its width; its last tab widened (a web font swapped in), so only that tab's observation fires.
+  resize(nav.lastElementChild as Element);
   // "Danger zone" ends at 400: scrolled to the 80px maximum, towards the end in either direction.
   expect(scroll()).toBe(rtl ? -80 : 80);
   act(() => {
@@ -113,8 +124,6 @@ it('keeps the focused tab in view before the current one when the strip narrows'
   // Focus "General" without a focusin reveal (the strip is unscrolled, so General is already in view), then scroll away.
   (nav.querySelector('a[href="/general"]') as HTMLElement).focus();
   nav.scrollLeft = 80;
-  act(() => {
-    for (const fire of observers) fire();
-  });
+  resize(nav);
   expect(scroll()).toBe(0);
 });

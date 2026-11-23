@@ -58,6 +58,16 @@ describe('eventSentence', () => {
     expect(actorLabel(e)).toBe('max@logbird.local');
   });
 
+  it('never drops a target recorded without an id because the actor has none either', () => {
+    const e = event({
+      action: 'user.updated',
+      description: '',
+      actor: { type: 'user', id: '', name: 'Lina', email: '' },
+      targets: [{ type: 'user', id: '', name: 'Omar' }],
+    });
+    expect(eventSentence(e)).toContain('Omar');
+  });
+
   it('never says "Something" for an action-only event', () => {
     const sentence = eventSentence(event({ action: 'validator.key.check' }));
     expect(sentence).toBe('validator.key.check');

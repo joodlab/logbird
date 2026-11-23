@@ -64,7 +64,8 @@ export function eventSentence(e: AuditEvent): string {
   if (INTRANSITIVE.has(verb)) return `${who} ${verb.replaceAll('_', ' ')}`;
   const verbText = VERB_PAST[verb] ?? verb.replaceAll('_', ' ');
   // "joined via link" with the joiner as the target: the object would only repeat the subject.
-  if (target && e.actor && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
+  // Only by id: an actor and a target both recorded without one are not the same party.
+  if (target && e.actor?.id && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
   const special = specialSentence(e, who, noun, verb);
   if (special) return special;
   // A named target of the action's own kind reads "API key ‘Production’" (also when the kind is the noun's last part:
@@ -214,11 +215,11 @@ export function actorAttributeHint(attributes: Record<string, string>): { key: s
   return key && value ? { key, value: value.trim() } : null;
 }
 
-/** The nearest step in the causation chain (root → direct parent) that recorded an actor. */
+/** The nearest step in the causation chain (root → direct parent) that recorded an actor it can name (name, email or id). */
 export function parentActor(parents: readonly Pick<AuditEvent, 'actor'>[]): NonNullable<AuditEvent['actor']> | null {
   for (let i = parents.length - 1; i >= 0; i--) {
     const actor = parents[i]?.actor;
-    if (actor && (actor.id || actor.name)) return actor;
+    if (actor && personLabel(actor)) return actor;
   }
   return null;
 }
