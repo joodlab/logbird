@@ -23,6 +23,24 @@ export interface CaptureOptions<C> {
   ip?: Resolver<C, string | undefined>;
   requestId?: Resolver<C, string | undefined>;
   operationId?: Resolver<C, string | undefined>;
+  /**
+   * Use an inbound `x-logbird-operation` header as the operation id, so one operation can span services. When it is off,
+   * absent or longer than 256 characters, each request gets a new operation id. Defaults to `false`.
+   *
+   * Turn it on only for traffic between your own services, behind a trusted ingress that strips or overwrites the header
+   * on requests from outside. Any caller can send it, so without that a client can group its requests with someone else's
+   * operation in the audit trail.
+   */
+  useOperationHeader?: boolean;
+  /**
+   * Use an inbound `x-request-id` header as the request id when present (a longer value than 256 characters is ignored,
+   * never cut); otherwise a generated id. Defaults to `false`.
+   *
+   * Turn it on only behind a trusted ingress (a gateway or load balancer) that sets this header itself, or strips or
+   * overwrites one a client sent. Any caller can send the header, so without that a client chooses the request id its
+   * events are recorded and searched under, and can make unrelated requests look like one.
+   */
+  useRequestIdHeader?: boolean;
   onError?: (error: Error) => void;
 }
 const pending = new WeakMap<object, Set<Promise<unknown>>>();
@@ -58,8 +76,9 @@ export async function createAudit<C>(options: CaptureOptions<C>, context: C, req
     action: '',
     executor: { type: 'api' },
     context: {
-      operationId: header('x-logbird-operation') ?? uuidv7(),
-      requestId: header('x-request-id') ?? uuidv7(),
+      // Inbound correlation headers are used only when the application opts in (#321): any caller can send them.
+      operationId: (options.useOperationHeader ? header('x-logbird-operation') : undefined) ?? uuidv7(),
+      requestId: (options.useRequestIdHeader ? header('x-request-id') : undefined) ?? uuidv7(),
       traceId: trace && trace[1] !== '0'.repeat(32) && trace[2] !== '0'.repeat(16) ? trace[1] : undefined,
       userAgent: request.headers.get('user-agent')?.slice(0, 1024) ?? undefined,
     },

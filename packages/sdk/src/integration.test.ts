@@ -144,13 +144,33 @@ it('shutdown waits for pending resolutions before closing the client', async () 
   expect(track).toHaveBeenCalledOnce();
   expect(close).toHaveBeenCalledOnce();
 });
+it('ignores inbound correlation headers unless the application opts in to each (#321)', async () => {
+  const { client, track } = fixture();
+  const uuidv7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const headers = { 'x-request-id': 'req_from_client', 'x-logbird-operation': 'op_from_client' };
+  for (const [options, request, operation] of [
+    [{}, false, false],
+    [{ useRequestIdHeader: true }, true, false],
+    [{ useOperationHeader: true }, false, true],
+    [{ useRequestIdHeader: true, useOperationHeader: true }, true, true],
+  ] as const) {
+    const audit = await createAudit({ client, ...options }, {}, new Request('http://host', { headers }));
+    audit('headers');
+    await audit.pending();
+    const context = track.mock.lastCall?.[0].context;
+    if (request) expect(context?.requestId).toBe('req_from_client');
+    else expect(context?.requestId).toMatch(uuidv7);
+    if (operation) expect(context?.operationId).toBe('op_from_client');
+    else expect(context?.operationId).toMatch(uuidv7);
+  }
+});
 it('uses a correlation header whole or not at all: 256 characters are kept, 257 fall back to a generated id (#206)', async () => {
   const { client, track } = fixture();
   const uuidv7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const keptRequest = 'r'.repeat(256);
   const keptOperation = 'o'.repeat(256);
   const kept = await createAudit(
-    { client },
+    { client, useRequestIdHeader: true, useOperationHeader: true },
     {},
     new Request('http://host', { headers: { 'x-request-id': keptRequest, 'x-logbird-operation': keptOperation } }),
   );
@@ -163,7 +183,7 @@ it('uses a correlation header whole or not at all: 256 characters are kept, 257 
     [`${'a'.repeat(256)}-request-tail`, `${'b'.repeat(256)}-operation-tail`],
   ] as const) {
     const audit = await createAudit(
-      { client },
+      { client, useRequestIdHeader: true, useOperationHeader: true },
       {},
       new Request('http://host', { headers: { 'x-request-id': request, 'x-logbird-operation': operation } }),
     );

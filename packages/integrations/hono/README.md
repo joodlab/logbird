@@ -13,7 +13,8 @@ app.post('/records', c => { c.var.audit('record.created', { targets: [{ type: 'r
 ```
 
 Options: `client`, optional `actor(c)`, `impersonator(c)` and `tenant(c)` resolvers (sync/async), optional `executor(c)`, `ip(c)`, `requestId(c)`, `operationId(c)`,
-`onError(error)`, `autoTrack: { methods?: string[], skip?: (c) => boolean }`. Defaults track POST/PUT/PATCH/DELETE.
+`useOperationHeader`, `useRequestIdHeader`, `onError(error)`, `autoTrack: { methods?: string[], skip?: (c) => boolean }`. Defaults track POST/PUT/PATCH/DELETE.
+The inbound `x-logbird-operation` and `x-request-id` headers are used only with `useOperationHeader` and `useRequestIdHeader` (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent.
 Use authenticated context for resolvers. Headers only supply correlation, never authorization.
 Workers executionCtx.waitUntil flushes queued events after responses; Node/Bun own their shutdown lifecycle.
 See [design](../../../docs/integrations.md) and [example](../../../examples/hono).
