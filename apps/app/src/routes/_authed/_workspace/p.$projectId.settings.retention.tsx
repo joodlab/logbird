@@ -32,6 +32,7 @@ import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery, retentionQuery } from '@/lib/api/queries';
 import { formatNumber, formatRetention, pluralize } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
+import { nextPurgeState } from '@/lib/retention';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/retention')({
   head: () => ({ meta: [{ title: 'Retention · Project settings · Logbird' }] }),
@@ -230,17 +231,53 @@ function RetentionStatusGrid({ status }: { status: RetentionStatus }) {
           <span className="font-normal text-muted-foreground">No purge has run yet</span>
         )}
       </StatusItem>
-      <StatusItem
-        detail={status.nextPurgeAt ? <Timestamp format="full" iso={status.nextPurgeAt} /> : 'The worker schedules it hourly'}
-        label="Next purge"
-      >
-        {status.nextPurgeAt ? (
-          <Timestamp format="relative" iso={status.nextPurgeAt} />
-        ) : (
-          <span className="font-normal text-muted-foreground">Not scheduled</span>
-        )}
-      </StatusItem>
+      <NextPurge at={status.nextPurgeAt} />
     </dl>
+  );
+}
+
+/**
+ * The next purge, never as a past time: a purge past its time is due now (the worker is about to run it) or, beyond a
+ * few minutes, overdue, which usually means the retention worker is down or behind (#318).
+ */
+function NextPurge({ at }: { at: string | null }) {
+  const state = nextPurgeState(at);
+  if (state === 'none')
+    return (
+      <StatusItem detail="The worker schedules it hourly" label="Next purge">
+        <span className="font-normal text-muted-foreground">Not scheduled</span>
+      </StatusItem>
+    );
+  if (state === 'scheduled')
+    return (
+      <StatusItem detail={<Timestamp format="full" iso={at} />} label="Next purge">
+        <Timestamp format="relative" iso={at} />
+      </StatusItem>
+    );
+  if (state === 'due')
+    return (
+      <StatusItem detail={<Timestamp format="full" iso={at} />} label="Next purge">
+        Due now
+      </StatusItem>
+    );
+  return (
+    <StatusItem
+      detail={
+        <span data-testid="purge-overdue">
+          Due since <Timestamp format="full" iso={at} />. The retention worker may not be running, so old events are not being removed. Ask whoever
+          runs Logbird to check it.
+        </span>
+      }
+      label="Next purge"
+    >
+      <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+        <TriangleAlertIcon aria-hidden className="size-3.5" />
+        Overdue
+      </span>
+      <span className="font-normal text-muted-foreground">
+        due <Timestamp format="relative" iso={at} />
+      </span>
+    </StatusItem>
   );
 }
 
