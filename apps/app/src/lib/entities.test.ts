@@ -10,6 +10,7 @@ import {
   idFromFreeText,
   lookupType,
   resolveJump,
+  settledIdMatches,
 } from './entities';
 
 describe('entity match rank (the order Jump to lists entities in)', () => {
@@ -133,5 +134,19 @@ describe('a record page history starts from the link when it carries the exact p
     expect(lookupType('target', 'order:archived:A1', 'order:archived')).toBe('order:archived');
     expect(lookupType('target', 'order:archived:A1', undefined)).toBeUndefined();
     expect(lookupType('actor', 'qa-user-1', undefined)).toBeUndefined();
+  });
+});
+
+describe('settledIdMatches (#324 A3, A4)', () => {
+  const tenant = { kind: 'tenant' as const, id: 'ACME"27', name: 'West Depot' };
+  const biz = { kind: 'tenant' as const, id: 'biz_27', name: 'Biz' };
+  it('offers nothing while the lookup has not settled, even with a cached hit', () => {
+    expect(settledIdMatches('biz_27', false, [biz])).toEqual([]);
+    expect(settledIdMatches('biz_27', true, [biz])).toEqual([biz]);
+  });
+  it('matches a quoted literal as written: a space inside the quotes is part of the id', () => {
+    expect(settledIdMatches('ACME"27 ', true, [tenant])).toEqual([]);
+    expect(settledIdMatches('ACME"27', true, [tenant])).toEqual([tenant]);
+    expect(idFromFreeText('"ACME\\"27 "')).toBe('ACME"27 ');
   });
 });

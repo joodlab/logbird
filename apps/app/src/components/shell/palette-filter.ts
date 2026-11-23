@@ -20,6 +20,8 @@ const KEYED = /^(view|project)#(\[.*\])$/s;
 export const paletteEntityValue = (e: { kind: EntityKind; id: string }) => paletteValue('entity', e.kind, e.id);
 
 const ENTITY = 'entity:[';
+/** A support agent row: scored on its label and id (its value is JSON, which cmdk would otherwise score). */
+const SUPPORT = /^support:(\[.*\])$/s;
 /** Jump to rows and notices are built from what was typed, in the order they should be read: never re-sorted or dropped. */
 const FIXED = ['jump:[', 'notice:['];
 
@@ -35,9 +37,16 @@ export function paletteFilter(entities: readonly { id: string; name: string }[],
   const entityScore = Math.max(0.01, ...entities.map((e) => defaultFilter(`${e.name} ${e.id}`, typed)));
   return (value: string, query: string, keywords?: string[]) => {
     if (value.startsWith(ENTITY)) return entityScore;
+    // cmdk passes the input as typed; a pasted leading or trailing space must not hide a row the trimmed text matches.
+    const q = query.trim();
+    const support = SUPPORT.exec(value);
+    if (support) {
+      const [id = '', label = ''] = JSON.parse(support[1] ?? '[]') as string[];
+      return defaultFilter(`${label} ${id}`, q, keywords);
+    }
     if (FIXED.some((p) => value.startsWith(p))) return 1;
     const keyed = KEYED.exec(value);
-    if (keyed) return defaultFilter(`${keyed[1]} ${(JSON.parse(keyed[2] ?? '[]') as string[])[0] ?? ''}`, query, keywords);
-    return defaultFilter(value, query, keywords);
+    if (keyed) return defaultFilter(`${keyed[1]} ${(JSON.parse(keyed[2] ?? '[]') as string[])[0] ?? ''}`, q, keywords);
+    return defaultFilter(value, q, keywords);
   };
 }

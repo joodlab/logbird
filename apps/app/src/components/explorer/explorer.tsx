@@ -18,7 +18,7 @@ import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histogramQuery } from '@/lib/api/queries';
 import { allTimeCheckNeedsAsking, otherDatesCheck, otherDatesLine } from '@/lib/empty-state';
-import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
+import { ENTITY_SECTIONS, entityQuery, idFromFreeText, sectionForKind, settledIdMatches } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
 import { andQuery, scopedQuery } from '@/lib/query-language';
@@ -332,23 +332,25 @@ function ProjectExplorer({
   // A bare word that is exactly an entity's id: free text searches names and descriptions, never ids.
   const word = lang === 'query' ? idFromFreeText(q) : '';
   const idLookup = useQuery({ ...entitySearchQuery(projectId, word), enabled: showsEmpty && Boolean(word) });
-  // Every kind with exactly this id (an actor and a tenant can share one): offer each.
-  // One per kind (the literal id first within a kind), so case variants of one kind never crowd out another kind.
-  const idMatches = word ? exactPerKind(idLookup.data?.entities, word) : [];
+  // A cached answer being refreshed is not settled yet: it may still find the id, or no longer find it (#239).
+  const idSettled = !word || ((idLookup.isSuccess || idLookup.isError) && !idLookup.isFetching);
+  // Every kind with exactly this id (an actor and a tenant can share one): offer each, once the lookup has settled, so a
+  // cached hit being refreshed gives no advice the refresh may take back. One per kind (the literal id first within a
+  // kind), so case variants of one kind never crowd out another kind. The id is the literal as written, spaces kept.
+  const idMatches = settledIdMatches(word, idSettled, idLookup.data?.entities);
   const idMatch = idMatches[0];
   // "a tenant id", or "the id of a tenant and an actor".
   const idPhrase =
     idMatches.length === 1 && idMatch
       ? `${articleFor(idMatch.kind)} ${kindNoun(idMatch.kind)} id`
       : `the id of ${idMatches.map((e) => `${articleFor(e.kind)} ${kindNoun(e.kind)}`).join(' and ')}`;
-  // A cached answer being refreshed is not settled yet: it may still find the id (#239).
-  const idSettled = !word || ((idLookup.isSuccess || idLookup.isError) && !idLookup.isFetching);
   // Whether anything older matches: only then is the range the reason, and only then is widening offered. In SQL mode
   // the check runs the reader's predicate over every partition, so it runs only when asked (#239).
-  // The search the reader asked to check (remembered per expression and range, so a new search asks again).
-  const [checkAskedFor, setCheckAskedFor] = useState<string | null>(null);
+  // The searches the reader asked to check, each an expression and a range: a new search asks again, and going back to
+  // one already checked shows its answer without asking twice.
+  const [checksAsked, setChecksAsked] = useState<ReadonlySet<string>>(() => new Set());
   const checkKey = JSON.stringify([effectiveQ, range]);
-  const sqlCheckAsked = !allTimeCheckNeedsAsking(lang, effectiveQ) || checkAskedFor === checkKey;
+  const sqlCheckAsked = !allTimeCheckNeedsAsking(lang, effectiveQ) || checksAsked.has(checkKey);
   const widerWanted = showsEmpty && !complete && idSettled && !idMatch;
   const wider = useQuery({
     ...histogramQuery(projectId, ALL_RANGE, effectiveQ, lang),
@@ -382,7 +384,7 @@ function ProjectExplorer({
         Retry the check
       </Button>
     ) : widerWanted && !sqlCheckAsked ? (
-      <Button data-testid="check-all-time" onClick={() => setCheckAskedFor(checkKey)} size="sm" variant="outline">
+      <Button data-testid="check-all-time" onClick={() => setChecksAsked((asked) => new Set(asked).add(checkKey))} size="sm" variant="outline">
         Check other dates
       </Button>
     ) : null;

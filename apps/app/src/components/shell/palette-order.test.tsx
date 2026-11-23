@@ -103,3 +103,10 @@ it('keeps namesake saved views and projects apart, and scores them on their name
   expect(filter(views[0]?.value ?? '', 'zq')).toBe(0);
   expect(filter(paletteKeyedValue('project', 'Sample', 'p1'), 'project sam')).toBeGreaterThan(0);
 });
+
+it('shows a support agent whose name matches the text with a pasted leading space (#324 A1)', () => {
+  const agent = { value: paletteValue('support', 'agt_17', 'Omar'), label: 'Omar' };
+  expect(shown(' Omar', [], [agent])).toEqual(['Omar']);
+  // And still drops one the text no longer matches.
+  expect(shown('zed', [], [agent])).toEqual([]);
+});

@@ -113,8 +113,13 @@ export function entityBaseQuery(kind: EntityKind, id: string, linkedType: string
  * as typed, 1 the id in another case, 2 id prefix, 3 name prefix, 4 id or name contains it, 5 a fuzzy match only. A record's bare id (`article_27_2` for
  * `article:article_27_2`) counts as its id.
  */
-export function entityMatchRank(entity: { kind?: EntityKind; id: string; name: string; type?: string }, text: string): EntityMatchRank {
-  const typed = text.trim();
+export function entityMatchRank(
+  entity: { kind?: EntityKind; id: string; name: string; type?: string },
+  text: string,
+  { literal = false }: { literal?: boolean } = {},
+): EntityMatchRank {
+  // A literal (a quoted term's decoded text) is the id exactly as written, spaces included: `"ACME 27 "` is not `ACME 27`.
+  const typed = literal ? text : text.trim();
   const t = typed.toLowerCase();
   // Only a record loses a prefix, and only its own known type (which may contain colons, or be empty for `:7`):
   // `a:biz_27` is not `biz_27`.
@@ -183,13 +188,26 @@ export function resolveJump<E extends { kind?: EntityKind; id: string; name: str
 export function exactPerKind<E extends { kind: EntityKind; id: string; name: string; type?: string }>(
   entities: readonly E[] | undefined,
   text: string,
+  options: { literal?: boolean } = {},
 ): E[] {
   return (entities ?? [])
-    .map((entity, i) => ({ entity, i, rank: entityMatchRank(entity, text) }))
+    .map((entity, i) => ({ entity, i, rank: entityMatchRank(entity, text, options) }))
     .filter((x) => isExactId(x.rank))
     .sort((a, b) => a.rank - b.rank || a.i - b.i)
     .filter((x, i, all) => all.findIndex((y) => y.entity.kind === x.entity.kind) === i)
     .map((x) => x.entity);
+}
+
+/**
+ * The explorer's "this text is an id" matches for a bare word or quoted literal: none until the lookup has settled (a
+ * cached hit being refreshed may be taken back, #239), then one per kind, the literal as written (spaces kept).
+ */
+export function settledIdMatches<E extends { kind: EntityKind; id: string; name: string; type?: string }>(
+  word: string,
+  settled: boolean,
+  entities: readonly E[] | undefined,
+): E[] {
+  return word && settled ? exactPerKind(entities, word, { literal: true }) : [];
 }
 
 export function targetEntityId(type: string, id: string): string {
