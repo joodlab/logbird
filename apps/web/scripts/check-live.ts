@@ -1,9 +1,11 @@
 import { siteDecision } from '../../app/server/site-paths';
+import { siteConfigFrom } from '../src/env';
 import { inlineScripts, scriptHash, scriptSources } from '../src/lib/csp';
 import { OBFUSCATED_EMAIL } from '../src/lib/email-off';
 import { collectAssetUrls, compareAssets, manifestIconUrls } from '../src/lib/live-assets';
 import { securityHeaders } from '../src/lib/security-headers';
 import { prerenderPaths } from '../src/lib/site-map';
+import { loadPublicEnv } from './public-env';
 
 /**
  * Checks a running site the way a browser sees it: every page and a set of unknown, dotted, escaped and API paths.
@@ -75,11 +77,15 @@ const assetUrls = new Set<string>();
 /** Pages that show console captures: each must reference at least one /media/ file, so a lost image fails the run. */
 const MEDIA_PAGES = ['/', '/product', '/use-cases/compliance-evidence', '/use-cases/customer-audit-logs', '/use-cases/support-investigations'];
 
-function collectAssets(path: string, body: string) {
-  const found = collectAssetUrls(body, base);
+/** The origin the built pages name in absolute URLs (canonical, cards, JSON-LD): the build's WEB_SITE_URL. */
+const publicOrigin = siteConfigFrom(loadPublicEnv()).SITE_URL;
+
+function collectAssets(path: string, body: string, capturePage: boolean) {
+  const { urls: found, problems: collected } = collectAssetUrls(body, base, publicOrigin);
   for (const url of found) assetUrls.add(url);
   const fail = (problem: string) => problems.push(`${path}: ${problem}`);
-  if (MEDIA_PAGES.includes(path) && ![...found].some((url) => url.startsWith('/media/'))) fail('references no /media/ file');
+  for (const { path: asset, problem } of collected) fail(`${asset}: ${problem}`);
+  if (capturePage && MEDIA_PAGES.includes(path) && ![...found].some((url) => url.startsWith('/media/'))) fail('references no /media/ file');
   if (![...found].some((url) => url.startsWith('/brand/logbird-favicon.svg'))) fail('references no favicon');
   if (![...found].some((url) => url.startsWith('/site.webmanifest'))) fail('references no web manifest');
 }
@@ -127,7 +133,8 @@ async function checkHtml(path: string, expected: number) {
     }
   }
   rows.push({ path, status: response.status, inline: scripts.length, uncovered: missing, url: response.url.replace(base, '') });
-  if (expectedStatus === 200) collectAssets(path, body);
+  // 404 pages share the layout (favicon, manifest), so their references are checked too.
+  if (body.includes(SITE_MARKER)) collectAssets(path, body, expectedStatus === 200);
 }
 
 for (const path of prerenderPaths) {

@@ -51,4 +51,4 @@ export const ASSET_VERSIONS: Record<string, string> = {
 };
 
 /** What scripts/og.ts draws besides each card's words (its code, the wordmark, renderer and font versions). */
-export const OG_DESIGN_VERSION = 'ccdd30609f';
+export const OG_DESIGN_VERSION = '84a81189cf';

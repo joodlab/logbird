@@ -14,7 +14,7 @@ import { clips, MEDIA_ENCODING, screenshots, type Variant } from '../src/lib/med
  *   so a recapture, an option change or an encoder upgrade gives every affected file a new URL;
  * - `brand/<file>`: the files in public/brand, from their bytes;
  * - `site.webmanifest`: the manifest as written with its icons' versioned URLs.
- * OG_DESIGN_VERSION covers what scripts/og.ts draws besides the words: its own code, the wordmark it embeds and the
+ * OG_DESIGN_VERSION covers what scripts/og.ts and og-cards.ts draw besides the words: their code, the wordmark it embeds and the
  * renderer and font package versions. seo.ts combines it with each card's words.
  */
 const app = resolve(import.meta.dirname, '..');
@@ -65,6 +65,7 @@ export async function computeOgDesignVersion() {
   );
   return short(
     await readFile(resolve(app, 'scripts/og.ts')),
+    await readFile(resolve(app, 'scripts/og-cards.ts')),
     await readFile(resolve(app, 'public/brand/logbird-wordmark-dark.svg')),
     packages.join(','),
   );

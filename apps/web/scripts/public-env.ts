@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from 'vite';
-import { PUBLIC_ENV_KEYS } from '../src/env';
+import { PUBLIC_ENV_KEYS } from '../src/env-keys';
 
 const webDir = fileURLToPath(new URL('..', import.meta.url));
 /**
