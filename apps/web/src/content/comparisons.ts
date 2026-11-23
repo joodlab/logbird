@@ -1,7 +1,8 @@
 /**
- * Every fact on the /compare pages, with its sources. Copy: marketing/copy/compare/*.md — change the wording there
- * first, then here. Rules: official sources only, every claim about another product cites a source, anything we
- * couldn't verify stays out of the table (it's listed under `unverified`), no logos, no disparagement.
+ * Every fact on the /compare pages, with its sources. The page text renders from here (facts) and compare.ts
+ * (furniture); edit the wording here. marketing/copy/compare/*.md are the briefs: jobs, sources and owner notes.
+ * Rules: official sources only, every claim about another product cites a source, anything we couldn't verify stays out
+ * of the table (it's listed under `unverified`), no logos, no disparagement.
  *
  * Inline marks: `code` and **bold** (rendered by components/marketing/rich.tsx).
  */

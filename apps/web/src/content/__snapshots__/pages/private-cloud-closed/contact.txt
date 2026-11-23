@@ -1,0 +1,92 @@
+title: Contact · Logbird
+description: Join the Logbird Cloud waitlist or send us a question. We store your email only to contact you about Logbird. No trackers.
+
+headings:
+h1 Join the waitlist, or ask us anything.
+h2 Join the waitlist
+h2 Other ways to reach us.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Contact
+Join the waitlist, or ask us anything.
+Logbird Cloud isn't open yet. Leave your email and we'll write when it is. If you have a question about self-hosting, support or something else, choose it below.
+Join the waitlist
+[noscript] Thanks, we've got it. We'll reply by email.
+[noscript] Something in the form needs fixing. Check the email address and try again.
+[noscript] Something in the form needs fixing. Check the email address and try again.
+[noscript] Too many attempts. Wait a minute, then try again.
+[noscript] The form isn't available right now. Email us at hello@example.test instead.
+[noscript] We couldn't send that. Check your connection and try again, or email hello@example.test.
+Email
+Name
+Company
+What's this about?
+The Logbird Cloud waitlist
+Self-hosting, when the source opens
+Product updates only
+A correction to one of our pages
+A question, or support and enterprise
+A privacy request (access, deletion or another right)
+Expected events per month (optional)
+Choose one
+Not sure yet
+Under 100,000
+100,000 to under 1 million
+1 million to under 10 million
+10 million or more
+What do you need? (optional)
+Show our customers their own audit log
+Compliance evidence and retention
+Support investigations
+Help running it ourselves
+Something else
+Message
+What are you building, and what do you need from an audit log? For a privacy request, tell us what you'd like us to do.
+[aria-hidden] Website
+Send
+We use these details to reply to you and handle access requests, and send product updates only if you choose "Product updates only". No trackers. By sending, you confirm you've read the privacy policy.
+Elsewhere
+Other ways to reach us.
+Security issues
+Email security@example.test.
+Source and issues
+Source on GitHub — coming soon.
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+[noscript] hello@example.test → mailto:hello@example.test
+[noscript] hello@example.test → mailto:hello@example.test
+privacy policy → /legal/privacy
+security@example.test → mailto:security@example.test
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]
+form action="/site-api/waitlist" method="post"
+input type="email" name="email" placeholder="you@example.test" required label="Email"
+input name="name" label="Name"
+input name="company" label="Company"
+input type="radio" name="interest" value="cloud" checked label="The Logbird Cloud waitlist"
+input type="radio" name="interest" value="self-host" label="Self-hosting, when the source opens"
+input type="radio" name="interest" value="updates" label="Product updates only"
+input type="radio" name="interest" value="correction" label="A correction to one of our pages"
+input type="radio" name="interest" value="other" label="A question, or support and enterprise"
+input type="radio" name="interest" value="privacy" label="A privacy request (access, deletion or another right)"
+select name="volume" label="Expected events per month (optional)"
+option value="" selected text="Choose one"
+option value="unsure" text="Not sure yet"
+option value="under-100k" text="Under 100,000"
+option value="100k-1m" text="100,000 to under 1 million"
+option value="1m-10m" text="1 million to under 10 million"
+option value="over-10m" text="10 million or more"
+input type="checkbox" name="needs" value="customer-audit-log" label="Show our customers their own audit log"
+input type="checkbox" name="needs" value="compliance" label="Compliance evidence and retention"
+input type="checkbox" name="needs" value="investigations" label="Support investigations"
+input type="checkbox" name="needs" value="self-host-support" label="Help running it ourselves"
+input type="checkbox" name="needs" value="other" label="Something else"
+textarea name="message" value="" label="Message"
+[aria-hidden] input name="website" label="Website"
+button type="submit" text="Send"

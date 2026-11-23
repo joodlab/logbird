@@ -6,7 +6,8 @@ import { CONTACT_EMAIL, GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from '../lib/cloud';
 import type { NEEDS, VOLUMES } from '../lib/waitlist-schema';
 
-// Copy: marketing/copy/contact.md (form, states).
+// Words: the form's labels, options and states are in this file (the page around it renders content/contact.ts).
+// Brief: marketing/copy/contact.md.
 // No mailbox is named unless WEB_CONTACT_EMAIL is configured (never a guessed address).
 const mail = CONTACT_EMAIL ? (
   <a className="text-link" href={`mailto:${CONTACT_EMAIL}`}>

@@ -4,6 +4,8 @@ description: Run Logbird on your own server with Docker Compose or Coolify. Brin
 path: /self-hosting
 ---
 
+Page text renders from `apps/web/src/content/self-hosting.ts` (the architecture diagram from `apps/web/src/content/architecture.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Self-hosting
 
 > **Published images (since 0.1.0).** With `WEB_GITHUB_PUBLIC=true` the quickstart clones the latest release tag and

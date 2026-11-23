@@ -1,0 +1,100 @@
+title: Pricing · Logbird
+description: Self-hosting Logbird will be free under the MIT licence once the source opens. Logbird Cloud's pricing isn't set yet.
+
+headings:
+h1 Self-hosting will be free. Cloud pricing isn’t set yet.
+h2 Pricing
+h3 Self-host
+h3 Cloud
+h3 Support and enterprise
+h2 What you get when you self-host.
+h2 What's on our roadmap.
+h2 Pricing questions.
+h3 Does self-hosting include every feature?
+h3 How much will Logbird Cloud cost?
+h3 How do I get early access?
+h2 Start with one event.
+[shell: footer — see _shell.txt]
+
+text:
+[shell: skip link, header — see _shell.txt]
+Pricing
+Self-hosting will be free. Cloud pricing isn’t set yet.
+Logbird is MIT-licensed, and every feature in the repository will be yours to run once the source opens. Logbird Cloud runs the same codebase for you, in early access; its pricing will be published before billing starts.
+[sr-only] Pricing
+Self-host
+Free, MIT
+Free and MIT-licensed once the source opens, with every feature in the repository. You'll run it.
+Self-host when the source opens
+Cloud
+Early access
+We run it for you. Free during early access, which is open to invited teams for now.
+Request access
+Support and enterprise
+Talk to us
+For teams that want help running Logbird, or terms we haven't covered here.
+Contact us
+Self-hosted
+What you get when you self-host.
+Every feature below is in the repository today, under the MIT licence.
+Ingest over HTTP or the TypeScript SDK
+One event per action; only action is required.
+Search
+The query language, or a guarded SQL WHERE expression.
+Entity pages
+Actors, tenants, executors and records get their own pages and timelines.
+Operation trees
+The events that share an operation id, from the request to the jobs it spawned.
+Exports
+CSV, JSON Lines, and an evidence export with every event’s original payload.
+Retention you choose
+Per project, from 7 days to 10 years. Expired events are permanently deleted.
+Workspace activity
+Logbird's own record of what your team does: projects, retention, keys, members, exports and sign-ins.
+Teams and roles
+Invitations, and owner, admin and member roles.
+Integrations
+Hono, TanStack Start, Vue and Nuxt.
+Customer-facing history
+Tenant-scoped read keys, and short-lived viewer tokens for the browser.
+On the roadmap
+What's on our roadmap.
+These are candidates from our public roadmap, not features or commitments. Order and timing can change.
+Project-level redaction controls, behind the redaction your client already does.
+Alerts on chosen actions.
+Signed webhooks and archive exports.
+Single sign-on for the console.
+Questions
+Pricing questions.
+Does self-hosting include every feature?
+Yes. Once the source opens, everything in the repository is MIT-licensed, and self-hosting gets all of it.
+How much will Logbird Cloud cost?
+It's free during early access. Pricing after that isn't set yet; we'll publish it before billing starts.
+How do I get early access?
+Request access through the contact form. Sign-ups are limited to invited teams for now.
+Start with one event.
+The source opens soon. Request access to Logbird Cloud, where sign-ups are limited to invited teams for now, and we'll tell you when you can self-host.
+Request access
+Self-host when the source opens
+[aria-hidden] payment.refunded
+[aria-hidden] Refunds worker · attempt 2 → Booking #1042
+[aria-hidden] now
+[aria-hidden] payment.refund_failed
+[aria-hidden] Refunds worker · attempt 1 → Booking #1042
+[aria-hidden] 14:32:12
+[aria-hidden] booking.cancelled
+[aria-hidden] Lina Haddad → Booking #1042
+[aria-hidden] 14:32:10
+[shell: footer — see _shell.txt]
+
+links:
+[shell: skip link, header — see _shell.txt]
+Self-host when the source opens → /contact?interest=self-host
+Request access → /contact
+Contact us → /contact
+Request access → /contact
+Self-host when the source opens → /contact?interest=self-host
+[shell: footer — see _shell.txt]
+
+controls:
+[shell: header — see _shell.txt]

@@ -3,6 +3,8 @@ path: /
 module: apps/web/src/content/home.ts
 ---
 
+Page text renders from `apps/web/src/content/home.ts` (the shared calls to action from `apps/web/src/content/shared.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Home: brief
 
 **The words live in the module.** The page renders `apps/web/src/content/home.ts`. The shared calls to action, the header's

@@ -4,6 +4,8 @@ description: Search every event, follow actors, tenants, workers and records, an
 path: /product
 ---
 
+Page text renders from `apps/web/src/content/product.ts` (the roadmap section from `apps/web/src/content/roadmap.ts`); edit it there. This file is the brief: jobs, sources and owner notes.
+
 # Product tour
 
 ## intro
