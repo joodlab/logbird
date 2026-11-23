@@ -48,13 +48,28 @@ export function creatorLabel(creator: { name?: string | null; email?: string | n
  * The human sentence for an event. Prefer the producer's `description`; otherwise build
  * "<actor> <verb> <target>" from the envelope so even off-standard events read naturally.
  */
+/** Whether the sentence is the producer's own description rather than one built from the envelope. */
+export const usesDescription = (e: Pick<AuditEvent, 'description' | 'action'>) => Boolean(e.description) && e.description !== e.action;
+
+/**
+ * Who a built sentence credits, and which party that is. Work done by a worker/scheduler/webhook reads best credited
+ * to the executor ("CRM worker upserted …"); the actor who caused it stays visible in the actor column and the detail
+ * panel. Callers compare parties, never display names: a worker and a user may both be called "Lina".
+ */
+export function sentenceSubject(e: AuditEvent): { who: string; party: 'actor' | 'executor' | null } {
+  const machine = e.executor && ['worker', 'scheduler', 'webhook', 'job'].includes(e.executor.type);
+  const executorLabel = e.executor?.name || e.executor?.id || '';
+  if (machine && executorLabel) return { who: executorLabel, party: 'executor' };
+  const actor = personLabel(e.actor);
+  if (actor) return { who: actor, party: 'actor' };
+  if (executorLabel) return { who: executorLabel, party: 'executor' };
+  return { who: '', party: null };
+}
+
 export function eventSentence(e: AuditEvent): string {
   // Some producers repeat the action as the description ("project.deleted"): build a sentence instead.
-  if (e.description && e.description !== e.action) return e.description;
-  // Work done by a worker/scheduler/webhook reads best credited to the executor ("CRM worker upserted …");
-  // the actor who caused it stays visible in the actor column and the detail panel.
-  const performedByMachine = e.executor && ['worker', 'scheduler', 'webhook', 'job'].includes(e.executor.type);
-  const who = (performedByMachine ? e.executor?.name || e.executor?.id : '') || personLabel(e.actor) || e.executor?.name || e.executor?.id || '';
+  if (usesDescription(e)) return e.description;
+  const { who, party } = sentenceSubject(e);
   const parts = e.action.split('.');
   const verb = parts.at(-1) ?? e.action;
   const noun = parts.slice(0, -1).join('.');
@@ -65,7 +80,10 @@ export function eventSentence(e: AuditEvent): string {
   const verbText = VERB_PAST[verb] ?? verb.replaceAll('_', ' ');
   // "joined via link" with the joiner as the target: the object would only repeat the subject.
   // Only by id: an actor and a target both recorded without one are not the same party.
-  if (target && e.actor?.id && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
+  // Only when the actor is also the sentence's subject: a worker updating the actor's own record keeps its object
+  // ("Billing worker updated Lina's profile", not "Billing worker updated") (#333).
+  const actorIsSubject = party === 'actor';
+  if (actorIsSubject && target && e.actor?.id && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
   const special = specialSentence(e, who, noun, verb);
   if (special) return special;
   // A named target of the action's own kind reads "API key ‘Production’" (also when the kind is the noun's last part:

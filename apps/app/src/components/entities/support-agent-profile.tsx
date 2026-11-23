@@ -211,7 +211,8 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
                 value={self.isError && total === undefined ? failedValue : formatNumber(total ?? 0)}
               />
               <StatTile
-                label="Customers acted as"
+                // Distinct customer ids: a customer recorded without an id is not counted here (#333).
+                label="Customer IDs acted as"
                 loading={!actedAsData && !actedAs.isError}
                 value={actedAs.isError && !actedAsData ? failedValue : distinctCount(actedAsData, formatNumber)}
               />
