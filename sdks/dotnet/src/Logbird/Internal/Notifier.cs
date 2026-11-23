@@ -12,8 +12,11 @@ namespace Logbird.Internal;
 /// bounded: past the capacity, new notifications are skipped and counted (the client's counters still record every
 /// drop). No thread is held while idle.
 /// </summary>
-internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
+internal sealed class Notifier(int capacity, Action<int> lost, Action failed, Func<WaitCallback, bool>? schedule = null)
 {
+    // The thread pool by default; a test can pass a scheduler that refuses or throws.
+    private readonly Func<WaitCallback, bool> _schedule = schedule ?? (callback => ThreadPool.UnsafeQueueUserWorkItem(callback, null));
+
     private readonly object _gate = new();
     private readonly Queue<Action> _pending = new();
     private readonly List<Entry> _waiters = [];
@@ -101,17 +104,65 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
 
     private void Start()
     {
+        bool queued;
         try
         {
             // Unsafe: the caller's execution context (AsyncLocals, culture, a suppressed flow) never reaches host
             // callbacks, and there is nothing to suppress or restore.
-            ThreadPool.UnsafeQueueUserWorkItem(_ => Drain(), null);
+            queued = _schedule(_ => Drain());
         }
         catch
         {
-            lock (_gate)
+            queued = false;
+        }
+
+        if (!queued)
+        {
+            Abandon();
+        }
+    }
+
+    /// <summary>
+    /// The thread pool refused the drain: the pending notifications cannot run. They are counted as lost, like
+    /// notifications skipped past the capacity, and every flush waiting for them is released instead of stranded.
+    /// </summary>
+    private void Abandon()
+    {
+        int dropped;
+        List<TaskCompletionSource<bool>>? done = null;
+        lock (_gate)
+        {
+            dropped = _pending.Count;
+            _pending.Clear();
+            _completed += dropped;
+            _running = false;
+            for (var i = _waiters.Count - 1; i >= 0; i--)
             {
-                _running = false;
+                if (_waiters[i].Target <= _completed)
+                {
+                    (done ??= []).Add(_waiters[i].Completion);
+                    _waiters.RemoveAt(i);
+                }
+            }
+        }
+
+        if (dropped > 0)
+        {
+            try
+            {
+                lost(dropped);
+            }
+            catch
+            {
+                // Counting is best effort.
+            }
+        }
+
+        if (done is not null)
+        {
+            foreach (var completion in done)
+            {
+                completion.TrySetResult(true);
             }
         }
     }

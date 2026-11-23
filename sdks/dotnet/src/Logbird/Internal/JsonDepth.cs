@@ -170,7 +170,7 @@ internal static class JsonDepth
                     }
 
                     break;
-                case JsonValue value when value.TryGetValue<string>(out var text):
+                case JsonValue value when JsJson.TryGetString(value, out var text):
                     // The two quotes; the first byte was counted above.
                     size += text.Length + 1;
                     break;

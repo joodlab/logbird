@@ -1,4 +1,4 @@
-import type { WorkspaceSetup } from '@logbird/contracts';
+import type { ProjectSetup, WorkspaceSetup } from '@logbird/contracts';
 import { CONSOLE_TEST_EVENT_SOURCE, isLogbirdGeneratedSource } from '@logbird/contracts';
 import type { QueryClient } from '@tanstack/react-query';
 import { redirect } from '@tanstack/react-router';
@@ -84,13 +84,25 @@ export async function activeWorkspaceHasProjects(queryClient: QueryClient): Prom
  * What the first-event step says when an event arrives. A console test event (a Logbird-generated source) proves the
  * pipeline, not the integration, so it never says "it works".
  */
+/**
+ * The toast shown when the first event arrives while the setup panel watches: the same facts as its card, so once the
+ * backend has sent events (`lastEventAt` counts only those) it never asks for one again.
+ */
+export function firstEventToast(ingest: Pick<ProjectSetup['ingest'], 'firstEvent' | 'lastEventAt'>) {
+  const copy = firstEventCopy(ingest.firstEvent?.source, true, Boolean(ingest.lastEventAt));
+  return { title: copy.toastTitle, description: copy.toastDescription };
+}
+
 export function firstEventCopy(source: string | null | undefined, justArrived = true, backendSeen = false) {
   if (isLogbirdGeneratedSource(source)) {
     // Only the console's own test is called one; other Logbird-generated sources are named for what they are.
     const what = source === CONSOLE_TEST_EVENT_SOURCE ? 'Console test' : 'Event from Logbird';
     return {
       toastTitle: `${what} received`,
-      toastDescription: 'Logbird is receiving events. Send one from your backend to check your integration.',
+      // Like the card: once the backend has sent events, never ask for one again.
+      toastDescription: backendSeen
+        ? 'Your backend has sent events since: your integration works.'
+        : 'Logbird is receiving events. Send one from your backend to check your integration.',
       cardTitle: backendSeen ? `${what} received — your backend has sent events since` : `${what} received — now send one from your backend`,
     };
   }

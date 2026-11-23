@@ -116,8 +116,139 @@ function joinColons(input: string, from: number, limit: number): number {
   return j;
 }
 
+/**
+ * The server's terms of `q` outside `[from, to)`, in order: each term's field, value and polarity and the path of OR
+ * branches it sits in (so `a (b OR c)` and `a (b c)` differ), offsets left out. Null when `q` does not parse. Two
+ * queries whose outside terms match differ only in the span between.
+ */
+export function termsOutside(q: string, from: number, to: number): string | null {
+  const expression = editableExpression(q);
+  if (!expression) return null;
+  const parts: string[] = [];
+  const strip = (key: string, v: unknown) => (key === 'start' || key === 'end' || key === 'valueStart' || key === 'key' ? undefined : v);
+  const visit = (node: QueryAtom, negated: boolean, path: string) => {
+    if (node.kind === 'not') return visit(node.operand, !negated, path);
+    if (node.kind === 'group') {
+      node.expression.forEach((branch, i) => {
+        for (const part of branch) visit(part.atom, negated, `${path}/${i}`);
+      });
+      return;
+    }
+    if (node.start < to && node.end > from) return;
+    parts.push(
+      JSON.stringify([path, node.kind, node.kind === 'field' ? node.field : '', node.kind === 'field' ? node.value : node.token, negated], strip),
+    );
+  };
+  expression.forEach((branch, i) => {
+    for (const part of branch) visit(part.atom, false, `${i}`);
+  });
+  return parts.join('|');
+}
+
+/** Endings that finish a query someone is still typing (`attempt:`, `(a`, `"ab`), tried in order to check it. */
+const UNFINISHED = ['', ' x', 'x', ' x)', 'x)', '"', 'x"'];
+
+/**
+ * The query after inserting `insert` over `[from, to)`, as the reader will finish it: when it does not parse yet (a key
+ * awaiting its value, `action:`; an empty group, `()`; an operator, `OR`), with a placeholder word typed at the caret
+ * after a space, so it can never fuse with what was inserted; a range template (`[ TO ]`) with both bounds filled.
+ * Returns the text to check and the completed span in it.
+ */
+export function completedForCheck(q: string, from: number, to: number, insert: string, caretOffset = insert.length) {
+  const at = Math.min(caretOffset, insert.length);
+  const typed = `${insert.slice(0, at)} x${insert.slice(at)}`;
+  // As it stands first: a query that already parses runs like that if the reader presses Enter now.
+  const forms = [insert, typed, insert.replace(/([[{])\s*TO\s*([\]}])/, '$1x TO x$2')];
+  const build = (form: string) => ({ text: q.slice(0, from) + form + q.slice(to), from, to: from + form.length });
+  return forms.map(build).find((c) => editableExpression(c.text)) ?? build(typed);
+}
+
+/**
+ * Which characters of `text` outside `[from, to)` the server reads as part of a term (1) or as an operator, a bracket or
+ * space between terms (0). Two queries with the same map read every outside character the same way: no completion
+ * glued an operator into a term (`one AND` + `impersonator:*` is the field `ANDimpersonator`) or split a term apart.
+ */
+function readingOutside(text: string, from: number, to: number): string | null {
+  const expression = editableExpression(text);
+  if (!expression) return null;
+  const covered = new Uint8Array(text.length);
+  const visit = (node: QueryAtom) => {
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else covered.fill(1, node.start, node.end);
+  };
+  for (const branch of expression) for (const part of branch) visit(part.atom);
+  return `${covered.slice(0, from).join('')}|${covered.slice(to).join('')}`;
+}
+
+/** Endings that close what is still open: a word, a quote, a range, then up to 16 groups (`((a`), the parser's limit. */
+const CLOSINGS = ['', ' x', 'x', '"', 'x"', ' x]', 'x]', 'x TO x]', '/', 'x/'].flatMap((inner) =>
+  Array.from({ length: 17 }, (_, depth) => inner + ')'.repeat(depth)),
+);
+
+/**
+ * The text `q` up to a cut that some ending finishes, with that ending: the whole text when it can be finished, else the
+ * longest whole-term prefix that still holds the term after `[from, to)`, so the completed term's neighbours on both
+ * sides are always checked. Null when even that cannot be finished.
+ */
+function finishable(q: string, to: number): { base: string; ending: string } | null {
+  // The end of the next term after the span (the next run of non-space characters).
+  const next = /^\s*\S*/.exec(q.slice(to))?.[0].length ?? 0;
+  for (let cut = q.length; cut >= to + next; cut--) {
+    // Whole terms only: cut at the end of the text or before a space.
+    if (cut < q.length && !/\s/.test(q[cut] ?? '')) continue;
+    const base = q.slice(0, cut);
+    const ending = (cut === q.length ? UNFINISHED : []).concat(CLOSINGS).find((end) => editableExpression(base + end));
+    if (ending !== undefined) return { base, ending };
+  }
+  return null;
+}
+
+/**
+ * What to insert so that accepting a completion changes only the term it completes: the insertion as built, else
+ * without its trailing space, else (a plain value only, where quotes mean the same) quoted, else after a space when it
+ * would otherwise glue onto the text before it, whichever first leaves every other term of the server's parse unchanged
+ * and every character outside the span read the same way (a space before `-tenant:west` would turn the attribute
+ * `-tenant` into NOT tenant). Null when none does: the completion is not applied. A query still being typed (`… attempt:`)
+ * is checked as finished with a placeholder; when the rest cannot be finished that way (`… attempt:[`), the text up to
+ * the last point that can is checked, so the neighbours of the completed term always are.
+ * `structural` false is for an operator the reader chose (`OR`): it may change the OR branches, never another term.
+ */
+export function neighbourSafeInsert(
+  q: string,
+  from: number,
+  to: number,
+  insert: string,
+  caretOffset = insert.length,
+  quotable = false,
+  structural = true,
+): string | null {
+  const finished = finishable(q, to);
+  // Nothing around the span can be read yet, so nothing can be checked: the completion is declined.
+  if (!finished) return null;
+  const { base, ending } = finished;
+  const shape = (out: string | null) => (out === null || structural ? out : out.replace(/(^|\|)\["[^"]*/g, '$1["'));
+  // At the end of the text the placeholder ending stands for what the reader types next, so it is no neighbour.
+  const atEnd = to === base.length;
+  const before = shape(termsOutside(base + ending, from, atEnd ? base.length + ending.length : to));
+  const reading = readingOutside(base + ending, from, atEnd ? base.length + ending.length : to);
+  const bare = insert.trimEnd();
+  const candidates = [insert, bare];
+  const plain = readQueryValue(bare);
+  if (quotable && bare && !/^["/(]/.test(bare) && !plain.wildcard) candidates.push(quoteQueryValue(plain.value));
+  if (!quotable && from > 0 && !/[\s(]/.test(q[from - 1] ?? '') && !/^\s/.test(insert)) candidates.push(` ${insert}`, ` ${bare}`);
+  for (const candidate of candidates) {
+    const shift = candidate.length - candidate.trimStart().length - (insert.length - insert.trimStart().length);
+    const check = completedForCheck(base + ending, from, to, candidate, Math.min(caretOffset + shift, candidate.length));
+    const end = atEnd ? check.text.length : check.to;
+    const after = shape(termsOutside(check.text, check.from, end));
+    if (after !== null && after === before && readingOutside(check.text, check.from, end) === reading) return candidate;
+  }
+  return null;
+}
+
 /** Value completion for the server's term `atom` at `caret`; null for `_exists_` (the console's own path handles it). */
-function serverValueCompletion(q: string, caret: number, atom: Extract<QueryAtom, { kind: 'field' }>): QueryCompletion | null {
+function serverValueCompletion(q: string, caret: number, atom: Extract<QueryAtom, { kind: 'field' }>): QueryCompletion | 'after' | null {
   const field = atom.field;
   const value = (prefix: string, from: number, to: number, extra: Partial<Extract<QueryCompletion, { kind: 'value' }>> = {}): QueryCompletion => ({
     kind: 'value',
@@ -130,7 +261,8 @@ function serverValueCompletion(q: string, caret: number, atom: Extract<QueryAtom
     ...extra,
   });
   const v = atom.value;
-  if (v.kind === 'presence') return null;
+  // `_exists_:field`: the whole presence term, as the server reads it (never part of a neighbouring group).
+  if (v.kind === 'presence') return { kind: 'exists', prefix: q.slice(atom.valueStart, caret), from: atom.start, to: atom.end };
   if (v.kind === 'range') return caret <= atom.valueStart ? value('', atom.valueStart, atom.end) : { kind: 'range', field };
   if (v.kind === 'compare') {
     if (caret < atom.valueStart + v.op.length) return value('', atom.valueStart, atom.end);
@@ -138,8 +270,11 @@ function serverValueCompletion(q: string, caret: number, atom: Extract<QueryAtom
     return value(q.slice(v.token.start, caret), v.token.start, v.token.end, { op: v.op });
   }
   const inGroup = v.kind === 'group';
+  // Right after a closed group the next thing is a new term, never another member.
+  if (inGroup && caret === atom.end && q[atom.end - 1] === ')') return 'after';
   const members = v.kind === 'value' ? [v.token] : v.members;
-  if (inGroup && caret <= atom.valueStart) return value('', atom.valueStart, atom.end);
+  // Between the colon and the value (`action:| booked`): the whole value is what a completion replaces.
+  if (caret <= atom.valueStart) return value('', atom.valueStart, atom.end);
   const member = members.find((m) => caret >= m.start && caret <= m.end);
   if (!member) {
     if (!inGroup) return { kind: 'none' };
@@ -155,6 +290,19 @@ function serverValueCompletion(q: string, caret: number, atom: Extract<QueryAtom
   const before = q.slice(atom.valueStart + 1, member.start).trimEnd();
   const afterMember = inGroup && before.length > 0 && !/(^|\s)OR$/.test(before);
   return value(prefix, member.start, member.end, { quoted, ...(inGroup ? { inGroup, afterMember } : {}) });
+}
+
+/** The server's free-text term whose text holds `caret`, when the query parses. */
+function serverTextContaining(q: string, caret: number): Extract<QueryAtom, { kind: 'text' }> | undefined {
+  let found: Extract<QueryAtom, { kind: 'text' }> | undefined;
+  const visit = (node: QueryAtom) => {
+    if (found) return;
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else if (node.kind === 'text' && caret > node.start && caret <= node.end) found = node;
+  };
+  for (const branch of editableExpression(q) ?? []) for (const part of branch) visit(part.atom);
+  return found;
 }
 
 /** The server's field term whose text holds `caret` (key or value), when the query parses. */
@@ -390,7 +538,7 @@ export function scopedQuery(base: string, user: string): ScopedQuery {
   const locked = base.trim();
   if (!user.trim()) return { q: locked, offset: 0, problem: null };
   // No locked filter: the reader's query alone, exactly as before (the server reports its own syntax errors).
-  if (!locked) return { q: user.trim(), offset: user.trimStart().length - user.length, problem: null };
+  if (!locked) return { q: user, offset: 0, problem: null };
   try {
     parseQueryExpression(user);
   } catch (error) {
@@ -800,17 +948,32 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
   // When the query parses, the server's term at the caret decides what is completed and what a completion replaces
   // (joined colons, quotes inside bare words, a quoted value with spaces): the console's tokens are only the fallback
   // while the query does not parse, so a completion can never rewrite more, or other, than the term it is in.
-  const atCaret = serverFieldContaining(q, caret);
-  if (atCaret) {
-    const colon = q.indexOf(':', atCaret.key.end);
-    if (caret <= colon) return key(atCaret.start, colon + 1);
-    const completion = serverValueCompletion(q, caret, atCaret);
-    if (completion) return completion;
+  if (editableExpression(q)) {
+    const atCaret = serverFieldContaining(q, caret);
+    if (atCaret) {
+      const colon = q.indexOf(':', atCaret.key.end);
+      if (caret <= colon) return key(atCaret.start, colon + 1);
+      const completion = serverValueCompletion(q, caret, atCaret);
+      // Right after a closed value group (`action:(booked)`) a term has ended: OR and AND may come next.
+      if (completion === 'after') return { kind: 'key', prefix: '', from: caret, to: caret, afterTerm: true };
+      if (completion) return completion;
+    } else {
+      // Free text, a phrase or a regex the server reads as one word: complete that word, never into a neighbour.
+      const text = serverTextContaining(q, caret);
+      if (text && text.token.kind === 'regex' && caret > text.start) return { kind: 'phrase' };
+      if (text && q[text.start] === '"' && caret > text.start) return { kind: 'phrase' };
+      // Between terms, at an operator or a bracket: a new term at the caret.
+      return text ? key(text.start, text.end) : key(caret, caret);
+    }
   }
   if (!t || t.kind === 'paren' || (t.kind === 'operator' && caret === t.start)) return key(caret, caret);
   if (t.kind === 'phrase' || t.kind === 'regex') return caret === t.start ? key(caret, caret) : { kind: 'phrase' };
   if (t.kind === 'operator' || t.kind === 'text') {
     if (caret === t.start && t.kind === 'text') return key(caret, caret);
+    // Right after a finished operator (`one OR|`) a new term starts here: the operator is never replaced.
+    if (t.kind === 'operator' && caret === t.end && /^(AND|OR|NOT|&&|\|\|)$/.test(t.raw)) {
+      return { kind: 'key', prefix: '', from: caret, to: caret, afterTerm: false };
+    }
     const from = t.start + (t.negated || t.raw === '-' ? 1 : 0);
     if (caret < from) return { kind: 'none' };
     return key(from, t.end);

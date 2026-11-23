@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { coreField } from './query-catalog';
-import { applyFixes, autoFixes, lintQuery } from './query-lint';
+import { applyFixes, autoFixes, fixesOnSubmit, lintQuery, suggestedConversion } from './query-lint';
 
 const isField = (name: string) => Boolean(coreField(name)) || name === 'metadata.channel';
 const fix = (q: string) => applyFixes(q, autoFixes(lintQuery(q, isField)));
@@ -57,5 +57,43 @@ describe('lintQuery: Lucene / KQL / Datadog spellings', () => {
 
   it('applies several fixes with stable offsets', () => {
     expect(fix('_exists_:tenant && attempt >= 3 && outcome != success')).toBe('tenant:* AND attempt:>=3 AND -outcome:success');
+  });
+});
+
+describe('Enter never changes a query the server accepts (the reader chooses a conversion)', () => {
+  const onEnter = (q: string) => applyFixes(q, fixesOnSubmit(q, lintQuery(q, isField)));
+  const offered = (q: string) => suggestedConversion(q, lintQuery(q, isField));
+
+  it('runs a KQL-looking query the server accepts as typed, and offers the filter instead', () => {
+    // `action=booked` is a valid text search: it runs as typed, and `action:booked` is offered, not applied.
+    expect(onEnter('action=booked')).toBe('action=booked');
+    expect(offered('action=booked')).toBe('action:booked');
+    expect(onEnter('tenant=biz_7')).toBe('tenant=biz_7');
+    expect(offered('tenant=biz_7')).toBe('tenant:biz_7');
+  });
+
+  it('still converts on Enter what the server rejects as typed, as before', () => {
+    // The server rejects the spaced KQL forms ("Use Logbird query syntax"), so Enter keeps converting them.
+    expect(onEnter('tenant = biz_7')).toBe('tenant:biz_7');
+    expect(offered('tenant = biz_7')).toBeNull();
+    expect(onEnter('!env:staging')).toBe('-env:staging');
+    expect(onEnter('outcome:failure && attempt:>2')).toBe('outcome:failure AND attempt:>2');
+  });
+
+  it('leaves other accepted spellings exactly as typed, offering nothing', () => {
+    for (const q of ['_exists_:tenant', 'tenant: biz_7', 'free words']) {
+      expect(onEnter(q)).toBe(q);
+      expect(offered(q)).toBeNull();
+    }
+  });
+});
+
+describe('fixes for a query the server accepts', () => {
+  it('respell whole server terms only, and only into a query that still parses', () => {
+    // The console's tokenizer reads `ab"cd` as opening a quote; the server reads two field terms. No fix spans both.
+    expect(lintQuery('action: (ab"cd OR next) tenant:west', isField).filter((f) => f.end > 24)).toEqual([]);
+    // `action:OR` does not parse, so `action=OR` is not offered as a filter.
+    expect(lintQuery('action=OR', isField)).toEqual([]);
+    expect(lintQuery('action=booked', isField)[0]).toMatchObject({ start: 0, end: 13, replacement: 'action:booked' });
   });
 });

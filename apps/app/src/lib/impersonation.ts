@@ -71,15 +71,22 @@ function queryWhoFilter(q: string): WhoFilter {
         // A NOT over terms ANDed (`NOT (a b)`) restricts none of them on its own.
         if (e.length === 1 && (!negated || e[0]?.length === 1)) for (const part of e[0] ?? []) visit(part.atom, negated);
         else if (negated && e.every((b) => b.length === 1)) for (const b of e) visit((b[0] as { atom: QueryAtom }).atom, true);
+        else if (!negated) {
+          // An ORed group inside the branch restricts it when every one of its branches does, the same way.
+          const inner = e.map(branchSplit);
+          if (inner.every((s) => s === 'support')) support = true;
+          else if (inner.every((s) => s === 'self')) self = true;
+        }
       } else if (node.kind === 'field' && canonicalField(node.field) === 'impersonator') {
         const v = node.value;
-        // `_exists_:impersonator` and `impersonator:*` are the same presence test to the server.
-        const presence = v.kind === 'presence' || (v.kind === 'value' && v.token.kind !== 'regex' && v.token.wildcard && v.token.value === '*');
-        // Only exact agents or presence say who: a regex (`/.*/`) also matches the empty id of self activity, and ranges
-        // or comparisons say nothing about support.
-        const agents =
-          (v.kind === 'value' && v.token.kind !== 'regex' && v.token.value !== '') ||
-          (v.kind === 'group' && v.members.every((m) => m.kind !== 'regex' && m.value !== ''));
+        const star = (t: { kind: string; wildcard?: boolean; value: string }) => t.kind !== 'regex' && Boolean(t.wildcard) && t.value === '*';
+        // `_exists_:impersonator`, `impersonator:*` and `impersonator:(*)` are the same presence test to the server.
+        // A group says who only when every member needs a non-empty id: a regex (`/.*/`) or an empty value (`""`) also
+        // matches the empty id of self activity, and ranges or comparisons say nothing about support.
+        const restrictive = v.kind === 'group' && v.members.every((m) => m.kind !== 'regex' && m.value !== '');
+        const presence =
+          v.kind === 'presence' || (v.kind === 'value' && star(v.token)) || (restrictive && v.kind === 'group' && v.members.some(star));
+        const agents = (v.kind === 'value' && v.token.kind !== 'regex' && v.token.value !== '') || restrictive;
         if (!negated && (presence || agents)) support = true;
         else if (negated && presence) self = true;
       }

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { legal } from '../../content/legal';
 import { EFFECTIVE_DATE, effectiveDateLabel } from '../../lib/legal-facts';
 import { PageHero } from './section';
 
@@ -10,20 +11,24 @@ export interface LegalSection {
 }
 
 /**
- * A legal page: hero with the effective date, a contents list and numbered sections. Copy lives in the route
- * (marketing/copy/legal-*.md explains the facts behind it); unknown operator facts come from WEB_* settings
- * (src/lib/legal-facts.ts), so the text renders correctly whether or not they are set.
+ * A legal page: hero with the effective date, a contents list and numbered sections. Words: content/legal.ts (this frame)
+ * and content/legal-privacy.ts / legal-terms.ts (the pages; marketing/copy/legal-*.md explains the facts behind them);
+ * unknown operator facts come from WEB_* settings (src/lib/legal-facts.tsx), so the text renders correctly whether or not
+ * they are set. This file is layout only (content-modules.test.ts).
  */
 export function LegalDocument({ title, lead, sections }: { title: string; lead: ReactNode; sections: LegalSection[] }) {
+  const { document: frame } = legal;
   return (
     <>
       <PageHero
-        eyebrow="Legal"
+        eyebrow={frame.eyebrow}
         lead={
           <>
             {lead}
             <span className="mt-4 block text-base text-muted-foreground">
-              Effective <time dateTime={EFFECTIVE_DATE}>{effectiveDateLabel}</time>.
+              {frame.effective.before}
+              <time dateTime={EFFECTIVE_DATE}>{effectiveDateLabel}</time>
+              {frame.effective.after}
             </span>
           </>
         }
@@ -32,7 +37,7 @@ export function LegalDocument({ title, lead, sections }: { title: string; lead: 
       <div className="container-site grid gap-12 pb-24 lg:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] lg:gap-16">
         <nav aria-labelledby="legal-contents-title" className="lg:sticky lg:top-[calc(var(--header-h)+1.5rem)] lg:self-start">
           <h2 className="eyebrow" id="legal-contents-title">
-            Contents
+            {frame.contents}
           </h2>
           <ol className="mt-4 flex flex-col gap-2 text-sm">
             {sections.map((section, index) => (

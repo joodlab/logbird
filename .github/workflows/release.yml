@@ -289,6 +289,16 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
+      # Package validation compares each package with PackageValidationBaselineVersion; that baseline must be the latest
+      # version already on nuget.org, or a breaking change to it would pass unseen (sdks/dotnet/CONTRIBUTING.md).
+      - name: Package validation compares with the latest published version
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: sdks/dotnet
+        run: |
+          for project in Logbird Logbird.AspNetCore; do
+            baseline="$(dotnet msbuild "src/$project/$project.csproj" -getProperty:PackageValidationBaselineVersion)"
+            python3 check-validation-baseline.py "$RELEASE_VERSION" "$baseline" "$project"
+          done
       - name: Build, test and pack the released version
         if: steps.gate.outputs.publish == 'true'
         working-directory: sdks/dotnet
@@ -308,6 +318,8 @@ jobs:
               exit 1
             fi
           done
+          # Logbird.AspNetCore calls Logbird's internals, so it must depend on exactly the Logbird packed with it (#208).
+          python3 check-packages.py "$RUNNER_TEMP/nupkg" "$RELEASE_VERSION"
       - name: Push Logbird, then wait until nuget.org serves it
         if: steps.gate.outputs.publish == 'true'
         env:

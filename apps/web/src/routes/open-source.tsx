@@ -7,44 +7,21 @@ import { Eyebrow, PageHero, Section, SectionHeader } from '../components/marketi
 import { SecurityContact } from '../components/marketing/security-contact';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { StackedTable } from '../components/marketing/stacked-table';
-import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME } from '../env';
-import { latestRelease, NO_RELEASES, supportedLine } from '../lib/releases';
+import { openSource } from '../content/open-source';
+import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/open-source')({ head: () => pageHead('/open-source'), component: OpenSourcePage });
 
-// Copy: marketing/copy/open-source.md. Change wording there first.
-const repo: { path: string; what: string }[] = [
-  { path: 'apps/server', what: 'The API: ingest and read on `/v1`, the console API on `/api`, OpenAPI and a Scalar reference. Hono on Node.' },
-  { path: 'apps/app', what: 'The console. TanStack Start and React.' },
-  { path: 'apps/worker', what: 'The retention worker: hourly purges and housekeeping. BullMQ on Redis or Dragonfly.' },
-  { path: 'apps/email', what: 'Previews for the sign-in and invitation email templates.' },
-  { path: 'packages/contracts', what: "The API's request and response schemas. The source of truth for the API." },
-  { path: 'packages/clickhouse', what: 'ClickHouse client, migrations, query builder and query-language parser.' },
-  { path: 'packages/database', what: 'Postgres schema (Prisma): workspaces, projects, keys, saved views.' },
-  { path: 'packages/auth', what: 'Email one-time-code sign-in and workspaces, on better-auth.' },
-  { path: 'packages/sdk', what: '`@logbird/sdk`: the TypeScript client. No dependencies.' },
-  { path: 'packages/integrations/*', what: '`@logbird/hono`, `@logbird/tanstack-start`, `@logbird/vue`, `@logbird/nuxt`.' },
-  { path: 'packages/ui', what: "The console's design system." },
-  { path: 'packages/seed', what: 'A generator of fictional hotel-booking data, sent through the public API.' },
-  { path: 'examples/*', what: 'Small runnable examples for each integration.' },
-];
-
-const contributing = [
-  'Node 22.18+ and pnpm',
-  'Focused branches and Conventional Commits',
-  'Pull requests that explain what changed, why, and how it was verified',
-  'Screenshots for UI changes',
-  'Fictional data only in tests',
-  'Maintainers merge',
-];
+// Words: content/open-source.ts. This file is layout only (content-modules.test.ts).
+const { source, license } = openSource;
 
 function SourceButton() {
   if (GITHUB_PUBLIC && GITHUB_URL) {
     return (
       <ButtonLink href={GITHUB_URL} size="lg">
         <GitBranchIcon aria-hidden="true" className="size-4" />
-        Source on GitHub
+        {source.public}
       </ButtonLink>
     );
   }
@@ -52,7 +29,7 @@ function SourceButton() {
   return (
     <span className="inline-flex h-(--control-size-large) cursor-not-allowed select-none items-center gap-1.5 rounded-md border border-dashed px-4 font-medium text-[15px] text-muted-foreground">
       <GitBranchIcon aria-hidden="true" className="size-4" />
-      Source on GitHub — coming soon
+      {source.private}
     </span>
   );
 }
@@ -64,17 +41,16 @@ function LicenseCard() {
         <i />
         <i />
         <i />
-        <span className="ms-2 font-mono text-[11px] text-muted-foreground">LICENSE</span>
+        <span className="ms-2 font-mono text-[11px] text-muted-foreground">{license.barTitle}</span>
       </div>
       <div className="flex flex-col gap-4 p-5 font-mono text-[13px] leading-relaxed md:p-6">
-        <p className="font-semibold">MIT License</p>
-        {/* The copyright line names the publisher, which is pending the owner (WEB_ORG_NAME); quote it only once set. */}
-        {ORG_NAME ? <p>Copyright (c) 2026 {ORG_NAME}</p> : null}
-        <p className="text-muted-foreground">Permission is hereby granted, free of charge, to any person obtaining a copy of this software…</p>
+        <p className="font-semibold">{license.name}</p>
+        {license.copyright ? <p>{license.copyright}</p> : null}
+        <p className="text-muted-foreground">{license.excerpt}</p>
       </div>
       <figcaption className="border-t px-5 py-4 md:px-6">
         <ul className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-          {['Read it', 'Run it', 'Change it', 'Ship it in your product'].map((item) => (
+          {license.freedoms.map((item) => (
             <li className="flex items-center gap-2" key={item}>
               <CheckIcon aria-hidden="true" className="size-4 shrink-0 text-outcome-success" />
               {item}
@@ -87,6 +63,7 @@ function LicenseCard() {
 }
 
 function OpenSourcePage() {
+  const { hero, repo, contributing, conduct, security, versions } = openSource;
   return (
     <>
       <PageHero
@@ -94,27 +71,25 @@ function OpenSourcePage() {
           <>
             <SourceButton />
             <SelfHostCta />
-            {GITHUB_PUBLIC ? null : (
-              <p className="basis-full text-muted-foreground text-sm">The repository opens publicly soon. Until then, the code isn't public.</p>
-            )}
+            {hero.privateNote ? <p className="basis-full text-muted-foreground text-sm">{hero.privateNote}</p> : null}
           </>
         }
         aside={<LicenseCard />}
-        eyebrow="Open source"
-        lead="The product is MIT-licensed: the API, the console, the retention worker, the SDK and the integrations, all in one repository. You can read the code, run it, change it and ship it in your own product. Experimental folders may carry their own licence; each one says so."
-        title="The product is MIT-licensed."
+        eyebrow={hero.eyebrow}
+        lead={hero.lead}
+        title={hero.title}
       />
 
       <Section id="repo" labelledBy="repo-title">
-        <SectionHeader eyebrow="What's in the repository" id="repo-title" title="One repository, one codebase." />
+        <SectionHeader eyebrow={repo.eyebrow} id="repo-title" title={repo.title} />
         <StackedTable
-          caption="What each folder of the Logbird repository contains"
+          caption={repo.caption}
           cardLabels={false}
           className="mt-10"
-          columns={['What it is']}
-          headerLabel={{ text: 'Path', visible: true }}
+          columns={[repo.column]}
+          headerLabel={{ text: repo.header, visible: true }}
           headerWidth="w-[16rem]"
-          rows={repo.map((entry) => ({
+          rows={repo.rows.map((entry) => ({
             key: entry.path,
             header: <code className="font-medium font-mono text-[0.875em]">{entry.path}</code>,
             cells: [<Rich key="what" text={entry.what} />],
@@ -125,21 +100,10 @@ function OpenSourcePage() {
 
       <Section id="contributing" labelledBy="contributing-title" tone="sunken">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
-          <SectionHeader
-            eyebrow="Contributing"
-            id="contributing-title"
-            lead={
-              <>
-                {GITHUB_PUBLIC ? 'Contributions' : 'Once the repository is public, contributions'} follow <code>CONTRIBUTING.md</code>. In short: Node
-                22.18+ and pnpm, focused branches, Conventional Commits, and pull requests that explain what changed, why, and how it was verified. UI
-                changes include screenshots. Tests use fictional data only. Maintainers merge.
-              </>
-            }
-            title="How to contribute."
-          />
+          <SectionHeader eyebrow={contributing.eyebrow} id="contributing-title" lead={<Rich text={contributing.lead} />} title={contributing.title} />
           <div className="flex flex-col gap-6">
             <ul className="panel grid gap-3 p-6 sm:grid-cols-2">
-              {contributing.map((item) => (
+              {contributing.checklist.map((item) => (
                 <li className="flex gap-3 text-sm leading-relaxed" key={item}>
                   <CheckIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-brand" />
                   {item}
@@ -147,19 +111,14 @@ function OpenSourcePage() {
               ))}
             </ul>
             <ul className="body-copy flex flex-col gap-3 text-muted-foreground leading-relaxed">
-              <li className="flex gap-3">
-                <span aria-hidden="true" className="mt-2.5 size-1.5 shrink-0 rounded-full bg-brand" />
-                <span>
-                  API changes start in <code>packages/contracts</code>. The server and console change in the same pull request.
-                </span>
-              </li>
-              <li className="flex gap-3">
-                <span aria-hidden="true" className="mt-2.5 size-1.5 shrink-0 rounded-full bg-brand" />
-                <span>
-                  GitHub Actions runs the checks on every pull request and push to master. A <code>v*</code> tag builds the release images for amd64
-                  and arm64 and publishes them to GHCR.
-                </span>
-              </li>
+              {contributing.notes.map((note) => (
+                <li className="flex gap-3" key={note}>
+                  <span aria-hidden="true" className="mt-2.5 size-1.5 shrink-0 rounded-full bg-brand" />
+                  <span>
+                    <Rich text={note} />
+                  </span>
+                </li>
+              ))}
             </ul>
           </div>
         </div>
@@ -168,29 +127,29 @@ function OpenSourcePage() {
       <Section>
         <div className="grid gap-6 md:grid-cols-2">
           <section aria-labelledby="conduct-title" className="panel flex flex-col gap-4 p-6 md:p-8" id="conduct">
-            <Eyebrow>Code of conduct</Eyebrow>
+            <Eyebrow>{conduct.eyebrow}</Eyebrow>
             <h2 className="flex items-center gap-3 font-semibold text-2xl tracking-tight" id="conduct-title">
               <HeartHandshakeIcon aria-hidden="true" className="size-5 shrink-0 text-brand" />
-              Be kind and constructive.
+              {conduct.title}
             </h2>
             <p className="body-copy text-muted-foreground leading-relaxed">
-              The project follows the Contributor Covenant, version 2.1. Report conduct issues through the private channel described in{' '}
-              <code>SECURITY.md</code>.
+              <Rich text={conduct.body} />
             </p>
           </section>
           <section aria-labelledby="security-title" className="panel flex flex-col gap-4 p-6 md:p-8" id="security">
-            <Eyebrow>Security reports</Eyebrow>
+            <Eyebrow>{security.eyebrow}</Eyebrow>
             <h2 className="flex items-center gap-3 font-semibold text-2xl tracking-tight" id="security-title">
               <MailIcon aria-hidden="true" className="size-5 shrink-0 text-brand" />
-              Found a vulnerability? Tell us privately.
+              {security.title}
             </h2>
             <p className="text-muted-foreground leading-relaxed">
-              Don't open a public issue. <SecurityContact /> Include the affected version, a reproduction with fictional data, and the impact. We
-              coordinate the fix and the disclosure with you privately. We don't offer a response-time SLA yet.
+              {security.before}
+              <SecurityContact />
+              {security.after}
             </p>
             <div className="mt-auto pt-2">
               <ButtonLink to="/security" variant="outline">
-                Security and data handling
+                {security.action}
               </ButtonLink>
             </div>
           </section>
@@ -200,25 +159,15 @@ function OpenSourcePage() {
       <Section id="versions" labelledBy="versions-title" tone="sunken">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
           <div className="flex flex-col gap-6">
-            <SectionHeader
-              eyebrow="Versions"
-              id="versions-title"
-              lead={`${latestRelease && supportedLine ? `The supported line is ${supportedLine}, and the latest release is ${latestRelease.version}, with Docker images on GHCR for amd64 and arm64.` : NO_RELEASES} The SDK and the integrations share the platform's version. They aren't on npm yet${GITHUB_PUBLIC ? ': use them from source.' : '.'}`}
-              title="Where the project is today."
-            />
+            <SectionHeader eyebrow={versions.eyebrow} id="versions-title" lead={versions.lead} title={versions.title} />
             <div>
               <ButtonLink to="/changelog" variant="outline">
-                Read the changelog
+                {versions.action}
               </ButtonLink>
             </div>
           </div>
           <dl className="panel grid grid-cols-2 overflow-hidden">
-            {[
-              { label: 'Supported line', value: supportedLine ?? '—' },
-              { label: 'Latest release', value: latestRelease ? latestRelease.version : '—' },
-              { label: 'Docker images', value: latestRelease ? 'GHCR' : '—' },
-              { label: 'npm packages', value: 'Not yet' },
-            ].map((item) => (
+            {versions.facts.map((item) => (
               <div className="flex flex-col gap-1 border-b p-5 odd:border-e [&:nth-last-child(-n+2)]:border-b-0" key={item.label}>
                 <dt className="text-muted-foreground text-sm">{item.label}</dt>
                 <dd className="font-mono font-semibold text-lg">{item.value}</dd>

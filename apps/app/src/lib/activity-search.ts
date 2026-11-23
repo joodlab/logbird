@@ -33,7 +33,7 @@ function chipToken(q: string): QueryToken | undefined {
     if (!server.some((x) => x.start === t.start && x.end === t.end && !x.negated && x.value === t.value && x.field === t.field)) continue;
     // Moving the chip out must not change what any other term means (`"category":"auth"-action:booked` would turn the
     // attribute `-action` into NOT action once its neighbour is gone): otherwise there is no chip.
-    if (meaning(activityQuery(t.value, freeTextWithout(q, t))) === meaning(q)) return t;
+    if (queryMeaning(activityQuery(t.value, freeTextWithout(q, t))) === queryMeaning(q)) return t;
   }
   return undefined;
 }
@@ -42,7 +42,7 @@ function chipToken(q: string): QueryToken | undefined {
  * What a query means to the server, order aside: each term's field, value and polarity, and each free-text word. Two
  * queries with the same meaning here filter the same events when they ANDed the same terms at the top level.
  */
-function meaning(q: string): string | null {
+export function queryMeaning(q: string): string | null {
   const parts: string[] = [];
   const visit = (node: QueryAtom, negated: boolean) => {
     if (node.kind === 'not') visit(node.operand, !negated);

@@ -9,6 +9,11 @@ import { expect, it, vi } from 'vitest';
 import { fieldsQuery, suggestQuery } from '@/lib/api/queries';
 import { QueryInput } from './query-input';
 
+// The default `toast(...)` is a spy (its methods stay real) so a test can press a toast's Undo.
+vi.mock(import('sonner'), async (original) => {
+  const real = await original();
+  return { ...real, toast: Object.assign(vi.fn(real.toast), real.toast) };
+});
 vi.mock(import('@tanstack/react-router'), async (original) => ({ ...(await original()), useNavigate: () => vi.fn() }));
 
 it.each([
@@ -118,6 +123,58 @@ it.each([
     expect(submit).toHaveBeenCalledExactlyOnceWith(visible, 'query');
     expect(compileQuery(submit.mock.calls[0]?.[0])).toEqual(compileQuery(value));
     expect(compileQuery(submit.mock.calls[0]?.[0]).params).toMatchObject({ recordId0: id });
+  } finally {
+    act(() => root.unmount());
+    client.clear();
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('runs a query the parser accepts as typed: IME Enter is ignored, and the offered filter applies only by choice, with Undo', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const client = new QueryClient();
+  const submit = vi.fn();
+  vi.mocked(toast).mockClear();
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  try {
+    act(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <QueryInput lang="query" onSubmit={submit} projectId="fictional" range="24h" value="" />
+        </QueryClientProvider>,
+      ),
+    );
+    const input = host.querySelector('textarea') as HTMLTextAreaElement;
+    const typed = '  action=booked ';
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, typed);
+      input.setSelectionRange(typed.length, typed.length);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const press = (init: KeyboardEventInit, keyCode?: number) =>
+      act(() => {
+        const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', ...init });
+        if (keyCode) Object.defineProperty(event, 'keyCode', { value: keyCode });
+        input.dispatchEvent(event);
+      });
+    // Confirming an IME candidate is not running the query.
+    press({ isComposing: true });
+    press({}, 229);
+    expect(submit).not.toHaveBeenCalled();
+    // Plain Enter runs exactly what was typed, spaces included, and offers the filter beside the bar.
+    press({});
+    expect(submit).toHaveBeenLastCalledWith(typed, 'query');
+    expect(host.querySelector('[data-testid="query-conversion"]')?.textContent).toContain('action:booked');
+    // Alt+Enter applies the offered filter; the toast's Undo restores what was typed.
+    press({ altKey: true });
+    expect(submit).toHaveBeenLastCalledWith('action:booked', 'query');
+    const undo = (vi.mocked(toast).mock.calls.at(-1)?.[1] as { action?: { onClick: () => void } } | undefined)?.action;
+    expect(undo).toBeDefined();
+    act(() => undo?.onClick());
+    expect(submit).toHaveBeenLastCalledWith(typed, 'query');
   } finally {
     act(() => root.unmount());
     client.clear();

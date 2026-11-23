@@ -22,9 +22,9 @@ export const copy = (file: string) => readFileSync(join(COPY_DIR, file), 'utf8')
 export const NOT_CHECKED: Record<string, string> = {
   'README.md': 'the copy guide, not a page',
   'legal-privacy.md':
-    'a placeholder brief: the legal pages are their own wording source (owner-approved TSX); legal-pages.test.ts checks selected facts',
+    'a placeholder brief: the page renders its owner-approved words from apps/web/src/content/legal-privacy.ts; legal-pages.test.ts checks selected facts',
   'legal-terms.md':
-    'a placeholder brief: the legal pages are their own wording source (owner-approved TSX); legal-pages.test.ts checks selected facts',
+    'a placeholder brief: the page renders its owner-approved words from apps/web/src/content/legal-terms.ts; legal-pages.test.ts checks selected facts',
   'arabic-notes.md': 'reference strings for a future localization, not a page',
   'home.md': 'a brief: the page renders apps/web/src/content/home.ts, and content-modules.test.ts guards the route file',
   'pricing.md': 'a brief: the page renders apps/web/src/content/pricing.ts; pricing.test.ts and content-modules.test.ts guard it',

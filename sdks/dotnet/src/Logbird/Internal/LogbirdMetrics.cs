@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
+using System.Threading;
 
 namespace Logbird.Internal;
 
@@ -16,22 +17,36 @@ internal static class LogbirdMetrics
 
     private static readonly object Gate = new();
     private static readonly List<WeakReference<LogbirdClient>> Clients = [];
+
+    // Cumulative totals for the whole process, kept across client disposal: a counter must never go down, and a drop or
+    // callback failure reported while a client shuts down must still be collected. The queue length is the only live
+    // gauge. Every client adds to these as it counts its own Stats.
+    internal static long TrackedTotal;
+    internal static long DeliveredTotal;
+    internal static long RejectedTotal;
+    internal static long FilteredTotal;
+    internal static long WarningsTotal;
+    internal static long FailedSendsTotal;
+    internal static long NotificationsLostTotal;
+    internal static long CallbackFailuresTotal;
+    internal static readonly long[] DroppedTotals = new long[LogbirdClient.DropReasonCount];
     private static readonly Meter? Meter = Create(() => new Meter(MeterName, LogbirdClient.Version));
 
-    // Kept alive by these fields; each callback sums over the live clients.
+    // Kept alive by these fields. The counters read the process-wide totals above, which every client adds to and which
+    // outlive it; only queue length sums over the live clients.
     private static readonly object?[] Instruments =
     [
-        Counter("logbird.events.tracked", "{event}", "Events accepted into the in-memory queue.", s => s.Tracked),
-        Counter("logbird.events.delivered", "{event}", "Events the server stored.", s => s.Delivered),
-        Counter("logbird.events.rejected", "{event}", "Events the server rejected individually.", s => s.Rejected),
-        Counter("logbird.events.filtered", "{event}", "Events skipped by BeforeSend.", s => s.Filtered),
-        Counter("logbird.events.warned", "{warning}", "Warnings about events (identifier whitespace found before sending, server warnings about stored events).", s => s.Warnings),
-        Counter("logbird.batches.failed", "{batch}", "Batches that failed after all retries and were queued again.", s => s.FailedSends),
-        Create(() => Meter?.CreateObservableCounter("logbird.events.dropped", DroppedByReason, "{event}", "Events that will not be stored, by reason.")),
+        Counter("logbird.events.tracked", "{event}", "Events accepted into the in-memory queue.", () => Interlocked.Read(ref TrackedTotal)),
+        Counter("logbird.events.delivered", "{event}", "Events the server stored.", () => Interlocked.Read(ref DeliveredTotal)),
+        Counter("logbird.events.rejected", "{event}", "Events the server rejected individually.", () => Interlocked.Read(ref RejectedTotal)),
+        Counter("logbird.events.filtered", "{event}", "Events skipped by BeforeSend.", () => Interlocked.Read(ref FilteredTotal)),
+        Counter("logbird.events.warned", "{warning}", "Warnings about events (identifiers a server may index differently, found before sending; server warnings about stored events).", () => Interlocked.Read(ref WarningsTotal)),
+        Counter("logbird.batches.failed", "{batch}", "Batches that failed after all retries and were queued again.", () => Interlocked.Read(ref FailedSendsTotal)),
+        Create(() => Meter?.CreateObservableCounter("logbird.events.dropped", DroppedByReason, "{event}", "Events the SDK stopped trying to deliver, by reason; some may already be stored (DroppedEvent.MayBeStored).")),
         Create(() => Meter?.CreateObservableCounter(
-            "logbird.notifications.lost", () => Sum(client => client.NotificationsLost), "{notification}", "OnDrop/OnError notifications skipped because the callbacks fell too far behind.")),
+            "logbird.notifications.lost", () => Interlocked.Read(ref NotificationsLostTotal), "{notification}", "OnDrop/OnError notifications skipped because the callbacks fell too far behind or could not be scheduled on the thread pool.")),
         Create(() => Meter?.CreateObservableCounter(
-            "logbird.callbacks.failed", () => Sum(client => client.CallbackFailures), "{exception}", "Exceptions thrown by OnDrop, OnError or a logger; each was swallowed.")),
+            "logbird.callbacks.failed", () => Interlocked.Read(ref CallbackFailuresTotal), "{exception}", "Exceptions thrown by OnDrop, OnError or a logger; each was swallowed.")),
         Create(() => Meter?.CreateObservableUpDownCounter("logbird.queue.length", () => Sum(client => client.Stats.QueueLength), "{event}", "Events waiting to be sent.")),
     ];
 
@@ -62,8 +77,8 @@ internal static class LogbirdMetrics
         _ => "invalid",
     };
 
-    private static ObservableCounter<long>? Counter(string name, string unit, string description, Func<LogbirdStats, long> read)
-        => Create(() => Meter?.CreateObservableCounter(name, () => Sum(client => read(client.Stats)), unit, description));
+    private static ObservableCounter<long>? Counter(string name, string unit, string description, Func<long> read)
+        => Create(() => Meter?.CreateObservableCounter(name, read, unit, description));
 
     private static long Sum(Func<LogbirdClient, long> read)
     {
@@ -78,10 +93,10 @@ internal static class LogbirdMetrics
 
     private static IEnumerable<Measurement<long>> DroppedByReason()
     {
-        var totals = new long[LogbirdClient.DropReasonCount];
-        foreach (var client in LiveClients())
+        var totals = new long[DroppedTotals.Length];
+        for (var i = 0; i < totals.Length; i++)
         {
-            client.AddDroppedByReason(totals);
+            totals[i] = Interlocked.Read(ref DroppedTotals[i]);
         }
 
         var measurements = new List<Measurement<long>>();

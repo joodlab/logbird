@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="..\Shared\OptionDefaults.cs" Link="OptionDefaults.cs" />
   </ItemGroup>
 
   <ItemGroup>

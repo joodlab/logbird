@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getPage } from '../lib/site-map';
 import { ACCESSED, comparisons, longDate } from './comparisons';
-import { getPage } from './site-map';
 
 describe('comparisons', () => {
   it.each(comparisons)('$slug cites a listed source for every claim, and lists no unused source', (comparison) => {
@@ -58,7 +58,7 @@ describe('source availability (WEB_GITHUB_PUBLIC)', () => {
   it('says the source is not open yet while the repository is private', async () => {
     vi.resetModules();
     const { comparisons: current } = await import('./comparisons');
-    const { getPage: page } = await import('./site-map');
+    const { getPage: page } = await import('../lib/site-map');
     const cells = logbirdCells(current.flatMap((comparison) => comparison.rows));
     expect(cells).toContain('MIT; source opens publicly soon');
     expect(cells).toContain('Self-hosted when the source opens (MIT); Logbird Cloud waitlist');
@@ -70,8 +70,8 @@ describe('source availability (WEB_GITHUB_PUBLIC)', () => {
     vi.stubEnv('WEB_GITHUB_PUBLIC', 'true');
     vi.stubEnv('WEB_GITHUB_URL', 'https://github.example.test/acme/logbird');
     const { comparisons: current } = await import('./comparisons');
-    const { getPage: page, staticPages } = await import('./site-map');
-    const { findSourcePhrases, SOURCE_STATE_PHRASES } = await import('./source-state');
+    const { getPage: page, staticPages } = await import('../lib/site-map');
+    const { findSourcePhrases, SOURCE_STATE_PHRASES } = await import('../lib/source-state');
     const cells = logbirdCells(current.flatMap((comparison) => comparison.rows));
     expect(cells).not.toMatch(/opens|soon|Planned/);
     const descriptions = staticPages.map((entry) => entry.description).join(' | ');

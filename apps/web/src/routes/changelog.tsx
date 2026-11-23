@@ -2,15 +2,15 @@ import { createFileRoute } from '@tanstack/react-router';
 import { ScreenshotFrame } from '../components/marketing/frame';
 import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
+import { changelog } from '../content/changelog';
 import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { buildLog, publicationDate as longDate, newestFirst } from '../lib/publications';
-import { byVersionDesc, NO_RELEASES, type Release, releases, releaseUrl } from '../lib/releases';
+import { byVersionDesc, type Release, releases, releaseUrl } from '../lib/releases';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/changelog')({ head: () => pageHead('/changelog'), component: ChangelogPage });
 
-// Copy: marketing/copy/changelog.md. Releases come from GitHub and CHANGELOG.md (src/lib/releases.ts); the build log from
-// publications.ts.
+// Words: content/changelog.ts. Releases: src/lib/releases.ts; build log: src/lib/publications.ts. Layout only.
 const releaseNotesHref = (release: Release) => (GITHUB_PUBLIC && GITHUB_URL ? releaseUrl(GITHUB_URL, release) : undefined);
 
 function Empty({ children }: { children: string }) {
@@ -18,20 +18,13 @@ function Empty({ children }: { children: string }) {
 }
 
 function ChangelogPage() {
+  const { hero, releases: releaseWords, buildLog: logWords } = changelog;
   return (
     <>
-      <PageHero
-        eyebrow="Changelog"
-        lead={
-          <Rich
-            text={`Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the repository's \`CHANGELOG.md\`${GITHUB_PUBLIC && GITHUB_URL ? '; each links to its full notes and upgrade steps' : ''}. The **build log** holds short updates on what we shipped, with a capture from the product when there is one.`}
-          />
-        }
-        title="What changed, and when."
-      />
+      <PageHero eyebrow={hero.eyebrow} lead={<Rich text={hero.lead} />} title={hero.title} />
 
       <Section labelledBy="releases-title">
-        <SectionHeader id="releases-title" title="Releases" />
+        <SectionHeader id="releases-title" title={releaseWords.title} />
         {releases.length ? (
           <ol className="mt-8 flex flex-col gap-6">
             {[...releases].sort(byVersionDesc).map((release, index) => {
@@ -40,13 +33,15 @@ function ChangelogPage() {
                 <li className="panel flex flex-col gap-4 p-5 md:p-6" key={release.version}>
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <h3 className="font-semibold text-xl">
-                      <span className="sr-only">Version </span>
+                      <span className="sr-only">{releaseWords.versionPrefix}</span>
                       {release.version}
                     </h3>
                     <time className="text-base text-muted-foreground" dateTime={release.date}>
                       {longDate(release.date)}
                     </time>
-                    {index === 0 ? <span className="rounded-full border px-2 py-0.5 font-mono text-muted-foreground text-xs">Latest</span> : null}
+                    {index === 0 ? (
+                      <span className="rounded-full border px-2 py-0.5 font-mono text-muted-foreground text-xs">{releaseWords.latest}</span>
+                    ) : null}
                   </div>
                   {release.highlights.length ? (
                     <ul className="flex list-disc flex-col gap-1 ps-5 text-muted-foreground">
@@ -60,7 +55,7 @@ function ChangelogPage() {
                   {href ? (
                     <p className="text-sm">
                       <a className="text-link" href={href}>
-                        Full release notes, upgrade steps and images for {release.version}
+                        {releaseWords.notesLink(release.version)}
                       </a>
                     </p>
                   ) : null}
@@ -69,12 +64,12 @@ function ChangelogPage() {
             })}
           </ol>
         ) : (
-          <Empty>{`${NO_RELEASES} The first release will list everything since the start of the project.`}</Empty>
+          <Empty>{releaseWords.empty}</Empty>
         )}
       </Section>
 
       <Section labelledBy="build-log-title" tone="sunken">
-        <SectionHeader id="build-log-title" lead="Day by day, in public." title="Build log" />
+        <SectionHeader id="build-log-title" lead={logWords.lead} title={logWords.title} />
         {buildLog.length ? (
           <ol className="mt-10 flex flex-col gap-12">
             {newestFirst(buildLog).map((entry, index) => (
@@ -94,7 +89,7 @@ function ChangelogPage() {
             ))}
           </ol>
         ) : (
-          <Empty>No entries yet. Each day's post appears here once it's published.</Empty>
+          <Empty>{logWords.empty}</Empty>
         )}
       </Section>
     </>

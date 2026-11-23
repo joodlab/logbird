@@ -197,8 +197,9 @@ public class AspNetCoreTests
         (await app.Http.PostAsync("/sync", null)).EnsureSuccessStatusCode();
 
         // The carrier travels in the job payload.
-        var payload = JsonSerializer.Serialize(carrier!, AuditCarrierJsonContext.Default.AuditCarrier);
-        var restored = JsonSerializer.Deserialize(payload, AuditCarrierJsonContext.Default.AuditCarrier);
+        var payload = carrier!.ToJson();
+        var restored = AuditCarrier.FromJson(payload);
+        Assert.Equal(carrier, AuditCarrier.FromJson(carrier.ToJsonUtf8Bytes()));
         var job = app.Host.Services.GetRequiredService<IAuditLogFactory>().ForJob(restored, jobId: "job_1", attempt: 2, worker: "crm-worker");
         job.Record("guest.updated", e => e.Target("guest", "g_1"));
 
