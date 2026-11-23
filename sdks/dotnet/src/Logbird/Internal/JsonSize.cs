@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Logbird.Internal;
@@ -118,6 +120,15 @@ internal static class JsonSize
             return Shape.Ok;
         }
 
+        // Only objects and arrays wait on the stack; leaves are counted where they are met, by their kind, which reads
+        // nothing and allocates nothing, so a huge shallow array is measured without being queued or copied. A lower bound
+        // of the UTF-8 text, exact for ASCII without escapes; the budget is checked as each member is counted.
+        if (root is not (JsonObject or JsonArray))
+        {
+            size += LeafBytes(root);
+            return size > maxBytes ? Shape.TooLarge : Shape.Ok;
+        }
+
         var pending = new Stack<(JsonNode Node, int Depth)>();
         pending.Push((root, 1));
         while (pending.Count > 0)
@@ -128,70 +139,103 @@ internal static class JsonSize
                 return Shape.TooDeep;
             }
 
-            // A lower bound of the UTF-8 text, exact for ASCII without escapes: each value costs at least one byte (a
-            // number's digit, a bracket or brace pair counted with its separators below), and the budget is checked as each
-            // member is counted, so a huge shallow array stops early instead of being walked or queued whole.
-            size++;
-
-            switch (node)
+            // The opening bracket or brace; each member below counts one separator, and the closing bracket or brace stands in
+            // for the last one.
+            size += 1;
+            if (node is JsonObject obj)
             {
-                case JsonObject obj:
-                    foreach (var pair in obj)
+                foreach (var pair in obj)
+                {
+                    // "key": plus a comma.
+                    size += pair.Key.Length + 4;
+                    var shape = Member(pair.Value, depth + 1, max, ref size, pending);
+                    if (shape != Shape.Ok || size > maxBytes)
                     {
-                        // "key": plus a comma (the closing brace stands in for the last comma).
-                        size += pair.Key.Length + 4;
-                        if (pair.Value is null)
-                        {
-                            size += 4;
-                        }
-                        else
-                        {
-                            pending.Push((pair.Value, depth + 1));
-                        }
-
-                        if (size > maxBytes)
-                        {
-                            return Shape.TooLarge;
-                        }
+                        return shape != Shape.Ok ? shape : Shape.TooLarge;
                     }
-
-                    break;
-                case JsonArray array:
-                    foreach (var item in array)
-                    {
-                        // A comma (the closing bracket stands in for the last one).
-                        size += 1;
-                        if (item is null)
-                        {
-                            size += 4;
-                        }
-                        else
-                        {
-                            pending.Push((item, depth + 1));
-                        }
-
-                        if (size > maxBytes)
-                        {
-                            return Shape.TooLarge;
-                        }
-                    }
-
-                    break;
-                case JsonValue value when JsJson.TryGetString(value, out var text):
-                    // The two quotes; the first byte was counted above.
-                    size += text.Length + 1;
-                    break;
-                case JsonValue value when value.TryGetValue<bool>(out var flag):
-                    size += flag ? 3 : 4;
-                    break;
+                }
             }
-
-            if (size > maxBytes)
+            else
             {
-                return Shape.TooLarge;
+                foreach (var item in (JsonArray)node)
+                {
+                    // A comma.
+                    size += 1;
+                    var shape = Member(item, depth + 1, max, ref size, pending);
+                    if (shape != Shape.Ok || size > maxBytes)
+                    {
+                        return shape != Shape.Ok ? shape : Shape.TooLarge;
+                    }
+                }
             }
         }
 
         return Shape.Ok;
+    }
+
+    /// <summary>Counts a leaf member in place, or queues an object or array; a member deeper than the limit is refused.</summary>
+    private static Shape Member(JsonNode? member, int depth, int max, ref long size, Stack<(JsonNode Node, int Depth)> pending)
+    {
+        if (member is null)
+        {
+            size += 4;
+            return Shape.Ok;
+        }
+
+        if (depth > max)
+        {
+            return Shape.TooDeep;
+        }
+
+        if (member is JsonObject or JsonArray)
+        {
+            pending.Push((member, depth));
+        }
+        else
+        {
+            size += LeafBytes(member);
+        }
+
+        return Shape.Ok;
+    }
+
+    /// <summary>The fewest bytes a leaf writes: its text and quotes for a string, its literal for a boolean, one otherwise.</summary>
+    private static long LeafBytes(JsonNode leaf)
+    {
+        if (leaf is not JsonValue value)
+        {
+            return 1;
+        }
+
+        // The kind first: it reads the value without allocating, where probing a number as a string boxes it. A value whose
+        // kind cannot be computed (NaN or an infinity on some targets, which JavaScript writes as null) is probed instead.
+        JsonValueKind kind;
+        try
+        {
+            kind = value.GetValueKind();
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or NotSupportedException or JsonException)
+        {
+            kind = JsonValueKind.Undefined;
+        }
+
+        switch (kind)
+        {
+            case JsonValueKind.Number:
+                return 1;
+            case JsonValueKind.Null:
+                return 4;
+            case JsonValueKind.True:
+                return 4;
+            case JsonValueKind.False:
+                return 5;
+        }
+
+        if (JsJson.TryGetString(value, out var text))
+        {
+            return text.Length + 2;
+        }
+
+        return value.TryGetValue<bool>(out var flag) ? (flag ? 4 : 5) : 1;
     }
 }

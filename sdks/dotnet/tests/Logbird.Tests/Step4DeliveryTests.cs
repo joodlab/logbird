@@ -221,7 +221,37 @@ public class Step4DeliveryTests
         var drop = Assert.Single(drops);
         Assert.Equal(DropReason.TooLarge, drop.Reason);
         Assert.True(drop.Json.IsEmpty);
+        Assert.False(drop.MayBeStored);
     }
+
+#if NET
+    [Fact]
+    public async Task A_tree_over_the_memory_guard_is_measured_without_being_copied()
+    {
+        // 600,000 numbers is over the guard. Copying them (to redact or to send) would allocate tens of megabytes of nodes;
+        // refusing them must allocate next to nothing on the tracking thread.
+        var numbers = new JsonArray();
+        for (var i = 0; i < 600_000; i++)
+        {
+            numbers.Add((JsonNode)i);
+        }
+
+        var auditEvent = new AuditEvent("numbers") { Metadata = { ["n"] = numbers } };
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using var client = Client(Options(o => o.OnDrop = drops.Enqueue), new FakeServer());
+        client.Track(new AuditEvent("warm up"));
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        client.Track(auditEvent);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(allocated < 1024 * 1024, allocated.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.True(await client.FlushAsync());
+        var drop = Assert.Single(drops, d => d.Action == "numbers");
+        Assert.Equal(DropReason.TooLarge, drop.Reason);
+        Assert.False(drop.MayBeStored);
+    }
+#endif
 
     private const string StoredEventJson = """
         {"id":"evt_1","projectId":"prj_1","timestamp":"2026-11-22T08:00:00.123Z","receivedAt":"2026-11-22T08:00:01.000Z",

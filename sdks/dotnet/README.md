@@ -199,8 +199,8 @@ met the same rejection.
 | `Reason` | Why | `MayBeStored` |
 | --- | --- | --- |
 | `Rejected` | The server rejected this event (see `Code` and `Detail`) | `false`, except `true` for `stored_event_unreadable` or `unverified_after_parse_failure` when an earlier request carrying it had an unresolved outcome |
-| `TooLarge` | The event as sent (after `BeforeSend` and redaction) is larger than 256 KB, or its data is more than 1 MiB of text before redaction (a memory guard) | always `false` |
-| `Invalid` | The event could not be prepared, for example `BeforeSend` threw, or its metadata or a change value nests JSON deeper than 1,000 levels | always `false` |
+| `TooLarge` | The event as sent (after `BeforeSend` and redaction) is larger than 256 KB; or its data is more than 1 MiB of text before redaction, in which case it is refused without being copied, whatever redaction would have removed (a memory guard) | always `false` |
+| `Invalid` | The event could not be prepared, for example `BeforeSend` threw; or its metadata or a change value nests JSON deeper than 1,000 levels (the server's limit for exact numbers, and safe for any thread's stack; a strings-only tree deeper than that, which the server would store, is refused) | always `false` |
 | `QueueFull` | Evicted from a full queue | `false` if it was never sent, or every answer said it was not stored; `true` if a request carrying it had an unresolved outcome |
 | `HttpError` | A 4xx other than 429, or a redirect | `false` if every answer said it was not stored; `true` if an earlier request had an unresolved outcome, or the final answer was a redirect |
 | `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if it was never sent, or every answer said it was not stored; `true` if it was in flight without a "not stored" answer, or an earlier request had an unresolved outcome |

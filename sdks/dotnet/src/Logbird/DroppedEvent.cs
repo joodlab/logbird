@@ -19,8 +19,10 @@ public enum DropReason
     HttpError = 2,
 
     /// <summary>
-    /// The event as sent (after <see cref="LogbirdOptions.BeforeSend"/> and redaction) is larger than 256 KB, or its data is
-    /// more than 1 MiB of text before redaction (a memory guard, checked before anything copies it).
+    /// The event as sent (after <see cref="LogbirdOptions.BeforeSend"/> and redaction) is larger than 256 KB. Separately, an
+    /// event whose data is more than 1 MiB of text before redaction is refused without being copied, whatever redaction
+    /// would have removed: copying an unbounded tree to redact it could exhaust the host's memory.
+    /// <see cref="DroppedEvent.MayBeStored"/> is false: the event was never sent.
     /// </summary>
     TooLarge = 3,
 
@@ -33,7 +35,10 @@ public enum DropReason
 
     /// <summary>
     /// The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw, or its metadata
-    /// or a change value nests JSON deeper than 1,000 levels.
+    /// or a change value nests JSON deeper than 1,000 levels. That limit is the server's own for storing numbers exactly,
+    /// and it keeps System.Text.Json's internal recursion (a node looks its options up through its parents) well inside any
+    /// thread's stack, where an overflow would end the host process. The one gap: a tree holding only strings, deeper than
+    /// 1,000 levels, which the server would store, is refused here.
     /// </summary>
     Invalid = 5,
 
