@@ -36,9 +36,23 @@ type Exchange = {
 };
 
 const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
-const config = JSON.parse(lines[0] ?? '{}') as { kind?: string; mode?: string; faults?: Record<string, number> };
-if (config.kind !== 'config') throw new Error('the first line must be the config line');
-const exchanges = lines.slice(1).map((line) => JSON.parse(line) as Exchange);
+const config = JSON.parse(lines[0] ?? '{}') as { kind?: unknown; mode?: unknown; faults?: unknown };
+const faultWeights =
+  config.faults && typeof config.faults === 'object' && !Array.isArray(config.faults) ? (config.faults as Record<string, unknown>) : {};
+if (config.kind !== 'config' || (config.mode !== 'stand-in' && config.mode !== 'upstream')) throw new Error('the first line must be the config line');
+if (!Object.values(faultWeights).some((w) => typeof w === 'number' && w > 0)) throw new Error('the config lists no fault with a positive weight');
+const exchanges = lines.slice(1).map((line, index) => {
+  const x = JSON.parse(line) as Exchange;
+  const shaped =
+    x?.kind === 'exchange' &&
+    typeof x.fault === 'string' &&
+    (x.status === null || typeof x.status === 'number') &&
+    (x.retryAfter === null || typeof x.retryAfter === 'string') &&
+    Array.isArray(x.dispositions);
+  if (!shaped) throw new Error(`line ${index + 2} is not an exchange record`);
+  return x;
+});
+if (exchanges.length === 0) throw new Error('the samples hold no exchange');
 const failures: string[] = [];
 const seenFaults = new Map<string, number>();
 
@@ -72,14 +86,25 @@ function settle(
     if (result.eventIds?.[k] !== idOf(events[index])) fail(`eventIds[${k}] does not name the event at index ${index}`);
   }
 
+  // Events with an id take theirs first; an event without an id (or a blank one) takes one remaining id, which the
+  // server generated for it.
   const ids = [...result.ids];
   for (let index = 0; index < events.length; index++) {
-    if (outcome[index] !== 'unsettled') continue;
     const id = idOf(events[index]);
-    const at = id === undefined ? -1 : ids.indexOf(id);
+    if (outcome[index] !== 'unsettled' || !id) continue;
+    const at = ids.indexOf(id);
     if (at < 0) fail(`event ${index} is neither rejected, unresolved nor in ids`);
     else {
       ids.splice(at, 1);
+      outcome[index] = 'accepted';
+    }
+  }
+
+  for (let index = 0; index < events.length; index++) {
+    if (outcome[index] !== 'unsettled') continue;
+    if (ids.length === 0) fail(`event ${index} is neither rejected, unresolved nor in ids`);
+    else {
+      ids.shift();
       outcome[index] = 'accepted';
     }
   }
@@ -92,6 +117,30 @@ for (const [number, x] of exchanges.entries()) {
   const key = `${x.fault} ${x.status ?? 'no answer'}`;
   const fail = (why: string) => failures.push(`line ${number + 2} (${key}): ${why}`);
   seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
+  // In stand-in mode, every event the stand-in stored must be one the server's schema accepts, also when the answer
+  // acknowledges nothing (a reset after storing, or 202 {}).
+  const requestEvents = x.request === null || x.request === undefined ? [] : eventsOf(x.request);
+  if (config.mode === 'stand-in') {
+    for (const [index, disposition] of x.dispositions.entries()) {
+      if (disposition !== 'accepted') continue;
+      const parsed = eventInputSchema.safeParse(requestEvents[index]);
+      if (!parsed.success) failures.push(`line ${number + 2} (${key}): stored event ${index} is invalid by the contracts: ${parsed.error.message}`);
+    }
+  }
+
+  // Only the store path records dispositions: one per event for an answer that settles events, a reset after storing,
+  // or 202 {}; none for an answer about the whole request (401, 400, 422, 413, 429, 503 unavailable) or a reset or hang
+  // before the body was read.
+  const stores =
+    x.fault === 'ResetAfterStore' || x.fault === 'EmptyAck' || x.status === 202 || (x.status === 503 && x.fault === 'PartialUnavailable');
+  if (config.mode === 'stand-in' && !stores && x.dispositions.length)
+    fail(`dispositions ${JSON.stringify(x.dispositions)} on an answer about the whole request`);
+  // A reset after storing, or 202 {}, stored every valid event first (a 401 or 413 answering these faults stored nothing).
+  const storedUnanswered = (x.fault === 'ResetAfterStore' || x.fault === 'EmptyAck') && (x.status === null || x.status === 202);
+  if (config.mode === 'stand-in' && storedUnanswered && x.dispositions.length !== requestEvents.length) {
+    fail(`${x.dispositions.length} dispositions for ${requestEvents.length} stored events`);
+  }
+
   if (x.status === null) {
     // Resets and hangs never answer; nothing else may end without an answer.
     if (!['Reset', 'Hang', 'ResetAfterStore'].includes(x.fault)) fail('no answer for a fault that must answer');
@@ -149,8 +198,9 @@ for (const [number, x] of exchanges.entries()) {
 }
 
 // Every configured fault must have been exercised and sampled.
-for (const [fault, weight] of Object.entries(config.faults ?? {})) {
-  if (weight > 0 && !seenFaults.has(fault)) failures.push(`fault ${fault} (weight ${weight}) never appears in the samples`);
+for (const [fault, weight] of Object.entries(faultWeights)) {
+  if (typeof weight === 'number' && weight > 0 && !seenFaults.has(fault))
+    failures.push(`fault ${fault} (weight ${weight}) never appears in the samples`);
 }
 
 console.log(

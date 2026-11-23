@@ -24,7 +24,7 @@ internal sealed class ClickHouseCheck : IDisposable
     public ClickHouseCheck(Uri url, string user, string password, string database, string projectId)
     {
         // Never follow a redirect: the login travels in headers and must not leave this machine.
-        _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(60) };
+        _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromSeconds(60) };
         _http.DefaultRequestHeaders.Add("X-ClickHouse-User", user);
         _http.DefaultRequestHeaders.Add("X-ClickHouse-Key", password);
         _baseUrl = url.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/?database=" + Uri.EscapeDataString(database);
@@ -35,15 +35,20 @@ internal sealed class ClickHouseCheck : IDisposable
 
     /// <summary>Raw rows of the run (all versions, no FINAL).</summary>
     public async Task<long> RowsAsync(string runTag)
-        => long.Parse(await QueryAsync(
+        => Count(await QueryAsync(
             "SELECT count() FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String}",
-            ("p", _projectId), ("r", runTag)).ConfigureAwait(false), CultureInfo.InvariantCulture);
+            ("p", _projectId), ("r", runTag)).ConfigureAwait(false));
 
     /// <summary>Event ids of the run with more than one raw row.</summary>
     public async Task<long> DuplicatedIdsAsync(string runTag)
-        => long.Parse(await QueryAsync(
+        => Count(await QueryAsync(
             "SELECT count() FROM (SELECT event_id FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String} GROUP BY event_id HAVING count() > 1)",
-            ("p", _projectId), ("r", runTag)).ConfigureAwait(false), CultureInfo.InvariantCulture);
+            ("p", _projectId), ("r", runTag)).ConfigureAwait(false));
+
+    private static long Count(string text)
+        => long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var n)
+            ? n
+            : throw new InvalidOperationException("ClickHouse answered something that is not a count: " + new string(text.Take(80).ToArray()));
 
     /// <summary>
     /// Inserts two identical rows (one statement, so one part) under a fresh self-test tag and returns whether the check

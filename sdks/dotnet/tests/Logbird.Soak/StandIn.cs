@@ -79,6 +79,7 @@ internal sealed class StandIn : IDisposable
     private readonly LongMap _firstSeen;
     private readonly LongMap _acknowledged;
     private readonly ConcurrentDictionary<Fault, long> _faults = new();
+    private readonly ConcurrentDictionary<Socket, byte> _sockets = new();
     private readonly Samples _samples;
     private Task? _accept;
     private long _conflicts;
@@ -101,7 +102,8 @@ internal sealed class StandIn : IDisposable
         _samples = samples;
         if (upstream is not null)
         {
-            _upstream = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(60) };
+            // No redirects and no proxy: the forwarded requests carry the real ingest key and must stay on this machine.
+            _upstream = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromSeconds(60) };
             _upstreamEvents = new Uri(upstream, "v1/events");
         }
 
@@ -170,6 +172,18 @@ internal sealed class StandIn : IDisposable
         {
         }
 
+        // Close every accepted connection, so no handler stays blocked waiting for a next request.
+        foreach (var socket in _sockets.Keys)
+        {
+            try
+            {
+                socket.Close();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
         _upstream?.Dispose();
         _stop.Dispose();
     }
@@ -193,7 +207,18 @@ internal sealed class StandIn : IDisposable
             }
 
             Interlocked.Increment(ref _connections);
-            _ = Task.Run(() => ServeAsync(socket));
+            _sockets.TryAdd(socket, 0);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await ServeAsync(socket).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _sockets.TryRemove(socket, out _);
+                }
+            });
         }
     }
 
@@ -316,26 +341,29 @@ internal sealed class StandIn : IDisposable
 
         exchange.Request = body;
         List<JsonNode?>? events;
+        string[] raw;
         try
         {
             var root = JsonNode.Parse(body);
             events = root is JsonArray array ? [.. array]
                 : root is JsonObject obj && obj.ContainsKey("events") ? obj["events"] is JsonArray list ? [.. list] : []
                 : [root];
+            raw = RawEvents(body);
         }
         catch (JsonException)
         {
             events = null;
+            raw = [];
         }
 
         // Every arrival is fingerprinted as soon as its body is read, whatever the answer will be, so a retry with changed
         // content is caught in both modes, also after a 429, a 503 or a 413.
-        foreach (var e in events ?? [])
+        for (var i = 0; i < (events?.Count ?? 0); i++)
         {
-            if (e is JsonObject o && o["id"] is JsonValue v && v.TryGetValue<string>(out var id) && id.Trim().Length > 0)
+            if (Text(events![i] is JsonObject o ? o["id"] : null, out var id, out _) && JsTrim(id!).Length > 0)
             {
-                var fingerprint = Fingerprint(e);
-                if (!_firstSeen.TryAdd(LongMap.Hash(id.Trim()), fingerprint, out var first) && first != fingerprint)
+                var fingerprint = Fingerprint(events[i], i < raw.Length ? raw[i] : string.Empty);
+                if (!_firstSeen.TryAdd(LongMap.Hash(JsTrim(id!)), fingerprint, out var first) && first != fingerprint)
                 {
                     Interlocked.Increment(ref _conflicts);
                 }
@@ -383,11 +411,11 @@ internal sealed class StandIn : IDisposable
         }
 
         return _upstream is null
-            ? await StoreAsync(stream, socket, exchange, events, fault).ConfigureAwait(false)
+            ? await StoreAsync(stream, socket, exchange, events, raw, fault).ConfigureAwait(false)
             : await ForwardAsync(stream, socket, exchange, head, body, events, fault).ConfigureAwait(false);
     }
 
-    private async Task<bool> StoreAsync(NetworkStream stream, Socket socket, Exchange exchange, List<JsonNode?> events, Fault fault)
+    private async Task<bool> StoreAsync(NetworkStream stream, Socket socket, Exchange exchange, List<JsonNode?> events, string[] raw, Fault fault)
     {
         var accepted = new JsonArray();
         var rejected = new JsonArray();
@@ -396,7 +424,7 @@ internal sealed class StandIn : IDisposable
         for (var index = 0; index < events.Count; index++)
         {
             var e = events[index];
-            var problem = Normalize(e, out var id);
+            var problem = Normalize(e, index < raw.Length ? raw[index] : string.Empty, out var id);
             if (problem is not null)
             {
                 rejected.Add((JsonNode)Rejection(index, problem.Value.Code, problem.Value.Reason));
@@ -404,7 +432,7 @@ internal sealed class StandIn : IDisposable
                 continue;
             }
 
-            var fingerprint = Fingerprint(e);
+            var fingerprint = Fingerprint(e, index < raw.Length ? raw[index] : string.Empty);
             var key = LongMap.Hash(id);
             var alreadyStored = _stored.TryGetValue(key, out var storedFingerprint);
             if (alreadyStored && storedFingerprint != fingerprint)
@@ -572,23 +600,33 @@ internal sealed class StandIn : IDisposable
     /// string id must hold no NUL and no lone surrogate and be at most 256 UTF-16 code units once trimmed; the event's
     /// JSON must be at most 256 KB. A missing or blank id gets a generated one, as the server does. Null when accepted.
     /// </summary>
-    private static (string Code, string Reason)? Normalize(JsonNode? e, out string id)
+    private static (string Code, string Reason)? Normalize(JsonNode? e, string raw, out string id)
     {
         var o = e as JsonObject ?? [];
         id = string.Empty;
-        if (o["action"] is not JsonValue action || !action.TryGetValue<string>(out _))
+
+        // Any JSON string is an action, even one .NET cannot decode (a lone surrogate): JavaScript strings allow it.
+        if (!Text(o["action"], out _, out var actionIsString) && !actionIsString)
         {
             return ("invalid_event", "invalid_event: action must be a string");
         }
 
-        if (o["id"] is JsonValue idValue && idValue.TryGetValue<string>(out var given))
+        const string BadId = "invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL";
+        var decoded = Text(o["id"], out var given, out var idIsString);
+        if (idIsString && !decoded)
         {
-            if (given.IndexOf((char)0) >= 0 || HasLoneSurrogate(given) || given.Trim().Length > 256)
+            // An escaped lone surrogate: .NET refuses to decode it, the server refuses the id.
+            return ("invalid_event_id", BadId);
+        }
+
+        if (decoded)
+        {
+            if (given!.IndexOf((char)0) >= 0 || HasLoneSurrogate(given) || JsTrim(given).Length > 256)
             {
-                return ("invalid_event_id", "invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL");
+                return ("invalid_event_id", BadId);
             }
 
-            id = given.Trim();
+            id = JsTrim(given);
         }
 
         if (id.Length == 0)
@@ -596,12 +634,77 @@ internal sealed class StandIn : IDisposable
             id = Guid.NewGuid().ToString();
         }
 
-        if (Encoding.UTF8.GetByteCount(e!.ToJsonString()) > MaxEventBytes)
+        if (Encoding.UTF8.GetByteCount(raw.Length > 0 ? raw : e!.ToJsonString()) > MaxEventBytes)
         {
             return ("invalid_event", "invalid_event: event exceeds 256 KB");
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Reads a JSON string value. True with the text when it decodes; false when the node is not a string, or is a string
+    /// .NET cannot decode (an escaped lone surrogate), which <paramref name="isString"/> tells apart.
+    /// </summary>
+    private static bool Text(JsonNode? node, out string? text, out bool isString)
+    {
+        text = null;
+        isString = node is JsonValue value && value.GetValueKind() == JsonValueKind.String;
+        if (!isString)
+        {
+            return false;
+        }
+
+        try
+        {
+            text = node!.GetValue<string>();
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>String.prototype.trim: JavaScript's whitespace set, which includes U+FEFF (unlike .NET's Trim).</summary>
+    private static string JsTrim(string value)
+    {
+        var start = 0;
+        var end = value.Length;
+        while (start < end && IsJsWhiteSpace(value[start]))
+        {
+            start++;
+        }
+
+        while (end > start && IsJsWhiteSpace(value[end - 1]))
+        {
+            end--;
+        }
+
+        return start == 0 && end == value.Length ? value : value.Substring(start, end - start);
+    }
+
+    private static bool IsJsWhiteSpace(char c)
+        => c is (char)9 or (char)10 or (char)11 or (char)12 or (char)13 or (char)32 or (char)0xA0 or (char)0x1680
+            or (char)0x2028 or (char)0x2029 or (char)0x202F or (char)0x205F or (char)0x3000 or (char)0xFEFF
+            || (c >= (char)0x2000 && c <= (char)0x200A);
+
+    /// <summary>Each event's raw JSON text, in the order the server reads the body (never decoded, so always available).</summary>
+    private static string[] RawEvents(byte[] body)
+    {
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            return root.EnumerateArray().Select(e => e.GetRawText()).ToArray();
+        }
+
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("events", out var list))
+        {
+            return list.ValueKind == JsonValueKind.Array ? list.EnumerateArray().Select(e => e.GetRawText()).ToArray() : [];
+        }
+
+        return [root.GetRawText()];
     }
 
     private static bool HasLoneSurrogate(string value)
@@ -621,11 +724,22 @@ internal sealed class StandIn : IDisposable
         return false;
     }
 
-    /// <summary>A fingerprint of an event's parsed content, independent of key order and whitespace (like the server's identity).</summary>
-    private static long Fingerprint(JsonNode? node)
+    /// <summary>
+    /// A fingerprint of an event's parsed content, independent of key order and whitespace (like the server's identity).
+    /// Content .NET cannot decode (a lone surrogate) falls back to the event's raw JSON text.
+    /// </summary>
+    private static long Fingerprint(JsonNode? node, string raw)
     {
         var builder = new StringBuilder();
-        Canonical(node, builder);
+        try
+        {
+            Canonical(node, builder);
+        }
+        catch (InvalidOperationException)
+        {
+            builder.Clear().Append("raw:").Append(raw);
+        }
+
         unchecked
         {
             var hash = (long)14695981039346656037UL;
@@ -674,8 +788,10 @@ internal sealed class StandIn : IDisposable
 
     private void Acknowledge(int status, JsonNode? answer)
     {
-        var ids = status == 202 ? answer?["ids"] as JsonArray
-            : status == 503 ? answer?["error"]?["details"]?["ids"] as JsonArray
+        // Any JSON may come back from a local gateway; only the server's object shapes acknowledge anything.
+        var ids = answer is not JsonObject root ? null
+            : status == 202 ? root["ids"] as JsonArray
+            : status == 503 && root["error"] is JsonObject error && error["details"] is JsonObject details ? details["ids"] as JsonArray
             : null;
         foreach (var id in ids ?? [])
         {
@@ -875,11 +991,26 @@ internal sealed class Exchange(Fault fault)
 /// Lines for tests/cross-sdk/validate-stand-in.ts, which checks each against packages/contracts and the server's rules.
 /// The first line lists the fault weights, so the check can require every configured fault to appear.
 /// </summary>
-internal sealed class Samples(IReadOnlyDictionary<Fault, int> weights, string mode)
+internal sealed class Samples : IDisposable
 {
     private const int PerKind = 25;
     private readonly ConcurrentDictionary<string, int> _counts = new(StringComparer.Ordinal);
-    private readonly ConcurrentQueue<string> _lines = new();
+    private readonly object _gate = new();
+    private readonly StreamWriter _writer;
+
+    /// <summary>Opens the file and writes the config line; exchanges are written as they arrive, never kept in memory.</summary>
+    public Samples(IReadOnlyDictionary<Fault, int> weights, string mode, string path)
+    {
+        _writer = new StreamWriter(path);
+        var config = new JsonObject { ["kind"] = "config", ["mode"] = mode, ["faults"] = new JsonObject() };
+        foreach (var w in weights)
+        {
+            config["faults"]![w.Key.ToString()] = w.Value;
+        }
+
+        _writer.WriteLine(config.ToJsonString());
+        _writer.Flush();
+    }
 
     public void Add(Exchange exchange)
     {
@@ -899,18 +1030,20 @@ internal sealed class Samples(IReadOnlyDictionary<Fault, int> weights, string mo
             ["response"] = exchange.Response?.DeepClone(),
             ["dispositions"] = new JsonArray(exchange.Dispositions.Select(d => (JsonNode?)JsonValue.Create(d)).ToArray()),
         };
-        _lines.Enqueue(line.ToJsonString());
+        var text = line.ToJsonString();
+        lock (_gate)
+        {
+            _writer.WriteLine(text);
+            _writer.Flush();
+        }
     }
 
-    public void WriteTo(string path)
+    public void Dispose()
     {
-        var config = new JsonObject { ["kind"] = "config", ["mode"] = mode, ["faults"] = new JsonObject() };
-        foreach (var w in weights)
+        lock (_gate)
         {
-            config["faults"]![w.Key.ToString()] = w.Value;
+            _writer.Dispose();
         }
-
-        File.WriteAllLines(path, new[] { config.ToJsonString() }.Concat(_lines));
     }
 
     private static JsonNode? TryParse(byte[] bytes)

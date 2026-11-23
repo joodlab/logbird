@@ -135,6 +135,22 @@ internal sealed class SoakOptions
             o.ClickHouseUser = Required("LOGBIRD_SOAK_CLICKHOUSE_USER");
             o.ClickHousePassword = Environment.GetEnvironmentVariable("LOGBIRD_SOAK_CLICKHOUSE_PASSWORD") ?? string.Empty;
             o.ClickHouseDatabase = Required("LOGBIRD_SOAK_CLICKHOUSE_DATABASE");
+
+            // Layer 2 does not use the reject fault (the real server decides rejections); something else must remain.
+            if (!o.Faults.Any(f => f.Key != Fault.Reject && f.Value > 0))
+            {
+                throw new ArgumentException("--upstream needs a fault mix with at least one fault other than reject");
+            }
+
+            // The SDK's own HTTP client honours the proxy variables, and on Linux they apply to loopback too: the real
+            // ingest key would go to the proxy. Refuse unless loopback is exempt.
+            foreach (var variable in new[] { "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy" })
+            {
+                if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(variable)) && !LoopbackExempt())
+                {
+                    throw new ArgumentException(variable + " is set: unset it, or add 127.0.0.1,localhost,::1 to NO_PROXY, so keys never reach a proxy");
+                }
+            }
         }
 
         return o;
@@ -184,6 +200,13 @@ internal sealed class SoakOptions
         }
 
         return new Uri(uri.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/");
+    }
+
+    private static bool LoopbackExempt()
+    {
+        var list = (Environment.GetEnvironmentVariable("NO_PROXY") ?? Environment.GetEnvironmentVariable("no_proxy") ?? string.Empty)
+            .Split(',').Select(v => v.Trim()).ToArray();
+        return list.Contains("*") || (list.Contains("127.0.0.1") && list.Contains("localhost") && (list.Contains("::1") || list.Contains("[::1]")));
     }
 
     private static string Required(string variable)

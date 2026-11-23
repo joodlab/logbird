@@ -57,7 +57,20 @@ internal static class Program
             Environment.Exit(1);
         }, null, options.Duration + TimeSpan.FromMinutes(15), Timeout.InfiniteTimeSpan);
 
-        var report = await new SoakRun(options).ExecuteAsync().ConfigureAwait(false);
+        JsonObject report;
+        try
+        {
+            report = await new SoakRun(options).ExecuteAsync().ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            // An unexpected exception still leaves a failing report (the type and message only; no keys are in either).
+            report = new JsonObject
+            {
+                ["checks"] = new JsonArray(new JsonObject { ["name"] = "the run completed", ["passed"] = false, ["detail"] = e.GetType().Name + ": " + e.Message }),
+            };
+        }
+
         watchdog.Dispose();
         File.WriteAllText(reportPath, report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         var failed = report["checks"]!.AsArray().Where(c => !c!["passed"]!.GetValue<bool>()).Select(c => c!["name"]!.GetValue<string>()).ToArray();
@@ -85,18 +98,25 @@ internal sealed class SoakRun(SoakOptions options)
 
     private readonly LongMap _tracked = new(options.ExpectedEvents);
     private readonly LongMap _dropped = new(options.ExpectedEvents);
-    private readonly ConcurrentDictionary<LogbirdClient, byte> _retiring = new();
+    // Clients whose disposal has begun. Weak, so a retired client is never kept alive by its mark.
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<LogbirdClient, object> _retiring = new();
     private readonly ConcurrentDictionary<DropReason, long> _dropReasons = new();
     private readonly ConcurrentDictionary<string, long> _errors = new(StringComparer.Ordinal);
     private readonly LatencyHistogram _trackLatency = new();
     private readonly List<ResourceSample> _samples = [];
     private readonly List<double> _flushSeconds = [];
     private readonly List<LogbirdClient> _clients = [];
+    private long _retiredDelivered;
+    private long _retiredRejected;
+    private long _retiredDropped;
+    private int _clientCount;
     private readonly string _runId = Guid.NewGuid().ToString("N").Substring(0, 12);
     private long _doubleDrops;
     private long _droppedWithoutId;
     private long _trackThrew;
-    private long _flushesFailed;
+    private long _flushesFalse;
+    private long _flushesHung;
+    private long _shutdownsHung;
     private long _restarts;
     private long _queueHighWater;
     private long _sent;
@@ -106,7 +126,7 @@ internal sealed class SoakRun(SoakOptions options)
     public async Task<JsonObject> ExecuteAsync()
     {
         var weights = options.Upstream is null ? options.Faults : options.Faults.Where(f => f.Key != Fault.Reject).ToDictionary(f => f.Key, f => f.Value);
-        var samples = new Samples(weights, options.Upstream is null ? "stand-in" : "upstream");
+        using var samples = new Samples(weights, options.Upstream is null ? "stand-in" : "upstream", Path.Combine(options.ReportDirectory, "stand-in-samples.jsonl"));
         using var standIn = new StandIn(weights, options.Seed, options.RequestTimeout + TimeSpan.FromSeconds(3), options.IngestKey, samples, options.Upstream, options.ExpectedEvents);
         standIn.Start();
         Console.WriteLine($"soak {_runId}: {options.Duration} at {options.Rate} events/s on {Program.Runtime()}, {(options.Upstream is null ? "stand-in" : "proxy to " + options.Upstream)} at {standIn.Endpoint}");
@@ -145,12 +165,15 @@ internal sealed class SoakRun(SoakOptions options)
         var drainSeconds = drain.Elapsed.TotalSeconds;
         var disposing = final.DisposeAsync().AsTask();
         var disposed = await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromMinutes(1))).ConfigureAwait(false) == disposing && !disposing.IsFaulted;
+        if (disposed)
+        {
+            Retire(final);
+        }
         var quiet = await standIn.QuiesceAsync(TimeSpan.FromMinutes(1)).ConfigureAwait(false);
 
         // Late OnDrop notifications run on the client's background thread; give them a moment.
         await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
         WriteSample(csv, clock);
-        samples.WriteTo(Path.Combine(options.ReportDirectory, "stand-in-samples.jsonl"));
 
         LongMap stored;
         var upstreamChecks = new JsonArray();
@@ -170,7 +193,6 @@ internal sealed class SoakRun(SoakOptions options)
     private async Task<bool> PreflightAsync(ClickHouseCheck clickHouse, DateTimeOffset started, JsonArray checks)
     {
         var canary = new LogbirdClient(new LogbirdOptions { Endpoint = options.Upstream, IngestKey = options.IngestKey, AllowInsecureHttp = true, Environment = "soak" });
-        canary.Track(new AuditEvent("soak.canary").WithMetadata("soakRun", _runId + "-canary"));
         var canaryId = LogbirdClient.NewEventId();
         canary.Track(new AuditEvent("soak.canary") { Id = canaryId }.WithMetadata("soakRun", _runId + "-canary"));
         var flushed = await Program.WithinAsync(canary.FlushAsync(), TimeSpan.FromSeconds(60)).ConfigureAwait(false) == true;
@@ -243,6 +265,7 @@ internal sealed class SoakRun(SoakOptions options)
         lock (_clients)
         {
             _clients.Add(client);
+            _clientCount++;
         }
 
         return client;
@@ -268,9 +291,11 @@ internal sealed class SoakRun(SoakOptions options)
         // One shared budget paced against elapsed time: producers claim events from it, so the total holds the requested
         // rate at any setting, even below one event per producer per second.
         var actions = new[] { "booking.created", "booking.cancelled", "invoice.paid", "user.signed_in", "settings.updated" };
+        var total = (long)(options.Rate * options.Duration.TotalSeconds);
         while (!stop.IsCancellationRequested)
         {
-            var due = (long)(clock.Elapsed.TotalSeconds * options.Rate);
+            // Never more than the nominal total (rate x duration), however the last tick falls.
+            var due = Math.Min(total, (long)(clock.Elapsed.TotalSeconds * options.Rate));
             while (true)
             {
                 var claimed = Interlocked.Read(ref _sent);
@@ -336,11 +361,15 @@ internal sealed class SoakRun(SoakOptions options)
             // client may return false only once its disposal has begun.
             var old = Interlocked.Exchange(ref _client, NewClient(endpoint))!;
             await Task.Delay(100).ConfigureAwait(false);
-            _retiring.TryAdd(old, 0);
+            _retiring.GetValue(old, _ => new object());
             var disposing = old.DisposeAsync().AsTask();
             if (await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromMinutes(1))).ConfigureAwait(false) != disposing || disposing.IsFaulted)
             {
-                Interlocked.Increment(ref _flushesFailed);
+                Interlocked.Increment(ref _shutdownsHung);
+            }
+            else
+            {
+                Retire(old);
             }
 
             Interlocked.Increment(ref _restarts);
@@ -381,9 +410,13 @@ internal sealed class SoakRun(SoakOptions options)
 
             // False is a failure unless a restart had already begun disposing this client (its shutdown then settles and
             // reports the rest).
-            if (result is null || (result == false && !_retiring.ContainsKey(client)))
+            if (result is null)
             {
-                Interlocked.Increment(ref _flushesFailed);
+                Interlocked.Increment(ref _flushesHung);
+            }
+            else if (result == false && !_retiring.TryGetValue(client, out _))
+            {
+                Interlocked.Increment(ref _flushesFalse);
             }
 
             lock (_flushSeconds)
@@ -443,19 +476,42 @@ internal sealed class SoakRun(SoakOptions options)
         }
     }
 
-    /// <summary>Counters summed over every client the run created (active, retiring and disposed), each exactly once.</summary>
+    /// <summary>
+    /// Counters summed over every client the run created, each exactly once: live clients (active or retiring) by their
+    /// current counters, disposed ones by the final counters recorded when they were released.
+    /// </summary>
     private (long Delivered, long Rejected, long Dropped) Totals()
     {
         lock (_clients)
         {
-            return (_clients.Sum(c => c.Stats.Delivered), _clients.Sum(c => c.Stats.Rejected), _clients.Sum(c => c.Stats.Dropped));
+            return (
+                _retiredDelivered + _clients.Sum(c => c.Stats.Delivered),
+                _retiredRejected + _clients.Sum(c => c.Stats.Rejected),
+                _retiredDropped + _clients.Sum(c => c.Stats.Dropped));
         }
+    }
+
+    /// <summary>Records a disposed client's final counters and releases it, so retired clients hold no memory.</summary>
+    private void Retire(LogbirdClient client)
+    {
+        var stats = client.Stats;
+        lock (_clients)
+        {
+            if (_clients.Remove(client))
+            {
+                _retiredDelivered += stats.Delivered;
+                _retiredRejected += stats.Rejected;
+                _retiredDropped += stats.Dropped;
+            }
+        }
+
     }
 
     private void WriteSample(StreamWriter csv, Stopwatch clock)
     {
         using var process = Process.GetCurrentProcess();
-        var queue = Volatile.Read(ref _client)!.Stats.QueueLength;
+        var current = Volatile.Read(ref _client)!;
+        var queue = current.Stats.QueueLength;
         var totals = Totals();
         var sample = new ResourceSample(clock.Elapsed.TotalSeconds, GC.GetTotalMemory(forceFullCollection: true), process.WorkingSet64, process.HandleCount, process.Threads.Count, queue);
         lock (_samples)
@@ -584,7 +640,7 @@ internal sealed class SoakRun(SoakOptions options)
             Program.Check("Stats.Delivered matches the ids acknowledged to the client", totals.Delivered == acknowledgedNotDropped, $"Delivered {totals.Delivered}, acknowledged and not dropped {acknowledgedNotDropped}"),
             Program.Check("Stats.Rejected + Dropped matches the drop reports", totals.Rejected + totals.Dropped == dropped.Count + Interlocked.Read(ref _droppedWithoutId), $"Rejected + Dropped {totals.Rejected + totals.Dropped}, reports {dropped.Count + _droppedWithoutId}"),
             Program.Check("Track never threw", Interlocked.Read(ref _trackThrew) == 0, $"{_trackThrew} throws"),
-            Program.Check("no flush or shutdown failed or hung", Interlocked.Read(ref _flushesFailed) == 0, $"{_flushesFailed} flushes reported false or passed 6 minutes, or shutdowns passed 1 minute"),
+            Program.Check("no flush or shutdown failed or hung", Interlocked.Read(ref _flushesFalse) + Interlocked.Read(ref _flushesHung) + Interlocked.Read(ref _shutdownsHung) == 0, $"{_flushesFalse} flushes returned false before their client's shutdown began, {_flushesHung} passed 6.5 minutes, {_shutdownsHung} shutdowns passed 1 minute"),
             Program.Check("the final drain settled everything", drained && disposed && quiet, $"final flush {(drained ? "completed" : "did not complete")} in {drainSeconds:F1} s, shutdown {(disposed ? "completed" : "hung")}, stand-in {(quiet ? "idle" : "still busy")}"),
             Program.Check("at most 1% of Track calls took over 5 ms", calls > 0 && slow * 100 <= calls, $"{slow} of {calls} over 5 ms; p50 {_trackLatency.Percentile(0.5)}, p99 {_trackLatency.Percentile(0.99)}, max {_trackLatency.Max:F3} ms"),
             Program.Check("the requested rate was held", achieved >= options.Rate * 0.9, $"achieved {achieved:F0} of {options.Rate} events/s"),
@@ -641,7 +697,7 @@ internal sealed class SoakRun(SoakOptions options)
                 ["dropped"] = totals.Dropped,
                 ["dropReports"] = dropped.Count,
                 ["storedAndDropped"] = both.Count,
-                ["clients"] = _clients.Count,
+                ["clients"] = _clientCount,
                 ["restarts"] = Interlocked.Read(ref _restarts),
                 ["requests"] = standIn.Requests,
                 ["connections"] = standIn.Connections,
@@ -692,6 +748,11 @@ internal sealed record ResourceReport(bool Valid, string ValidDetail, bool HeapB
         }
 
         var late = load.Where(s => s.Seconds >= loadSeconds * 2 / 3).ToArray();
+        if (late.Length == 0)
+        {
+            return new ResourceReport(false, validDetail + " (none in the last third of the load)", false, "not judged", false, "not judged", false, "not judged", all.Length, all.Max(s => s.WorkingSet));
+        }
+
         long Median(Func<ResourceSample, long> pick) => window.Select(pick).OrderBy(v => v).ElementAt(window.Length / 2);
         var heapBase = Median(s => s.Heap);
         var handleBase = Median(s => s.Handles);
