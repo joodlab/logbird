@@ -193,15 +193,36 @@ try {
     const download = await page.request.get(`${base}/api/projects/${fixture.projectId}/export?${exportParams}`);
     assert.equal(download.status(), 200, 'The evidence export downloads');
     assert.ok((await download.body()).length > 0, 'The evidence export has rows');
+    // This run's export id, from the download's filename: both themes open this export's own record, which can land in
+    // Workspace activity a moment after the download ends.
+    const exportId = /events-([0-9a-f-]{36})-evidence/.exec(download.headers()['content-disposition'] ?? '')?.[1];
+    assert.ok(exportId, 'The download names its export id');
+    const recordQuery = `action:export.completed ${exportId.slice(0, 8)}`;
     // The record's evidence (period, query, clock, SHA-256, size, rows) is its attributes. The attribute table truncates
     // long keys and the digest, so open the raw payload, scroll its attributes block to just under the sheet's sticky
     // header (the record's title and action), and keep the sheet from its top to the end of that block: one real,
     // contiguous region of the screen, legible at the size a marketing section allows.
     async function exportRecord(name) {
-      await page.goto(`${base}/workspace/activity?q=${encodeURIComponent('action:export.completed')}`);
+      let row;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await page.goto(`${base}/workspace/activity?q=${encodeURIComponent(recordQuery)}`);
+        await settle();
+        row = page
+          .locator('[data-index]')
+          .filter({ hasText: exportId.slice(0, 8) })
+          .first();
+        if (await row.count()) break;
+        await page.waitForTimeout(1000);
+      }
+      await row.click();
       await settle();
-      await page.locator('[data-index]').first().click();
-      await settle();
+      assert.ok(
+        await page
+          .getByRole('dialog')
+          .getByText(`Export ${exportId.slice(0, 8)}`)
+          .count(),
+        "This run's export record is open",
+      );
       const sheet = page.getByRole('dialog');
       await sheet.getByText(/raw payload/i).click();
       await page.waitForTimeout(400);
