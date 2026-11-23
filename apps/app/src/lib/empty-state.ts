@@ -21,3 +21,24 @@ export function otherDatesLine(check: { failed: boolean; checking: boolean; olde
     return 'Other dates are checked only when you ask, since that runs the expression over all stored events.';
   return 'Remove a filter or change the query.';
 }
+
+/**
+ * Where the empty state's check of other dates stands. It failed only once the last attempt settled as an error: a retry
+ * in flight is checking again, not failed. It is checking while an id lookup has not settled (a cached answer being
+ * refreshed included) and while the all-time count has no answer for this search or is refreshing one (#239).
+ */
+export function otherDatesCheck(s: {
+  showsEmpty: boolean;
+  complete: boolean;
+  idMatch: boolean;
+  idSettled: boolean;
+  checkRuns: boolean;
+  olderMatches: number | undefined;
+  isError: boolean;
+  isFetching: boolean;
+}): { failed: boolean; checking: boolean } {
+  const failed = s.checkRuns && s.isError && !s.isFetching;
+  const checking =
+    s.showsEmpty && !s.complete && !s.idMatch && (!s.idSettled || (s.checkRuns && !failed && (s.olderMatches === undefined || s.isFetching)));
+  return { failed, checking };
+}

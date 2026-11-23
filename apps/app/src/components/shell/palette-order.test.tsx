@@ -3,7 +3,7 @@ import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it } from 'vitest';
-import { paletteEntityValue, paletteFilter } from './palette-filter';
+import { paletteEntityValue, paletteFilter, paletteValue } from './palette-filter';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
@@ -67,4 +67,26 @@ it('an entity row never shares a value with another row, so selecting one never 
   const entity: Entity = { kind: 'actor', id: 'sam', name: 'Viewer' };
   expect(paletteEntityValue(entity)).not.toBe(view.value);
   expect(shown('view', [entity], [view])).toEqual(['Viewer', 'Saved view actor:sam']);
+});
+
+it('no two rows share a value, whatever the typed text or the ids hold, so only one is ever selected (#239)', () => {
+  // Typed text that looks like an entity value, an exact tenant with that id, and an actor whose id repeats it all.
+  const typed = 'entity:actor:sam';
+  const actor: Entity = { kind: 'actor', id: 'sam open tenant entity:actor:sam', name: 'Sam' };
+  const jump = { value: paletteValue('jump', 'open', 'tenant', typed), label: 'Open tenant entity:actor:sam' };
+  expect(paletteEntityValue(actor)).not.toBe(jump.value);
+  expect(shown(typed, [actor], [jump])).toEqual(['Sam', 'Open tenant entity:actor:sam']);
+  expect(document.querySelectorAll('[cmdk-item][aria-selected="true"]')).toHaveLength(1);
+  // Parts are kept apart: an agent `a b` called `c` is not an agent `a` called `b c`.
+  expect(paletteValue('support', 'a b', 'c')).not.toBe(paletteValue('support', 'a', 'b c'));
+});
+
+it('scores Jump to rows and notices as written, even when the text looks like an entity value (#239)', () => {
+  const typed = 'entity:actor:sam';
+  const filter = paletteFilter([], typed);
+  expect(filter(paletteValue('jump', 'open', 'tenant', typed), typed)).toBe(1);
+  expect(filter(paletteValue('jump', 'search', typed), typed)).toBe(1);
+  expect(filter(paletteValue('notice', 'support agents unavailable'), typed)).toBe(1);
+  // Entity rows share the best entity score (here none: the floor), never cmdk's own for the value.
+  expect(filter(paletteEntityValue({ kind: 'actor', id: 'zz' }), typed)).toBe(0.01);
 });

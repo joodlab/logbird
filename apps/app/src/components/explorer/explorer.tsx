@@ -17,7 +17,7 @@ import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histogramQuery } from '@/lib/api/queries';
-import { allTimeCheckNeedsAsking, otherDatesLine } from '@/lib/empty-state';
+import { allTimeCheckNeedsAsking, otherDatesCheck, otherDatesLine } from '@/lib/empty-state';
 import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
@@ -341,7 +341,8 @@ function ProjectExplorer({
     idMatches.length === 1 && idMatch
       ? `${articleFor(idMatch.kind)} ${kindNoun(idMatch.kind)} id`
       : `the id of ${idMatches.map((e) => `${articleFor(e.kind)} ${kindNoun(e.kind)}`).join(' and ')}`;
-  const idSettled = !word || idLookup.isSuccess || idLookup.isError;
+  // A cached answer being refreshed is not settled yet: it may still find the id (#239).
+  const idSettled = !word || ((idLookup.isSuccess || idLookup.isError) && !idLookup.isFetching);
   // Whether anything older matches: only then is the range the reason, and only then is widening offered. In SQL mode
   // the check runs the reader's predicate over every partition, so it runs only when asked (#239).
   // The search the reader asked to check (remembered per expression and range, so a new search asks again).
@@ -357,11 +358,16 @@ function ProjectExplorer({
   // earlier check of the same expression in another range must not answer before the reader asks here (#239).
   const checkRuns = widerWanted && sqlCheckAsked;
   const olderMatches = checkRuns ? current(wider)?.buckets.reduce((n, b) => n + b.total, 0) : undefined;
-  const checkFailed = checkRuns && wider.isError;
-  // Until the check answers (a refetch of a cached answer included, and an id lookup still running before it), no
-  // advice: it may yet say the range is the reason (#239).
-  const checking =
-    showsEmpty && !complete && !idMatch && (!idSettled || (checkRuns && !checkFailed && (olderMatches === undefined || wider.isFetching)));
+  const { failed: checkFailed, checking } = otherDatesCheck({
+    showsEmpty,
+    complete,
+    idMatch: Boolean(idMatch),
+    idSettled,
+    checkRuns,
+    olderMatches,
+    isError: wider.isError,
+    isFetching: wider.isFetching,
+  });
   const widen =
     olderMatches && olderMatches > 0 && !checking ? (
       <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
@@ -411,6 +417,8 @@ function ProjectExplorer({
             Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>. {outside}
           </>
+        ) : checking ? (
+          `No events in ${rangeInSentence(rangeName)}. ${outside}`
         ) : checkFailed ? (
           `No events in ${rangeInSentence(rangeName)}. Could not check other dates.`
         ) : olderMatches ? (

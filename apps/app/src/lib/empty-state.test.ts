@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { allTimeCheckNeedsAsking, otherDatesLine } from './empty-state';
+import { allTimeCheckNeedsAsking, otherDatesCheck, otherDatesLine } from './empty-state';
 
 it('checks other dates by itself, except an SQL expression, which runs over every partition (#239)', () => {
   expect(allTimeCheckNeedsAsking('query', 'outcome:failure')).toBe(false);
@@ -18,4 +18,30 @@ it('gives no advice while the check runs, and says what the check found once it 
   expect(otherDatesLine({ ...base, needsAsking: true })).toBe(
     'Other dates are checked only when you ask, since that runs the expression over all stored events.',
   );
+});
+
+it('says a check is running while a retry or a refresh is in flight, and failed only once it settles as one (#239)', () => {
+  const base = {
+    showsEmpty: true,
+    complete: false,
+    idMatch: false,
+    idSettled: true,
+    checkRuns: true,
+    olderMatches: undefined,
+    isError: false,
+    isFetching: false,
+  };
+  expect(otherDatesCheck({ ...base, isFetching: true })).toEqual({ failed: false, checking: true });
+  expect(otherDatesCheck({ ...base, olderMatches: 4 })).toEqual({ failed: false, checking: false });
+  // A cached count being refreshed gives no advice yet.
+  expect(otherDatesCheck({ ...base, olderMatches: 4, isFetching: true })).toEqual({ failed: false, checking: true });
+  // A failed refetch keeps its cached count; retrying it is checking again, not "could not check".
+  expect(otherDatesCheck({ ...base, olderMatches: 4, isError: true, isFetching: true })).toEqual({ failed: false, checking: true });
+  expect(otherDatesCheck({ ...base, olderMatches: 4, isError: true })).toEqual({ failed: true, checking: false });
+  // An id lookup that has not settled (a refreshed cached answer included) holds the advice too.
+  expect(otherDatesCheck({ ...base, idSettled: false, checkRuns: false })).toEqual({ failed: false, checking: true });
+  // Nothing to check: an id match, a complete answer, or results on screen.
+  expect(otherDatesCheck({ ...base, idMatch: true })).toEqual({ failed: false, checking: false });
+  expect(otherDatesCheck({ ...base, complete: true })).toEqual({ failed: false, checking: false });
+  expect(otherDatesCheck({ ...base, showsEmpty: false })).toEqual({ failed: false, checking: false });
 });
