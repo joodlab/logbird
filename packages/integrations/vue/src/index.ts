@@ -55,6 +55,11 @@ function createTrail(source: () => RawRequest) {
   let generation = 0;
   let disposed = false;
   let controller: AbortController | undefined;
+  /** The newest state a change queued for the next tick's read. */
+  let pending: State | undefined;
+  let scheduled = false;
+  /** Bumped by every change: a callback that a nested change overtook (say, from an abort listener) stands down. */
+  let selection = 0;
   /** What the shown rows and cursor belong to; a different trail, session or fetcher never continues them. */
   let owner: { key: string; fetcher: AuditFetcher } | undefined;
   const snapshot = (): State => {
@@ -86,6 +91,8 @@ function createTrail(source: () => RawRequest) {
   };
   async function run(state: State, append: boolean) {
     if (disposed) return;
+    // Any explicit or queued run reads the current snapshot, so it supersedes older queued work.
+    pending = undefined;
     const current = ++generation;
     const previous = controller;
     const mine = new AbortController();
@@ -137,7 +144,6 @@ function createTrail(source: () => RawRequest) {
   // The watcher reads only what the snapshot reads (no deep traversal of the caller's options). It runs synchronously
   // on every change: a changed trail, session or fetcher invalidates at once (rows, cursor and the read in flight go
   // before any other code can see them), and the new read is batched to one request per tick.
-  let pending: State | undefined;
   let first = true;
   watch(
     snapshot,
@@ -148,16 +154,20 @@ function createTrail(source: () => RawRequest) {
         return;
       }
       if (disposed || owns(state)) return;
+      const mine = ++selection;
       invalidate();
+      // invalidate() aborts the read in flight, and an abort listener may have changed the options again: the newer
+      // callback has already queued its own state, so this older one must not overwrite it.
+      if (mine !== selection || disposed) return;
       loading.value = !('error' in state);
-      const batched = pending === undefined;
       pending = state;
-      if (batched)
-        queueMicrotask(() => {
-          const next = pending as State;
-          pending = undefined;
-          void run(next, false);
-        });
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(() => {
+        scheduled = false;
+        const next = pending;
+        if (next !== undefined) void run(next, false);
+      });
     },
     { immediate: true, flush: 'sync' },
   );

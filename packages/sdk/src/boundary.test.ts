@@ -95,6 +95,22 @@ describe('the trail boundary accepts the shapes a careful developer passes', () 
       { from: ISO },
     ],
     ['a limit as URL digits', () => ({ tenant: 'acme', limit: '20' }), 'tenant:"acme"', { limit: 20 }],
+    // Round 5: a class with its own toStringTag is still an ordinary class instance.
+    [
+      'a class instance with a custom toStringTag',
+      () =>
+        new (class {
+          readonly [Symbol.toStringTag] = 'Session';
+          tenant = 'acme';
+        })(),
+      'tenant:"acme"',
+    ],
+    [
+      'a millisecond ISO string bound',
+      () => ({ tenant: 'acme', range: { from: '2026-11-01T00:00:00.123Z' } }),
+      'tenant:"acme"',
+      { from: '2026-11-01T00:00:00.123Z' },
+    ],
   ];
   it.each(cases)('%s', (_, make, q, extra = {}) => {
     const input = make() as TrailQuery;
@@ -155,6 +171,17 @@ describe('the trail boundary refuses a value that is not the primitive its field
     ['an array as the target', { target: [{ id: 'x' }] }],
     ['an array as the options', [{ tenant: 'acme' }]],
     ['fractional epoch milliseconds', { tenant: 'acme', range: { from: Date.parse(ISO) + 0.5 } }],
+    ['a sub-millisecond ISO string bound', { tenant: 'acme', range: { from: '2026-11-01T00:00:00.0005Z' } }],
+    [
+      'a class claiming to be a Map by its tag',
+      {
+        tenant: 'acme',
+        range: new (class {
+          readonly [Symbol.toStringTag] = 'Map';
+          from = ISO;
+        })(),
+      },
+    ],
     ['a target that is a string', { target: 'inv_1' }],
     ['no options object', 'tenant:acme'],
   ];
@@ -219,6 +246,15 @@ describe('the search query boundary (readAuditTrail, the Vue engine, the Nuxt ro
     ['Date bounds', () => ({ q: 'tenant:"acme"', from: at(ISO), to: new LyingDate(ISO_TO) }), { q: 'tenant:"acme"', from: ISO, to: ISO_TO }],
     ['unknown keys, which are dropped', () => ({ q: 'tenant:"acme"', tenant: 'other', scope: 'all' }), { q: 'tenant:"acme"' }],
     [
+      'a class instance with a custom toStringTag',
+      () =>
+        new (class {
+          readonly [Symbol.toStringTag] = 'Query';
+          q = 'tenant:"acme"';
+        })(),
+      { q: 'tenant:"acme"' },
+    ],
+    [
       'every known field',
       () => ({ q: 'a', lang: 'query', from: ISO, to: ISO_TO, limit: '5', cursor: 'c', order: 'asc' }),
       { q: 'a', lang: 'query', from: ISO, to: ISO_TO, limit: '5', cursor: 'c', order: 'asc' },
@@ -241,6 +277,8 @@ describe('the search query boundary (readAuditTrail, the Vue engine, the Nuxt ro
     ['a Map as the query', new Map([['q', 'tenant:"acme"']])],
     ['a Date as the query', new Date(ISO)],
     ['fractional epoch milliseconds', { q: 'a', from: Date.parse(ISO) + 0.5 }],
+    ['a sub-millisecond ISO string bound', { q: 'a', from: '2026-11-01T00:00:00.0005+00:00' }],
+    ['a Set as the query', new Set(['q'])],
   ])('refuses %s before any request', async (_, query) => {
     await expect(sent(query)).rejects.toBeInstanceOf(TrailQueryError);
   });

@@ -524,3 +524,27 @@ it('stays consistent when an abort listener re-enters the composable synchronous
   expect(fetcher).toHaveBeenCalledTimes(2);
   mounted.wrapper.unmount();
 });
+
+// Round 5: an abort listener that changes the options again while the composable invalidates must win.
+it('lets the newest selection win when an abort listener changes the trail during invalidation', async () => {
+  const tenant = ref('a');
+  let switched = false;
+  const fetcher = vi.fn((query: Record<string, unknown>, signal?: AbortSignal) => {
+    if (query.q === 'tenant:"a"') {
+      signal?.addEventListener('abort', () => {
+        if (!switched) {
+          switched = true;
+          tenant.value = 'c';
+        }
+      });
+      return new Promise<Awaited<ReturnType<AuditFetcher>>>(() => undefined);
+    }
+    return Promise.resolve(page([`${String(query.q)}-1`]));
+  });
+  const { trail, wrapper } = mountTrail(() => useAuditTrail(() => ({ fetcher, tenant: tenant.value })));
+  tenant.value = 'b';
+  await flushPromises();
+  expect(fetcher.mock.calls.map((call) => call[0].q)).toEqual(['tenant:"a"', 'tenant:"c"']);
+  expect(trail.data.value.map((e) => e.id)).toEqual(['tenant:"c"-1']);
+  wrapper.unmount();
+});

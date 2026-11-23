@@ -102,8 +102,29 @@ const isObject = (value: unknown): value is object => value !== null && typeof v
  * An array, Date, Map or other built-in is refused: it has none of the named fields, so reading it would silently drop
  * every bound or selector (a date picker's `[start, end]` would become the server's default window).
  */
-const isRecord = (value: unknown): value is object =>
-  isObject(value) && !Array.isArray(value) && Object.prototype.toString.call(value) === '[object Object]';
+const isRecord = (value: unknown): value is object => isObject(value) && !Array.isArray(value) && !ArrayBuffer.isView(value) && !isBuiltIn(value);
+/** Tags of the built-in containers; a class's own custom `Symbol.toStringTag` is not one of them and stays allowed. */
+const BUILT_IN_TAGS = new Set(['Array', 'Date', 'Map', 'Set', 'WeakMap', 'WeakSet', 'RegExp', 'Promise', 'Error', 'ArrayBuffer']);
+/** Internal-slot checks that throw for anything but the real built-in, whatever its tag says. */
+const BRANDS: ((value: object) => unknown)[] = [
+  (value) => Date.prototype.getTime.call(value),
+  (value) => Reflect.apply(Object.getOwnPropertyDescriptor(Map.prototype, 'size')?.get as () => number, value, []),
+  (value) => Reflect.apply(Object.getOwnPropertyDescriptor(Set.prototype, 'size')?.get as () => number, value, []),
+  (value) => WeakMap.prototype.has.call(value as WeakMap<object, unknown>, {}),
+  (value) => WeakSet.prototype.has.call(value as WeakSet<object>, {}),
+];
+/** A built-in container: by its tag (which also sees through a Vue reactive Proxy) or by its internal slots. */
+function isBuiltIn(value: object): boolean {
+  if (BUILT_IN_TAGS.has(Object.prototype.toString.call(value).slice(8, -1))) return true;
+  return BRANDS.some((brand) => {
+    try {
+      brand(value);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
 /** Blank means only whitespace, as JavaScript's `trim()` sees it (the .NET builder uses the same rule). */
 const isBlank = (value: string) => value.trim().length === 0;
 /**
@@ -134,7 +155,12 @@ const BOUND_TYPES = 'must be a Date, epoch milliseconds or an ISO 8601 string.';
  * passed as is for the server to validate.
  */
 function rangeBound(where: string, field: string, value: unknown): string | undefined {
-  if (value === undefined || typeof value === 'string') return optionalText(where, field, value);
+  if (value === undefined) return undefined;
+  if (typeof value === 'string') {
+    // The server keeps milliseconds: a finer fraction would be truncated, moving a lower bound earlier.
+    if (/:\d{2}\.\d{4,}/.test(value)) return fail(where, `\`${field}\` has more than millisecond precision.`);
+    return text(where, field, value);
+  }
   let time = Number.NaN;
   if (typeof value === 'number') {
     if (!Number.isSafeInteger(value)) return fail(where, `\`${field}\` must be whole epoch milliseconds.`);

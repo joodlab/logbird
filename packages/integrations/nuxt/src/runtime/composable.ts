@@ -8,10 +8,10 @@ import { useRequestFetch } from '#imports';
  * server, so a trail with no selector and no query is sent as is (the route refuses a trusted query without `q`);
  * anything else is built by trailQuery, so a selector passed without a value still throws on the client (#263).
  *
- * Pass `session` (the signed-in user or session id) so a sign-out or account switch drops the shown rows, the cursor
- * and any read in flight. Without it, the rows already on screen stay until the next reload or trail change, and
- * "load more" asks the route for the next page of the old cursor; the route re-authorizes it, so it can only return
- * events the new session may read.
+ * Pass `session`: a string that changes whenever `authorize` would return a different scope, so the user and the active
+ * tenant or workspace, for example `JSON.stringify([user.id, workspace.id])`. A change drops the shown rows, the cursor
+ * and any read in flight. Without it, the route still re-authorizes every request, but the rows already on screen stay
+ * until the next reload or trail change, and "load more" appends the new scope's next page to them.
  */
 export function useAuditTrail(options: MaybeRefOrGetter<Omit<AuditTrailOptions, 'fetcher'>>) {
   const request = useRequestFetch();

@@ -31,9 +31,9 @@ a selector passed without a value (`tenant: undefined`) still throws on the clie
 SDK becomes a 400; any other error in `authorize` stays a server error.
 Pass `session` in the options: a string that changes whenever `authorize` would return a different scope, so the user
 **and** the active tenant or workspace, for example
-`` useAuditTrail(() => ({ target: { id }, session: `${user.value?.id}:${workspace.value?.id}` })) ``. When it changes, the
+`` useAuditTrail(() => ({ target: { id }, session: JSON.stringify([user.value?.id ?? null, workspace.value?.id ?? null]) })) ``. When it changes, the
 rows on screen, the cursor and any read in flight are dropped at once and the trail reloads. Remounting the component
-with the same key (`` <AuditTrail :key="`${user.id}:${workspace.id}`" /> ``) does the same. Without either, the route still
+with the same key (`` <AuditTrail :key="JSON.stringify([user.id, workspace.id])" /> ``; JSON keeps ids containing `:` apart) does the same. Without either, the route still
 re-authorizes every request, so no response contains events the new scope may not read, but the rows already on screen
 stay there until the next reload or trail change, and "load more" appends the new scope's next page to them.
 
