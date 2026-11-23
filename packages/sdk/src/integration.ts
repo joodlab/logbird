@@ -25,7 +25,7 @@ export interface CaptureOptions<C> {
   operationId?: Resolver<C, string | undefined>;
   /**
    * Use an inbound `x-logbird-operation` header as the operation id, so one operation can span services. When it is off,
-   * absent or longer than 256 characters, each request gets a new operation id. Defaults to `false`. This sets only the
+   * absent or longer than 256 characters, each request gets a new operation id. Defaults to `false`; only `true` turns it on. This sets only the
    * SDK's fallback: an `operationId` resolver that returns a value, or an id set on the event, takes precedence, and
    * what those return is up to your code.
    *
@@ -36,7 +36,7 @@ export interface CaptureOptions<C> {
   useOperationHeader?: boolean;
   /**
    * Use an inbound `x-request-id` header as the request id when present (a longer value than 256 characters is ignored,
-   * never cut); otherwise a generated id. Defaults to `false`. This sets only the SDK's fallback: a `requestId` resolver
+   * never cut); otherwise a generated id. Defaults to `false`; only `true` turns it on. This sets only the SDK's fallback: a `requestId` resolver
    * that returns a value, or an id set on the event, takes precedence, and what those return is up to your code.
    *
    * Turn it on only behind a trusted ingress (a gateway or load balancer) that sets this header itself, or strips or
@@ -79,9 +79,10 @@ export async function createAudit<C>(options: CaptureOptions<C>, context: C, req
     action: '',
     executor: { type: 'api' },
     context: {
-      // Inbound correlation headers are used only when the application opts in (#321): any caller can send them.
-      operationId: (options.useOperationHeader ? header('x-logbird-operation') : undefined) ?? uuidv7(),
-      requestId: (options.useRequestIdHeader ? header('x-request-id') : undefined) ?? uuidv7(),
+      // Inbound correlation headers are used only when the application opts in (#321): any caller can send them. Only
+      // `true` opts in, so a value wired from an environment variable (the string 'false') fails closed.
+      operationId: (options.useOperationHeader === true ? header('x-logbird-operation') : undefined) ?? uuidv7(),
+      requestId: (options.useRequestIdHeader === true ? header('x-request-id') : undefined) ?? uuidv7(),
       traceId: trace && trace[1] !== '0'.repeat(32) && trace[2] !== '0'.repeat(16) ? trace[1] : undefined,
       userAgent: request.headers.get('user-agent')?.slice(0, 1024) ?? undefined,
     },

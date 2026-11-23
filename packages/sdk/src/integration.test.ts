@@ -153,8 +153,10 @@ it('ignores inbound correlation headers unless the application opts in to each (
     [{ useRequestIdHeader: true }, true, false],
     [{ useOperationHeader: true }, false, true],
     [{ useRequestIdHeader: true, useOperationHeader: true }, true, true],
+    // Only `true` opts in: strings wired from an environment variable fail closed.
+    [{ useRequestIdHeader: 'false', useOperationHeader: 'true' } as never, false, false],
   ] as const) {
-    const audit = await createAudit({ client, ...options }, {}, new Request('http://host', { headers }));
+    const audit = await createAudit({ client, ...(options as object) }, {}, new Request('http://host', { headers }));
     audit('headers');
     await audit.pending();
     const context = track.mock.lastCall?.[0].context;
