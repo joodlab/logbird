@@ -201,11 +201,11 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
   it('suggests a target id as stored after its type, never split at the first colon (#220)', async () => {
     const suggestProject = `record-suggest-${randomUUID()}`;
     const targets = [
-      { type: 'order:archived', id: 'A1' },
+      { type: 'order:archived', id: 'A1', name: 'Archived order A1' },
       { type: '', id: 'A2' },
       { type: 'commande:é', id: 'B7' },
       // The same bare id under another type sums into one suggestion.
-      { type: 'invoice', id: 'A1' },
+      { type: 'invoice', id: 'A1', name: 'Invoice A1' },
     ];
     try {
       await insertEvents(
@@ -222,6 +222,9 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
       const suggested = await suggestValues(ch, suggestProject, { field: 'target', limit: 10 });
       expect(suggested.values.map((v) => v.value).sort()).toEqual(['A1', 'A2', 'B7']);
       expect(suggested.values.find((v) => v.value === 'A1')?.count).toBe(2);
+      // Both names of the shared id stay searchable.
+      const byName = await suggestValues(ch, suggestProject, { field: 'target', prefix: 'Invoice', limit: 10 });
+      expect(byName.values.map((v) => v.value)).toEqual(['A1']);
     } finally {
       await purgeProject(ch, suggestProject);
     }

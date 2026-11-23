@@ -77,7 +77,13 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
   // the union of the directory's quick first/last seen and the profile's: whichever answers first starts the history, and
   // the other can only widen it (historyBounds), so the history never waits for the whole profile nor leaves an event out.
   const own = p;
-  const seen = useQuery({ ...entitySeenQuery(projectId, kind, entityId, lookupType(kind, entityId, targetType)), enabled: !rangeChosen });
+  // A record id with more colons can share its rollup key with another record, whose events would widen the window; the
+  // profile reads such a record's own events, so only it bounds the window then.
+  const directoryBounds = kind !== 'target' || countsMentions(kind, entityId);
+  const seen = useQuery({
+    ...entitySeenQuery(projectId, kind, entityId, lookupType(kind, entityId, targetType)),
+    enabled: !rangeChosen && directoryBounds,
+  });
   const bounds = historyBounds(seen.data, own?.entity);
   const timelineRange = rangeChosen ? timeline.range : bounds ? historyRange(bounds.firstSeen, Date.now(), bounds.lastSeen) : undefined;
   // Out of a full history, links say "all" rather than this entity's computed window, so the next page is not narrowed.
