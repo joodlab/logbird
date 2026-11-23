@@ -301,10 +301,24 @@ describe('combined holds', () => {
 });
 
 describe('settledResends', () => {
-  it('settles a resend once the pending list no longer holds it, and waits while that list has more pages', () => {
-    const watching = new Set(['d1', 'd2']);
-    expect(settledResends(watching, { ids: ['d2'], complete: true })).toEqual(['d1']);
-    expect(settledResends(watching, { ids: [], complete: true })).toEqual(['d1', 'd2']);
-    expect(settledResends(watching, { ids: ['d9'], complete: false })).toEqual([]);
+  it('settles a resend once a read started after it no longer lists it pending, and waits while that list has more pages', () => {
+    const watching = new Map([
+      ['d1', 100],
+      ['d2', 100],
+    ]);
+    expect(settledResends(watching, { ids: ['d2'], complete: true, startedAt: 200 })).toEqual(['d1']);
+    expect(settledResends(watching, { ids: [], complete: true, startedAt: 200 })).toEqual(['d1', 'd2']);
+    expect(settledResends(watching, { ids: ['d9'], complete: false, startedAt: 200 })).toEqual([]);
+  });
+
+  it('never settles a resend from a read that was already in flight when it was queued', () => {
+    // A queued at 100; the read started at 200; B queued at 300 while that read was in flight. The read lists neither.
+    const watching = new Map([
+      ['A', 100],
+      ['B', 300],
+    ]);
+    expect(settledResends(watching, { ids: [], complete: true, startedAt: 200 })).toEqual(['A']);
+    // The next read, started after B was queued, can settle it.
+    expect(settledResends(new Map([['B', 300]]), { ids: [], complete: true, startedAt: 400 })).toEqual(['B']);
   });
 });

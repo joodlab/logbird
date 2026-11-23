@@ -255,13 +255,17 @@ export type EndpointState = {
 
 /**
  * Which resent deliveries have settled, from a read of the endpoint's pending deliveries: a resend is settled once it
- * is no longer pending. When the pending list has more pages than were read, a resend missing from the first page is
- * not known to be settled yet, so it stays watched.
+ * is no longer pending. Only a read that *started* after a resend was queued can say so: one already in flight may
+ * predate it and simply not list it yet. When the pending list has more pages than were read, a resend missing from
+ * the first page is not known to be settled yet, so it stays watched.
  */
-export function settledResends(watching: ReadonlySet<string>, pending: { ids: readonly string[]; complete: boolean }): string[] {
+export function settledResends(
+  watching: ReadonlyMap<string, number>,
+  pending: { ids: readonly string[]; complete: boolean; startedAt: number },
+): string[] {
   if (!pending.complete) return [];
   const stillPending = new Set(pending.ids);
-  return [...watching].filter((id) => !stillPending.has(id));
+  return [...watching].filter(([id, queuedAt]) => queuedAt < pending.startedAt && !stillPending.has(id)).map(([id]) => id);
 }
 
 /** Every state the API reports for an endpoint, holds first. A held endpoint delivers nothing and loses nothing. */

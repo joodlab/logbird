@@ -72,18 +72,25 @@ export function DeliveryLog({
   const [watching, setWatching] = useState<ReadonlyMap<string, number>>(() => new Map());
   const watch = useQuery({
     queryKey: [...deliveriesKey(projectId, endpoint.id, 'pending'), 'resend-watch'],
-    queryFn: ({ signal }) => api.webhooks.deliveries(projectId, endpoint.id, { status: 'pending' }, signal),
+    // The time the read started, not when it answered: a read already in flight when a resend is queued may not list it.
+    queryFn: async ({ signal }) => {
+      const startedAt = Date.now();
+      return { ...(await api.webhooks.deliveries(projectId, endpoint.id, { status: 'pending' }, signal)), startedAt };
+    },
     enabled: open && watching.size > 0,
     refetchInterval: 3000,
   });
   useEffect(() => {
     if (!watch.data || watch.isFetching) return;
-    const readAfter = new Set([...watching].filter(([, queuedAt]) => queuedAt < watch.dataUpdatedAt).map(([id]) => id));
-    const settled = settledResends(readAfter, { ids: watch.data.data.map((d) => d.id), complete: !watch.data.nextCursor });
+    const settled = settledResends(watching, {
+      ids: watch.data.data.map((d) => d.id),
+      complete: !watch.data.nextCursor,
+      startedAt: watch.data.startedAt,
+    });
     if (settled.length === 0) return;
     setWatching((current) => new Map([...current].filter(([id]) => !settled.includes(id))));
     queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'deliveries'] });
-  }, [watch.data, watch.dataUpdatedAt, watch.isFetching, watching, queryClient, projectId, endpoint.id]);
+  }, [watch.data, watch.isFetching, watching, queryClient, projectId, endpoint.id]);
   const { host, path } = displayUrl(endpoint.url);
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
