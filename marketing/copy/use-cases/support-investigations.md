@@ -25,31 +25,32 @@ The landing page's support section links here.
 
 - No speed, size or "real-time" claim: none is measured for the console on production. A test rejects
   "instant", "real-time" and "millisecond".
-- The example queries are compiled by the real query compiler in `use-cases.test.ts`, so the page can't show a
-  query the language rejects.
+- Each example query is one inline code span with no copy button, so what a reader copies is the query alone. The
+  test compiles each one exactly as shown with the real query compiler, and fails if a code block appears on the page.
 - No tamper, immutable or certified wording.
 
 ## Proof
 
 | Claim (section) | Source |
 | --- | --- |
-| Jump to (Ctrl K) takes an id or a name; an exact id leads; a record is found by its bare id (`find`) | `CHANGELOG.md` 0.2.1 § Highlights and § Entity search (ranking: exact id, id prefix, name prefix, substring, fuzzy) |
+| Jump to (Ctrl K): a name lists matching entities; an exact id is highlighted; a record is found by its bare id (`find`) | `CHANGELOG.md` 0.2.1 § Highlights and § Entity search; `apps/app/src/components/shell/command-palette.tsx` |
 | Each account, actor, executor and record has a page with a timeline of every event that mentions it (`find`) | `docs/concepts.md` (opening paragraph and table) |
-| An account's page separates what support did while signed in as the customer, and names the support agents (`find`) | `apps/app/src/components/entities/support-split.tsx` ("Not by support" / "Done by support", the agents list); `entity-profile.tsx` renders it on entity pages; the reviewed `tenant` capture |
-| A page shows only events sent with that account or record (`find` limit) | `docs/concepts.md` § Tenants and § Records; `docs/SPEC.md` §1 item 2 ("Capture is the client's job") |
-| Exact matches, prefixes, ranges and `OR`; suggestions with counts; guarded SQL `WHERE` (`search`) | `docs/query-language.md` § Query language, § Query bar (console), § SQL mode |
-| The four example queries (`search`) | `docs/query-language.md` (`tenant:`, `outcome:`, `record:<type>:<id>`, presence `impersonator:*`, prefix `action:booking.*`, relative date `occurredAt:>now-7d`); compiled in `use-cases.test.ts` (each comment sits on its own line, so nothing wraps at phone width) |
-| A search covers the chosen range; the explorer offers "Search all time" when matches lie outside it (`search` limit) | `CHANGELOG.md` 0.2.1 § Highlights; `apps/app/src/components/explorer/explorer.tsx` ("Search all time") |
+| When events name a support agent (`impersonator`), an account's page shows how many were done by support and lists up to six agents by name or id (`find`) | `apps/app/src/components/entities/support-split.tsx` (the `impersonator` facet, the agent list); `entity-profile.tsx`; the reviewed `tenant` capture |
+| An account's page matches `tenant` id; a record's page matches the record in `targets`; search still finds an event with neither (`find` limit) | `apps/app/src/lib/entities.ts` (entity filters); `docs/query-language.md` |
+| Exact matches, prefixes, ranges and `OR`; suggestions as you type, some values with counts from the rows checked; guarded SQL `WHERE` (`search`) | `docs/query-language.md` § Query language, § Autocomplete (counts from at most 50,000 recent rows), § Query bar (console), § SQL mode |
+| The four example queries (`search`) | `docs/query-language.md` (`tenant:`, `outcome:`, `record:<type>:<id>`, presence `impersonator:*`, prefix `action:booking.*`, relative date `occurredAt:>now-7d`); compiled exactly as shown in `use-cases.test.ts` |
+| With no matches: the id query for a bare id that matches an entity; otherwise "Search all time" when matches lie outside the range (`search` limit) | `CHANGELOG.md` 0.2.1 § Highlights; `apps/app/src/components/explorer/explorer.tsx` (empty state) |
 | A cut-short count is a lower bound, shown as "≥ N" or "10,000+" (`search` limit) | `docs/SPEC.md` §4 hot-path rules (`totalExact: false`); `CHANGELOG.md` 0.2.0 § Search totals; maintainer ruling 2026-11-23 (lower bound OK) |
-| The explorer capture: booking actions, seven-day histogram, facets for outcome, support, severity and action (`search` visual) | The reviewed `explorer` capture (`marketing/media/staydesk/explorer-*.webp`) |
-| Actor and executor with attempt; impersonator; changes, the first 256 per event (`event`) | `docs/concepts.md` § Actors, § Executors; `packages/clickhouse/src/normalize.ts` (`e.changes.slice(0, 256)`) |
+| The explorer capture: booking actions over seven days, matching events below the chart, true on desktop and phone (`search` visual) | The reviewed `explorer` captures (`marketing/media/staydesk/explorer-*.webp`, `phone-explorer-*.webp`) |
+| The actor is the identity the action used; with impersonation the customer stays the actor and the staff member is the impersonator (`event`) | `docs/concepts.md` § Actors |
+| The executor ran it, with the attempt number when sent; changes, the first 256 per event (`event`) | `docs/concepts.md` § Executors; `packages/clickhouse/src/normalize.ts` (`e.changes.slice(0, 256)`) |
 | Copy link on an event (`event`) | `apps/app/src/components/explorer/event-sheet.tsx` ("Copy link") |
 | Logbird records what your code sends (`event` limit) | `docs/SPEC.md` §1 item 2 |
-| An operation groups the request, its jobs and their retries, linked by parent event; retries show each attempt on the same executor (`operation`) | `docs/concepts.md` § Operations and § Executors |
-| A job joins the operation only when you pass its operation id and parent event (`operation` limit) | `docs/integrations.md` § Design ("Propagate operationId and parentEventId explicitly into jobs") |
+| An operation is the events sharing its id; a parent event places an event under its cause; the same operation id with attempt and outcome shows which try succeeded (`operation`) | `docs/concepts.md` § Operations and § Executors; `packages/clickhouse/src/queries.ts` (operation tree by operation id); `apps/app/src/routes/_authed/_workspace/p.$projectId.operations.$operationId.tsx` |
+| Pass the operation id into each job yourself, and the parent event (`operation` limit) | `docs/integrations.md` § Design ("Propagate operationId and parentEventId explicitly into jobs") |
 | Workspace activity doesn't record reads (`not`) | `docs/workspace-audit.md` § Activity action catalogue; the compliance page's activity limit |
-| Free text searches the description and the actor, account and record names; other fields by name, such as `metadata.channel:whatsapp` (`not`) | `docs/query-language.md` § Query language (Text, Attribute rows) |
-| Older history can be imported with its original time; retention still applies (`not`) | The landing page's guarantees row (`occurredAt` up to 3650 days back; project retention applies to imports) and its sources in `marketing/copy/home.md` |
+| Free text searches the description and the actor, account and record names; other fields by name, such as `metadata.channel:whatsapp` (compiled in the test) (`not`) | `docs/query-language.md` § Query language (Text, Attribute rows) |
+| Older events keep their original time up to 3,650 days back; an older time is stored as the receive time; retention applies (`not`) | `docs/SPEC.md` §1 (`occurredAt` window); the landing page's guarantees row and its sources in `marketing/copy/home.md` |
 
 ## Visuals
 

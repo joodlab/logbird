@@ -4,19 +4,9 @@ import type { UseCase } from './types';
 /**
  * /use-cases/support-investigations. Brief, with the source of every claim: marketing/copy/use-cases/support-investigations.md.
  * The third paid job's companion: support and operations answering "what happened?" for one account or record.
+ * Each example query is one inline code span with no copy button, so what a reader copies is the query alone; the
+ * test compiles each one exactly as shown.
  */
-const queries = `# One account's failures
-tenant:biz_7 outcome:failure
-
-# One booking's history
-record:booking:bk_1042
-
-# Done by support
-impersonator:*
-
-# Bookings, last 7 days
-action:booking.* occurredAt:>now-7d`;
-
 export function supportInvestigationsContent(_site: SiteState): UseCase {
   return {
     meta: {
@@ -27,7 +17,7 @@ export function supportInvestigationsContent(_site: SiteState): UseCase {
     hero: {
       eyebrow: 'Use case · Support investigations',
       title: 'Answer "what happened in this account?"',
-      lead: 'When a customer asks why a booking changed or who removed a user, support and operations open the account or the record and read its events in order: who acted, what did the work, and the before and after values your code sends.',
+      lead: 'When a customer asks why a booking changed or who removed a user, support and operations open the account or the record and read its events in order: who acted, what ran it, and the before and after values your code sends.',
     },
     sections: [
       {
@@ -37,7 +27,7 @@ export function supportInvestigationsContent(_site: SiteState): UseCase {
         points: [
           {
             title: 'Jump to (Ctrl K)',
-            body: 'Type an id or a name. An exact id leads the list, and a record is found by its bare id, such as `bk_1042` for `booking:bk_1042`.',
+            body: 'Type a name to see matching entities, or an exact id to highlight it. For a record, its bare id is enough, such as `bk_1042` for `booking:bk_1042`.',
           },
           {
             title: 'Entity pages',
@@ -45,44 +35,46 @@ export function supportInvestigationsContent(_site: SiteState): UseCase {
           },
           {
             title: 'Done by support',
-            body: "A customer account's page separates what support did while signed in as the customer from everything else, and names the support agents.",
+            body: "When events name a support agent (`impersonator`), a customer account's page shows how many were done by support and lists up to six agents, by name or id.",
           },
         ],
         limit: {
           label: 'The limit',
-          text: 'A page shows the events your code sent with that account or record. An event sent without `tenant` or `targets` is not on it.',
+          text: "An account's page lists the events whose `tenant` id matches; a record's page lists the events that name it in `targets`. An event sent without them is on neither page, though search still finds it.",
         },
       },
       {
         id: 'search',
         eyebrow: 'Search',
         title: 'Narrow it down in one search.',
-        steps: [
-          {
-            title: 'Type what you know',
-            body: 'The query language matches fields exactly, with prefixes, ranges and `OR`. The search bar suggests fields and values with how many events have each. A guarded SQL `WHERE` expression is there when you need it.',
-            code: { title: 'Examples', code: queries, language: 'text' },
-          },
+        lead: 'The query language matches fields exactly, with prefixes, ranges and `OR`. The search bar suggests fields and values as you type, some values with counts from the events it checked. A guarded SQL `WHERE` expression is there when you need it.',
+        points: [
+          { title: "One account's failures", body: '`tenant:biz_7 outcome:failure`' },
+          { title: "One booking's history", body: '`record:booking:bk_1042`' },
+          { title: 'Done by support', body: '`impersonator:*`' },
+          { title: 'Bookings, last 7 days', body: '`action:booking.* occurredAt:>now-7d`' },
         ],
         limit: {
           label: 'The limit',
-          text: 'A search covers the time range you pick. When nothing matches there but older events do, the explorer offers to search all time. When counting is cut short, the total is a lower bound, shown as "≥ N" or "10,000+".',
+          text: 'A search covers the time range you pick. When nothing matches, the explorer offers the id query if you typed a bare id that matches an entity; otherwise, when it finds matches outside your range, it offers to search all time. When counting is cut short, the total is a lower bound, shown as "≥ N" or "10,000+".',
         },
         visual: {
           id: 'explorer',
           label: 'Explorer',
-          caption:
-            'The explorer filtered to booking actions: a histogram of the last seven days, facets for outcome, support, severity and action, and the matching events.',
+          caption: 'Booking actions over the last seven days, with the matching events below the chart.',
           zoom: true,
         },
       },
       {
         id: 'event',
         eyebrow: 'One event',
-        title: 'Read who asked, what did the work, and what changed.',
+        title: 'Read who acted, what ran it, and what changed.',
         points: [
-          { title: 'Actor and executor', body: 'Who asked for the action, and the API or worker that performed it, with the attempt number.' },
-          { title: 'Impersonator', body: 'When support acted for a customer, the staff member who did.' },
+          {
+            title: 'Actor and impersonator',
+            body: 'The actor is the identity the action used. When support acted for a customer, the customer stays the actor and the staff member is the impersonator.',
+          },
+          { title: 'Executor', body: 'The API or worker that ran it, with the attempt number when your code sends it.' },
           { title: 'Changes', body: 'The before and after values your code sends, the first 256 per event.' },
           { title: 'Copy link', body: 'Share the event with a colleague who has access to the project.' },
         ],
@@ -102,16 +94,16 @@ export function supportInvestigationsContent(_site: SiteState): UseCase {
         points: [
           {
             title: 'One tree',
-            body: 'The events that share an operation id, the request and every job it started, each linked to the event that caused it.',
+            body: 'The events that share an operation id: the request and the jobs it started. An event that names its parent sits under the event that caused it.',
           },
           {
-            title: 'Retries in place',
-            body: 'A retried job shows each attempt on the same executor, so a failure and the retry that fixed it sit side by side.',
+            title: 'Retries',
+            body: 'Send the same operation id on each attempt, with its attempt number and outcome, to see which try succeeded.',
           },
         ],
         limit: {
           label: 'The limit',
-          text: 'The tree is as complete as the ids your code passes on: a job joins the operation only when you pass its operation id and parent event into the job.',
+          text: 'The tree holds only the events that carry its operation id: pass it into each job yourself, and the parent event to place a job under its cause.',
         },
       },
       {
@@ -134,7 +126,7 @@ export function supportInvestigationsContent(_site: SiteState): UseCase {
             {
               promise: 'Can Logbird show what happened before you started sending events?',
               limit:
-                "No. It holds only the events your code sent. You can import older history by sending events with their original time; the project's retention still applies.",
+                "No. It holds only the events your code sent. If you already have older events, send them with their original time, up to 3,650 days back; an older time is stored as the time Logbird received it. The project's retention still applies.",
             },
           ],
         },

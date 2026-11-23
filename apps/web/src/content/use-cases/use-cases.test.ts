@@ -146,13 +146,18 @@ describe('the support investigations page', () => {
     }
   }, 60_000);
 
-  it('shows only example queries that the query language accepts', () => {
-    const steps = supportInvestigations.sections.find((section) => section.id === 'search')?.steps ?? [];
-    const lines = steps.flatMap((step) => step.code?.code.split('\n') ?? []);
-    expect(lines.length).toBeGreaterThan(0);
-    // Comment lines start with #; every other non-empty line is a query.
-    const queries = lines.map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
+  it('shows only example queries that the query language accepts, each exactly as shown', () => {
+    const points = supportInvestigations.sections.find((section) => section.id === 'search')?.points ?? [];
+    // Each example is one inline code span and nothing else, so what a reader copies is the query alone.
+    const queries = points.map((point) => /^`([^`]+)`$/.exec(point.body)?.[1] ?? '');
     expect(queries).toHaveLength(4);
-    for (const query of queries) expect(() => compileQuery(query), query).not.toThrow();
+    for (const query of queries) {
+      expect(query, 'one code span').not.toBe('');
+      expect(() => compileQuery(query), query).not.toThrow();
+    }
+    // The page shows no code block whose copy button would copy several queries at once.
+    expect(supportInvestigations.sections.flatMap((section) => section.steps ?? []).filter((step) => step.code)).toEqual([]);
+    // The inline attribute example in the closing table compiles too.
+    expect(() => compileQuery('metadata.channel:whatsapp')).not.toThrow();
   });
 });
