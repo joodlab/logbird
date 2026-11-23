@@ -348,7 +348,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         catch (Exception e)
         {
-            Drop(DropReason.Invalid, id, action, json, e.GetType().Name);
+            // The SDK's own refusals (depth) carry fixed text and say why; anything else is named by its type only.
+            Drop(DropReason.Invalid, id ?? auditEvent?.Id, action, json, e is SdkDropException ? e.Message : e.GetType().Name);
 
             // Host exceptions (from BeforeSend, a redaction pattern, a JSON value) can quote event data, so only the
             // exception type is reported, never the exception itself.

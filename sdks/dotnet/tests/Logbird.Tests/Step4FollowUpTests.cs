@@ -406,6 +406,63 @@ public class Step4FollowUpTests
         Assert.Single(reports.OfType<LogbirdRejectedException>());
     }
 
+    // ---------------------------------------------------------------- R06 (maintainer ruling b): depth is checked as given
+
+    private static JsonNode Chain(int depth)
+    {
+        JsonNode node = new JsonObject { ["leaf"] = true };
+        for (var i = 0; i < depth; i++)
+        {
+            node = new JsonObject { ["n"] = node };
+        }
+
+        return node;
+    }
+
+    [Fact]
+    public async Task Depth_is_checked_without_recursion_on_the_given_event_and_on_what_BeforeSend_returns()
+    {
+        // 100,000 levels on a 256 KB stack: a recursive walk would overflow and end the test host. The given event is
+        // refused before anything copies it; a hook that returns a new, deeper event meets the same check before
+        // redaction and serialisation walk it, with the same Invalid drop.
+        var server = new FakeServer();
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using var client = Client(Options(o =>
+        {
+            o.OnDrop = drops.Enqueue;
+            o.BeforeSend = e => e.Action == "hook.deepens"
+                ? new AuditEvent("hook.deepens") { Id = e.Id }.Change("tree", null, Chain(100_000))
+                : e;
+        }), server);
+        Exception? failure = null;
+        var thread = new Thread(
+            () =>
+            {
+                try
+                {
+                    client.Track(new AuditEvent("given.deep") { Metadata = { ["token"] = Chain(100_000) } });
+                    client.Track(new AuditEvent("hook.deepens"));
+                }
+                catch (Exception e)
+                {
+                    failure = e;
+                }
+            },
+            256 * 1024);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+        Assert.True(await client.FlushAsync());
+
+        Assert.Empty(server.Requests);
+        Assert.Equal(["given.deep", "hook.deepens"], drops.Select(d => d.Action).OrderBy(a => a, StringComparer.Ordinal).ToArray());
+        Assert.All(drops, d =>
+        {
+            Assert.Equal(DropReason.Invalid, d.Reason);
+            Assert.Equal(LogbirdClient.DepthDetail, d.Detail);
+        });
+    }
+
     // ---------------------------------------------------------------- B01: the guard's boundary, on redaction-shrinkable data
 
     [Fact]
