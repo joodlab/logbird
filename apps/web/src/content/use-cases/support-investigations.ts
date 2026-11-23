@@ -94,7 +94,7 @@ export function supportInvestigationsContent(_site: SiteState): UseCase {
         points: [
           {
             title: 'One tree',
-            body: 'The events that share an operation id: the request and the jobs it started. An event that names its parent sits under the event that caused it.',
+            body: 'The events that share an operation id: the request and the jobs it started. When its parent event is in the same operation, an event appears beneath it.',
           },
           {
             title: 'Retries',
