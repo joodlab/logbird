@@ -90,10 +90,10 @@ public sealed class ViewerScope
     };
 
     /// <summary>
-    /// A read-only copy of at most one prefix more than the limit, so a list of any length fails validation without being
-    /// copied whole (its <c>Count</c> is not trusted).
+    /// A read-only copy of at most 21 entries (one more than the limit): a list of up to 21 is copied whole, and a longer
+    /// one fails validation without being copied whole (its <c>Count</c> is not trusted).
     /// </summary>
-    private static System.Collections.ObjectModel.ReadOnlyCollection<string>? CopyPrefixes(IReadOnlyList<string>? prefixes)
+    private static PrefixList? CopyPrefixes(IReadOnlyList<string>? prefixes)
     {
         if (prefixes is null)
         {
@@ -110,7 +110,7 @@ public sealed class ViewerScope
             }
         }
 
-        return copy.AsReadOnly();
+        return new PrefixList(copy.ToArray());
     }
 
     internal void Validate()
@@ -171,7 +171,7 @@ public sealed class ViewerScope
     {
         Target = wire.Target is null ? null : new ViewerScopeTarget(wire.Target.Type ?? string.Empty, wire.Target.Id ?? string.Empty),
         // Read-only: the granted scope is handed to the caller, who must not be able to cast it back and change it.
-        ActionPrefixes = wire.ActionPrefixes?.AsReadOnly(),
+        ActionPrefixes = wire.ActionPrefixes is null ? null : new PrefixList(wire.ActionPrefixes.ToArray()),
         Mask = MaskFromNames(wire.Mask),
     };
 
@@ -527,6 +527,27 @@ internal static class Query2
         var parts = pairs.Where(p => p.Value is not null).Select(p => p.Key + "=" + Uri.EscapeDataString(p.Value!)).ToArray();
         return parts.Length == 0 ? string.Empty : "?" + string.Join("&", parts);
     }
+}
+
+/// <summary>
+/// A list of action prefixes that nobody can change: it implements only <see cref="IReadOnlyList{T}"/>, so no interface
+/// (<c>IList</c>, <c>ICollection.SyncRoot</c>) leads to its storage.
+/// </summary>
+internal sealed class PrefixList(string[] items) : IReadOnlyList<string>
+{
+    public int Count => items.Length;
+
+    public string this[int index] => items[index];
+
+    public IEnumerator<string> GetEnumerator()
+    {
+        foreach (var item in items)
+        {
+            yield return item;
+        }
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 // A granted scope with a member this SDK does not know (a newer server's restriction) is refused, never silently dropped:

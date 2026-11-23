@@ -137,15 +137,15 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
             Assert.DoesNotContain(email, Encoding.UTF8.GetString(file.ToArray()), StringComparison.Ordinal);
         }
 
-        // CSV: the server's text/csv answer is accepted, with a header line and one line per in-scope event, and no
-        // control's id in it.
+        // CSV: the server's text/csv answer is accepted: a header whose first column is id, then exactly one record per
+        // in-scope event (no control, no repeat), with the ip masked.
         using (var csv = new MemoryStream())
         {
             await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv) { From = from }, csv);
             var text = Encoding.UTF8.GetString(csv.ToArray());
-            Assert.All(inScope, id => Assert.Contains(id, text, StringComparison.Ordinal));
-            Assert.DoesNotContain(sameTenantOtherSite, text, StringComparison.Ordinal);
-            Assert.DoesNotContain(otherTenantSameSite, text, StringComparison.Ordinal);
+            var firstColumn = CsvFirstColumn(text);
+            Assert.StartsWith("id,timestamp,action,", text, StringComparison.Ordinal);
+            Assert.Equal(inScope.OrderBy(x => x, StringComparer.Ordinal), firstColumn.Skip(1).OrderBy(x => x, StringComparer.Ordinal));
             Assert.DoesNotContain(Ip, text, StringComparison.Ordinal);
         }
 
@@ -156,6 +156,65 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
         }
 
         output.WriteLine($"server {version}: viewer token read {found.Count} in-scope events (ip, agent, email masked on search, detail and export), controls hidden, facets scoped, CSV and JSONL exports scoped, evidence export refused");
+    }
+
+    /// <summary>The first field of every CSV record (quoted fields may hold commas, quotes and line breaks).</summary>
+    private static List<string> CsvFirstColumn(string text)
+    {
+        var fields = new List<string>();
+        var field = new StringBuilder();
+        var quoted = false;
+        var first = true;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (quoted)
+            {
+                if (c == '"' && i + 1 < text.Length && text[i + 1] == '"')
+                {
+                    field.Append('"');
+                    i++;
+                }
+                else if (c == '"')
+                {
+                    quoted = false;
+                }
+                else
+                {
+                    field.Append(c);
+                }
+            }
+            else if (c == '"')
+            {
+                quoted = true;
+            }
+            else if (c == ',')
+            {
+                if (first)
+                {
+                    fields.Add(field.ToString());
+                    first = false;
+                }
+
+                field.Clear();
+            }
+            else if (c == (char)10)
+            {
+                if (first)
+                {
+                    fields.Add(field.ToString());
+                }
+
+                field.Clear();
+                first = true;
+            }
+            else
+            {
+                field.Append(c);
+            }
+        }
+
+        return fields;
     }
 
     [LiveFact(requires: "LOGBIRD_IT_SCOPED")]

@@ -47,8 +47,11 @@ public class ScopedFollowUpTests
 
     // ---------------------------------------------------------------- (a) the prefix snapshot and the granted prefixes
 
-    /// <summary>A list that claims a small count but enumerates without end, counting what was read.</summary>
-    private sealed class EndlessPrefixes : IReadOnlyList<string>
+    /// <summary>Thrown by <see cref="LongPrefixes"/> when asked for a 22nd entry.</summary>
+    private sealed class ReadPastTheBoundException : Exception;
+
+    /// <summary>A list that claims one entry, yields more, and fails on a 22nd so a copy without a bound fails at once.</summary>
+    private sealed class LongPrefixes : IReadOnlyList<string>
     {
         public int Enumerated;
 
@@ -60,7 +63,11 @@ public class ScopedFollowUpTests
         {
             while (true)
             {
-                Interlocked.Increment(ref Enumerated);
+                if (++Enumerated > 21)
+                {
+                    throw new ReadPastTheBoundException();
+                }
+
                 yield return "booking.";
             }
         }
@@ -69,13 +76,13 @@ public class ScopedFollowUpTests
     }
 
     [Fact]
-    public async Task A_prefix_list_of_any_length_is_refused_without_being_copied_whole()
+    public async Task A_prefix_list_of_any_length_is_refused_after_at_most_21_entries()
     {
         var server = Server(Minted);
         using var reader = Reader(server);
-        var prefixes = new EndlessPrefixes();
+        var prefixes = new LongPrefixes();
         await Assert.ThrowsAsync<ArgumentException>(() => reader.MintViewerTokenAsync(new ViewerScope("biz_5") { ActionPrefixes = prefixes }));
-        Assert.True(prefixes.Enumerated <= 21, prefixes.Enumerated.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(21, prefixes.Enumerated);
         Assert.Empty(server.Requests);
     }
 
@@ -106,11 +113,15 @@ public class ScopedFollowUpTests
         var token = await reader.MintViewerTokenAsync(new ViewerScope("biz_5") { ActionPrefixes = ["booking.", "auth."] });
         var granted = token.Scope.ActionPrefixes!;
         Assert.Equal(new[] { "booking.", "auth." }, granted);
-        Assert.IsNotType<List<string>>(granted);
-        Assert.IsNotType<string[]>(granted);
-        var asList = Assert.IsAssignableFrom<IList<string>>(granted);
-        Assert.True(asList.IsReadOnly);
-        Assert.Throws<NotSupportedException>(() => asList.Add("admin."));
+
+        // No interface leads to storage a caller could change: not a list or array, not IList or ICollection (whose
+        // SyncRoot can be the backing list), only IReadOnlyList.
+        Assert.False(granted is List<string>);
+        Assert.False(granted is string[]);
+        Assert.False(granted is IList<string>);
+        Assert.False(granted is ICollection<string>);
+        Assert.False(granted is IList);
+        Assert.False(granted is ICollection);
     }
 
     // ---------------------------------------------------------------- (b) fractional lifetime
@@ -205,10 +216,18 @@ public class ScopedFollowUpTests
         Assert.True(file.Length > 0);
     }
 
-    [Fact]
-    public async Task A_network_failure_during_the_download_is_still_unreachable()
+    public static IEnumerable<object[]> DownloadFailures()
     {
-        var content = new StreamContent(new FailingSource());
+        yield return [new IOException("fictional connection reset")];
+        yield return [new InvalidDataException("fictional corrupt compressed body")];
+        yield return [new TimeoutException("fictional body read timeout")];
+    }
+
+    [Theory]
+    [MemberData(nameof(DownloadFailures))]
+    public async Task A_failure_reading_the_download_is_unreachable(Exception failure)
+    {
+        var content = new StreamContent(new FailingSource(failure));
         content.Headers.TryAddWithoutValidation("Content-Type", "text/csv; charset=utf-8");
         using var reader = Reader(Server(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
         using var file = new MemoryStream();
@@ -216,8 +235,72 @@ public class ScopedFollowUpTests
         Assert.Equal("unreachable", error.Code);
     }
 
+    /// <summary>A destination that cancels the caller's token and then fails, as a stream that observes cancellation can.</summary>
+    private sealed class CancellingDestination(CancellationTokenSource caller) : MemoryStream
+    {
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            caller.Cancel();
+            throw new IOException("fictional write aborted by cancellation");
+        }
+
+#if NET
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            caller.Cancel();
+            throw new IOException("fictional write aborted by cancellation");
+        }
+#endif
+    }
+
+    [Fact]
+    public async Task A_destination_failure_caused_by_the_callers_cancellation_is_the_cancellation()
+    {
+        using var reader = Reader(Server(_ => Answer(HttpStatusCode.OK, "evt_1\n", "text/csv")));
+        using var caller = new CancellationTokenSource();
+        using var file = new CancellingDestination(caller);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Csv), file, caller.Token));
+    }
+
+    private sealed class SentinelException(string message) : Exception(message);
+
+    /// <summary>A destination that fails with one particular exception instance.</summary>
+    private sealed class SentinelDestination(SentinelException failure) : MemoryStream
+    {
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Fail();
+
+#if NET
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => new(Fail());
+#endif
+
+        private Task Fail() => throw failure;
+    }
+
+    /// <summary>A body that reads normally but throws whenever it is disposed.</summary>
+    private sealed class BrokenOnDispose(byte[] bytes) : MemoryStream(bytes)
+    {
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            throw new IOException("fictional cleanup failure");
+        }
+    }
+
+    [Fact]
+    public async Task A_destination_failure_survives_a_cleanup_that_also_fails()
+    {
+        var failure = new SentinelException("fictional disk full");
+        var content = new StreamContent(new BrokenOnDispose(Encoding.UTF8.GetBytes("evt_1\n")));
+        content.Headers.TryAddWithoutValidation("Content-Type", "text/csv");
+        using var reader = Reader(Server(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
+        using var file = new SentinelDestination(failure);
+        var error = await Assert.ThrowsAsync<SentinelException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Csv), file));
+        Assert.Same(failure, error);
+        Assert.Contains(nameof(SentinelDestination), error.StackTrace, StringComparison.Ordinal);
+    }
+
     /// <summary>A response body that fails like a dropped connection on its first read.</summary>
-    private sealed class FailingSource : Stream
+    private sealed class FailingSource(Exception failure) : Stream
     {
         public override bool CanRead => true;
 
@@ -233,7 +316,7 @@ public class ScopedFollowUpTests
         {
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => throw new IOException("fictional connection reset");
+        public override int Read(byte[] buffer, int offset, int count) => throw failure;
 
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 

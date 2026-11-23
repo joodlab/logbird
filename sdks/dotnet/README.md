@@ -315,11 +315,14 @@ await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: inv
 EventDetail? detail = await reader.GetAsync(eventId);   // null when it does not exist
 ```
 
-Every read call ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
-cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. Cancelling your token throws
-`OperationCanceledException`, and a call whose token is already cancelled sends nothing. A success answer is checked
-against the server's contract before it is read: a missing member, or `null` where none is allowed, throws
-`invalid_response` instead of reading as an empty page. An answer over 64 MB throws `response_too_large`.
+Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
+cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. The limit is per request, not per
+call: a first call that also reads the server's version, or a `SearchAllAsync` iteration, makes several requests, each
+with its own limit. Cancelling your token throws `OperationCanceledException`, and a call whose token is already
+cancelled sends nothing. A search, detail or facet answer is checked against the server's contract before it is read:
+a required member that is missing, or `null` where the contract allows none, throws `invalid_response` instead of
+reading as an empty page (optional members may be absent). A search, detail, facet or viewer-token answer over 64 MiB
+throws `response_too_large`; exports are streamed and have no size limit.
 
 `SearchAllAsync` follows cursors until the last page. Logbird's cursors are keyset-ordered and never repeat; as a guard
 against a misbehaving server, the client stops with `LogbirdApiException` (`pagination_stalled`) if a cursor repeats within
@@ -375,10 +378,12 @@ await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
   counted. `ExportAsync` streams CSV, JSONL or JSONL with payloads (`JsonlEvidence`, refused for a masked scope) into
   your stream. Queries are at most 4,096 characters. The read `Timeout` covers the wait for the export's headers; pass a
   cancellation token to bound the download.
-- Only the requested export is written. An answer with a status other than 200 (such as a `206` partial answer) or
-  another content type (`text/csv` for CSV, `application/x-ndjson` for JSONL; such as a proxy's HTML page) throws
-  `invalid_response` and writes nothing. A download that fails part way throws `unreachable` and leaves a partial file.
-  An exception from your stream itself (for example a full disk) reaches you unchanged, never as a network failure.
+- Only the requested export is written. A success status other than 200 (such as a `206` partial answer), or a 200
+  without the requested content type (`text/csv` for CSV, `application/x-ndjson` for JSONL; such as a proxy's HTML
+  page), throws `invalid_response`; an HTTP error keeps the server's code (such as `masked_export`). Either way nothing
+  is written. A download that fails part way throws `unreachable` and leaves a partial file. An exception from your
+  stream itself (for example a full disk) reaches you unchanged, never as a network failure; one caused by your
+  cancellation is reported as the cancellation.
 
 ## Verify webhooks
 

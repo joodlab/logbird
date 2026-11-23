@@ -31,9 +31,11 @@ public sealed class LogbirdReadOptions
     public string? ReadKey { get; set; }
 
     /// <summary>
-    /// The time limit for one request, and for the wait for an export's headers (the download itself is bounded by your
-    /// cancellation token). It holds even when a custom HTTP handler ignores cancellation; past it the call throws
-    /// <see cref="LogbirdApiException"/> with code <c>unreachable</c>. Defaults to 30 seconds.
+    /// The time limit for each HTTP request: the version read, each search page, a detail, facet or mint request, and the
+    /// wait for an export's headers. It is not a limit for a whole call (a first call that also reads the server's version,
+    /// or a <c>SearchAllAsync</c> iteration, makes several requests, each with its own limit), and an export's download is
+    /// bounded only by your cancellation token. It holds even when a custom HTTP handler ignores cancellation; past it the
+    /// request throws <see cref="LogbirdApiException"/> with code <c>unreachable</c>. Defaults to 30 seconds.
     /// </summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -54,11 +56,13 @@ public sealed class LogbirdReadOptions
 /// may see the tenant or record before you search, on every request including next-page requests.
 /// </para>
 /// <para>
-/// Every call ends within <see cref="LogbirdReadOptions.Timeout"/> (<c>unreachable</c> past it) or when your token is
-/// cancelled (<see cref="OperationCanceledException"/>), whichever comes first; a call whose token is already cancelled
-/// sends nothing. A success answer is checked against the server's contract before it is read: a missing member, or
-/// <c>null</c> where none is allowed, throws <c>invalid_response</c> instead of reading as an empty page. An answer over
-/// 64 MB throws <c>response_too_large</c>.
+/// Each HTTP request ends within <see cref="LogbirdReadOptions.Timeout"/> (<c>unreachable</c> past it), and every call
+/// ends when your token is cancelled (<see cref="OperationCanceledException"/>); a call whose token is already cancelled
+/// sends nothing. A search, detail or facet answer is checked against the server's contract before it is read: a
+/// required member that is missing, or <c>null</c> where the contract allows none, throws <c>invalid_response</c> instead
+/// of reading as an empty page (optional members may be absent). A viewer-token answer has its own checks
+/// (<c>invalid_response</c> or <c>scope_mismatch</c>). A search, detail, facet or viewer-token answer over 64 MiB throws
+/// <c>response_too_large</c>; an export is streamed and has no size limit.
 /// </para>
 /// </remarks>
 public sealed class LogbirdReadClient : IDisposable
@@ -417,16 +421,18 @@ public sealed class LogbirdReadClient : IDisposable
     /// <param name="destination">Where to write the file. Not disposed.</param>
     /// <param name="cancellationToken">Cancels the export.</param>
     /// <exception cref="LogbirdApiException">
-    /// The server refused (for example <c>masked_export</c> for an evidence export of a masked scope), could not be
-    /// reached in time (<c>unreachable</c>), or is older than 0.2.0; or answered with something other than the requested
-    /// export (<c>invalid_response</c>: a status other than 200, such as a 206 partial answer, or a content type other than
-    /// <c>text/csv</c> for CSV and <c>application/x-ndjson</c> for JSONL, such as a proxy's HTML page), in which case nothing
-    /// is written. If the download fails part way (<c>unreachable</c>), <paramref name="destination"/> holds a partial file.
+    /// The server refused with an HTTP error, keeping its code (for example <c>masked_export</c> for an evidence export of
+    /// a masked scope); could not be reached in time (<c>unreachable</c>); or is older than 0.2.0. A success answer that is
+    /// not the requested export is <c>invalid_response</c>: a success status other than 200 (such as a 206 partial answer),
+    /// or a 200 without the requested content type (<c>text/csv</c> for CSV, <c>application/x-ndjson</c> for JSONL; such as a
+    /// proxy's HTML page). In all these cases nothing is written. If the download fails part way (<c>unreachable</c>),
+    /// <paramref name="destination"/> holds a partial file.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     /// <remarks>
-    /// An exception thrown by <paramref name="destination"/> itself (for example a full disk) reaches you unchanged, so it
-    /// is never mistaken for a network failure; the destination then holds what was written before it.
+    /// An exception thrown by <paramref name="destination"/> itself (for example a full disk) reaches you unchanged, with
+    /// its own stack trace, so it is never mistaken for a network failure; the destination then holds what was written
+    /// before it. A destination failure caused by your cancellation is reported as the cancellation.
     /// </remarks>
     public async Task<long> ExportAsync(ExportQuery query, System.IO.Stream destination, CancellationToken cancellationToken = default)
     {
@@ -489,7 +495,8 @@ public sealed class LogbirdReadClient : IDisposable
                 throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird answered the export with status " + (int)response.StatusCode + " instead of 200; nothing was written.");
             }
 
-            if (!string.Equals(response.Content?.Headers.ContentType?.MediaType, expected, StringComparison.OrdinalIgnoreCase))
+            var content = response.Content;
+            if (content is null || !string.Equals(content.Headers.ContentType?.MediaType, expected, StringComparison.OrdinalIgnoreCase))
             {
                 throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird answered the export with a content type other than " + expected + "; nothing was written.");
             }
@@ -499,17 +506,13 @@ public sealed class LogbirdReadClient : IDisposable
             using var abort = cancellationToken.Register(static state => ((HttpResponseMessage)state!).Dispose(), response);
             try
             {
-                if (response.Content is null)
-                {
-                    return 0;
-                }
-
 #if NET
-                var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                var source = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 #else
-                var source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                var source = await content.ReadAsStreamAsync().ConfigureAwait(false);
 #endif
-                using (source)
+                var cleanedUp = false;
+                try
                 {
                     var buffer = new byte[81920];
                     long total = 0;
@@ -529,6 +532,22 @@ public sealed class LogbirdReadClient : IDisposable
                     cancellationToken.ThrowIfCancellationRequested();
                     return total;
                 }
+                catch (DestinationWriteException)
+                {
+                    // The destination's failure is the one to report: a failure while cleaning up the download (the body
+                    // stream or the response throwing from Dispose) must not replace it.
+                    cleanedUp = true;
+                    DisposeQuietly(source);
+                    DisposeQuietly(response);
+                    throw;
+                }
+                finally
+                {
+                    if (!cleanedUp)
+                    {
+                        source.Dispose();
+                    }
+                }
             }
             catch (DestinationWriteException failure)
             {
@@ -540,15 +559,34 @@ public sealed class LogbirdReadClient : IDisposable
             {
                 throw;
             }
-            catch (Exception e) when (cancellationToken.IsCancellationRequested && e is HttpRequestException or System.IO.IOException or ObjectDisposedException)
+            catch (Exception e) when (cancellationToken.IsCancellationRequested && IsDownloadFailure(e))
             {
                 // The read failed because cancelling disposed the response: report the cancellation, not a network fault.
                 throw new OperationCanceledException("The export was cancelled.", e, cancellationToken);
             }
-            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException)
+            catch (Exception e) when (IsDownloadFailure(e))
             {
                 throw new LogbirdApiException(response.StatusCode, "unreachable", "The export download failed part way: " + e.GetType().Name);
             }
+        }
+    }
+
+    /// <summary>
+    /// A failure reading the download from Logbird: the transport, a body stream that was disposed or timed out, or a
+    /// response decoder that met corrupt data.
+    /// </summary>
+    private static bool IsDownloadFailure(Exception e)
+        => e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException or System.IO.InvalidDataException or TimeoutException;
+
+    private static void DisposeQuietly(IDisposable disposable)
+    {
+        try
+        {
+            disposable.Dispose();
+        }
+        catch
+        {
+            // Cleanup after a destination failure: that failure is the one reported.
         }
     }
 
@@ -566,6 +604,11 @@ public sealed class LogbirdReadClient : IDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (Exception e) when (cancellationToken.IsCancellationRequested && e is HttpRequestException or System.IO.IOException or ObjectDisposedException)
+        {
+            // The destination failed because the caller cancelled (as before #264): report the cancellation.
+            throw new OperationCanceledException("The export was cancelled.", e, cancellationToken);
         }
         catch (Exception e)
         {
