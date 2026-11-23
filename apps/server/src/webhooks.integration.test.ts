@@ -1319,7 +1319,8 @@ it('signs identical masked bytes on initial delivery and resend of a target-only
       action: 'qa.webhook',
       targets: [scope.target],
       context: { ip, userAgent },
-      actor: { type: 'user', id: 'qa-actor', email },
+      // The producer also used the address as the display name (other case, padded): the mask must hide it there too.
+      actor: { type: 'user', id: 'qa-actor', email, name: ` ${email.toUpperCase()}` },
       'context.ip': ip,
       'context.userAgent': userAgent,
       'actor.email': email,
@@ -1345,9 +1346,13 @@ it('signs identical masked bytes on initial delivery and resend of a target-only
       expect(received[0]?.headers['webhook-id']).toBe(received[1]?.headers['webhook-id']);
       const emailPseudonym = createHmac('sha256', fieldMaskKey(env.BETTER_AUTH_SECRET)).update(`${projectId}\0${email}`).digest('hex').slice(0, 24);
       for (const wire of received) {
-        for (const privateValue of [ip, userAgent, email]) expect(wire.payload).not.toContain(privateValue);
+        for (const privateValue of [ip, userAgent, email]) expect(wire.payload.toLowerCase()).not.toContain(privateValue.toLowerCase());
         const body = await verifyWebhook({ ...wire, secret });
-        expect(body).toMatchObject({ id: 'qa-masked-wire', context: { ip: '', userAgent: '' }, actor: { email: `masked:${emailPseudonym}` } });
+        expect(body).toMatchObject({
+          id: 'qa-masked-wire',
+          context: { ip: '', userAgent: '' },
+          actor: { email: `masked:${emailPseudonym}`, name: `masked:${emailPseudonym}` },
+        });
         expect(body).toHaveProperty('attributes', { 'qa.keep': 'visible' });
         expect(body).not.toHaveProperty('payload');
       }
