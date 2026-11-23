@@ -16,17 +16,17 @@ import { absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange
 import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
-export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
+export function TopBar({ onOpenPalette, projectMissing = false }: { onOpenPalette: () => void; projectMissing?: boolean }) {
   // Range labels and the custom range editor follow the console zone; re-render when the reader switches it.
   const zone = useConsoleZone();
   const pickerZone = useMemo(() => ({ offsetMs: zoneOffsetMs, label: zone }), [zone]);
   const matches = useMatches();
   const params = useParams({ strict: false }) as { projectId?: string };
-  // The project's name comes from the workspace's project list (the sidebar reads it too), never a fetch by id: a
-  // project the list does not hold (a stale link on its not-found page) gets no crumb and no request answering 404.
+  // The project's name comes from the workspace's project list (the sidebar reads it too), never a fetch by id, so a
+  // stale link sends no request answering 404. A project the route found missing gets no crumb, sections or range.
   const projects = useQuery(projectsQuery());
   const listed = projects.data?.find((p) => p.id === params.projectId);
-  const projectId = params.projectId && (!projects.isSuccess || listed) ? params.projectId : undefined;
+  const projectId = projectMissing ? undefined : params.projectId;
   const dynamicCrumb = useCrumb();
   const { range, setRange, wholeHistory } = useRange();
   const resolved = useMemo(() => {
@@ -34,7 +34,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
     return { from: new Date(r.fromMs), to: new Date(r.toMs) };
   }, [range]);
 
-  const sections = (params.projectId && !projectId ? [] : matches)
+  const sections = (projectMissing ? [] : matches)
     .filter((m) => m.staticData?.crumb)
     .map((m) => ({
       id: m.id,
@@ -44,7 +44,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       search: m.staticData.crumbSearch,
     }));
   // A project that is not found has no range to pick.
-  const showRange = !(params.projectId && !projectId) && matches.some((m) => m.staticData?.range);
+  const showRange = !projectMissing && matches.some((m) => m.staticData?.range);
   const isMac = useIsMac();
 
   return (

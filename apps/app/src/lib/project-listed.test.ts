@@ -42,3 +42,17 @@ it('leaves the decision to the project request when the list cannot be read', as
   list.mockRejectedValueOnce(new Error('offline'));
   expect(await projectIsListed(client(), 'proj_a')).toBe(true);
 });
+
+it('settles a cold visit with one list read: an id the just-read list lacks is not found without reading it again', async () => {
+  list.mockResolvedValueOnce([{ id: 'proj_a', name: 'A' }]);
+  expect(await projectIsListed(client(), 'proj_stale_link')).toBe(false);
+  expect(list).toHaveBeenCalledTimes(1);
+});
+
+it('answers from a stale cached list at once and refreshes it in the background', async () => {
+  const queryClient = client();
+  queryClient.setQueryData(keys.projects, [{ id: 'proj_a', name: 'A' }], { updatedAt: Date.now() - 60_000 });
+  list.mockResolvedValueOnce([{ id: 'proj_a', name: 'A renamed' }]);
+  expect(await projectIsListed(queryClient, 'proj_a')).toBe(true);
+  await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+});

@@ -9,8 +9,13 @@ import { projectsQuery } from '@/lib/api/queries';
  */
 export async function projectIsListed(queryClient: QueryClient, projectId: string): Promise<boolean> {
   const has = (projects: readonly { id: string }[]) => projects.some((p) => p.id === projectId);
+  const readAt = () => queryClient.getQueryState(projectsQuery().queryKey)?.dataUpdatedAt;
   try {
-    if (has(await queryClient.ensureQueryData(projectsQuery()))) return true;
+    const before = readAt();
+    // A stale cached list still answers at once (navigation never waits on it) and is refreshed in the background.
+    if (has(await queryClient.ensureQueryData({ ...projectsQuery(), revalidateIfStale: true }))) return true;
+    // Read just now (a cold visit): that answer is fresh, so it settles it. Otherwise check a fresh list once.
+    if (readAt() !== before) return false;
     return has(await queryClient.fetchQuery({ ...projectsQuery(), staleTime: 0 }));
   } catch {
     return true;

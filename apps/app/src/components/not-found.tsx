@@ -11,6 +11,7 @@ export function NotFound({ title = 'Nothing here', description, action }: { titl
       <EmptyState
         description={description ?? 'The page you followed does not exist, or it belongs to a workspace you are not part of.'}
         icon={CompassIcon}
+        titleAs="h1"
         title={title}
       >
         {action ?? (
