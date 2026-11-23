@@ -269,7 +269,8 @@ function EndpointCard({
     <li className="flex min-w-0 flex-col gap-3 rounded-lg border p-4" data-testid="webhook-endpoint">
       {/* On a phone the state badge goes under the address, which then keeps the whole width. */}
       <div className="flex min-w-0 items-start justify-between gap-3 max-sm:flex-col max-sm:gap-1.5">
-        <div className="flex min-w-0 flex-col gap-0.5">
+        {/* max-w-full: stacked, the address column may not grow past the card, so the address truncates instead. */}
+        <div className="flex min-w-0 max-w-full flex-col gap-0.5">
           <p className="truncate font-mono text-sm">
             {host}
             <span className="text-muted-foreground">{path}</span>
