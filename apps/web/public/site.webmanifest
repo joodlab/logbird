@@ -7,13 +7,13 @@
   "theme_color": "#0b0b0c",
   "icons": [
     {
-      "src": "/brand/logbird-favicon.svg",
+      "src": "/brand/logbird-favicon.svg?v=ba2c2c5fcc",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/brand/logbird-apple-touch-icon.png",
+      "src": "/brand/logbird-apple-touch-icon.png?v=38b8d914be",
       "sizes": "180x180",
       "type": "image/png"
     }

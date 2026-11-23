@@ -23,7 +23,7 @@ internal sealed class LogbirdClientOwner(LogbirdClient client) : IAsyncDisposabl
         }
         catch (OperationCanceledException)
         {
-            // The host's budget ran out first: stop sending and report everything still unsent on the thread pool, without
+            // The host's budget ran out first: stop sending and report everything not yet delivered on the thread pool, without
             // holding the host any longer.
             _ = Client.AbandonNow();
         }

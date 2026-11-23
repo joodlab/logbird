@@ -51,7 +51,7 @@ app.MapPut("/invoices/{id}", (string id, IAuditLog audit) =>
   serializes its properties would print the user and tenant ids, so do not log carriers.
 - **Shutdown**: a hosted service sends what is queued when the host stops, within `ShutdownTimeout` (10 seconds by
   default) and the host's own `HostOptions.ShutdownTimeout` (30 seconds by default), whichever ends first. When the
-  host's budget ends first, Logbird stops sending at once and reports each event still unsent through `OnDrop` as
+  host's budget ends first, Logbird stops sending at once and reports each event not yet delivered through `OnDrop` as
   `Shutdown` (and in `Stats`) on a background thread, without holding the host; a process that exits immediately
   afterwards may not finish that report. Hosted services stop in reverse
   order of registration: call `AddLogbird` before registering hosted services that record events while they stop.

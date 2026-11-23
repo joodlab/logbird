@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { mediaUrl } from '../lib/asset-url';
 import { imageWidths, type ScreenshotEntry, screenshots, type Variant } from '../lib/media-manifest';
 
 const FORMATS = ['avif', 'webp'] as const;
@@ -9,7 +10,7 @@ const EAGER_VISIBLE =
 const PHONE = '(max-width: 639px)';
 
 const srcSet = (id: string, theme: 'light' | 'dark', format: string, widths: number[]) =>
-  widths.map((width) => `/media/${id}-${theme}-${width}.${format} ${width}w`).join(', ');
+  widths.map((width) => `${mediaUrl(`${id}-${theme}-${width}.${format}`, `${id}/${theme}`)} ${width}w`).join(', ');
 
 function ThemePicture({
   entry,
@@ -37,7 +38,7 @@ function ThemePicture({
   const pick = (variant: Variant) => (theme === 'dark' && variant.dark ? 'dark' : 'light');
   const desktopTheme = pick(entry);
   const widths = imageWidths(entry.width);
-  const fullSize = `/media/${entry.id}-${desktopTheme}-${widths.at(-1)}.webp`;
+  const fullSize = mediaUrl(`${entry.id}-${desktopTheme}-${widths.at(-1)}.webp`, `${entry.id}/${desktopTheme}`);
   const picture = (
     <picture className={zoomLabel ? undefined : className}>
       {entry.phone

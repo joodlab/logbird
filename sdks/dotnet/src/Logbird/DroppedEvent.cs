@@ -3,7 +3,10 @@ using System.Text;
 
 namespace Logbird;
 
-/// <summary>Why an event will not be stored.</summary>
+/// <summary>
+/// Why the SDK stopped trying to deliver an event. A dropped event is not always absent from the audit log: see
+/// <see cref="DroppedEvent.MayBeStored"/>.
+/// </summary>
 public enum DropReason
 {
     /// <summary>The in-memory queue was full (see <see cref="LogbirdOptions.MaxQueueSize"/>).</summary>
@@ -18,7 +21,11 @@ public enum DropReason
     /// <summary>The serialized event is larger than 256 KB.</summary>
     TooLarge = 3,
 
-    /// <summary>The client was disposed and its shutdown timeout ran out before the event was sent.</summary>
+    /// <summary>
+    /// The client shut down before delivery was confirmed: its shutdown timeout (or the host's budget) ran out with the
+    /// event queued or in flight, or the event was tracked after shutdown began. An event in flight may have been stored;
+    /// see <see cref="DroppedEvent.MayBeStored"/>.
+    /// </summary>
     Shutdown = 4,
 
     /// <summary>The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw.</summary>
@@ -34,12 +41,15 @@ public enum DropReason
     Unacknowledged = 7,
 }
 
-/// <summary>An event that will not be stored, passed to <see cref="LogbirdOptions.OnDrop"/>.</summary>
+/// <summary>
+/// An event the SDK stopped trying to deliver, passed to <see cref="LogbirdOptions.OnDrop"/>. Whether the server may
+/// still have stored it is <see cref="MayBeStored"/>.
+/// </summary>
 public sealed class DroppedEvent
 {
     private readonly byte[]? _json;
 
-    internal DroppedEvent(DropReason reason, string? id, string action, byte[]? json, string? detail, string? code = null)
+    internal DroppedEvent(DropReason reason, string? id, string action, byte[]? json, string? detail, string? code = null, bool mayBeStored = false)
     {
         Reason = reason;
         Id = id;
@@ -47,6 +57,7 @@ public sealed class DroppedEvent
         _json = json;
         Detail = detail;
         Code = code;
+        MayBeStored = mayBeStored;
     }
 
     /// <summary>Why the event was dropped.</summary>
@@ -66,6 +77,17 @@ public sealed class DroppedEvent
     /// <c>invalid_entity_id</c>; <c>other</c> for a code this SDK does not know. Null for every other reason.
     /// </summary>
     public string? Code { get; }
+
+    /// <summary>
+    /// Whether the server may have stored this event even though the SDK dropped it. True when the event was put on the
+    /// wire at least once and no answer settled it: a request ended without an answer, or with a 5xx, or with a success
+    /// that did not acknowledge it, or it was still in flight at shutdown. False when the event was never sent, or every
+    /// answer for it said it was not stored. <see cref="DropReason.TooLarge"/> and <see cref="DropReason.Invalid"/> are
+    /// always false; <see cref="DropReason.Rejected"/> is false too, except for the codes <c>stored_event_unreadable</c>
+    /// and <c>unverified_after_parse_failure</c>, which keep an earlier unresolved outcome. A "dropped" event is not necessarily absent: when this is true,
+    /// resend <see cref="Json"/> (the server deduplicates by id) or look the id up before treating the event as lost.
+    /// </summary>
+    public bool MayBeStored { get; }
 
     /// <summary>
     /// The exact JSON that was (or would have been) sent, as UTF-8, after redaction. Empty when the event was dropped
