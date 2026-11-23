@@ -143,6 +143,20 @@ it('keeps a literal __proto__ key and unwraps boxed primitives, as JSON does', (
   expect(JSON.stringify(hidden)).toBe('{"id":"e","action":"a","metadata":{"token":"[redacted]"}}');
 });
 
+it('tells a boxed primitive as JSON does, by its internal slot, so nothing escapes redaction', async () => {
+  const { runInNewContext } = await import('node:vm');
+  // An object with Number.prototype is an ordinary object to JSON: its own keys are redacted.
+  const numberLike = Object.assign(Object.create(Number.prototype), { secret: 'visible' });
+  expect(JSON.stringify(redact()({ id: 'e', action: 'a', metadata: numberLike } as unknown as EventInput))).toBe(
+    '{"id":"e","action":"a","metadata":{"secret":"[redacted]"}}',
+  );
+  // A boxed number from another realm is a scalar to JSON: a matched party holding one is replaced.
+  const foreign = runInNewContext('new Number(7)') as object;
+  expect(JSON.stringify(redact({ keys: /actor/ })({ id: 'e', action: 'a', actor: foreign } as unknown as EventInput))).toBe(
+    '{"id":"e","action":"a","actor":"[redacted]"}',
+  );
+});
+
 it('lists the same identifier fields as the .NET SDK', () => {
   expect(IDENTIFIER_FIELDS).toEqual([
     'actor.type',

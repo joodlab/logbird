@@ -422,11 +422,27 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
     type Context = { level: Level; whole: boolean; changed: boolean };
     const contexts = new WeakMap<object, Context>();
     const omitted = (value: unknown) => value === undefined || typeof value === 'function' || typeof value === 'symbol';
-    const boxed = (value: object) => value instanceof Number || value instanceof String || value instanceof Boolean || value instanceof BigInt;
+    // A boxed primitive as JSON.stringify tells one, by its internal slot (any realm), not by its prototype: only a real
+    // Number, String, Boolean or BigInt object is serialized as its primitive.
+    const brands: Array<(this: unknown) => unknown> = [
+      Number.prototype.valueOf,
+      String.prototype.valueOf,
+      Boolean.prototype.valueOf,
+      BigInt.prototype.valueOf,
+    ];
+    const boxed = (value: object) =>
+      brands.some((unbox) => {
+        try {
+          unbox.call(value);
+          return true;
+        } catch {
+          return false;
+        }
+      });
     const isObject = (value: unknown): value is Record<string, unknown> =>
       !!value && typeof value === 'object' && !Array.isArray(value) && !boxed(value);
     const keep = (value: unknown, context: Context) => {
-      if (value && typeof value === 'object' && !boxed(value)) contexts.set(value, context);
+      if (value && typeof value === 'object') contexts.set(value, context);
       return value;
     };
     const plain: Context = { level: 'plain', whole: false, changed: false };
