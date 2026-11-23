@@ -15,6 +15,12 @@ describe('workspace activity chips (#226)', () => {
       '(category:auth revoked)',
       'category:unknown',
       'category:auth*',
+      // #220: a negated group, a dash after `)`, and terms inside a quoted value are never a chip.
+      'NOT (category:auth revoked)',
+      '-(category:auth)',
+      '(revoked)-category:auth',
+      'description:"category:auth"',
+      '(action:x)-/a"b"category:auth tail/',
     ]) {
       expect(activityChip(q), q).toBeUndefined();
       expect(activityFreeText(q), q).toBe(q);
@@ -29,6 +35,10 @@ describe('workspace activity chips (#226)', () => {
       'category:member -category:auth',
       'revoked',
       'category:member actor.name:"Nadia  Example"',
+      // #220: quoted attribute keys and negated groups come back exactly as written.
+      'category:auth "attr.ticket status":open',
+      'category:auth NOT (actor:qa-user-1 OR "attr.ticket status":closed)',
+      'category:auth (revoked)-action:x',
     ]) {
       expect(roundTrip(q), q).toBe(q);
     }

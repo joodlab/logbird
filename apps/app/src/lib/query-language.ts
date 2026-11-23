@@ -175,7 +175,7 @@ export function tokenize(input: string): QueryToken[] {
         valueKind: v.kind,
         valueStart,
         op: v.op,
-        keyEnd: i + key[1].length + (key[2] ?? '').length,
+        keyEnd: i + (key[1] ?? '').length + (key[2] ?? '').length,
       });
       i = v.end;
       continue;
