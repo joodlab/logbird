@@ -41,6 +41,14 @@ export interface QueryToken {
 }
 
 const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
+/**
+ * A dash that cannot negate (it follows `)`) starts a bare word, as the server reads it: everything up to whitespace,
+ * a bracket or `:`, quotes and slashes included. Followed by `:` that word is a field name (`-/a"b"category`).
+ */
+const LITERAL_DASH_RUN = /^-(?:(?!&&|\|\|)[^\s():[\]{}<>])*/;
+const LITERAL_DASH_KEY_RE = /^(-)((?:(?!&&|\|\|)[^\s():[\]{}<>])*)\s*:/;
+/** A bare word. A quote inside it is part of it, as the server reads a bare run (`tail"` never opens a phrase). */
+const WORD_RE = /^(-?)([^\s()"][^\s()]*)/;
 const OPERATORS = new Set(['OR', 'AND', 'NOT']);
 
 /** End offset (exclusive) of a delimited run starting at `i` (`"…"`, `/…/`), honouring backslash escapes. */
@@ -119,16 +127,21 @@ export function tokenize(input: string): QueryToken[] {
       continue;
     }
     const ch = rest[0] ?? '';
-    if (ch === '(' || ch === ')' || (ch === '-' && rest[1] === '(')) {
+    // As in the server's parser, `-` negates only at the start, after whitespace or after `(`. Anywhere else (right
+    // after `)`, say) it is part of the word: `(a:b)-action:x` is the attribute `-action`, not NOT action.
+    const negatable = i === 0 || /[\s(]/.test(input[i - 1] ?? '');
+    if (ch === '(' || ch === ')' || (ch === '-' && rest[1] === '(' && negatable)) {
       const raw = ch === '-' ? '-(' : ch;
       tokens.push({ kind: 'paren', raw, start: i, end: i + raw.length, negated: ch === '-' });
       i += raw.length;
       continue;
     }
-    const key = KEY_RE.exec(rest);
+    const key = KEY_RE.exec(rest) ?? (negatable ? null : LITERAL_DASH_KEY_RE.exec(rest));
     if (key) {
+      const negated = key[1] === '-' && negatable;
+      const field = negated || key[1] !== '-' ? (key[2] ?? '') : `-${key[2] ?? ''}`;
       const valueStart = skipWhitespace(input, i + key[0].length);
-      const v = scanValue(input, valueStart, key[2] === 'record');
+      const v = scanValue(input, valueStart, field === 'record');
       const raw = input.slice(i, v.end);
       const valueRaw = input.slice(skipWhitespace(input, valueStart + (v.op?.length ?? 0)), v.end);
       const decoded =
@@ -138,11 +151,11 @@ export function tokenize(input: string): QueryToken[] {
         raw,
         start: i,
         end: v.end,
-        negated: key[1] === '-',
+        negated,
         // Case is significant: unknown fields are attribute keys (attr.metadata.supportTicket).
-        field: key[2] ?? '',
+        field,
         value: decoded.value,
-        wildcard: decoded.wildcard && (key[2] !== 'record' || valueRaw === '*'),
+        wildcard: decoded.wildcard && (field !== 'record' || valueRaw === '*'),
         valueKind: v.kind,
         valueStart,
         op: v.op,
@@ -150,7 +163,7 @@ export function tokenize(input: string): QueryToken[] {
       i = v.end;
       continue;
     }
-    const neg = ch === '-' && (rest[1] === '"' || rest[1] === '/') ? 1 : 0;
+    const neg = ch === '-' && negatable && (rest[1] === '"' || rest[1] === '/') ? 1 : 0;
     const delimiter = rest[neg];
     if (delimiter === '"' || delimiter === '/') {
       const end = scanDelimited(input, i + neg, delimiter);
@@ -160,7 +173,7 @@ export function tokenize(input: string): QueryToken[] {
       i = end;
       continue;
     }
-    const word = /^(-?)([^\s()"]+)/.exec(rest);
+    const word = ch === '-' && !negatable ? LITERAL_DASH_RUN.exec(rest) : WORD_RE.exec(rest);
     if (word) {
       const raw = word[0];
       const isOperator = OPERATORS.has(raw);
@@ -169,8 +182,8 @@ export function tokenize(input: string): QueryToken[] {
         raw,
         start: i,
         end: i + raw.length,
-        negated: !isOperator && word[1] === '-' && raw.length > 1,
-        value: raw.length > 1 ? (word[2] ?? raw) : raw,
+        negated: !isOperator && word[1] === '-' && raw.length > 1 && negatable,
+        value: raw.length > 1 && negatable ? (word[2] ?? raw) : raw,
       });
       i += raw.length;
       continue;

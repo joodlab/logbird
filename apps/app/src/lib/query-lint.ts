@@ -5,6 +5,7 @@
  *
  * Nothing here changes what the server accepts (the server parser is the source of truth).
  */
+import { parseQueryExpression, type QueryAtom, QueryError } from '@logbird/contracts';
 import { type QueryToken, tokenize } from './query-language';
 
 export interface QueryFix {
@@ -40,6 +41,29 @@ function rewrite(field: string, op: string, value: string, negated: boolean): { 
  * only then is `word = value` read as a comparison rather than free text.
  */
 export function lintQuery(q: string, isField: (name: string) => boolean): QueryFix[] {
+  // Never from inside a value the server reads as one: text in `@meta:"please !tenant:t here"` is data, not syntax to
+  // fix, even when the proposed span runs on past the value's end (`"meta":"please !tenant:t"tail`).
+  const values = serverValueSpans(q);
+  return lintTokens(q, isField).filter((f) => !values.some((v) => f.start >= v.start && f.start < v.end));
+}
+
+/** Where the server's parse has field values (none when it does not parse: then every fix is a candidate). */
+function serverValueSpans(q: string): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  const visit = (node: QueryAtom) => {
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else if (node.kind === 'field') spans.push({ start: node.valueStart, end: node.end });
+  };
+  try {
+    for (const branch of parseQueryExpression(q)) for (const part of branch) visit(part.atom);
+  } catch (error) {
+    if (!(error instanceof QueryError)) throw error;
+  }
+  return spans;
+}
+
+function lintTokens(q: string, isField: (name: string) => boolean): QueryFix[] {
   const fixes: QueryFix[] = [];
   const solid = tokenize(q).filter((t) => t.kind !== 'space');
   const valueRaw = (t?: QueryToken) => (t && (t.kind === 'text' || t.kind === 'phrase') && !t.negated ? t.raw : null);

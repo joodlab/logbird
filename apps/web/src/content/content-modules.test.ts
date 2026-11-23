@@ -25,6 +25,7 @@ const MOVED = [
   'components/marketing/use-case.tsx',
   'routes/use-cases.compliance-evidence.tsx',
   'routes/use-cases.customer-audit-logs.tsx',
+  'routes/use-cases.support-investigations.tsx',
   'components/marketing/self-host-cta.tsx',
   'components/marketing/steps.tsx',
 ];
