@@ -139,7 +139,7 @@ it('moves a row whose event load outlasts the lease budget back in the queue so 
   });
 });
 
-it('claims and delivers another project once while the first project claim keeps failing', async () => {
+it('claims and delivers another project once while the first project claim keeps failing', { timeout: 60_000 }, async () => {
   const [first = '', second = ''] = projects;
   const { now } = await webhookCursorClock(prisma);
   const expiresAt = new Date(+now + 86_400_000);

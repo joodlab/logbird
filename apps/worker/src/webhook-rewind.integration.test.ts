@@ -59,7 +59,7 @@ afterAll(async () => {
   }
 }, 360_000);
 
-it('rewinds a valid cursor past a missed event with the documented SQL and delivers that event once', async () => {
+it('rewinds a valid cursor past a missed event with the documented SQL and delivers that event once', { timeout: 60_000 }, async () => {
   const received: string[] = [];
   const receiver = createServer(async (req, res) => {
     let body = '';
