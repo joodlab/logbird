@@ -333,12 +333,14 @@ public class HardeningFollowUpTests
     [Fact]
     public async Task A_response_whose_disposal_blocks_cannot_hold_a_cancelled_call()
     {
-        var release = new ManualResetEventSlim();
-        try
+        // Each round's disposal stays blocked until that round's call has returned, then is released, so blocked disposals
+        // never pile up and starve the thread pool (which would stall the test for its own reasons on a small runner).
+        for (var i = 0; i < 5; i++)
         {
-            await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+            var release = new ManualResetEventSlim();
+            try
             {
-                for (var i = 0; i < 20; i++)
+                await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
                 {
                     using var caller = new CancellationTokenSource();
                     using var reader = Reader(new Answer(_ =>
@@ -347,12 +349,12 @@ public class HardeningFollowUpTests
                         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new BlockingDisposeContent(release) });
                     }));
                     await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.SearchAsync(new EventSearch(), caller.Token));
-                }
-            });
-        }
-        finally
-        {
-            release.Set();
+                });
+            }
+            finally
+            {
+                release.Set();
+            }
         }
     }
 
