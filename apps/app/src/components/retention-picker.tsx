@@ -67,7 +67,13 @@ export function RetentionPicker({
           return (
             <RadioChoice className="tabular-nums" key={days} value={days} variant="chip">
               {formatRetention(days)}
-              {hint ? <span className="sr-only">, {hint.toLowerCase()}</span> : null}
+              {hint ? (
+                // Read out at every size; shown on a phone, where the cards that show it on larger screens are left out.
+                <span className="font-normal text-muted-foreground text-xs sm:sr-only">
+                  <span className="sr-only">, </span>
+                  {hint.toLowerCase()}
+                </span>
+              ) : null}
               {current === days ? (
                 <span className="font-normal text-xs">
                   <span className="sr-only">, </span>current

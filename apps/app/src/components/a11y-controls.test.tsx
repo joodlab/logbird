@@ -104,6 +104,10 @@ describe('RetentionPicker (PHONE-08)', () => {
     expect(tokens(shortcuts)).toContain('max-sm:hidden');
     // The chips stay at every size: they are the one control there.
     expect(tokens(el.querySelector('[role="radiogroup"]') as Element)).not.toContain('max-sm:hidden');
+    // The cards' hints move onto the chips on a phone (visible there, read out everywhere).
+    const recommended = [...el.querySelectorAll('[role="radio"] span')].find((s) => s.textContent?.endsWith('recommended')) as Element;
+    expect(tokens(recommended)).toContain('sm:sr-only');
+    expect(tokens(recommended)).not.toContain('sr-only');
   });
 
   it('moves the selection with the arrow keys', async () => {
