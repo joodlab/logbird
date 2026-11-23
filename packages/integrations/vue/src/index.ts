@@ -150,11 +150,11 @@ function createTrail(source: () => RawRequest) {
     const state = snapshot();
     return revision === selection ? state : undefined;
   };
-  /** Settles every waiter on disposal, even when a fetcher ignores its abort signal and never settles. */
-  let settleDisposal: () => void = () => undefined;
-  const disposal = new Promise<void>((resolve) => {
-    settleDisposal = resolve;
-  });
+  /**
+   * Resolvers of the explicit calls still waiting. Each removes itself when it settles (nothing accumulates over a long
+   * mount), and disposal settles the rest, even when a fetcher ignores its abort signal and never settles.
+   */
+  const waiters = new Set<() => void>();
   /** The newest read, so an overtaken explicit call can resolve when the read that won finishes. */
   let latest: Promise<void> = Promise.resolve();
   const start = (state: State, append: boolean): Promise<void> => {
@@ -166,7 +166,21 @@ function createTrail(source: () => RawRequest) {
   };
   /** Resolves when this read, or the read that superseded it, has finished. */
   const follow = (read: Promise<void>): Promise<void> =>
-    Promise.race([disposal, read.then(() => (disposed || latest === read ? undefined : follow(latest)))]);
+    new Promise<void>((resolve) => {
+      if (disposed) return resolve();
+      const done = () => {
+        waiters.delete(done);
+        resolve();
+      };
+      waiters.add(done);
+      const step = (current: Promise<void>) => {
+        current.then(() => {
+          if (disposed || latest === current) done();
+          else step(latest);
+        }, done);
+      };
+      step(read);
+    });
   // The queued run is scheduled before this continuation, so `latest` is already the winning read when it runs.
   const afterQueued = () => Promise.resolve().then(() => follow(latest));
   const refresh = () => {
@@ -217,7 +231,7 @@ function createTrail(source: () => RawRequest) {
   );
   onScopeDispose(() => {
     disposed = true;
-    settleDisposal();
+    for (const done of [...waiters]) done();
     generation++;
     controller?.abort();
   });

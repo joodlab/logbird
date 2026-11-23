@@ -648,3 +648,15 @@ it('settles an awaited refresh on disposal when the fetcher never settles', asyn
   scope.stop();
   await expect(waiting).resolves.toBeUndefined();
 });
+
+// Round 11: settled explicit calls leave nothing behind over a long mount.
+it('keeps no waiter for explicit calls that have settled', async () => {
+  const fetcher = vi.fn().mockResolvedValue(page(['x']));
+  const { trail, wrapper } = mountTrail(() => useAuditTrail(() => ({ fetcher, tenant: 'acme' })));
+  await flushPromises();
+  for (let i = 0; i < 50; i++) await trail.refresh();
+  expect(fetcher).toHaveBeenCalledTimes(51);
+  // Disposal after settled calls has nothing left to settle, and a later call resolves at once.
+  wrapper.unmount();
+  await expect(trail.refresh()).resolves.toBeUndefined();
+});
