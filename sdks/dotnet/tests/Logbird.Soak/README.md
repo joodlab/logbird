@@ -39,70 +39,95 @@ first requests of a run go once through every configured fault, so even a short 
 | `toolarge` | 413 `payload_too_large` |
 
 **Layer 2: real server (manual, part of the pre-publication gate).** `--upstream <url>` turns the stand-in into a
-proxy in front of a real Logbird.
-- **Faults that reach the server:** `latency`, `resetafterstore`, `emptyack` and `partial` forward the batch first,
-  then act on the server's answer. `partial` reports some events the server stored as unresolved, so the client
-  resends them and the server's deduplication is exercised.
+proxy in front of a real Logbird. It forwards the original request bytes with every header except the hop-by-hop ones
+(so the server parses and records exactly what the SDK sent), and lets the server decide about the key, the body and
+each event.
+- **Faults that reach the server:**
+  - `latency` delays the server's answer on its way back;
+  - `resetafterstore` forwards the batch, then resets the connection whatever the server answered;
+  - `emptyack` replaces a 202 with `{}`;
+  - `partial` turns a 202 into a 503 `ingest_pending` that lists some stored events as unresolved (never a rejected
+    one, matched by position), keeping the server's other warnings, so the client resends them and the server's
+    deduplication is exercised.
+
+  When the server's own answer is not a 202, `emptyack` and `partial` pass it through unchanged; the sample marks it as
+  `passthrough`.
 - **Faults that never reach the server:** `reset`, `hang`, `ratelimited`, `unavailable` and `toolarge` answer without
-  forwarding, as a broken network or gateway would. `reject` is not used.
-- **Canary:** before the load, one event goes straight to the server and must be delivered, so a wrong ingest key
-  fails the run at once. It is then read back with the read key, and its project must be `LOGBIRD_SOAK_PROJECT_ID`
-  before anything is written to ClickHouse.
-- **Completeness:** after the load, the run reads its events back by tag (`metadata.soakRun`), retrying transient
-  errors, until every id the server acknowledged to the client is there, or five minutes pass.
-- **Duplicates:** search answers one row per event id, so it cannot show a duplicate. The run counts, in the local
-  server's ClickHouse, the run's event ids with more than one **raw row** (no `FINAL`). It proves that check first by
-  inserting two identical rows in one statement (with `optimize_on_insert = 0`, so ClickHouse does not collapse them on
-  insert) under a self-test tag in the same fictional project and requiring them to be reported (three attempts, in
-  case a background merge collapses them first).
-  A background merge can collapse duplicates before the count, so a pass is evidence, not proof; a fail is a real
-  duplicate.
-- **ClickHouse settings:** every statement sets what it depends on, so no server or user profile changes its meaning.
-  The raw-row counts send `final=0`. The self-test insert sends `optimize_on_insert=0`, `async_insert=0` and
-  `insert_deduplicate=0`.
+  forwarding, as a broken network or gateway would. `reject` is not used, and the report shows the weights actually
+  used.
+- **Canary:** before the load, one event goes straight to the server and must be delivered, so a wrong ingest key fails
+  at once.
+  - It goes through the ingest key, so it can only land in that key's own project.
+  - It is then read back with the read key, and its project must be `LOGBIRD_SOAK_PROJECT_ID`.
+  - It must also be found in the configured ClickHouse database under that project before anything is written there
+    directly.
+- **Self-test:** the duplicate check proves itself with a control no merge can collapse: one event id written at two
+  timestamps a millisecond apart (different sorting keys), which must be reported as one duplicated id.
+- **Completeness:** after the load, the run pages through its events by tag (`metadata.soakRun`). A failed page is
+  retried with the same cursor and the earlier pages are kept. It continues until every id the server acknowledged to
+  the client is there, or a deadline of five minutes plus 100 ms per expected page passes.
+- **Reconciliation:** the run's distinct event ids in the raw ClickHouse rows must all be tracked events, and every
+  event read back must have a raw row. An empty run passes.
+- **Duplicates:** the run counts its event ids with more than one raw row (no `FINAL`).
+- **Deduplication exercised:** at least one event must have been forwarded again after the server had acknowledged it
+  (counted from the server's own answers), whenever `partial`, `resetafterstore` or `emptyack` is configured.
+- **ClickHouse settings:** every statement sets what it depends on, so no server or user profile changes its meaning,
+  and asks for `FORMAT TabSeparated` explicitly.
+  - Reads send `final=0`, `empty_result_for_aggregation_by_empty_set=0`, `max_rows_to_group_by=0`,
+    `group_by_overflow_mode=throw`, `max_result_rows=0` and `result_overflow_mode=throw`.
+  - The self-test insert sends `optimize_on_insert=0`, `async_insert=0` and `insert_deduplicate=0`.
+
+  The report lists them too.
 
 **What the read-back proves, and what it cannot.**
-- **It proves:**
-  - every event the server acknowledged to the client is stored and readable by its id under the run's tag (the run
-    waits up to five minutes for indexing);
-  - no event id has more than one raw row at the time of the count;
-  - every stored event of the run is one the harness tracked.
+- **It proves, for the rows of the run that carry its tag and are visible when the run counts them:**
+  - every event the server acknowledged to the client is stored and readable by its id;
+  - no event id has more than one raw row;
+  - every one of those ids is an event the harness tracked.
 
-  With the accounting above, that shows the SDK's retries, resends after a lost answer and partial resends did not make
-  the server store an id twice.
+  Together with the accounting, that shows the SDK's retries, resends after a lost answer and partial resends (counted
+  as "deduplication exercised") did not leave the server with an id stored twice at that moment.
 - **It cannot show:**
-  - an event stored twice under two different ids. Only "nothing is stored that was not tracked" covers that, and only
-    for events that still carry the run's tag, which the server copies from the payload; the harness gives every event
-    its own id, so the SDK cannot re-key a retry without that check failing;
-  - duplicates a background merge collapsed before the count, so a pass is evidence, not proof;
-  - a stored event whose content differs from what was sent, because it compares ids, not payloads (the stand-in's
-    first-arrival fingerprint covers changed retries on the wire, not what the server keeps);
-  - events stored without the run's tag, which would appear as missing rather than as strangers;
-  - durability across a server restart, which the run does not perform.
+  - **Copies that leave no trace in those rows.** Two rows with the same sorting key (project, timestamp, id) that a
+    background merge collapsed before the count, or an extra copy stored without the run's tag. The count is a
+    snapshot, not a history.
+  - **An event stored twice under two different ids.** Only a copy under an untracked id is caught (as a raw row that
+    was never tracked). A copy re-keyed onto another tracked event's id shows only if both rows survive to the count.
+  - **Content.** It compares ids, not payloads. The stand-in's first-arrival fingerprint covers changed retries on the
+    wire, not what the server keeps.
+  - **Durability across a server restart**, which the run does not perform.
+  - **Hash collisions.** Ids are compared as 64-bit hashes; the chance of a collision is about n² / 2⁶⁵, under one in a
+    million for the 4 million events a run may track.
+  - **Receipt by the SDK.** "Acknowledged to the client" means the proxy finished writing that answer. If the SDK had
+    already abandoned the request, `Stats.Delivered` would come out lower, so the counter check could fail spuriously
+    but never pass wrongly. It has not happened in a run: answers come within the fault's 2 s, well inside the 10 s
+    request timeout.
 
-Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse, with no user
-info, query or fragment, and its HTTP clients never follow a redirect, so keys never leave the machine and a production
-host is refused. Everything else comes from the environment:
+**Safety.** Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse,
+with no user info, query or fragment. Every HTTP client it uses, the SDK clients included, is given a handler that never
+uses a proxy (environment or system) and never follows a redirect, so keys never leave the machine and a production host
+is refused. Keys and the ClickHouse login come only from the environment:
 
 ```bash
 # From the repository root, with the root .env (local services) and a server from master on 127.0.0.1:4741.
-# dotenv -o: the local .env overrides anything inherited (a DATABASE_URL pointing elsewhere is never used).
+# dotenv -o makes the local .env override inherited values; local-only.mjs then refuses unless DATABASE_URL,
+# CLICKHOUSE_URL and REDIS_URL all point at this machine, before the fixture script writes anything.
 F=/path/outside/the/repo/soak.env
-pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
+pnpm exec dotenv -o -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
+  pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
 pnpm exec dotenv -o -e .env -e "$F" -- sh -c '
   export LOGBIRD_SOAK_INGEST_KEY="$LOGBIRD_IT_INGEST_KEY" LOGBIRD_SOAK_READ_KEY="$LOGBIRD_IT_READ_KEY"
   export LOGBIRD_SOAK_PROJECT_ID="$LOGBIRD_IT_PROJECT_ID" LOGBIRD_SOAK_CLICKHOUSE_URL="$CLICKHOUSE_URL"
   export LOGBIRD_SOAK_CLICKHOUSE_USER="$CLICKHOUSE_USER" LOGBIRD_SOAK_CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD"
   export LOGBIRD_SOAK_CLICKHOUSE_DATABASE="$CLICKHOUSE_DATABASE"
   cd sdks/dotnet && dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --upstream http://127.0.0.1:4741 --duration 2h --rate 50'
-pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts delete "$F"
+pnpm exec dotenv -o -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
+  pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts delete "$F"
 ```
 
 The fixture file holds fresh keys with owner-only permissions; keep it outside the repository. `delete` purges the
 project, including the canary and the ClickHouse self-test rows, then the fictional workspace. If a recent insert is
-still settling it fails with `ingest_pending` and keeps the file: run it again a minute later. Proxy variables
-(`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) must be unset, or `NO_PROXY` must list `127.0.0.1,localhost,::1`, because the
-SDK's HTTP client would otherwise send the ingest key to the proxy; the run refuses to start otherwise.
+still settling it fails with `ingest_pending` and keeps the file: run it again a minute later.
 
 Before NuGet publishing is enabled, the gate needs one layer-2 run of at least 2 hours against a local server built from
 master, with its report attached to the gate brief.

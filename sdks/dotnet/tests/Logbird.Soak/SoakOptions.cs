@@ -141,26 +141,16 @@ internal sealed class SoakOptions
             {
                 throw new ArgumentException("--upstream needs a fault mix with at least one fault other than reject");
             }
-
-            // The SDK's own HTTP client honours the proxy variables, and on Linux they apply to loopback too: the real
-            // ingest key would go to the proxy. Refuse unless loopback is exempt.
-            foreach (var variable in new[] { "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy" })
-            {
-                if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(variable)) && !LoopbackExempt())
-                {
-                    throw new ArgumentException(variable + " is set: unset it, or add 127.0.0.1,localhost,::1 to NO_PROXY, so keys never reach a proxy");
-                }
-            }
         }
 
         return o;
     }
 
-    /// <summary>The configuration for the report (no keys, no credentials).</summary>
-    public JsonObject ToJson()
+    /// <summary>The configuration for the report (no keys, no credentials), with the fault weights the run actually used.</summary>
+    public JsonObject ToJson(IReadOnlyDictionary<Fault, int> effectiveFaults)
     {
         var faults = new JsonObject();
-        foreach (var f in Faults.OrderBy(f => f.Key))
+        foreach (var f in effectiveFaults.OrderBy(f => f.Key))
         {
             faults[f.Key.ToString()] = f.Value;
         }
@@ -200,14 +190,6 @@ internal sealed class SoakOptions
         }
 
         return new Uri(uri.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/");
-    }
-
-    private static bool LoopbackExempt()
-    {
-        var list = (Environment.GetEnvironmentVariable("NO_PROXY") ?? Environment.GetEnvironmentVariable("no_proxy") ?? string.Empty)
-            .Split(',').Select(v => v.Trim()).ToArray();
-        // Explicit entries only: .NET does not treat "*" as bypassing every host.
-        return list.Contains("127.0.0.1") && list.Contains("localhost") && (list.Contains("::1") || list.Contains("[::1]"));
     }
 
     private static string Required(string variable)

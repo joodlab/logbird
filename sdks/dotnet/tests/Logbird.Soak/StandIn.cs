@@ -78,6 +78,8 @@ internal sealed class StandIn : IDisposable
     private readonly LongMap _stored;
     private readonly LongMap _firstSeen;
     private readonly LongMap _acknowledged;
+    private readonly LongMap? _upstreamAcknowledged;
+    private long _upstreamResends;
     private readonly ConcurrentDictionary<Fault, long> _faults = new();
     private readonly ConcurrentDictionary<Socket, byte> _sockets = new();
     private readonly Samples _samples;
@@ -94,6 +96,10 @@ internal sealed class StandIn : IDisposable
         _stored = new LongMap(expectedEvents);
         _firstSeen = new LongMap(expectedEvents);
         _acknowledged = new LongMap(expectedEvents);
+        if (upstream is not null)
+        {
+            _upstreamAcknowledged = new LongMap(expectedEvents);
+        }
         _weights = weights.Where(w => w.Value > 0).Select(w => (w.Key, w.Value)).ToArray();
         _totalWeight = _weights.Sum(w => w.Weight);
         _random = new Random(seed);
@@ -121,6 +127,12 @@ internal sealed class StandIn : IDisposable
 
     /// <summary>Id hashes acknowledged to the client in an answer it received (accepted in a 202 or in 503 details).</summary>
     public LongMap Acknowledged => _acknowledged;
+
+    /// <summary>
+    /// Upstream mode: events forwarded again after the server had already acknowledged them (in any answer, whether or not
+    /// it reached the client). Each one exercised the server's deduplication.
+    /// </summary>
+    public long UpstreamResends => Interlocked.Read(ref _upstreamResends);
 
     /// <summary>First-seen fingerprints by id hash.</summary>
     public LongMap FirstSeen => _firstSeen;
@@ -326,7 +338,15 @@ internal sealed class StandIn : IDisposable
                 return false;
         }
 
-        if (head.ContentLength > MaxBodyBytes)
+        if (_upstream is not null && head.ContentLength > 8L * MaxBodyBytes)
+        {
+            // Far beyond anything the SDK sends: refuse to buffer it rather than forward it.
+            _samples.Add(exchange);
+            Reset(socket);
+            return false;
+        }
+
+        if (_upstream is null && head.ContentLength > MaxBodyBytes)
         {
             // The server's body limit answers without reading the body; the connection cannot be reused after that.
             await WriteAsync(stream, exchange, 413, Error("payload_too_large", "Request exceeds 5 MB."), null, close: true).ConfigureAwait(false);
@@ -381,7 +401,7 @@ internal sealed class StandIn : IDisposable
             case Fault.TooLarge:
                 await WriteAsync(stream, exchange, 413, Error("payload_too_large", "Request exceeds 5 MB."), null).ConfigureAwait(false);
                 return true;
-            case Fault.Latency:
+            case Fault.Latency when _upstream is null:
                 // 1 to 2,000 ms. The sample records the measured wait, not the request, so a skipped wait shows as 0.
                 var waited = System.Diagnostics.Stopwatch.StartNew();
                 await Task.Delay(NextInt(2000) + 1).ConfigureAwait(false);
@@ -389,7 +409,14 @@ internal sealed class StandIn : IDisposable
                 break;
         }
 
-        if (_upstream is null && !string.Equals(head.Header("authorization"), _authorization, StringComparison.Ordinal))
+        // Upstream mode forwards the original bytes: the server, not the stand-in, decides about the key, the body and
+        // every event. Fingerprinting above is only an observation.
+        if (_upstream is not null)
+        {
+            return await ForwardAsync(stream, socket, exchange, head, body, events, fault).ConfigureAwait(false);
+        }
+
+        if (!string.Equals(head.Header("authorization"), _authorization, StringComparison.Ordinal))
         {
             await WriteAsync(stream, exchange, 401, Error("invalid_api_key", "A valid API key is required."), null).ConfigureAwait(false);
             return true;
@@ -413,9 +440,7 @@ internal sealed class StandIn : IDisposable
             return true;
         }
 
-        return _upstream is null
-            ? await StoreAsync(stream, socket, exchange, events, raw, fault).ConfigureAwait(false)
-            : await ForwardAsync(stream, socket, exchange, head, body, events, fault).ConfigureAwait(false);
+        return await StoreAsync(stream, socket, exchange, events, raw, fault).ConfigureAwait(false);
     }
 
     private async Task<bool> StoreAsync(NetworkStream stream, Socket socket, Exchange exchange, List<JsonNode?> events, string[] raw, Fault fault)
@@ -517,15 +542,37 @@ internal sealed class StandIn : IDisposable
     }
 
     /// <summary>Forwards a request to the real server, then applies the faults that need its answer.</summary>
-    private async Task<bool> ForwardAsync(NetworkStream stream, Socket socket, Exchange exchange, RequestHead head, byte[] body, List<JsonNode?> events, Fault fault)
+    private async Task<bool> ForwardAsync(NetworkStream stream, Socket socket, Exchange exchange, RequestHead head, byte[] body, List<JsonNode?>? events, Fault fault)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, _upstreamEvents) { Content = new ByteArrayContent(body) };
-        message.Content.Headers.TryAddWithoutValidation("Content-Type", head.Header("content-type") ?? "application/json");
-        foreach (var name in new[] { "authorization", "user-agent", "logbird-retry" })
+
+        // Every request header goes through except the hop-by-hop ones, so the server parses and records exactly what the
+        // SDK sent (Content-Encoding, X-Logbird-SDK, Logbird-Retry, Authorization, User-Agent, ...).
+        foreach (var header in head.All)
         {
-            if (head.Header(name) is { } value)
+            var name = header.Key.ToLowerInvariant();
+            if (name is "host" or "content-length" or "connection" or "keep-alive" or "transfer-encoding" or "expect" or "te" or "upgrade"
+                || name.StartsWith("proxy-", StringComparison.Ordinal))
             {
-                message.Headers.TryAddWithoutValidation(name, value);
+                continue;
+            }
+
+            if (name.StartsWith("content-", StringComparison.Ordinal))
+            {
+                message.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+            else
+            {
+                message.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+
+        // A forwarded event the server already acknowledged is a resend: it exercises the server's deduplication.
+        foreach (var e in events ?? [])
+        {
+            if (Text(e is JsonObject o ? o["id"] : null, out var id, out _) && _upstreamAcknowledged!.Contains(LongMap.Hash(JsTrim(id!))))
+            {
+                Interlocked.Increment(ref _upstreamResends);
             }
         }
 
@@ -546,6 +593,17 @@ internal sealed class StandIn : IDisposable
             var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
             var status = (int)response.StatusCode;
             var answer = TryParse(bytes);
+            RecordUpstreamAcknowledgements(status, answer);
+
+            // Latency in upstream mode delays the server's answer on its way back.
+            if (fault == Fault.Latency)
+            {
+                var waited = System.Diagnostics.Stopwatch.StartNew();
+                await Task.Delay(NextInt(2000) + 1).ConfigureAwait(false);
+                exchange.DelayMs = (int)waited.ElapsedMilliseconds;
+            }
+
+            // Forwarded, then the connection is reset whatever the server answered.
             if (fault == Fault.ResetAfterStore)
             {
                 _samples.Add(exchange);
@@ -559,16 +617,23 @@ internal sealed class StandIn : IDisposable
                 return true;
             }
 
-            if (fault == Fault.PartialUnavailable && status == 202 && answer is JsonObject stored && stored["ids"] is JsonArray storedIds)
+            if (fault == Fault.PartialUnavailable && status == 202 && events is not null && answer is JsonObject stored && stored["ids"] is JsonArray storedIds)
             {
                 // The server stored the batch; report some stored events as unresolved so the client resends them and the
-                // server's own deduplication is exercised.
+                // server's own deduplication is exercised. Events are matched by position: a rejected position is never
+                // listed, and each listed position consumes one occurrence of its id from the server's ids.
                 var ids = storedIds.Select(n => n!.GetValue<string>()).ToList();
+                var rejectedIndices = new HashSet<int>((stored["rejected"] as JsonArray ?? []).Select(r => r?["index"]?.GetValue<int>() ?? -1));
                 var unresolved = new List<int>();
                 for (var index = 0; index < events.Count; index++)
                 {
-                    var id = (events[index] as JsonObject)?["id"]?.GetValue<string>()?.Trim();
-                    if (id is not null && ids.Contains(id) && NextInt(2) == 0)
+                    if (rejectedIndices.Contains(index) || !Text(events[index] is JsonObject o ? o["id"] : null, out var raw, out _))
+                    {
+                        continue;
+                    }
+
+                    var id = JsTrim(raw!);
+                    if (ids.Contains(id) && NextInt(2) == 0)
                     {
                         unresolved.Add(index);
                         ids.Remove(id);
@@ -577,14 +642,19 @@ internal sealed class StandIn : IDisposable
 
                 if (unresolved.Count > 0)
                 {
+                    // The server's warnings stay, except for the positions now listed as unresolved.
+                    var warnings = new JsonArray((stored["warnings"] as JsonArray ?? [])
+                        .Where(w => !unresolved.Contains(w?["index"]?.GetValue<int>() ?? -1))
+                        .Select(w => w?.DeepClone())
+                        .ToArray());
                     var details = new JsonObject
                     {
                         ["accepted"] = ids.Count,
                         ["ids"] = new JsonArray(ids.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray()),
                         ["rejected"] = stored["rejected"]?.DeepClone() ?? new JsonArray(),
-                        ["warnings"] = new JsonArray(),
+                        ["warnings"] = warnings,
                         ["indices"] = new JsonArray(unresolved.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray()),
-                        ["eventIds"] = new JsonArray(unresolved.Select(i => (JsonNode?)JsonValue.Create(((JsonObject)events[i]!)["id"]!.GetValue<string>().Trim())).ToArray()),
+                        ["eventIds"] = new JsonArray(unresolved.Select(i => (JsonNode?)JsonValue.Create(JsTrim(((JsonObject)events[i]!)["id"]!.GetValue<string>()))).ToArray()),
                     };
                     await WriteAsync(stream, exchange, 503, Error("ingest_pending", "Some events need a retry; listed indices are unresolved.", details), "1").ConfigureAwait(false);
                     return true;
@@ -592,6 +662,7 @@ internal sealed class StandIn : IDisposable
             }
 
             var retryAfter = response.Headers.TryGetValues("Retry-After", out var values) ? values.FirstOrDefault() : null;
+            exchange.Passthrough = true;
             exchange.Status = status;
             exchange.RetryAfter = retryAfter;
             exchange.Response = answer;
@@ -846,6 +917,22 @@ internal sealed class StandIn : IDisposable
         }
     }
 
+    /// <summary>Upstream mode: ids the server acknowledged in its own answer, whatever the stand-in then tells the client.</summary>
+    private void RecordUpstreamAcknowledgements(int status, JsonNode? answer)
+    {
+        var ids = answer is not JsonObject root ? null
+            : status == 202 ? root["ids"] as JsonArray
+            : status == 503 && root["error"] is JsonObject error && error["details"] is JsonObject details ? details["ids"] as JsonArray
+            : null;
+        foreach (var id in ids ?? [])
+        {
+            if (id is JsonValue v && v.TryGetValue<string>(out var text))
+            {
+                _upstreamAcknowledged!.TryAdd(LongMap.Hash(text), 0);
+            }
+        }
+    }
+
     private static JsonNode? TryParse(byte[] bytes)
     {
         try
@@ -1010,6 +1097,8 @@ internal sealed class StandIn : IDisposable
         public long ContentLength { get; } = contentLength;
 
         public string? Header(string name) => headers.TryGetValue(name, out var value) ? value : null;
+
+        public IEnumerable<KeyValuePair<string, string>> All => headers;
     }
 }
 
@@ -1031,6 +1120,9 @@ internal sealed class Exchange(Fault fault)
 
     /// <summary>The delay the latency fault applied, in milliseconds.</summary>
     public int? DelayMs { get; set; }
+
+    /// <summary>Upstream mode: the answer is the server's own, forwarded unchanged (the fault did not alter it).</summary>
+    public bool Passthrough { get; set; }
 }
 
 /// <summary>
@@ -1080,6 +1172,7 @@ internal sealed class Samples : IDisposable
                 ["response"] = exchange.Response?.DeepClone(),
                 ["dispositions"] = new JsonArray(exchange.Dispositions.Select(d => (JsonNode?)JsonValue.Create(d)).ToArray()),
                 ["delayMs"] = exchange.DelayMs,
+                ["passthrough"] = exchange.Passthrough,
             }.ToJsonString();
         }
         catch (InvalidOperationException)
