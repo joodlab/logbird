@@ -184,6 +184,31 @@ public class EntityIdTests
         Assert.Equal(1501, h.Logger.Lines.Count(line => line.StartsWith("Logbird: Logbird warning about an event it is sending:", StringComparison.Ordinal)));
     }
 
+    public static IEnumerable<object[]> HugeIdentity()
+    {
+        var huge = new string('h', 300_000);
+        yield return [new AuditEvent("x") { Impersonator = new AuditImpersonator(huge) }];
+        yield return [new AuditEvent("x") { Actor = new AuditActor(huge, "u1") }];
+        yield return [new AuditEvent("x") { Executor = new AuditExecutor(huge) }];
+        yield return [new AuditEvent("x") { Executor = new AuditExecutor("job") { JobId = huge } }];
+    }
+
+    [Theory]
+    [MemberData(nameof(HugeIdentity))]
+    public async Task An_identity_field_over_256_KB_is_measured_before_it_is_copied(AuditEvent auditEvent)
+    {
+        // Ids over the indexed length are sent, but one that alone exceeds the event limit is refused as too large before
+        // anything serializes it, like any other oversized field.
+        await using var h = new Harness();
+        h.Client.Track(auditEvent);
+        Assert.True(await h.Client.FlushAsync());
+        var drop = Assert.Single(h.Drops);
+        Assert.Equal(DropReason.TooLarge, drop.Reason);
+        Assert.True(drop.Json.IsEmpty);
+        Assert.Empty(h.Errors.OfType<LogbirdEventWarning>());
+        Assert.Empty(h.Server.Requests);
+    }
+
     [Fact]
     public async Task A_long_list_of_empty_targets_is_measured_before_it_is_copied()
     {

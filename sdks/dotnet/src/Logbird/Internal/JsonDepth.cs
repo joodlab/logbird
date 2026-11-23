@@ -45,8 +45,9 @@ internal static class JsonDepth
         }
 
         if (Add(e.Action) || Add(e.Id) || Add(e.Description) || Add(e.Environment) || Add(e.Outcome) || Add(e.Severity) || Add(e.Source)
-            || Add(e.Actor?.Id) || Add(e.Actor?.Name) || Add(e.Actor?.Email) || Add(e.Tenant?.Id) || Add(e.Tenant?.Name)
-            || Add(e.Executor?.Id) || Add(e.Executor?.Name) || Add(e.Impersonator?.Name))
+            || Add(e.Actor?.Type) || Add(e.Actor?.Id) || Add(e.Actor?.Name) || Add(e.Actor?.Email) || Add(e.Tenant?.Id) || Add(e.Tenant?.Name)
+            || Add(e.Executor?.Type) || Add(e.Executor?.Id) || Add(e.Executor?.Name) || Add(e.Executor?.JobId)
+            || Add(e.Impersonator?.Id) || Add(e.Impersonator?.Name))
         {
             return Shape.TooLarge;
         }
