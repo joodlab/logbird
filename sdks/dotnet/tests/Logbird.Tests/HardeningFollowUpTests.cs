@@ -264,6 +264,32 @@ public class HardeningFollowUpTests
     }
 
     [Fact]
+    public async Task A_caller_that_cancels_while_the_answer_arrives_gets_the_cancellation()
+    {
+        const string page = "{\"data\":[],\"nextCursor\":null,\"total\":0,\"tookMs\":1}";
+        for (var i = 0; i < 20; i++)
+        {
+            using var caller = new CancellationTokenSource();
+            using var reader = Reader(new Answer(_ =>
+            {
+                // The caller gives up while the server is answering: the cancellation decides, not the answer.
+                caller.Cancel();
+                return Task.FromResult(Json(page));
+            }));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.SearchAsync(new EventSearch(), caller.Token));
+        }
+    }
+
+    [Fact]
+    public async Task A_member_name_with_a_lone_surrogate_is_an_invalid_response()
+    {
+        const string page = "{\"data\":[],\"nextCursor\":null,\"total\":0,\"tookMs\":1,\"\\ud800\":1}";
+        using var reader = Reader(new Answer(_ => Task.FromResult(Json(page))));
+        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync(new EventSearch()));
+        Assert.Equal("invalid_response", error.Code);
+    }
+
+    [Fact]
     public async Task A_caller_that_already_cancelled_sends_nothing()
     {
         var sent = 0;
@@ -336,7 +362,7 @@ public class HardeningFollowUpTests
     {
         using var reader = Reader(new Answer(_ => Task.FromResult(Oversized())));
         var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.FacetsAsync(new FacetQuery("outcome")));
-        Assert.Contains(error.Code, new[] { "unreachable", "server_version_unknown" });
+        Assert.Equal("unreachable", error.Code);
     }
 
     [Fact]
@@ -591,12 +617,14 @@ public class MeterTotalsTests
         var client = new LogbirdClient(
             new LogbirdOptions { Endpoint = new Uri("https://audit.example.invalid/"), IngestKey = "lb_ingest_fictional", FlushInterval = TimeSpan.FromHours(1), ShutdownTimeout = TimeSpan.Zero },
             new HttpClient(new FakeServer()));
+        // Queue length is the one live value: it follows the client's queue. Measured before the first flush, when no
+        // delivery is running (the flush interval is an hour and one event does not fill a batch).
         client.Track(new AuditEvent("delivered"));
-        Assert.True(await client.FlushAsync());
-
-        // Queue length is the one live value: it follows the client's queue.
-        client.Track(new AuditEvent("queued at shutdown"));
         Assert.Equal(1, Delta(before, Collect(), "logbird.queue.length"));
+        Assert.True(await client.FlushAsync());
+        Assert.Equal(0, Delta(before, Collect(), "logbird.queue.length"));
+
+        client.Track(new AuditEvent("queued at shutdown"));
         await client.DisposeAsync();
 
         // A drop reported after shutdown (an event tracked once the client is closed) is counted too, synchronously.

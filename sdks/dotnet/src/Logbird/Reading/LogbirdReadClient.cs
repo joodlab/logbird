@@ -607,8 +607,10 @@ public sealed class LogbirdReadClient : IDisposable
     /// The timeout and the caller's token only complete a signal of this method's own, so no callback another component
     /// registered on the transport token can delay the outcome. The transport gets a token source of its own, cancelled
     /// on the thread pool once the attempt is abandoned and never linked to the caller's token, so nothing stays
-    /// registered on a long-lived caller token after this method returns. Once the timeout or the caller wins, that
-    /// outcome stands: whatever the abandoned attempt produces later is passed to <paramref name="discard"/> unread.
+    /// registered on a long-lived caller token after this method returns. A stop signalled before the registrations are
+    /// released decides, even when the attempt finished too, and the first stop decides how: the timeout gives
+    /// <see cref="TimeoutException"/> and the caller's token <see cref="OperationCanceledException"/>. Whatever the
+    /// abandoned attempt produces is passed to <paramref name="discard"/> unread.
     /// </remarks>
     private async Task<TResult> BoundedAsync<TResult>(Func<CancellationToken, Task<TResult>> send, Action<TResult> discard, CancellationToken cancellationToken)
     {
@@ -619,15 +621,15 @@ public sealed class LogbirdReadClient : IDisposable
         // On the thread pool: a handler that blocks before returning its task cannot hold the limit below.
         var work = Task.Run(() => send(transport.Token), CancellationToken.None);
         var stop = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task winner;
         using (var timer = new CancellationTokenSource(_timeout))
         using (timer.Token.Register(static state => ((TaskCompletionSource<bool>)state!).TrySetResult(true), stop))
         using (cancellationToken.Register(static state => ((TaskCompletionSource<bool>)state!).TrySetResult(false), stop))
         {
-            winner = await Task.WhenAny(work, stop.Task).ConfigureAwait(false);
+            await Task.WhenAny(work, stop.Task).ConfigureAwait(false);
         }
 
-        if (winner == work)
+        // The registrations are released, so nothing can signal any more: the outcome is final here.
+        if (!stop.Task.IsCompleted)
         {
             transport.Dispose();
             return await work.ConfigureAwait(false);
@@ -672,7 +674,11 @@ public sealed class LogbirdReadClient : IDisposable
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
 
-        cancellationToken.ThrowIfCancellationRequested();
+        if (!stop.Task.Result)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+
         throw new TimeoutException("Logbird did not answer within the read timeout.");
     }
 
@@ -754,8 +760,9 @@ public sealed class LogbirdReadClient : IDisposable
                 return JsonSerializer.Deserialize(body, type)
                     ?? throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird returned an empty response.");
             }
-            catch (JsonException e)
+            catch (Exception e) when (e is JsonException or InvalidOperationException)
             {
+                // InvalidOperationException: a member name that escapes a lone surrogate, which .NET cannot decode.
                 throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird returned a response this SDK cannot read: " + e.GetType().Name);
             }
         }

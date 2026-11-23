@@ -4,8 +4,9 @@ using System.Text.Json;
 namespace Logbird;
 
 /// <summary>
-/// The members a success answer must have before the read client reads it, as the server's contract defines them
-/// (unchanged since Logbird 0.1.0 for search and detail, and since 0.2.0 for facets). A member that is missing, or
+/// The members a success answer must have before the read client reads it, as the server's contract defines them. The
+/// required members are unchanged since Logbird 0.1.0 for search and detail and since 0.2.0 for facets (search's
+/// optional <c>totalExact</c> came later). A member that is missing, or
 /// <c>null</c> where the contract does not allow it, makes the answer <c>invalid_response</c>, never an empty page or a
 /// <see langword="null"/> collection. Members the contract marks optional (<c>totalExact</c>, a facet value's
 /// <c>groups</c> and <c>groupsOtherCount</c>) may be absent, and members this SDK does not know are ignored.
