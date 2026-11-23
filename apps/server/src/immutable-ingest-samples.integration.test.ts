@@ -3,6 +3,7 @@ import { prisma, pruneIngestReceipts, withProjectLock } from '@logbird/database'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { purgeLimit, slowStore } from './slow-store';
 
 vi.setConfig({ testTimeout: 40_000, hookTimeout: 40_000 });
 let f: ImmutableFixture;
@@ -14,8 +15,8 @@ beforeEach(async () => {
 // synchronous stream purges (project and workspace) that share the local ClickHouse two-slot mutation pool.
 afterEach(async () => {
   await f.cleanup();
-}, 60_000);
-it('sample API preserves a retained customer sample-event-N identity', async () => {
+}, slowStore(60_000));
+it('sample API preserves a retained customer sample-event-N identity', purgeLimit(60_000), async () => {
   expect((await f.post({ id: 'sample-event-0', action: 'customer.original' })).status).toBe(202);
   const loaded = await f.management(`/api/projects/${f.project}/sample-data`, 'POST');
   expect(loaded.status, await loaded.clone().text()).toBe(200);
@@ -28,8 +29,8 @@ it('sample API preserves a retained customer sample-event-N identity', async () 
   expect(await f.count()).toBe(1);
   expect((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM event_ids WHERE project_id={p:String}', { p: f.project }))[0]?.n).toBe(1);
   // Two synchronous purges of the sample stream share the local ClickHouse two-slot mutation pool.
-}, 60_000);
-it('sample removal reconciles receipts so the intentionally deleted event can retry', async () => {
+});
+it('sample removal reconciles receipts so the intentionally deleted event can retry', purgeLimit(40_000), async () => {
   const input = { id: 'customer-sample-source', action: 'sample.original', source: 'logbird-sample' };
   expect((await f.post(input)).status).toBe(202);
   expect((await f.management(`/api/projects/${f.project}/sample-data`, 'DELETE')).status).toBe(204);
@@ -46,7 +47,7 @@ it('sample removal waits for an unresolved active write', async () => {
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: 'pending-sample', confirmedAt: null } })).toBe(1);
 });
 
-it('upgraded legacy sample/customer collisions retain and rebuild the customer fence', async () => {
+it('upgraded legacy sample/customer collisions retain and rebuild the customer fence', purgeLimit(60_000), async () => {
   const customer = { id: 'sample-event-0', action: 'customer.retained', occurredAt: new Date(Date.now() - 10_000).toISOString() };
   expect((await f.post(customer)).status).toBe(202);
   const sample = f.row({ id: customer.id, action: 'old.sample', source: 'logbird-sample', occurredAt: new Date().toISOString() });
@@ -68,9 +69,9 @@ it('upgraded legacy sample/customer collisions retain and rebuild the customer f
   expect(await conflict.json()).toMatchObject({ accepted: 0, rejected: [{ code: 'duplicate_id_conflict' }] });
   expect((await getEvent(clickhouse, f.project, customer.id))?.event.action).toBe(customer.action);
   expect(await f.count()).toBe(1);
-}, 60_000);
+});
 
-it('an expired sample-removal crash cache cannot acknowledge or reject a missing raw row', async () => {
+it('an expired sample-removal crash cache cannot acknowledge or reject a missing raw row', purgeLimit(40_000), async () => {
   const sample = { id: 'sample-crash-cache', action: 'sample.original', source: 'logbird-sample' };
   expect((await f.post(sample)).status).toBe(202);
   // Simulate a crash after raw deletion and before index/receipt reconciliation.

@@ -28,6 +28,8 @@ export function sharedContent(site: SiteState) {
     }),
     /** The accessible name of a capture that opens full size (components/screenshot.tsx). */
     openFullSize: 'Open the image full size',
+    /** The visible hint in a zoomable capture's window bar, beside the image rather than over it. */
+    fullSizeHint: 'Full size',
     /** The header's link to the repository, shown only while it is public. */
     githubNav: site.githubUrl ? { label: 'GitHub', href: site.githubUrl } : undefined,
     /** The closing call to action at the bottom of most pages. */

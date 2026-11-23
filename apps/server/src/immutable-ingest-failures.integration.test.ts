@@ -6,6 +6,7 @@ import { Logbird } from '@logbird/sdk';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { purgeLimit, slowStore } from './slow-store';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 let f: ImmutableFixture;
@@ -22,35 +23,38 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   await f.cleanup();
-});
+}, slowStore(30_000));
 const input = { id: 'same', action: 'error.original', occurredAt: new Date().toISOString(), context: {}, metadata: {} };
-it.each(['6', '25', '27', '38', '41', '53', '69', '72', '60', '62', '81', '164', '497', '516', '241', '159', '252'])(
-  'classifies server code %s after consuming the body',
-  async (code) => {
-    vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
-      for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {
-        /* body consumed */
-      }
-      throw Object.assign(new Error('fictional server exception: While executing WaitForAsyncInsert.'), { code });
-    });
-    const response = await f.post(input);
-    const ambiguous = ['241', '159', '252'].includes(code);
-    const parseRejection = ['6', '25', '27', '38', '41', '53', '69', '72'].includes(code);
-    expect(response.status).toBe(parseRejection ? 202 : 503);
-    if (parseRejection)
-      expect(await response.json()).toMatchObject({
-        accepted: 0,
-        rejected: [{ index: 0, code: 'invalid_event', reason: expect.stringMatching(/^invalid_event:/) }],
-      });
-    expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(ambiguous ? 1 : 0);
-    if (ambiguous) {
-      expect((await response.json()).error.code).toBe('ingest_pending');
-      vi.setSystemTime(Date.now() + 80_000);
+// The ambiguous codes leave an expired claim that the retry recovers, rebuilding the rollups (DELETEs): only they scale.
+const classifyServerCode = async (code: string) => {
+  vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
+    for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {
+      /* body consumed */
     }
-    expect((await f.post(input)).status).toBe(202);
-    expect(await f.count()).toBe(1);
-  },
+    throw Object.assign(new Error('fictional server exception: While executing WaitForAsyncInsert.'), { code });
+  });
+  const response = await f.post(input);
+  const ambiguous = ['241', '159', '252'].includes(code);
+  const parseRejection = ['6', '25', '27', '38', '41', '53', '69', '72'].includes(code);
+  expect(response.status).toBe(parseRejection ? 202 : 503);
+  if (parseRejection)
+    expect(await response.json()).toMatchObject({
+      accepted: 0,
+      rejected: [{ index: 0, code: 'invalid_event', reason: expect.stringMatching(/^invalid_event:/) }],
+    });
+  expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(ambiguous ? 1 : 0);
+  if (ambiguous) {
+    expect((await response.json()).error.code).toBe('ingest_pending');
+    vi.setSystemTime(Date.now() + 80_000);
+  }
+  expect((await f.post(input)).status).toBe(202);
+  expect(await f.count()).toBe(1);
+};
+it.each(['6', '25', '27', '38', '41', '53', '69', '72', '60', '62', '81', '164', '497', '516'])(
+  'classifies server code %s after consuming the body',
+  classifyServerCode,
 );
+it.each(['241', '159', '252'])('classifies server code %s after consuming the body', classifyServerCode, slowStore(30_000));
 it('releases claims on connection refusal before body transmission', async () => {
   vi.spyOn(clickhouse, 'exec').mockRejectedValueOnce(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
   const response = await f.post(input);
@@ -70,7 +74,7 @@ it('releases claims after a real UInt16 ClickHouse parse failure', async () => {
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
   expect(await f.count()).toBe(0);
 });
-it('retains only an ambiguity after the body was consumed, then recovers an absent row', async () => {
+it('retains only an ambiguity after the body was consumed, then recovers an absent row', purgeLimit(30_000), async () => {
   vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
     for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {
       /* body handed to HTTP transport */
@@ -194,7 +198,7 @@ for (const phase of ['first lookup', 'ownership recheck', 'recovery lookup'] as 
       expect(sdk.dropped).toBe(0);
       expect(await f.count()).toBe(1);
     },
-    phase === 'recovery lookup' ? 90_000 : 30_000,
+    phase === 'recovery lookup' ? slowStore(90_000) : 30_000,
   );
 it('rejects corrupt stored evidence per id while storing healthy siblings', async () => {
   const row = f.row(input);
@@ -221,7 +225,7 @@ it('fast fresh batches issue one narrow identity lookup, with no payload scan or
   expect(statements.some((sql) => sql.includes('payload') && sql.includes('FROM events'))).toBe(false);
 });
 
-it('releases a recovered claim on a definite server rejection', async () => {
+it('releases a recovered claim on a definite server rejection', purgeLimit(30_000), async () => {
   await f.pending(input, { expired: true });
   vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
     for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {

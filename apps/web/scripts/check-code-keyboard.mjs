@@ -29,7 +29,24 @@ try {
       const before = await where();
       await page.keyboard.press('Tab');
       const focused = await pre.evaluate((el) => document.activeElement === el);
-      const outline = await pre.evaluate((el) => getComputedStyle(el).outlineStyle);
+      // A visible ring: a style other than none, a positive width and a colour with alpha above zero. The alpha is read
+      // by painting the computed colour onto a cleared 1x1 canvas, so it holds for any colour syntax (rgb, oklab, oklch);
+      // a colour the canvas cannot parse leaves the pixel transparent and fails.
+      const ring = await pre.evaluate((el) => {
+        const style = getComputedStyle(el);
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const context = canvas.getContext('2d');
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = 'rgba(0, 0, 0, 0)';
+        context.fillStyle = style.outlineColor;
+        context.fillRect(0, 0, 1, 1);
+        const alpha = context.getImageData(0, 0, 1, 1).data[3];
+        return { style: style.outlineStyle, width: Number.parseFloat(style.outlineWidth), color: style.outlineColor, alpha };
+      });
+      const visibleRing = ring.style !== 'none' && ring.width > 0 && ring.alpha > 0;
+      const outline = `${ring.style} ${ring.width}px ${ring.color}`;
       const overflow = await pre.evaluate((el) => el.scrollWidth - el.clientWidth);
       for (let k = 0; k < 8; k++) await page.keyboard.press('ArrowRight');
       await page.waitForTimeout(700); // scrolling is smooth: let it settle
@@ -37,7 +54,7 @@ try {
       const after = await where();
       const stays = before && after && before.x === after.x && before.y === after.y;
       // Every sample on these pages is wider than a phone, so each must overflow and actually scroll.
-      const ok = focused && outline !== 'none' && stays && overflow > 0 && scrolled > 0;
+      const ok = focused && visibleRing && stays && overflow > 0 && scrolled > 0;
       console.log(
         `${path} block ${i + 1}: focus=${focused} outline=${outline} overflow=${overflow}px scrolled=${scrolled}px copyButtonStays=${stays} ${ok ? 'OK' : 'FAIL'}`,
       );

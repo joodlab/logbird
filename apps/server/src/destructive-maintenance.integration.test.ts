@@ -9,6 +9,7 @@ import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './
 import { stageExport, validateExportMembership } from './export-outcomes';
 import { ingest } from './ingest';
 import { removeSampleData } from './sample-data';
+import { purgeLimit, slowStore } from './slow-store';
 
 afterAll(async () => {
   await closeProjectLocks();
@@ -21,7 +22,7 @@ afterAll(async () => {
   ]);
 });
 
-it('does not let a newer completed ingest repair hide an older failed retention raw DELETE that is still pending', async () => {
+it('does not let a newer completed ingest repair hide an older failed retention raw DELETE that is still pending', purgeLimit(120_000), async () => {
   const id = `qa-retention-fence-${randomUUID()}`;
   const exports: string[] = [];
   await prisma.organization.create({ data: { id, name: 'QA Retention repair fence', slug: id, createdAt: new Date() } });
@@ -125,9 +126,9 @@ it('does not let a newer completed ingest repair hide an older failed retention 
     await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${id}` } });
     await prisma.organization.delete({ where: { id } });
   }
-}, 120_000);
+});
 
-it('keeps newly admitted exports refused across an orphaned tagged query and queued raw DELETE mutation', async () => {
+it('keeps newly admitted exports refused across an orphaned tagged query and queued raw DELETE mutation', purgeLimit(120_000), async () => {
   const id = `qa-destructive-${randomUUID()}`;
   const ids: string[] = [];
   let orphan: Promise<unknown> | undefined;
@@ -195,7 +196,7 @@ it('keeps newly admitted exports refused across an orphaned tagged query and que
       async () => {
         expect(await withProjectLock(id, () => reconcileDestructiveMaintenance(id))).toBe(true);
       },
-      { timeout: 30_000, interval: 100 },
+      { timeout: slowStore(30_000), interval: 100 },
     );
     expect(Number((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: id }))[0]?.n)).toBe(0);
     expect((await prisma.project.findUniqueOrThrow({ where: { id } })).exportDeleteStartedAt).toBeNull();
@@ -215,9 +216,9 @@ it('keeps newly admitted exports refused across an orphaned tagged query and que
     expect(await prisma.ingestReceipt.count({ where: { projectId: id } })).toBe(0);
     expect(await prisma.auditOutbox.count({ where: { stream: `ws:${id}` } })).toBe(0);
   }
-}, 120_000);
+});
 
-it('persists the sample-removal fence before its raw delete even if the caller dies before creating a repair run', async () => {
+it('persists the sample-removal fence before its raw delete even if the caller dies before creating a repair run', purgeLimit(360_000), async () => {
   const id = `qa-sample-fence-${randomUUID()}`;
   await prisma.organization.create({ data: { id, name: 'QA Sample fence', slug: id, createdAt: new Date() } });
   await prisma.project.create({ data: { id, name: 'QA Sample fence', slug: id, organizationId: id } });
@@ -240,7 +241,7 @@ it('persists the sample-removal fence before its raw delete even if the caller d
       async () => {
         expect(await withProjectLock(id, () => reconcileDestructiveMaintenance(id))).toBe(true);
       },
-      { timeout: 30_000, interval: 100 },
+      { timeout: slowStore(30_000), interval: 100 },
     );
     await prisma.organization.delete({ where: { id } });
   }

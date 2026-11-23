@@ -365,6 +365,16 @@ a {
     width: 100%;
     height: auto;
   }
+  /* A capture that opens full size: a zoom cursor, and a visible ring on hover and keyboard focus. */
+  /* No display rule here: it would outrank .theme-dark { display: none } and show both themes. */
+  .screenshot a {
+    cursor: zoom-in;
+  }
+  .screenshot a:hover img,
+  .screenshot a:focus-visible img {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
   .clip video {
     display: block;
     width: 100%;

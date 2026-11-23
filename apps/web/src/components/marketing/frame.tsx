@@ -1,3 +1,5 @@
+import { Maximize2Icon } from 'lucide-react';
+import { shared } from '../../content/shared';
 import { cx as cn } from '../../lib/cx';
 import { Clip } from '../clip';
 import { Screenshot } from '../screenshot';
@@ -31,6 +33,12 @@ export function ScreenshotFrame({
           <i />
           <i />
           {label ? <span className="ms-2 truncate font-mono text-[11px] text-muted-foreground">{label}</span> : null}
+          {zoomLabel ? (
+            <span className="ms-auto inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+              <Maximize2Icon aria-hidden="true" className="size-3" />
+              {shared.fullSizeHint}
+            </span>
+          ) : null}
         </div>
         <Screenshot id={id} priority={priority} sizes={sizes} zoomLabel={zoomLabel} />
       </div>

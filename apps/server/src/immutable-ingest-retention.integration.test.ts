@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { enforceProjectRetention, clickhouse as retentionClickhouse } from '../../worker/src/retention';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { purgeLimit, slowStore } from './slow-store';
 
 let f: ImmutableFixture;
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 30_000 });
@@ -13,8 +14,8 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   await f.cleanup();
-});
-it('resumes an interrupted cutoff index delete after every expired raw row is already gone', async () => {
+}, slowStore(30_000));
+it('resumes an interrupted cutoff index delete after every expired raw row is already gone', purgeLimit(90_000), async () => {
   const input = { id: 'expired', action: 'retention.old', occurredAt: new Date(Date.now() - 91 * 86_400_000).toISOString() };
   expect((await f.post(input)).status).toBe(202);
   const command = retentionClickhouse.command.bind(retentionClickhouse);
@@ -35,7 +36,7 @@ it('resumes an interrupted cutoff index delete after every expired raw row is al
     expect((await read<{ n: number }>(clickhouse, `SELECT count() n FROM ${table} WHERE project_id={p:String}`, { p: f.project }))[0]?.n).toBe(0);
   expect((await prisma.retentionRun.findFirstOrThrow({ where: { projectId: f.project }, orderBy: { startedAt: 'desc' } })).status).toBe('completed');
 });
-it('keeps the surviving identity after the upgrade repaired a collapsed legacy pointer', async () => {
+it('keeps the surviving identity after the upgrade repaired a collapsed legacy pointer', purgeLimit(90_000), async () => {
   const id = 'legacy-retention',
     receivedAt = new Date();
   const expired = f.row({ id, action: 'legacy.expired', occurredAt: new Date(Date.now() - 91 * 86_400_000).toISOString() }, receivedAt);
