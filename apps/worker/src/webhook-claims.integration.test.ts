@@ -762,40 +762,59 @@ it("costs one claim timeout, not the pass, when the fallback's endpoint listing 
   });
 });
 
-it('stops claiming once the pass budget is spent, dispatches what it claimed and leaves the rest to the next pass', { timeout: 60_000 }, async () => {
-  const group = projects.slice(20, 23);
+it('starts no claim, not even the first, once the pass budget is spent', { timeout: 60_000 }, async () => {
+  const project = projects[20] ?? '';
   const { now } = await webhookCursorClock(prisma);
-  const healthy: { eventId: string }[] = [];
-  const slowIds: string[] = [];
-  for (const [index, project] of group.entries()) {
-    const slow = await endpoint(project, `budget-slow-${index}`);
-    const fine = await endpoint(project, `budget-healthy-${index}`);
-    slowIds.push(slow.id);
-    // The healthy row is older, so a project's fallback tries its healthy endpoint first.
-    healthy.push(await ping(fine.id, `budget-healthy-${index}`, new Date(+now - 120_000 + index)));
-    await ping(slow.id, `budget-slow-${index}`, new Date(+now - 60_000 + index));
-  }
+  const hook = await endpoint(project, 'budget-expired');
+  const row = await ping(hook.id, 'budget-expired', new Date(+now - 60_000));
   const sent = (id: string) => received.filter((message) => message.id === id).length;
   const errors = vi.spyOn(console, 'error');
-  let elapsed = 0;
   try {
-    // Test hook: every statement that scans a slow endpoint times out after 500 ms. With a 1.4 s budget the first ranked
-    // project's fallback claims its healthy row; then the budget is spent and the other projects wait. Without the budget
-    // each project's fallback and fill would run their own timeouts (about 6 s here).
-    const started = performance.now();
-    await deliverWebhooks(
-      ch,
-      { ...options(), concurrency: 6, claimTimeoutMs: 500, claimBudgetMs: 1400, claimScanDelay: { endpointIds: slowIds, seconds: 2 } },
-      group,
-    );
-    elapsed = performance.now() - started;
+    // A zero budget is spent before the first statement, as if pre-claim work had taken the whole budget.
+    await deliverWebhooks(ch, { ...options(), claimBudgetMs: 0 }, project);
     expect(logged(errors, 'webhook.claim_budget_spent')).toHaveLength(1);
   } finally {
     errors.mockRestore();
   }
-  expect(elapsed).toBeLessThan(3500);
-  expect(healthy.map(({ eventId }) => sent(eventId)).sort()).toEqual([0, 0, 1]);
-  // The next pass, without slow scans, claims what the spent budget left.
-  await deliverWebhooks(ch, { ...options(), concurrency: 6 }, group);
-  expect(healthy.map(({ eventId }) => sent(eventId))).toEqual([1, 1, 1]);
+  expect(sent(row.eventId)).toBe(0);
+  expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+    status: 'pending',
+    attemptNumber: 0,
+    leaseUntil: null,
+  });
+  expect(await prisma.webhookAttempt.count({ where: { deliveryId: row.id } })).toBe(0);
+  await deliverWebhooks(ch, options(), project);
+  expect(sent(row.eventId)).toBe(1);
+});
+
+it('dispatches what it claimed when the budget runs out mid-pass and leaves the rest to the next pass', { timeout: 60_000 }, async () => {
+  const project = projects[21] ?? '';
+  const { now } = await webhookCursorClock(prisma);
+  const first = await endpoint(project, 'budget-first');
+  const second = await endpoint(project, 'budget-second');
+  const claimedRow = await ping(first.id, 'budget-first', new Date(+now - 120_000));
+  const waitingRow = await ping(second.id, 'budget-second', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  // Test hook: the budget clock reads 0 when the deadline is set and for the check before the fair statement, then is
+  // past the deadline. The fair statement claims the project's oldest row; the fill phase must start nothing.
+  let reads = 0;
+  const claimBudgetClock = () => (++reads <= 2 ? 0 : 60_000);
+  const errors = vi.spyOn(console, 'error');
+  try {
+    await deliverWebhooks(ch, { ...options(), concurrency: 2, perEndpoint: 1, claimBudgetClock }, project);
+    expect(logged(errors, 'webhook.claim_budget_spent')).toHaveLength(1);
+  } finally {
+    errors.mockRestore();
+  }
+  expect(sent(claimedRow.eventId)).toBe(1);
+  expect(sent(waitingRow.eventId)).toBe(0);
+  expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: waitingRow.id } })).toMatchObject({
+    status: 'pending',
+    attemptNumber: 0,
+    leaseUntil: null,
+  });
+  expect(await prisma.webhookAttempt.count({ where: { deliveryId: waitingRow.id } })).toBe(0);
+  await deliverWebhooks(ch, { ...options(), concurrency: 2 }, project);
+  expect(sent(waitingRow.eventId)).toBe(1);
+  expect(sent(claimedRow.eventId)).toBe(1);
 });

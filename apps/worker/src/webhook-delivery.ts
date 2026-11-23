@@ -42,6 +42,8 @@ type DeliveryOptions = {
    * endpoint listing too), to force statement timeouts there.
    */
   claimScanDelay?: { endpointIds: string[]; seconds: number; listing?: boolean };
+  /** Tests only, ignored outside Vitest: the clock the claim budget reads (default `performance.now`). */
+  claimBudgetClock?: () => number;
 };
 
 /** The most a pass spends claiming. Normal passes take milliseconds; this bounds a pass whose statements keep timing out. */
@@ -63,8 +65,9 @@ type PassScope = {
   perEndpoint: number;
   excludeEndpoints: string[];
   timeoutMs: number;
-  /** `performance.now()` after which the pass starts no further claim statement. */
+  /** Budget-clock time after which the pass starts no further claim statement. */
   claimDeadline: number;
+  budgetClock: () => number;
   scanDelay?: DeliveryOptions['claimScanDelay'];
 };
 
@@ -311,13 +314,16 @@ async function invalidScopedEndpoints(now: Date, projects?: string[]) {
  * guide for transactions held by other clients.
  */
 export async function claimWebhookDeliveries(
-  options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimBudgetMs' | 'claimScanDelay'>,
+  options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimBudgetMs' | 'claimScanDelay' | 'claimBudgetClock'>,
   projectId?: string | readonly string[],
 ) {
   const projects = projectId === undefined ? undefined : typeof projectId === 'string' ? [projectId] : [...projectId];
   // Sample before PostgreSQL's clock so the local retry deadline is conservative and immune to host clock skew.
-  const passStart = performance.now();
-  const leaseDeadline = passStart + LEASE_MS;
+  const testing = process.env.VITEST === 'true';
+  // The claim budget runs on the lease clock: time spent before and during claims comes out of the dispatch budget.
+  const budgetClock = (testing && options.claimBudgetClock) || (() => performance.now());
+  const claimDeadline = budgetClock() + (options.claimBudgetMs ?? CLAIM_BUDGET_MS);
+  const leaseDeadline = performance.now() + LEASE_MS;
   const now = await webhookDatabaseTime();
   // The delivery queue's global concurrency is one. Limit each endpoint independently and exclude live leases
   // from its allowance, even after a worker restarts while some requests are still in flight.
@@ -332,10 +338,10 @@ export async function claimWebhookDeliveries(
     perEndpoint: options.perEndpoint,
     excludeEndpoints: [],
     timeoutMs: options.claimTimeoutMs ?? 2000,
-    // Claims share the lease clock started above, so time spent here comes out of every claimed delivery's dispatch budget.
-    claimDeadline: passStart + (options.claimBudgetMs ?? CLAIM_BUDGET_MS),
-    // The pg_sleep hook exists only for the timeout regression; no production caller can turn it on.
-    scanDelay: process.env.VITEST === 'true' ? options.claimScanDelay : undefined,
+    claimDeadline,
+    budgetClock,
+    // The pg_sleep hook exists only for the timeout regressions; no production caller can turn it on.
+    scanDelay: testing ? options.claimScanDelay : undefined,
   };
   // An endpoint with an invalid stored scope gets the existing scope hold before it can take a slot.
   for (const { id, scope: columns, updatedAt } of await invalidScopedEndpoints(now, projects)) {
@@ -347,7 +353,7 @@ export async function claimWebhookDeliveries(
   const claimable = new Set<string>();
   let budgetLogged = false;
   const spent = () => {
-    if (performance.now() < scope.claimDeadline) return false;
+    if (scope.budgetClock() < scope.claimDeadline) return false;
     if (!budgetLogged) {
       budgetLogged = true;
       // The rest waits for the next pass; what is claimed so far is dispatched now.
@@ -387,19 +393,22 @@ export async function claimWebhookDeliveries(
     }
     return count;
   };
-  try {
-    const fair = await claimFair(scope, ranked, capacity);
-    claims.push(...fair.claims);
-    for (const project of fair.projects) claimable.add(project);
-  } catch {
-    // The statement rolled back as a whole. Retry the fair phase one project at a time, so a failing project cannot
-    // hold up the others in this pass.
-    console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_fair_failed', projects: ranked.length }));
-    for (const project of ranked) {
-      if (claims.length >= capacity || spent()) break;
-      if (await claim(project, 1)) claimable.add(project);
+  // Every claim statement, the first included, starts only within the budget: slow pre-claim work (clock, leases,
+  // scopes, ranking) also comes out of the lease clock.
+  if (!spent())
+    try {
+      const fair = await claimFair(scope, ranked, capacity);
+      claims.push(...fair.claims);
+      for (const project of fair.projects) claimable.add(project);
+    } catch {
+      // The statement rolled back as a whole. Retry the fair phase one project at a time, so a failing project cannot
+      // hold up the others in this pass.
+      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_fair_failed', projects: ranked.length }));
+      for (const project of ranked) {
+        if (claims.length >= capacity || spent()) break;
+        if (await claim(project, 1)) claimable.add(project);
+      }
     }
-  }
   for (const project of ranked) {
     if (claims.length >= capacity || spent()) break;
     if (claimable.has(project)) await claim(project, capacity - claims.length);
