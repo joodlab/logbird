@@ -217,8 +217,9 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
             }
         }
 
-        // A last record without a newline (a truncated file) still counts, so it cannot hide an id.
-        if (first && text.Length > 0 && text[text.Length - 1] != (char)10)
+        // A last record without its closing newline (a truncated file, possibly inside an open quote) still counts, so it
+        // cannot hide an id.
+        if (first && (quoted || (text.Length > 0 && text[text.Length - 1] != (char)10)))
         {
             fields.Add(field.ToString());
         }
@@ -231,6 +232,7 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
     [InlineData("id,timestamp\n\"evt_1\",\"t\"\n\"evt_other\"", new[] { "id", "evt_1", "evt_other" })]
     [InlineData("id,timestamp\n\"evt_1\",\"t\"\n\"evt_other\",\"t", new[] { "id", "evt_1", "evt_other" })]
     [InlineData("id,timestamp\n\"evt,\"\"1\",\"line\nbreak\"\n", new[] { "id", "evt,\"1" })]
+    [InlineData("id,timestamp\n\"evt_1\",\"t\"\n\"evt_other\n", new[] { "id", "evt_1", "evt_other\n" })]
     public void The_csv_reader_counts_every_record_including_a_truncated_last_one(string text, string[] expected)
         => Assert.Equal(expected, CsvFirstColumn(text));
 
