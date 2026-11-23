@@ -118,6 +118,16 @@ describe('the trail boundary accepts the shapes a careful developer passes', () 
       'tenant:"acme"',
       { from: ISO },
     ],
+    [
+      'a class instance under a plain prototype that owns constructor: Object',
+      () => {
+        const base = { constructor: Object, tenant: 'acme' };
+        class Scope {}
+        Object.setPrototypeOf(Scope.prototype, base);
+        return new Scope();
+      },
+      'tenant:"acme"',
+    ],
     ['a null-prototype object', () => Object.assign(Object.create(null), { tenant: 'acme' }), 'tenant:"acme"'],
     [
       'a millisecond ISO string bound',
@@ -298,6 +308,29 @@ describe('the search query boundary (readAuditTrail, the Vue engine, the Nuxt ro
     // Round 6: URL parameter containers have no `q` property, so reading them would drop the filter.
     ['URLSearchParams as the query', new URLSearchParams('q=tenant:"acme"')],
     ['Headers as the query', new Headers({ q: 'tenant:"acme"' })],
+    // Round 7: judged by behaviour, so containers from another copy or library are refused too.
+    [
+      'a Map-like store (MobX ObservableMap shape) holding q',
+      new (class {
+        readonly [Symbol.toStringTag] = 'Map';
+        readonly data = new globalThis.Map([['q', 'tenant:"acme"']]);
+        get(key: string) {
+          return this.data.get(key);
+        }
+      })(),
+    ],
+    [
+      'a Headers class from another fetch copy',
+      new (class {
+        get(name: string) {
+          return name === 'q' ? 'tenant:"acme"' : null;
+        }
+        *[Symbol.iterator]() {
+          yield ['q', 'tenant:"acme"'];
+        }
+      })(),
+    ],
+    ['a Date-like object', { getTime: () => 0, toISOString: () => '' }],
     [
       'FormData as the query',
       (() => {

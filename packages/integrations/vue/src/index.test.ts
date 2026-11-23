@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
 import { expect, it, vi } from 'vitest';
-import { h, reactive, ref } from 'vue';
+import { h, reactive, ref, watch } from 'vue';
 import { type AuditFetcher, type AuditTrailOptions, useAuditTrail, useAuditTrailRequests } from './index';
 
 it('refreshes selectors, paginates and exposes errors without exposing keys', async () => {
@@ -566,9 +566,35 @@ it('lets a change made while refresh reads the options win over the snapshot ref
   );
   await flushPromises();
   flip = true;
+  // The overtaken refresh resolves when the read that won (C) has finished.
   await trail.refresh();
-  await flushPromises();
+  expect(trail.data.value.map((e) => e.id)).toEqual(['tenant:"c"-1']);
   expect(fetcher.mock.calls.map((call) => call[0].q)).toEqual(['tenant:"b"', 'tenant:"c"']);
   expect(trail.data.value.map((e) => e.id)).toEqual(['tenant:"c"-1']);
+  wrapper.unmount();
+});
+
+// Round 7: a synchronous consumer of the cleared rows that switches back must not look like the trail on screen.
+it('treats a switch back made while rows are cleared as a new trail, never as the old one still owned', async () => {
+  const tenant = ref('a');
+  let switchBack = false;
+  const fetcher = vi.fn((query: Record<string, unknown>) => Promise.resolve(page([`${String(query.q)}-1`])));
+  const { trail, wrapper } = mountTrail(() => useAuditTrail(() => ({ fetcher, tenant: tenant.value })));
+  await flushPromises();
+  watch(
+    trail.data,
+    () => {
+      if (switchBack) {
+        switchBack = false;
+        tenant.value = 'a';
+      }
+    },
+    { flush: 'sync' },
+  );
+  switchBack = true;
+  tenant.value = 'b';
+  await flushPromises();
+  expect(fetcher.mock.calls.map((call) => call[0].q)).toEqual(['tenant:"a"', 'tenant:"a"']);
+  expect(trail.data.value.map((e) => e.id)).toEqual(['tenant:"a"-1']);
   wrapper.unmount();
 });

@@ -77,9 +77,11 @@ function createTrail(source: () => RawRequest) {
     }
   };
   const clear = () => {
-    data.value = [];
-    nextCursor.value = null;
+    // Ownership goes first: setting the refs below can run a synchronous consumer that changes the options again, and
+    // its change must not look like the trail already on screen.
     owner = undefined;
+    nextCursor.value = null;
+    data.value = [];
   };
   const owns = (state: State) => !('error' in state) && owner !== undefined && owner.key === state.key && owner.fetcher === state.fetcher;
   /** Nothing in flight may publish any more, and nothing on screen belongs to the current trail. */
@@ -142,19 +144,27 @@ function createTrail(source: () => RawRequest) {
     const state = snapshot();
     return revision === selection ? state : undefined;
   };
+  /** The newest read, so an overtaken explicit call can resolve when the read that won finishes. */
+  let latest: Promise<void> = Promise.resolve();
+  const start = (state: State, append: boolean) => {
+    latest = run(state, append);
+    return latest;
+  };
+  // The queued run is scheduled before this continuation, so `latest` is already the winning read when it runs.
+  const afterQueued = () => Promise.resolve().then(() => latest);
   const refresh = () => {
     if (disposed) return Promise.resolve();
     const state = explicitState();
-    return state ? run(state, false) : Promise.resolve();
+    return state ? start(state, false) : afterQueued();
   };
   const loadMore = () => {
     if (disposed) return Promise.resolve();
     const state = explicitState();
-    if (!state) return Promise.resolve();
+    if (!state) return afterQueued();
     // Nothing more to load for the trail on screen. A changed trail, session or fetcher (or an invalid one) always runs,
     // restarting at page one or showing the error.
     if (owns(state) && (!nextCursor.value || loading.value)) return Promise.resolve();
-    return run(state, true);
+    return start(state, true);
   };
   // The watcher reads only what the snapshot reads (no deep traversal of the caller's options). It runs synchronously
   // on every change: a changed trail, session or fetcher invalidates at once (rows, cursor and the read in flight go
@@ -165,7 +175,7 @@ function createTrail(source: () => RawRequest) {
     (state) => {
       if (first) {
         first = false;
-        void run(state, false);
+        void start(state, false);
         return;
       }
       if (disposed || owns(state)) return;
@@ -183,7 +193,7 @@ function createTrail(source: () => RawRequest) {
       queueMicrotask(() => {
         scheduled = false;
         const next = pending;
-        if (next !== undefined) void run(next, false);
+        if (next !== undefined) void start(next, false);
       });
     },
     { immediate: true, flush: 'sync' },

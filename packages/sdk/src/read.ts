@@ -99,52 +99,24 @@ const fail = (where: string, message: string): never => {
 const isObject = (value: unknown): value is object => value !== null && typeof value === 'object';
 /**
  * A container the boundary reads fields from: a plain object, a null-prototype object or an ordinary class instance
- * (Vue reactive ones too, and ones with their own `Symbol.toStringTag`). Anything built on a built-in prototype is
- * refused: an array, Date, Map, URLSearchParams, Headers or FormData has none of the named fields as properties, so
- * reading it would silently drop every bound, selector or `q` (a date picker's `[start, end]` would become the server's
- * default window, and `new URLSearchParams('q=…')` a project-wide read).
+ * (Vue reactive ones too, whatever their `Symbol.toStringTag`). A container that keeps its entries behind methods or
+ * an iterator is refused, judged by what it does rather than where it comes from: anything iterable (an array, Map,
+ * Set, URLSearchParams, Headers, FormData) or with a `get` method (any Map-like store, such as a MobX ObservableMap or
+ * Node's MIMEParams), any Date-like, and the named platform containers. Reading named fields from one of those would
+ * silently drop every bound, selector or `q` (`new URLSearchParams('q=…')` would become a project-wide read).
  */
-const isRecord = (value: unknown): value is object =>
-  isObject(value) && !Array.isArray(value) && !ArrayBuffer.isView(value) && !hasBuiltInPrototype(value);
-const PLATFORM_CONTAINERS = [
-  'Map',
-  'Set',
-  'WeakMap',
-  'WeakSet',
-  'Date',
-  'RegExp',
-  'Promise',
-  'Error',
-  'URL',
-  'URLSearchParams',
-  'Headers',
-  'FormData',
-  'Request',
-  'Response',
-  'Blob',
-  'EventTarget',
-  'ReadableStream',
-];
-/**
- * Walks the prototype chain up to (not including) its root `Object.prototype`, of whichever realm. A built-in prototype
- * owns a native `constructor`; a class's prototype owns its class, and a plain object used as a prototype owns none.
- * This also sees through a Vue reactive Proxy (whose prototype is its target's) and works across realms.
- */
-function hasBuiltInPrototype(value: object): boolean {
-  // Runtimes implement some web containers in JavaScript (Node's URLSearchParams, Headers, FormData), so their
-  // constructors do not print as native: they are named here and matched by prototype (a Proxy's too).
+function isRecord(value: unknown): value is object {
+  if (!isObject(value) || Array.isArray(value) || ArrayBuffer.isView(value)) return false;
+  const entries = value as { get?: unknown; getTime?: unknown; [Symbol.iterator]?: unknown };
+  if (Symbol.iterator in value || typeof entries.get === 'function' || typeof entries.getTime === 'function') return false;
   for (const name of PLATFORM_CONTAINERS) {
     const type = (globalThis as Record<string, unknown>)[name];
-    if (typeof type === 'function' && value instanceof type) return true;
+    if (typeof type === 'function' && value instanceof type) return false;
   }
-  let prototype = Object.getPrototypeOf(value);
-  while (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
-    const owned = Object.getOwnPropertyDescriptor(prototype, 'constructor')?.value;
-    if (typeof owned === 'function' && /\{\s*\[native code\]\s*\}\s*$/.test(Function.prototype.toString.call(owned))) return true;
-    prototype = Object.getPrototypeOf(prototype);
-  }
-  return false;
+  return true;
 }
+/** Built-ins with neither an iterator nor a `get` method that still hold no named fields. */
+const PLATFORM_CONTAINERS = ['Date', 'RegExp', 'Promise', 'Error', 'WeakMap', 'WeakSet', 'URL', 'Request', 'Response', 'Blob', 'EventTarget'];
 /** Blank means only whitespace, as JavaScript's `trim()` sees it (the .NET builder uses the same rule). */
 const isBlank = (value: string) => value.trim().length === 0;
 /**
