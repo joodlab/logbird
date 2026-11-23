@@ -10,8 +10,9 @@ using System.Threading.Tasks;
 namespace Logbird.Tests;
 
 /// <summary>
-/// Entity identifiers are sent exactly as given. The SDK refuses an identifier that is too long or holds a lone surrogate,
-/// and more than 256 targets; it sends surrounding whitespace as given and warns about it.
+/// Entity identifiers are sent exactly as given, and the server decides: the SDK never refuses an event for one. It warns
+/// about a property a server may index differently (surrounding whitespace, a long id, a lone surrogate, more targets than
+/// Logbird up to 0.2.x indexes), and a server rejection is reported as the drop with the server's code.
 /// </summary>
 public class EntityIdTests
 {
@@ -47,7 +48,11 @@ public class EntityIdTests
 
     private static string Lone(int code) => ((char)code).ToString();
 
-    public static IEnumerable<object[]> Unstorable()
+    private const string LaterServer = "; a server that rejects such an identifier rejects the event, and the SDK reports that rejection as the drop with the server's code";
+
+    private const string LaterServerTargets = "; a server that rejects more targets than it indexes rejects the event, and the SDK reports that rejection as the drop with the server's code";
+
+    public static IEnumerable<object[]> IndexedDifferently()
     {
         yield return [new AuditEvent("x") { Actor = AuditActor.User(new string('a', 257)) }, TooLong("actor.id", 256)];
         yield return [new AuditEvent("x") { Impersonator = new AuditImpersonator("i" + Lone(0xD800)) }, Surrogate("impersonator.id")];
@@ -56,34 +61,83 @@ public class EntityIdTests
         yield return [new AuditEvent("x").Target(new string('t', 65), "r1"), TooLong("targets[0].type", 64)];
         yield return [new AuditEvent("x").Target("record", "ok").Target("record", new string('r', 257)), TooLong("targets[1].id", 256)];
         var many = new AuditEvent("x");
-        for (var i = 0; i < 257; i++)
+        for (var i = 0; i < 65; i++)
         {
             many.Target("record", $"r{i}");
         }
 
-        yield return [many, "invalid_entity_id: the event has more than 256 targets, the most this SDK sends (Logbird up to 0.2.x indexes only the first 64), so the SDK did not send the event"];
+        yield return [many, "the event has 65 targets: all are sent; Logbird up to 0.2.x stores them all but indexes only the first 64, so the others are in the stored payload only" + LaterServerTargets];
     }
 
     private static string TooLong(string field, int max)
-        => $"invalid_entity_id: {field} is longer than {max} UTF-16 code units; Logbird would not index it as given, so the SDK did not send the event";
+        => $"{field} is longer than {max} UTF-16 code units: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it cut to {max}, so search and entity pages show the shortened value" + LaterServer;
 
     private static string Surrogate(string field)
-        => $"invalid_entity_id: {field} contains a lone surrogate; Logbird would not index it as given, so the SDK did not send the event";
+        => $"{field} contains a lone surrogate: sent exactly as given; Logbird up to 0.2.x stores it as sent but indexes it with U+FFFD in its place" + LaterServer;
 
     [Theory]
-    [MemberData(nameof(Unstorable))]
-    public async Task An_identifier_Logbird_would_not_index_as_given_drops_the_event_before_sending(AuditEvent auditEvent, string expected)
+    [MemberData(nameof(IndexedDifferently))]
+    public async Task An_identifier_a_server_may_index_differently_is_sent_exactly_and_reported_as_a_warning(AuditEvent auditEvent, string expected)
     {
         await using var h = new Harness();
         h.Client.Track(auditEvent);
         h.Client.Track(new AuditEvent("sibling"));
         Assert.True(await h.Client.FlushAsync());
+        Assert.Empty(h.Drops);
+        Assert.Equal(["x", "sibling"], h.Server.Requests.SelectMany(r => r.Events).Select(e => e.GetProperty("action").GetString()));
+        var warning = Assert.Single(h.Errors.OfType<LogbirdEventWarning>());
+        Assert.Equal(h.Server.Requests.SelectMany(r => r.Ids).First(), warning.EventId);
+        Assert.Equal(expected, warning.Reason);
+        Assert.Equal("Logbird warning about an event it is sending: " + expected, warning.Message);
+        Assert.Equal(new LogbirdStats(2, 2, 0, 0, 0, 0, 0, Warnings: 1), h.Client.Stats);
+    }
+
+    [Fact]
+    public async Task Identifiers_reach_the_server_exactly_as_given()
+    {
+        await using var h = new Harness();
+        var longId = new string('a', 300);
+        var lone = "user" + Lone(0xD800) + "x";
+        var e = new AuditEvent("exact") { Actor = AuditActor.User(longId), Tenant = new AuditTenant(lone) };
+        for (var i = 0; i < 300; i++)
+        {
+            e.Target("record", $"r{i}");
+        }
+
+        h.Client.Track(e);
+        Assert.True(await h.Client.FlushAsync());
+        var sent = h.Server.Requests.Single().Events.Single();
+        Assert.Equal(longId, sent.GetProperty("actor").GetProperty("id").GetString());
+        Assert.Equal(300, sent.GetProperty("targets").GetArrayLength());
+
+        // The lone surrogate goes out escaped, exactly like JSON.stringify, so the server parses the same string.
+        Assert.Contains("\\ud800", System.Text.Encoding.UTF8.GetString(h.Server.Requests.Single().Body), StringComparison.Ordinal);
+        Assert.Empty(h.Drops);
+        Assert.Equal(1, h.Client.Stats.Delivered);
+    }
+
+    [Fact]
+    public async Task A_server_rejection_of_an_identifier_is_the_drop_with_the_servers_code()
+    {
+        var server = new FakeServer().Then(request => FakeServer.Json(
+            HttpStatusCode.Accepted,
+            JsonSerializer.Serialize(new
+            {
+                accepted = 1,
+                ids = new[] { request.Ids[1] },
+                rejected = new[] { new { index = 0, code = "invalid_entity_id", reason = "actor.id: longer than 256 characters" } },
+                warnings = Array.Empty<object>(),
+            })));
+        await using var h = new Harness(server);
+        h.Client.Track(new AuditEvent("x") { Actor = AuditActor.User(new string('a', 300)) });
+        h.Client.Track(new AuditEvent("sibling"));
+        Assert.True(await h.Client.FlushAsync());
         var drop = Assert.Single(h.Drops);
-        Assert.Equal(DropReason.InvalidEntityId, drop.Reason);
-        Assert.Equal(expected, drop.Detail);
-        Assert.Equal("An audit event was dropped: " + expected, Assert.Single(h.Errors).Message);
-        Assert.Equal(["sibling"], h.Server.Requests.SelectMany(r => r.Events).Select(e => e.GetProperty("action").GetString()));
-        Assert.Equal(1, h.Client.Stats.Dropped);
+        Assert.Equal(DropReason.Rejected, drop.Reason);
+        Assert.Equal("invalid_entity_id", drop.Code);
+        Assert.Equal("actor.id: longer than 256 characters", drop.Detail);
+        Assert.Equal(["invalid_entity_id"], h.Errors.OfType<LogbirdRejectedException>().Single().Codes);
+        Assert.Equal(new LogbirdStats(2, 1, 1, 0, 0, 0, 0, Warnings: 1), h.Client.Stats);
     }
 
     [Fact]
@@ -139,10 +193,14 @@ public class EntityIdTests
         e.Target("record", " r64");
         h.Client.Track(e);
         Assert.True(await h.Client.FlushAsync());
-        var warning = Assert.Single(h.Errors.OfType<LogbirdEventWarning>());
+        // Two warnings: this target's whitespace, and the event-wide one for targets past the 64th.
+        var reasons = h.Errors.OfType<LogbirdEventWarning>().Select(w => w.Reason).ToArray();
         Assert.Equal(
-            "surrounding whitespace in targets[64].id: sent exactly as given; Logbird up to 0.2.x indexes only the first 64 targets, so this one is kept in the stored payload only",
-            warning.Reason);
+            [
+                "surrounding whitespace in targets[64].id: sent exactly as given; Logbird up to 0.2.x indexes only the first 64 targets, so this one is kept in the stored payload only",
+                "the event has 65 targets: all are sent; Logbird up to 0.2.x stores them all but indexes only the first 64, so the others are in the stored payload only" + LaterServerTargets,
+            ],
+            reasons);
     }
 
     [Fact]

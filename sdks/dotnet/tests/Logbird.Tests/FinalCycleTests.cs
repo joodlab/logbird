@@ -540,7 +540,7 @@ public class FinalCycleTests
         var errors = new ConcurrentQueue<Exception>();
         var server = new FakeServer().Then(request => FakeServer.Json(
             HttpStatusCode.Accepted,
-            "{\"accepted\":0,\"ids\":[],\"rejected\":[{\"index\":0,\"reason\":\"x\"},{\"index\":1,\"reason\":\"y\",\"code\":\"invalid_entity_id\"},{\"index\":2,\"reason\":\"z\",\"code\":7}]}"));
+            "{\"accepted\":0,\"ids\":[],\"rejected\":[{\"index\":0,\"reason\":\"x\"},{\"index\":1,\"reason\":\"y\",\"code\":\"not_a_protocol_code\"},{\"index\":2,\"reason\":\"z\",\"code\":7}]}"));
         await using var client = Client(Options(o => o.OnError = errors.Enqueue), server);
         client.Track(new AuditEvent("a"));
         client.Track(new AuditEvent("b"));

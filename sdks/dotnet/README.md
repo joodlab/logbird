@@ -91,15 +91,23 @@ one, and `AuditChange.Secret("password")` records that a secret changed without 
 ### Identifiers
 
 Actor, impersonator, executor and tenant ids and each target's type and id are **sent exactly as you give them**:
-never trimmed, truncated or converted, so `"user_42"` and `" user_42 "` reach Logbird as different strings. Logbird
-servers up to 0.2.x keep each as sent in the stored payload but index both as the same actor `user_42`, so a search for
-`" user_42 "` does not find the event ([#269](https://github.com/joodlab/logbird/issues/269)). They also index only the
-first 64 targets of an event. Before sending, the client checks every identifier:
+never trimmed, truncated, repaired or converted, so `"user_42"` and `" user_42 "` reach Logbird as different strings.
+**The SDK never refuses an event because of an identifier: the server decides.** Logbird servers up to 0.2.x store the
+payload exactly as sent and index a repaired copy, and the client warns before sending when an identifier will be indexed
+differently ([#269](https://github.com/joodlab/logbird/issues/269)):
 
-- One that Logbird would not index as given is refused by the SDK, and the event is not sent: it is dropped with
-  `DropReason.InvalidEntityId` (reason `invalid_entity_id`). That is an identifier longer than 256 UTF-16 code units (64
-  for a target type) or containing a lone surrogate, or more than 256 targets on one event.
-- Surrounding whitespace is sent as given and reported as a `LogbirdEventWarning` through `OnError` and the logger.
+| Sent | Logbird up to 0.2.x indexes |
+| --- | --- |
+| Surrounding whitespace, `" user_42 "` | trimmed, `user_42`: a search for `" user_42 "` does not find the event |
+| An id longer than 256 UTF-16 code units (a target type longer than 64) | cut to 256 (64) |
+| A lone surrogate | U+FFFD in its place |
+| More than 64 targets | the first 64; the others are in the stored payload only |
+
+- Each case is reported as a `LogbirdEventWarning` through `OnError` and the logger, and counted in
+  `Stats.Warnings`. The warning names the field and the limit, never the value.
+- A server that applies the exact-identifier rule may reject such an event instead (code `invalid_entity_id`). That
+  rejection is the drop: `DropReason.Rejected`, with the server's code in `DroppedEvent.Code` and its reason in
+  `DroppedEvent.Detail`, like any other per-event rejection.
 - An empty string is not checked and is sent as `""`; Logbird treats an empty id as no id when it indexes the event.
 
 Identifiers are strings in this SDK. For a numeric id, pass an integer's invariant text, for example

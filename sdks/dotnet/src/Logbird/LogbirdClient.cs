@@ -107,7 +107,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private readonly long[] _droppedByReason = new long[DropReasonCount];
 
     [ThreadStatic]
-    private static List<string>? _whitespaceFields;
+    private static List<string>? _identifierWarnings;
 
     /// <summary>Creates a client.</summary>
     /// <param name="options">Settings. They are read once; later changes have no effect.</param>
@@ -276,16 +276,11 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 id = UuidV7.NewId();
             }
 
-            // Identifiers are sent exactly as given. One Logbird would not index as given is refused here by the SDK and the
-            // event is not sent; surrounding whitespace is sent as given and reported once the event is queued.
-            var whitespace = _whitespaceFields ??= [];
-            whitespace.Clear();
-            if (EntityIds.Validate(source, whitespace) is { } invalidEntity)
-            {
-                Drop(DropReason.InvalidEntityId, id, action, null, invalidEntity);
-                Report(new LogbirdDeliveryException("An audit event was dropped: " + invalidEntity));
-                return id ?? auditEvent?.Id;
-            }
+            // Identifiers are sent exactly as given and the server decides: the SDK never refuses an event for one. A property
+            // a server may index differently from what is sent is reported as a warning once the event is queued.
+            var identifierWarnings = _identifierWarnings ??= [];
+            identifierWarnings.Clear();
+            EntityIds.Inspect(source, identifierWarnings);
 
             var node = EventJson.ToJsonObject(source, id, occurredAt, environment, defaultSource, fullEnvelope);
             _redactor?.RedactInPlace(node);
@@ -311,10 +306,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (added is not null)
             {
-                foreach (var field in whitespace)
+                foreach (var reason in identifierWarnings)
                 {
-                    // Field names and fixed text only: the message never carries event data.
-                    var reason = EntityIds.WhitespaceReason(field);
+                    // Field names, limits and fixed text only: the message never carries event data.
                     Warn(eventId, eventAction, reason, "Logbird warning about an event it is sending: " + reason);
                 }
 
@@ -874,8 +868,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         => value is null || value.Length <= max ? value : value.Substring(0, max);
 
     // The sender counted the drop when it settled the event (under the queue lock); this only notifies.
-    private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail)
-        => Drop(reason, item.Id, item.Action, item.Json, detail, counted: true);
+    private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail, string? code)
+        => Drop(reason, item.Id, item.Action, item.Json, detail, counted: true, code: code);
 
     // A server reason can quote the event's values; the message and log line keep only its leading field or code.
     private void OnSenderWarning(QueuedEvent item, string reason)
@@ -924,7 +918,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
     }
 
-    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, bool counted = false)
+    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, bool counted = false, string? code = null)
     {
         if (!counted)
         {
@@ -935,7 +929,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         {
             // Display fields are bounded (an oversized action or id must not be kept whole in the backlog); the JSON, when
             // kept, carries the event for replay.
-            var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024));
+            var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024), code);
             Notify(() => onDrop(dropped));
         }
     }
