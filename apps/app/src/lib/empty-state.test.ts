@@ -31,17 +31,24 @@ it('says a check is running while a retry or a refresh is in flight, and failed 
     isError: false,
     isFetching: false,
   };
-  expect(otherDatesCheck({ ...base, isFetching: true })).toEqual({ failed: false, checking: true });
-  expect(otherDatesCheck({ ...base, olderMatches: 4 })).toEqual({ failed: false, checking: false });
+  expect(otherDatesCheck({ ...base, isFetching: true })).toEqual({ failed: false, checking: true, lookingUp: false });
+  expect(otherDatesCheck({ ...base, olderMatches: 4 })).toEqual({ failed: false, checking: false, lookingUp: false });
   // A cached count being refreshed gives no advice yet.
-  expect(otherDatesCheck({ ...base, olderMatches: 4, isFetching: true })).toEqual({ failed: false, checking: true });
+  expect(otherDatesCheck({ ...base, olderMatches: 4, isFetching: true })).toEqual({ failed: false, checking: true, lookingUp: false });
   // A failed refetch keeps its cached count; retrying it is checking again, not "could not check".
-  expect(otherDatesCheck({ ...base, olderMatches: 4, isError: true, isFetching: true })).toEqual({ failed: false, checking: true });
-  expect(otherDatesCheck({ ...base, olderMatches: 4, isError: true })).toEqual({ failed: true, checking: false });
+  expect(otherDatesCheck({ ...base, olderMatches: 4, isError: true, isFetching: true })).toEqual({ failed: false, checking: true, lookingUp: false });
+  expect(otherDatesCheck({ ...base, olderMatches: 4, isError: true })).toEqual({ failed: true, checking: false, lookingUp: false });
   // An id lookup that has not settled (a refreshed cached answer included) holds the advice too.
-  expect(otherDatesCheck({ ...base, idSettled: false, checkRuns: false })).toEqual({ failed: false, checking: true });
+  expect(otherDatesCheck({ ...base, idSettled: false, checkRuns: false })).toEqual({ failed: false, checking: true, lookingUp: true });
+  // In a range that holds every event there is nothing to check, but a refreshing id lookup still holds the advice.
+  expect(otherDatesCheck({ ...base, complete: true, idSettled: false, checkRuns: false })).toEqual({
+    failed: false,
+    checking: false,
+    lookingUp: true,
+  });
+  expect(otherDatesLine({ failed: false, checking: false, lookingUp: true, olderMatches: undefined, needsAsking: false })).toBe('');
   // Nothing to check: an id match, a complete answer, or results on screen.
-  expect(otherDatesCheck({ ...base, idMatch: true })).toEqual({ failed: false, checking: false });
-  expect(otherDatesCheck({ ...base, complete: true })).toEqual({ failed: false, checking: false });
-  expect(otherDatesCheck({ ...base, showsEmpty: false })).toEqual({ failed: false, checking: false });
+  expect(otherDatesCheck({ ...base, idMatch: true })).toEqual({ failed: false, checking: false, lookingUp: false });
+  expect(otherDatesCheck({ ...base, complete: true })).toEqual({ failed: false, checking: false, lookingUp: false });
+  expect(otherDatesCheck({ ...base, showsEmpty: false })).toEqual({ failed: false, checking: false, lookingUp: false });
 });

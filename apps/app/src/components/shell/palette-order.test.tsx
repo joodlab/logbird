@@ -3,7 +3,7 @@ import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it } from 'vitest';
-import { paletteEntityValue, paletteFilter, paletteValue } from './palette-filter';
+import { paletteEntityValue, paletteFilter, paletteKeyedValue, paletteValue } from './palette-filter';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
@@ -89,4 +89,17 @@ it('scores Jump to rows and notices as written, even when the text looks like an
   expect(filter(paletteValue('notice', 'support agents unavailable'), typed)).toBe(1);
   // Entity rows share the best entity score (here none: the floor), never cmdk's own for the value.
   expect(filter(paletteEntityValue({ kind: 'actor', id: 'zz' }), typed)).toBe(0.01);
+});
+
+it('keeps namesake saved views and projects apart, and scores them on their name only (#239)', () => {
+  const views = [
+    { value: paletteKeyedValue('view', 'Sample', 'cmv1zq'), label: 'Sample (one)' },
+    { value: paletteKeyedValue('view', 'Sample', 'cmv2zq'), label: 'Sample (two)' },
+  ];
+  expect(shown('sample', [], views)).toEqual(['Sample (one)', 'Sample (two)']);
+  expect(document.querySelectorAll('[cmdk-item][aria-selected="true"]')).toHaveLength(1);
+  const filter = paletteFilter([], 'zq');
+  // The id is never matched: "zq" is in both ids, in neither name.
+  expect(filter(views[0]?.value ?? '', 'zq')).toBe(0);
+  expect(filter(paletteKeyedValue('project', 'Sample', 'p1'), 'project sam')).toBeGreaterThan(0);
 });

@@ -358,7 +358,11 @@ function ProjectExplorer({
   // earlier check of the same expression in another range must not answer before the reader asks here (#239).
   const checkRuns = widerWanted && sqlCheckAsked;
   const olderMatches = checkRuns ? current(wider)?.buckets.reduce((n, b) => n + b.total, 0) : undefined;
-  const { failed: checkFailed, checking } = otherDatesCheck({
+  const {
+    failed: checkFailed,
+    checking,
+    lookingUp,
+  } = otherDatesCheck({
     showsEmpty,
     complete,
     idMatch: Boolean(idMatch),
@@ -383,7 +387,7 @@ function ProjectExplorer({
       </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
-  const outside = otherDatesLine({ failed: checkFailed, checking, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
+  const outside = otherDatesLine({ failed: checkFailed, checking, lookingUp, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
 
   // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
   // so a search opened straight from a link still gets its offer once they arrive).

@@ -35,7 +35,7 @@ import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries'
 import { ENTITY_SECTIONS, entityMatchRank, entityQuery, exactPerKind, isExactId, resolveJump, sectionForKind } from '@/lib/entities';
 import { formatTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
-import { paletteEntityValue, paletteFilter, paletteValue } from './palette-filter';
+import { paletteEntityValue, paletteFilter, paletteKeyedValue, paletteValue } from './palette-filter';
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 
@@ -366,7 +366,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                     }),
                   )
                 }
-                value={`view ${view.name}`}
+                value={paletteKeyedValue('view', view.name, view.id)}
               >
                 <BookmarkIcon />
                 {view.name}
@@ -380,7 +380,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               <CommandItem
                 key={p.id}
                 onSelect={() => go(() => navigate({ to: '/p/$projectId', params: { projectId: p.id } }))}
-                value={`project ${p.name}`}
+                value={paletteKeyedValue('project', p.name, p.id)}
               >
                 <EntityAvatar id={p.id} name={p.name} size="sm" square />
                 {p.name}

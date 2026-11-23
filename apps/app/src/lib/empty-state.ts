@@ -10,11 +10,19 @@ export const allTimeCheckNeedsAsking = (lang: QueryLang, q: string) => lang === 
 
 /**
  * The empty state's line about other dates, after "Nothing in this range matches …". No advice while the check is
- * still running: it may yet say that the range is the reason (#239).
+ * still running: it may yet say that the range is the reason (#239). Nor while an id lookup is: it may yet say the text
+ * is an id (in a range that already holds every event, where there are no other dates to check, the line stays empty).
  */
-export function otherDatesLine(check: { failed: boolean; checking: boolean; olderMatches: number | undefined; needsAsking: boolean }): string {
+export function otherDatesLine(check: {
+  failed: boolean;
+  checking: boolean;
+  lookingUp?: boolean;
+  olderMatches: number | undefined;
+  needsAsking: boolean;
+}): string {
   if (check.failed) return 'Could not check other dates.';
   if (check.checking) return 'Checking other dates…';
+  if (check.lookingUp) return '';
   if (check.olderMatches)
     return `${formatNumber(check.olderMatches)} ${check.olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`;
   if (check.needsAsking && check.olderMatches === undefined)
@@ -26,6 +34,7 @@ export function otherDatesLine(check: { failed: boolean; checking: boolean; olde
  * Where the empty state's check of other dates stands. It failed only once the last attempt settled as an error: a retry
  * in flight is checking again, not failed. It is checking while an id lookup has not settled (a cached answer being
  * refreshed included) and while the all-time count has no answer for this search or is refreshing one (#239).
+ * `lookingUp`: an id lookup has not settled, whatever the range (all time included), so no advice is given yet.
  */
 export function otherDatesCheck(s: {
   showsEmpty: boolean;
@@ -36,9 +45,10 @@ export function otherDatesCheck(s: {
   olderMatches: number | undefined;
   isError: boolean;
   isFetching: boolean;
-}): { failed: boolean; checking: boolean } {
+}): { failed: boolean; checking: boolean; lookingUp: boolean } {
   const failed = s.checkRuns && s.isError && !s.isFetching;
   const checking =
     s.showsEmpty && !s.complete && !s.idMatch && (!s.idSettled || (s.checkRuns && !failed && (s.olderMatches === undefined || s.isFetching)));
-  return { failed, checking };
+  const lookingUp = s.showsEmpty && !s.idMatch && !s.idSettled;
+  return { failed, checking, lookingUp };
 }
