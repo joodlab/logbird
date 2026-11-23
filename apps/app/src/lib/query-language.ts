@@ -40,7 +40,7 @@ export interface QueryToken {
   op?: string;
 }
 
-const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
+const KEY_RE = /^(-?)([A-Za-z_@][\w.$@-]*)\s*:/;
 /**
  * A dash that cannot negate (it follows `)`) starts a bare word, as the server reads it: everything up to whitespace,
  * a bracket or `:`, quotes and slashes included. Followed by `:` that word is a field name (`-/a"b"category`).

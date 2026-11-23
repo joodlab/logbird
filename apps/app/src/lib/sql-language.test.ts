@@ -5,6 +5,7 @@ import { sqlSuggestions } from '@/components/query-input/use-completions';
 import { parsePresenceSql } from './presence-filter';
 import { sqlColumn } from './query-catalog';
 import { queryCompletionAt, tokenize } from './query-language';
+import { lintQuery } from './query-lint';
 import { translateQueryToSql } from './query-translate';
 import {
   appendSqlPredicate,
@@ -586,5 +587,31 @@ describe('translation follows the server parse, value by value (#220, round 2)',
         .map((t) => t.field),
     ).toEqual(['action', 'category', 'tenant']);
     expect(queryCompletionAt(q, q.length)).toMatchObject({ kind: 'value', field: 'tenant' });
+  });
+});
+
+describe('round 3 (#220): submitting never rewrites a value, and SQL never matches what query mode refuses', () => {
+  it('proposes no fix inside a value the server reads as one', () => {
+    const q = '@meta:"please !tenant:t here"';
+    expect(lintQuery(q, () => true)).toEqual([]);
+    expect(
+      tokenize(q)
+        .filter((t) => t.kind === 'field')
+        .map((t) => t.field),
+    ).toEqual(['@meta']);
+    // Outside any value the familiar fixes still apply.
+    expect(lintQuery('!tenant:t', () => true)).toEqual([expect.objectContaining({ replacement: '-tenant:t' })]);
+  });
+
+  it('refuses what the compiler rejects instead of translating it into a broad search or an empty one', () => {
+    expect(() => compileQuery('_exists_:/actor/')).toThrow();
+    expect(translateQueryToSql('_exists_:/actor/')).toBeNull();
+    expect(translateQueryToSql('occurredAt:>=9999-12-31T23:59:59-02:00')).toBeNull();
+    expect(translateQueryToSql('occurredAt:>=9999-12-30T23:59:59Z')).not.toBeNull();
+  });
+
+  it('reads N as nothing and keeps a leading byte-order mark, as ClickHouse does', () => {
+    expect(unquoteSql(String.raw`a\Nb`)).toBe('ab');
+    expect(parsePresenceSql(String.raw`impersonator_id = '\xEF\xBB\xBF'`, 'impersonator_id')).toEqual({ value: '\uFEFF', negated: false });
   });
 });

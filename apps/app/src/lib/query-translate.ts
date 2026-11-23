@@ -69,6 +69,9 @@ export function dateSql(value: string, now = Date.now()): string | null {
   if (!Number.isFinite(midnight.getTime()) || midnight.toISOString().slice(0, 10) !== calendar || !ISO_DATE.test(value)) return null;
   const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value);
   if (!Number.isFinite(d.getTime()) || (value.length === 10 && d.toISOString().slice(0, 10) !== value)) return null;
+  // An offset can carry the instant past year 9999 (`+010000-…`), which ClickHouse cannot parse: the query errors there,
+  // so the translation must not quietly match nothing instead.
+  if (!/^\d{4}-/.test(d.toISOString())) return null;
   return `parseDateTime64BestEffortOrNull(${sqlString(d.toISOString())}, 3, 'UTC')`;
 }
 
@@ -174,6 +177,8 @@ function memberSql(t: Target, token: QuerySyntaxToken): string | null {
  */
 function termToSql(token: QueryToken, atom: FieldAtom): string | null {
   if (atom.value.kind === 'presence') {
+    // `_exists_:/x/` is an error to the compiler (a regex is not a field name), never a presence test.
+    if (atom.value.token.kind === 'regex') return null;
     if (atom.field === 'record') return 'notEmpty(target_ids)';
     const target = targetFor(atom.field);
     return target ? attributePredicate(target, presence(target)) : null;
