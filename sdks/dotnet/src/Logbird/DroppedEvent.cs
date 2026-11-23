@@ -18,7 +18,15 @@ public enum DropReason
     /// <summary>The server answered a permanent HTTP error (a 4xx other than 429), for example an invalid key.</summary>
     HttpError = 2,
 
-    /// <summary>The serialized event is larger than 256 KB.</summary>
+    /// <summary>
+    /// The event as sent (after <see cref="LogbirdOptions.BeforeSend"/> and redaction) is larger than 256 KB of UTF-8 JSON.
+    /// Separately, an event whose data measures more than 1 MiB before redaction is refused without being copied, whatever
+    /// redaction would have removed: copying an unbounded tree to redact it could exhaust the host's memory. That guard
+    /// counts one byte per UTF-16 code unit of every text the event carries (fields, context, targets, change fields,
+    /// metadata keys and values), plus JSON punctuation and the digits of parsed numbers: a lower bound of the JSON's size,
+    /// so it never refuses an event whose JSON would be under 1 MiB. <see cref="DroppedEvent.MayBeStored"/> is false: the
+    /// event was never sent.
+    /// </summary>
     TooLarge = 3,
 
     /// <summary>
@@ -28,7 +36,19 @@ public enum DropReason
     /// </summary>
     Shutdown = 4,
 
-    /// <summary>The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw.</summary>
+    /// <summary>
+    /// The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw, or its metadata
+    /// or a change value nests JSON deeper than 1,000 levels (a value that is part of a larger tree of yours also counts
+    /// the parents it has there), checked on the event as given (before
+    /// <see cref="LogbirdOptions.BeforeSend"/> and redaction: a deep part they would remove still counts, because walking it
+    /// is the risk). The limit keeps System.Text.Json's internal recursion (a node looks its options up through its parents)
+    /// within the stack, where an overflow would end the host process; it is tested on a 256 KB thread stack. It is the
+    /// number the server uses for exact numbers, but the server applies it differently: to the objects and arrays of the
+    /// whole event, and only when the event holds, anywhere, a number a double cannot keep exactly. So a deeper tree in an
+    /// event without such a number, which the server would store, is refused here; and because a change value sits three
+    /// levels into the event, a change value whose objects or arrays nest more than 997 levels (a leaf at level 999 or
+    /// deeper), in an event holding such a number, is rejected by the server (<see cref="Rejected"/>).
+    /// </summary>
     Invalid = 5,
 
     // 6 is not used: it was an SDK-side identifier refusal, removed before the first release. The SDK sends identifiers

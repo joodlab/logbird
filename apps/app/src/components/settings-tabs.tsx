@@ -1,7 +1,7 @@
 import { cn } from '@logbird/ui/lib/utils';
 import { Link, useRouter } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
-import { logicalScroll, logicalTabSpan, physicalScroll, revealScroll, stripEdges, stripMask } from '@/lib/tab-strip';
+import { logicalScroll, logicalTabSpan, physicalScroll, revealScroll, stripFades, stripMask } from '@/lib/tab-strip';
 
 /** Width of the edge fade that tells a phone user the tab strip scrolls. */
 const FADE = 28;
@@ -9,12 +9,24 @@ const FADE = 28;
 /**
  * Scroll only the strip (scrollIntoView would also scroll the page): bring `tab` fully into view, clear of the fades.
  */
-function revealTab(nav: HTMLElement, tab: HTMLElement) {
+/** The strip's direction and scroll position from its inline start, clamped to what it can scroll. */
+function stripScroll(nav: HTMLElement): { rtl: boolean; scroll: number } {
   const rtl = getComputedStyle(nav).direction === 'rtl';
-  const scroll = logicalScroll(nav.scrollLeft);
+  return { rtl, scroll: logicalScroll(nav.scrollLeft, rtl, nav.scrollWidth - nav.clientWidth) };
+}
+
+function revealTab(nav: HTMLElement, tab: HTMLElement) {
+  const { rtl, scroll } = stripScroll(nav);
   const span = logicalTabSpan(nav.getBoundingClientRect(), tab.getBoundingClientRect(), scroll, rtl);
   const target = revealScroll(span, { scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
   if (target !== null) nav.scrollLeft = physicalScroll(target, rtl);
+}
+
+/** The tab a geometry change should keep in view: the one keyboard focus is on, else the current section's. */
+export function tabToReveal(nav: HTMLElement): HTMLElement | null {
+  const focused = document.activeElement;
+  if (focused instanceof HTMLElement && focused !== nav && nav.contains(focused)) return focused;
+  return nav.querySelector<HTMLElement>('[aria-current="page"]');
 }
 
 /**
@@ -23,13 +35,13 @@ function revealTab(nav: HTMLElement, tab: HTMLElement) {
  */
 export function useTabStrip(activeKey: string) {
   const ref = useRef<HTMLElement>(null);
-  const [state, setState] = useState({ start: false, end: false, rtl: false });
+  const [state, setState] = useState({ start: 0, end: 0, rtl: false });
   useEffect(() => {
     const nav = ref.current;
     if (!nav) return;
     const update = () => {
-      const rtl = getComputedStyle(nav).direction === 'rtl';
-      const edges = stripEdges({ scroll: logicalScroll(nav.scrollLeft), width: nav.clientWidth, scrollWidth: nav.scrollWidth });
+      const { rtl, scroll } = stripScroll(nav);
+      const edges = stripFades({ scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
       setState((prev) => (prev.start === edges.start && prev.end === edges.end && prev.rtl === rtl ? prev : { ...edges, rtl }));
     };
     update();
@@ -39,8 +51,16 @@ export function useTabStrip(activeKey: string) {
       if (event.target instanceof HTMLElement && event.target !== nav) revealTab(nav, event.target);
     };
     nav.addEventListener('focusin', onFocusIn);
-    const observer = new ResizeObserver(update);
+    // Geometry changed (the viewport narrowed, a web font swapped in and widened the tabs): refresh the fades and bring the
+    // focused tab, else the current one, back into view. Observing the tabs too catches a width change the nav box hides.
+    // Scrolling by hand only refreshes the fades, so the strip still pans freely.
+    const observer = new ResizeObserver(() => {
+      update();
+      const target = tabToReveal(nav);
+      if (target) revealTab(nav, target);
+    });
     observer.observe(nav);
+    for (const tab of nav.children) observer.observe(tab);
     return () => {
       nav.removeEventListener('scroll', update);
       nav.removeEventListener('focusin', onFocusIn);
@@ -60,7 +80,7 @@ export function useTabStrip(activeKey: string) {
     // `onRendered`, possibly after this effect: check again then (it subscribed first, so it has already run).
     return router.subscribe('onRendered', reveal);
   }, [activeKey, router]);
-  const mask = stripMask(state, FADE, state.rtl);
+  const mask = stripMask(state, state.rtl);
   return { ref, style: mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined };
 }
 

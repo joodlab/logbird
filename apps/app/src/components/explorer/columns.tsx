@@ -103,9 +103,14 @@ export const EVENT_COLUMNS: EventColumn[] = [
     width: 150,
     defaultVisible: false,
     render: (e) =>
-      e.executor?.id ? (
+      e.executor ? (
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate font-mono text-[12px]">{e.executor.id}</span>
+          {/* The id when there is one; an executor recorded without one reads as its name, else its type. */}
+          {e.executor.id ? (
+            <span className="truncate font-mono text-[12px]">{e.executor.id}</span>
+          ) : (
+            <bdi className="truncate text-[12px]">{e.executor.name || e.executor.type}</bdi>
+          )}
           {e.executor.attempt > 1 ? <TypePill tone="warning">#{e.executor.attempt}</TypePill> : null}
         </span>
       ) : (

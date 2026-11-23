@@ -47,9 +47,15 @@ public interface ILogbirdClient
 /// synchronously on the calling thread (they must be fast; a throwing hook drops the event). <see cref="LogbirdOptions.OnDrop"/>,
 /// <see cref="LogbirdOptions.OnError"/> and logging run in order on one background thread; their exceptions are swallowed
 /// and counted, and if they fall behind by more than <see cref="LogbirdOptions.MaxQueueSize"/> (at least 1,000)
-/// notifications, further ones are skipped and counted. Metric instruments are observable, so listeners only run when they
-/// collect. <c>FlushAsync()</c> has no time limit of its own; use <see cref="LogbirdClientExtensions.Flush"/> or a token
-/// for one. <c>DisposeAsync</c> returns within <see cref="LogbirdOptions.ShutdownTimeout"/> plus at most 7 seconds.</para>
+/// notifications, further ones are skipped and counted on <c>logbird.notifications.lost</c>. One exception: the first time
+/// any is skipped, a single notice saying so goes to the logger and <see cref="LogbirdOptions.OnError"/> directly on the
+/// thread pool (the ordered queue is full at that moment), so it can run while another callback is running and a flush does
+/// not wait for it. Metric instruments are observable, so listeners only run when they collect. <c>FlushAsync()</c> has no
+/// time limit of its own; use <see cref="LogbirdClientExtensions.Flush"/> or a token for one. <c>DisposeAsync</c> waits up
+/// to <see cref="LogbirdOptions.ShutdownTimeout"/> for delivery and up to 2 more seconds for a cancelled request to unwind,
+/// then reports what is left as <see cref="DropReason.Shutdown"/> (in-memory work, no I/O, proportional to the events
+/// left), then waits up to 5 seconds for pending callbacks. <c>Dispose</c> runs the same steps on the thread pool and
+/// blocks for at most <see cref="LogbirdOptions.ShutdownTimeout"/> plus 10 seconds, counted from the call.</para>
 /// <para>The queue lives in memory. A crash before delivery loses what is queued. For events that must survive a crash,
 /// save them in your database in the same transaction as the change (an outbox) and send them from there, keeping their ids.</para>
 /// </remarks>
@@ -103,6 +109,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private long _failedSends;
     private long _warnings;
     private long _notificationsLost;
+    private int _lostReported;
     private long _callbackFailures;
 
     [ThreadStatic]
@@ -139,7 +146,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _onError = options.OnError;
         _onDrop = options.OnDrop;
         _logger = logger ?? NullLogger.Instance;
-        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Count(ref _notificationsLost, ref LogbirdMetrics.NotificationsLostTotal, lost), () => Count(ref _callbackFailures, ref LogbirdMetrics.CallbackFailuresTotal));
+        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), OnNotificationsLost, () => Count(ref _callbackFailures, ref LogbirdMetrics.CallbackFailuresTotal));
         List<string>? identifierFields = null;
         try
         {
@@ -169,7 +176,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay,
             delivered: () => Count(ref _delivered, ref LogbirdMetrics.DeliveredTotal),
             countDrop: CountDrop,
-            settle: (item, count) => _queue!.Settle(item, count));
+            settle: (item, count) => _queue!.Settle(item, count),
+            reserveReport: ReserveReport);
         _loop = Task.Run(RunAsync);
         LogbirdMetrics.Register(this);
     }
@@ -285,10 +293,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             identifierWarnings.Clear();
             EntityIds.Inspect(source, identifierWarnings);
 
+            // The size limit applies to what is sent: after BeforeSend and redaction. The writer stops as soon as the output
+            // passes the limit, so an oversized value costs no more than the limit itself.
             var node = EventJson.ToJsonObject(source, id, occurredAt, environment, defaultSource, fullEnvelope);
             _redactor?.RedactInPlace(node);
-            json = EventJson.ToUtf8(node);
-            if (json.Length > MaxEventBytes)
+            json = JsJson.ToUtf8(node, MaxEventBytes);
+            if (json is null || json.Length > MaxEventBytes)
             {
                 // The payload is not kept: holding oversized bodies in the callback backlog could exhaust memory.
                 Drop(DropReason.TooLarge, id, action, null, "The event exceeds 256 KB.");
@@ -338,7 +348,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         catch (Exception e)
         {
-            Drop(DropReason.Invalid, id, action, json, e.GetType().Name);
+            // The SDK's own refusals (depth) carry fixed text and say why; anything else is named by its type only.
+            Drop(DropReason.Invalid, id ?? auditEvent?.Id, action, json, e is SdkDropException ? e.Message : e.GetType().Name);
 
             // Host exceptions (from BeforeSend, a redaction pattern, a JSON value) can quote event data, so only the
             // exception type is reported, never the exception itself.
@@ -508,10 +519,11 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     }
 
     /// <summary>
-    /// Stops accepting events and sends what is queued, waiting at most <see cref="LogbirdOptions.ShutdownTimeout"/>
-    /// (plus up to two seconds for a cancelled request to unwind). Events not yet delivered afterwards, including a batch
-    /// whose request has not returned, are reported once each through <see cref="LogbirdOptions.OnDrop"/>; a late
-    /// response is then ignored. Never throws.
+    /// Stops accepting events and sends what is queued, waiting at most <see cref="LogbirdOptions.ShutdownTimeout"/>, plus
+    /// up to 2 seconds for a cancelled request to unwind. Events not yet delivered afterwards, including a batch whose
+    /// request has not returned, are then reported as <see cref="DropReason.Shutdown"/> (through
+    /// <see cref="LogbirdOptions.OnDrop"/>, best effort), which is in-memory work proportional to the events left; a late
+    /// response is then ignored. Finally it waits up to 5 seconds for pending callbacks. Never throws.
     /// </summary>
     public ValueTask DisposeAsync() => new(StartDispose());
 
@@ -639,20 +651,24 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     /// <summary>
     /// Same as <see cref="DisposeAsync"/>, blocking the calling thread for at most
-    /// <see cref="LogbirdOptions.ShutdownTimeout"/> plus a few seconds. Safe on threads with a synchronization context
-    /// (WinForms, WPF, classic ASP.NET): the work runs on the thread pool, so it cannot deadlock.
+    /// <see cref="LogbirdOptions.ShutdownTimeout"/> plus 10 seconds. Safe on threads with a synchronization context
+    /// (WinForms, WPF, classic ASP.NET): the work runs on the thread pool, so it cannot deadlock. If the thread pool is too
+    /// busy to finish in time, the remaining events are reported as <see cref="DropReason.Shutdown"/> on the thread pool
+    /// after this returns; a process that exits at once may not finish that report.
     /// </summary>
     public void Dispose()
     {
         try
         {
-            // Starts (or joins) disposal on this thread up to its first await, then waits without capturing a
-            // synchronization context. If the pool is too busy to finish in time, shutdown takes ownership of the
-            // remaining events right here, so nothing stays queued unreported when Dispose returns.
-            var dispose = StartDispose();
+            // The deadline starts on entry and disposal starts (or is joined) on the thread pool, never on this thread: its
+            // accounting takes the queue lock and walks the queue. The proxy task returned by Task.Run cannot be inlined by
+            // Wait. Past the deadline, taking ownership of the remaining events is handed to the thread pool as well.
+            // Admission closes on this thread first, so no event is accepted while disposal waits for the pool.
+            _closing = true;
+            var dispose = Task.Run(StartDispose);
             if (!dispose.Wait(_shutdownTimeout + TimeSpan.FromSeconds(10)) && _queue is not null)
             {
-                AbandonRemaining();
+                _ = Task.Run(AbandonRemaining);
             }
         }
         catch (Exception e)
@@ -836,33 +852,70 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     }
 
     /// <summary>Runs a host callback or log call on the notifier, inside the feedback guard.</summary>
-    private void Notify(Action notification)
-        => _notifier.Post(() =>
-        {
-            InsideLogbird.Value = true;
-            notification();
-        });
+    private void Notify(Action notification, int weight = 1)
+        => _notifier.Post(Guarded(notification), weight);
+
+    private static Action Guarded(Action notification) => () =>
+    {
+        InsideLogbird.Value = true;
+        notification();
+    };
 
     /// <summary>
-    /// Checks depth and size before anything clones or serializes the event. Returns true when it was dropped (and
-    /// reported); oversized events are dropped without keeping their payload.
+    /// Holds a place for an error report in the notification order before the events it is about settle, so a flush that
+    /// sees them settled also waits for the report. The returned callback posts the report, or with null releases the place.
+    /// </summary>
+    private Action<Exception?> ReserveReport()
+    {
+        var slot = _notifier.Reserve();
+        return error => _notifier.PostReserved(slot, error is null ? null : Guarded(() => ReportCore(error, log: true)));
+    }
+
+    /// <summary>
+    /// A memory guard, separate from the size limit: data measuring more than 1 MiB (four times the 256 KB wire limit) before
+    /// redaction is refused before anything copies it, because copying an unbounded caller tree to redact it could exhaust
+    /// memory. The unit is a lower bound of the event's UTF-8 JSON (one byte per UTF-16 code unit of text, plus punctuation
+    /// and number digits; see <see cref="JsonSize"/>). Everything below the guard is decided on what is sent.
+    /// </summary>
+    internal const int MaxDataBytes = 4 * MaxEventBytes;
+
+    /// <summary>The <see cref="DroppedEvent.Detail"/> of an event refused by the memory guard.</summary>
+    internal const string GuardDetail = "The event's data exceeds 1 MiB before redaction.";
+
+    /// <summary>The <see cref="DroppedEvent.Detail"/> of an event whose data nests deeper than <see cref="JsonSize.Max"/> levels.</summary>
+    internal static readonly string DepthDetail = $"An audit event nests JSON deeper than {JsonSize.Max} levels and was dropped.";
+
+    /// <summary>
+    /// Why an event must be refused before anything copies it (depth, then the memory guard, in one iterative walk), or
+    /// null when it may be copied. Shared by <see cref="Track"/> and the ASP.NET Core recording path.
+    /// </summary>
+    internal static (DropReason Reason, string Detail)? RefuseBeforeCopy(AuditEvent auditEvent)
+        => JsonSize.Measure(auditEvent, MaxDataBytes) switch
+        {
+            JsonSize.Shape.TooDeep => (DropReason.Invalid, DepthDetail),
+            JsonSize.Shape.TooLarge => (DropReason.TooLarge, GuardDetail),
+            _ => null,
+        };
+
+    /// <summary>
+    /// One iterative walk before anything copies the event: a tree deeper than <see cref="JsonSize.Max"/> levels is dropped
+    /// as <see cref="DropReason.Invalid"/> (instead of risking the host's stack), and data beyond the memory guard as
+    /// <see cref="DropReason.TooLarge"/>. Both are checked on the event as given, before BeforeSend and redaction: a part
+    /// they would remove still counts, because walking it is the risk. Returns true when the event was dropped here.
     /// </summary>
     private bool CheckShape(AuditEvent auditEvent, string? id, string action)
     {
-        var shape = JsonDepth.Measure(auditEvent, MaxEventBytes);
-        if (shape == JsonDepth.Shape.TooDeep)
+        switch (RefuseBeforeCopy(auditEvent))
         {
-            throw new SdkDropException($"An audit event nests JSON deeper than {JsonDepth.Max} levels and was dropped.");
+            case null:
+                return false;
+            case { Reason: DropReason.Invalid, Detail: var detail }:
+                throw new SdkDropException(detail);
+            case { Detail: var detail }:
+                Drop(DropReason.TooLarge, id, action, null, detail);
+                Report(new LogbirdDeliveryException("An audit event's data exceeds 1 MiB before redaction and was dropped before it was copied."));
+                return true;
         }
-
-        if (shape == JsonDepth.Shape.TooLarge)
-        {
-            Drop(DropReason.TooLarge, id, action, null, "The event exceeds 256 KB.");
-            Report(new LogbirdDeliveryException("An audit event exceeds 256 KB and was dropped."));
-            return true;
-        }
-
-        return false;
     }
 
     /// <summary>Accounts an event evicted from a full queue. Runs under the queue lock: counters and a posted notification only.</summary>
@@ -880,12 +933,53 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     // not stored. Two codes say nothing about content: stored_event_unreadable (something with this id is stored and cannot
     // be compared) and unverified_after_parse_failure (this request was not checked). For them an earlier lost answer
     // keeps the outcome unknown.
-    private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail, string? code)
-        => Drop(reason, item.Id, item.Action, item.Json, detail, counted: true, code: code, mayBeStored: reason switch
+    // Prepared before the event settles and posted inside the settlement (BatchSender.State.TryReject).
+    private Action? OnSenderDrop(QueuedEvent item, DropReason reason, string? detail, string? code)
+        => PrepareDrop(reason, item.Id, item.Action, item.Json, detail, code, reason switch
         {
             DropReason.Rejected => code is "stored_event_unreadable" or "unverified_after_parse_failure" && item.AnswerLost,
             _ => item.MayBeStored,
         });
+
+    /// <summary>
+    /// Counts skipped notifications, and the first time any is skipped says so once through the logger and
+    /// <see cref="LogbirdOptions.OnError"/>, so an operator who never reads the meter still learns that per-event
+    /// callbacks are being lost. That one report bypasses the full notification queue: it runs on the thread pool itself.
+    /// </summary>
+    private void OnNotificationsLost(int lost)
+    {
+        Count(ref _notificationsLost, ref LogbirdMetrics.NotificationsLostTotal, lost);
+        if (Interlocked.Exchange(ref _lostReported, 1) != 0)
+        {
+            return;
+        }
+
+        var notice = new LogbirdDeliveryException(
+            "Logbird skipped OnDrop/OnError notifications because the callbacks fell behind; every skipped one is counted on "
+            + "logbird.notifications.lost. Events are still counted in Stats. This is reported once.");
+        bool queued;
+        try
+        {
+            queued = ScheduleNotice(_ =>
+            {
+                InsideLogbird.Value = true;
+                ReportCore(notice, log: true);
+            });
+        }
+        catch
+        {
+            queued = false;
+        }
+
+        if (!queued)
+        {
+            // The notice never ran: the next skipped notification tries again (the counter above recorded this one).
+            Interlocked.Exchange(ref _lostReported, 0);
+        }
+    }
+
+    /// <summary>Queues the one-time loss notice on the thread pool; a test replaces it to refuse, throw or run it later.</summary>
+    internal Func<WaitCallback, bool> ScheduleNotice { get; set; } = callback => ThreadPool.UnsafeQueueUserWorkItem(callback, null);
 
     // A server reason can quote the event's values; the message and log line keep only its leading field or code.
     private void OnSenderWarning(QueuedEvent item, string reason)
@@ -911,7 +1005,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private void WarnAll(string id, string action, EntityIds.Warning[] warnings)
     {
         Count(ref _warnings, ref LogbirdMetrics.WarningsTotal, warnings.Length);
-        Notify(() =>
+
+        // One queue entry carrying one OnError call per warning: if it is skipped, every one of them counts as lost.
+        Notify(weight: warnings.Length, notification: () =>
         {
             foreach (var warning in warnings)
             {
@@ -951,20 +1047,24 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
     }
 
-    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, bool counted = false, string? code = null, bool mayBeStored = false)
+    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, string? code = null, bool mayBeStored = false)
     {
-        if (!counted)
+        CountDrop(reason);
+        PrepareDrop(reason, id, action, json, detail, code, mayBeStored)?.Invoke();
+    }
+
+    /// <summary>The <c>OnDrop</c> report for one dropped event, ready to post; null when no <c>OnDrop</c> is set.</summary>
+    private Action? PrepareDrop(DropReason reason, string? id, string action, byte[]? json, string? detail, string? code, bool mayBeStored)
+    {
+        if (_onDrop is not { } onDrop)
         {
-            CountDrop(reason);
+            return null;
         }
 
-        if (_onDrop is { } onDrop)
-        {
-            // Display fields are bounded (an oversized action or id must not be kept whole in the backlog); the JSON, when
-            // kept, carries the event for replay.
-            var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024), code, mayBeStored);
-            Notify(() => onDrop(dropped));
-        }
+        // Display fields are bounded (an oversized action or id must not be kept whole in the backlog); the JSON, when
+        // kept, carries the event for replay.
+        var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024), code, mayBeStored);
+        return () => Notify(() => onDrop(dropped));
     }
 
     private void Report(Exception error) => Report(error, log: true);

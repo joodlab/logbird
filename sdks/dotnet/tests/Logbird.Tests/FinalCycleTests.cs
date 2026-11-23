@@ -247,15 +247,17 @@ public class FinalCycleTests
             };
         }), new FakeServer());
         var numbers = new JsonArray();
-        for (var i = 0; i < 300_000; i++)
+        for (var i = 0; i < 600_000; i++)
         {
             numbers.Add((JsonNode)i);
         }
 
+        // The array is over the 1 MiB memory guard: refused before any copy. The 300 KB action is under it: the hook sees
+        // the event, and what it returns is too large.
         client.Track(new AuditEvent("numbers") { Metadata = { ["n"] = numbers } });
         client.Track(new AuditEvent(new string('a', 300 * 1024)));
         Assert.True(await client.FlushAsync());
-        Assert.Equal(0, copies);
+        Assert.Equal(1, copies);
         Assert.All(drops, d => Assert.Equal(DropReason.TooLarge, d.Reason));
         Assert.Equal(2, drops.Count);
         Assert.All(drops, d => Assert.True(d.Action.Length <= 256));

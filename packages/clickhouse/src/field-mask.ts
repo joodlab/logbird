@@ -20,7 +20,13 @@ export function maskEvent(event: AuditEvent, mask: Masks, secret?: Buffer): Audi
   if (mask.includes('user_agent')) masked.context.userAgent = '';
   if (mask.includes('actor_email')) {
     if (!secret) throw new Error('The actor_email mask requires a field mask key.');
-    if (masked.actor) masked.actor = { ...masked.actor, email: maskedEmail(event.projectId, masked.actor.email, secret) };
+    if (masked.actor) {
+      const { email, name } = masked.actor;
+      const hidden = maskedEmail(event.projectId, email, secret);
+      // A producer that used the address as the display name too: the name would show what the mask hides. Same value.
+      const nameIsEmail = Boolean(email) && name.trim().toLowerCase() === email.trim().toLowerCase();
+      masked.actor = { ...masked.actor, email: hidden, name: nameIsEmail ? hidden : name };
+    }
   }
   for (const preset of mask) for (const key of MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];
   return masked;

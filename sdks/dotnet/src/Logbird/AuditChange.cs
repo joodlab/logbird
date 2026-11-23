@@ -43,7 +43,7 @@ public sealed class AuditChange
     /// <summary>Whether a new value is recorded. <see langword="false"/> for a field that was removed.</summary>
     public bool HasAfter { get; }
 
-    internal AuditChange DeepClone() => new(Field, Before?.DeepClone(), HasBefore, After?.DeepClone(), HasAfter);
+    internal AuditChange DeepClone() => new(Field, Internal.JsonTree.Clone(Before), HasBefore, Internal.JsonTree.Clone(After), HasAfter);
 
     /// <summary>Records a field that was set for the first time, for example on a created record.</summary>
     /// <param name="field">The field name.</param>
