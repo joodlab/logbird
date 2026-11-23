@@ -26,7 +26,8 @@ Auto-imported `useAuditTrail({ target: { id: '123' } })` uses the server route
 sets private/no-store caching, and only forwards the query returned by authorize. Hooks run on the
 server, not serialized runtime config. Authorize every page/cursor; tenant selectors are not a policy.
 If authorize throws a `TypeError` (from `trailQuery`) or returns a query with no `q`, the route answers 400 and reads
-nothing.
+nothing. Because authorize decides the scope on the server, `useAuditTrail({})` may send an empty trail to this route;
+a selector passed without a value (`tenant: undefined`) still throws on the client.
 
 `ModuleOptions`: endpoint, ingestKey, readKey (private runtimeConfig.logbird), hooks (server module path).
 Hook types: authorize(event, query) => false | Partial<SearchQuery> (async supported), optional actor,

@@ -54,45 +54,89 @@ export interface TrailQuery {
 }
 /** Blank means only whitespace, as JavaScript's `trim()` sees it (the .NET builder uses the same rule). */
 const isBlank = (value: string) => value.trim().length === 0;
+/** A lone UTF-16 surrogate becomes U+FFFD in the URL, so it could match a different identifier: refused (as in .NET). */
+const hasLoneSurrogate = (value: string) => /[\uD800-\uDFFF]/u.test(value);
+const fail = (message: string): never => {
+  throw new TypeError(`trailQuery: ${message}`);
+};
 /** A present selector must name something: an absent value would silently widen the read (#263). */
-function selector(input: TrailQuery, key: 'actor' | 'tenant'): string | undefined {
-  if (!Object.hasOwn(input, key)) return undefined;
-  const value = input[key];
+function selectorValue(key: string, value: unknown): string {
   if (typeof value !== 'string' || isBlank(value))
-    throw new TypeError(`trailQuery: \`${key}\` was given but is empty; pass a value or leave the key out (an empty ${key} would widen the read).`);
+    return fail(`\`${key}\` was given but is empty; pass a value or leave the key out (an empty ${key} would widen the read).`);
+  if (hasLoneSurrogate(value)) return fail(`\`${key}\` contains an unpaired UTF-16 surrogate.`);
   return value;
+}
+/**
+ * The extra query is wrapped in parentheses and ANDed with the selectors, so it must be one complete expression: its
+ * parentheses (outside double-quoted values) stay balanced and never close more than they opened, and every quote is
+ * closed. Otherwise `a) OR (b` would become `(a) OR (b) AND tenant:"…"`, an OR branch outside the tenant (#263).
+ */
+function assertSelfContained(q: string) {
+  let depth = 0;
+  for (let i = 0; i < q.length; i++) {
+    const c = q[i];
+    if (c === '"') {
+      for (i++; i < q.length && q[i] !== '"'; i++) if (q[i] === '\\') i++;
+      if (i >= q.length) fail('`q` has an unterminated quoted value.');
+    } else if (c === '(') depth++;
+    else if (c === ')' && --depth < 0) fail('`q` closes a parenthesis it did not open; it must be one complete expression.');
+  }
+  if (depth !== 0) fail('`q` leaves a parenthesis open; it must be one complete expression.');
+}
+export interface TrailQueryOptions {
+  /**
+   * Only for a fetcher whose own server decides the scope (the Nuxt read route's `authorize` hook): a trail with no
+   * selector and no query is then sent as is, for that server to complete or refuse. Present-but-empty selectors still
+   * throw. Never use it with a project read key.
+   */
+  scopedByServer?: boolean;
 }
 /**
  * The search query for one record's, actor's or tenant's trail. Throws a TypeError instead of ever returning a query
  * wider than the caller asked for (#263): a trail needs a target, actor, tenant or non-blank query, and a selector key
- * that is present must have a value (`tenant: session.tenantId` with no tenant id throws rather than reading the
- * whole project).
+ * that is present (own or inherited) must have a value (`tenant: session.tenantId` with no tenant id throws rather
+ * than reading the whole project). Every input value is read once.
  */
-export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
+export function trailQuery(input: TrailQuery, options: TrailQueryOptions = {}): Partial<SearchQuery> {
+  if (!input || typeof input !== 'object') return fail('expects an options object.');
   let target: { type?: string; id: string } | undefined;
-  if (Object.hasOwn(input, 'target')) {
-    const given = input.target as unknown;
-    if (!given || typeof given !== 'object')
-      throw new TypeError('trailQuery: `target` was given but is empty; pass `{ id }` or `{ type, id }`, or leave the key out.');
-    const { id, type } = given as { id?: unknown; type?: unknown };
-    if (typeof id !== 'string' || isBlank(id)) throw new TypeError('trailQuery: `target` needs an id; a target without one would widen the read.');
-    if (type !== undefined && typeof type !== 'string') throw new TypeError('trailQuery: `target.type` must be a string when given.');
-    target = { type, id };
+  if ('target' in input) {
+    const given: unknown = input.target;
+    if (!given || typeof given !== 'object') return fail('`target` was given but is empty; pass `{ id }` or `{ type, id }`, or leave the key out.');
+    const id = selectorValue('target.id', (given as { id?: unknown }).id);
+    if ('type' in given) {
+      // An empty type is a real record type; an undefined one would drop the type and widen to every type with this id.
+      const type: unknown = (given as { type?: unknown }).type;
+      if (typeof type !== 'string') return fail('`target.type` was given but is not a string; pass the type or leave the key out.');
+      if (hasLoneSurrogate(type)) return fail('`target.type` contains an unpaired UTF-16 surrogate.');
+      target = { type, id };
+    } else target = { id };
   }
-  const actor = selector(input, 'actor');
-  const tenant = selector(input, 'tenant');
-  if (input.q !== undefined && typeof input.q !== 'string') throw new TypeError('trailQuery: `q` must be a string when given.');
-  const q = input.q !== undefined && !isBlank(input.q) ? input.q : undefined;
-  if (!target && actor === undefined && tenant === undefined && q === undefined)
-    throw new TypeError('trailQuery: a trail needs a target, actor, tenant or query; an empty trail would be the whole project.');
+  const actor = 'actor' in input ? selectorValue('actor', input.actor) : undefined;
+  const tenant = 'tenant' in input ? selectorValue('tenant', input.tenant) : undefined;
+  const rawQ: unknown = input.q;
+  if (rawQ !== undefined && typeof rawQ !== 'string') return fail('`q` must be a string when given.');
+  const q = rawQ !== undefined && !isBlank(rawQ) ? rawQ : undefined;
+  if (q !== undefined) {
+    if (hasLoneSurrogate(q)) fail('`q` contains an unpaired UTF-16 surrogate.');
+    assertSelfContained(q);
+  }
+  const range = input.range;
+  const limit = input.limit;
+  const cursor = input.cursor;
+  if (!target && actor === undefined && tenant === undefined && q === undefined) {
+    if (options.scopedByServer) return { ...range, limit, cursor };
+    fail('a trail needs a target, actor, tenant or query; an empty trail would be the whole project.');
+  }
   const terms = [
     q === undefined ? '' : `(${q})`,
     target ? (target.type !== undefined ? formatRecordTerm(target.type, target.id) : `target:${quoteQueryValue(target.id)}`) : '',
     actor === undefined ? '' : `actor:${quoteQueryValue(actor)}`,
     tenant === undefined ? '' : `tenant:${quoteQueryValue(tenant)}`,
   ].filter(Boolean);
-  return { ...input.range, q: terms.join(' AND '), limit: input.limit, cursor: input.cursor };
+  return { ...range, q: terms.join(' AND '), limit, cursor };
 }
+
 export interface ReadOptions {
   endpoint: string;
   readKey: string;

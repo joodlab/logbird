@@ -72,3 +72,30 @@ it('answers an incomplete trail with an error and never reads upstream (#263)', 
   }
   expect(upstream).toBe(0);
 });
+
+it('sends exactly the validated query, even when authorize returns a getter or a non-enumerable q', async () => {
+  const urls: string[] = [];
+  const options = {
+    endpoint: 'http://logbird.test',
+    readKey: 'lb_read_fake',
+    fetch: async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Response.json({ data: [], nextCursor: null, total: 0, tookMs: 0 });
+    },
+  };
+  class Trusted {
+    limit = 20;
+    get q() {
+      return 'tenant:"acme"';
+    }
+  }
+  const hidden = { limit: 20 };
+  Object.defineProperty(hidden, 'q', { value: 'tenant:"acme"', enumerable: false });
+  for (const authorize of [() => new Trusted(), () => hidden]) {
+    const app = createApp();
+    app.use(createReadHandler(options, { authorize }));
+    expect((await toWebHandler(app)(new Request('http://local/'))).status).toBe(200);
+  }
+  expect(urls).toHaveLength(2);
+  for (const url of urls) expect(new URL(url).searchParams.get('q')).toBe('tenant:"acme"');
+});

@@ -45,9 +45,9 @@ it('throws when a selector key is present without a value, even next to another 
   expect(() => trailQuery({ actor: undefined, tenant: 't1' })).toThrow(/`actor`/);
   expect(() => trailQuery({ actor: 42 as unknown as string })).toThrow(/`actor`/);
   expect(() => trailQuery({ target: undefined, actor: 'u' })).toThrow(/`target` was given but is empty/);
-  expect(() => trailQuery({ target: { id: '' } })).toThrow(/`target` needs an id/);
-  expect(() => trailQuery({ target: { type: 'invoice', id: '  ' } })).toThrow(/`target` needs an id/);
-  expect(() => trailQuery({ target: { type: 'invoice' } as unknown as { id: string } })).toThrow(/`target` needs an id/);
+  expect(() => trailQuery({ target: { id: '' } })).toThrow(/`target.id` was given but is empty/);
+  expect(() => trailQuery({ target: { type: 'invoice', id: '  ' } })).toThrow(/`target.id` was given but is empty/);
+  expect(() => trailQuery({ target: { type: 'invoice' } as unknown as { id: string } })).toThrow(/`target.id` was given but is empty/);
   expect(() => trailQuery({ target: { type: 7, id: 'x' } as unknown as { id: string } })).toThrow(/`target.type`/);
   expect(() => trailQuery({ q: 7 as unknown as string })).toThrow(/`q` must be a string/);
   // Present and valid still works, and an absent key is simply absent.
@@ -60,4 +60,60 @@ it('escapes every star in exact trail selectors', () => {
     String.raw`target:"doc\*v2\*" AND actor:"agent\*" AND tenant:"team\*"`,
   );
   expect(trailQuery({ target: { type: 'page*', id: 'doc*v2*' } }).q).toBe(String.raw`record:"page\*:doc\*v2\*"`);
+});
+
+// Review round 1 on #311: every way a selector can be present, and every way q could escape its group.
+it('counts inherited, getter and non-enumerable selectors as present, reading each once', () => {
+  class Session {
+    get tenant() {
+      return 'acme';
+    }
+  }
+  const inherited = Object.assign(Object.create(new Session()), { target: { id: 'inv_1' } });
+  expect(trailQuery(inherited).q).toBe('target:"inv_1" AND tenant:"acme"');
+  const blankInherited = Object.assign(Object.create({ tenant: '' }), { target: { id: 'inv_1' } });
+  expect(() => trailQuery(blankInherited)).toThrow(/`tenant` was given but is empty/);
+  const hidden = { target: { id: 'inv_1' } };
+  Object.defineProperty(hidden, 'tenant', { value: 'acme', enumerable: false });
+  expect(trailQuery(hidden).q).toBe('target:"inv_1" AND tenant:"acme"');
+  let reads = 0;
+  const counted = {
+    tenant: 'acme',
+    get q() {
+      reads++;
+      return reads === 1 ? 'action:a' : '';
+    },
+  };
+  expect(trailQuery(counted).q).toBe('(action:a) AND tenant:"acme"');
+  expect(reads).toBe(1);
+});
+
+it('refuses a target type given as undefined instead of widening to every type with that id', () => {
+  expect(() => trailQuery({ target: { type: undefined, id: 'A1' } })).toThrow(/`target.type` was given but is not a string/);
+  expect(trailQuery({ target: { type: '', id: 'A1' } }).q).toBe('record:":A1"');
+});
+
+it('accepts only a q that is one complete expression, so no OR branch can leave the selectors', () => {
+  for (const q of ['a) OR (b', 'tenant:other) OR (x', '(a', 'a)', 'action:"open']) expect(() => trailQuery({ tenant: 'acme', q }), q).toThrow(/`q`/);
+  expect(trailQuery({ tenant: 'acme', q: 'action:"a)b" OR (x AND y)' }).q).toBe('(action:"a)b" OR (x AND y)) AND tenant:"acme"');
+  expect(trailQuery({ tenant: 'acme', q: String.raw`action:"say \"hi)\""` }).q).toBe(String.raw`(action:"say \"hi)\"") AND tenant:"acme"`);
+});
+
+it('refuses unpaired UTF-16 surrogates in selectors and q, and keeps valid pairs', () => {
+  const lone = '\uD83D';
+  for (const input of [
+    { tenant: `a${lone}` },
+    { actor: lone },
+    { target: { id: lone } },
+    { target: { type: lone, id: 'x' } },
+    { tenant: 't', q: `a${lone}` },
+  ])
+    expect(() => trailQuery(input), JSON.stringify(input)).toThrow(/unpaired UTF-16 surrogate/);
+  expect(trailQuery({ tenant: 'team-\u{1F600}' }).q).toBe('tenant:"team-\u{1F600}"');
+});
+
+it('lets only a server-scoped fetcher send an empty trail, and never a selector without a value', () => {
+  expect(trailQuery({ limit: 20 }, { scopedByServer: true })).toEqual({ limit: 20, cursor: undefined });
+  expect(() => trailQuery({ tenant: undefined }, { scopedByServer: true })).toThrow(/`tenant`/);
+  expect(() => trailQuery({ limit: 20 })).toThrow(/an empty trail would be the whole project/);
 });

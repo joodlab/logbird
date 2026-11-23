@@ -146,20 +146,32 @@ it('shutdown waits for pending resolutions before closing the client', async () 
 });
 it('uses a correlation header whole or not at all: 256 characters are kept, 257 fall back to a generated id (#206)', async () => {
   const { client, track } = fixture();
-  const keep = 'r'.repeat(256);
-  const long = `${'o'.repeat(256)}-distinct-tail`;
-  const kept = await createAudit({ client }, {}, new Request('http://host', { headers: { 'x-request-id': keep, 'x-logbird-operation': keep } }));
+  const uuidv7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const keptRequest = 'r'.repeat(256);
+  const keptOperation = 'o'.repeat(256);
+  const kept = await createAudit(
+    { client },
+    {},
+    new Request('http://host', { headers: { 'x-request-id': keptRequest, 'x-logbird-operation': keptOperation } }),
+  );
   kept('kept');
   await kept.pending();
-  expect(track.mock.calls[0]?.[0].context).toMatchObject({ requestId: keep, operationId: keep });
-  for (const value of ['q'.repeat(257), long]) {
-    const audit = await createAudit({ client }, {}, new Request('http://host', { headers: { 'x-request-id': value, 'x-logbird-operation': value } }));
+  expect(track.mock.calls[0]?.[0].context).toMatchObject({ requestId: keptRequest, operationId: keptOperation });
+  // Distinct over-long values per header, each checked on its own (a swap or a partial fix would fail).
+  for (const [request, operation] of [
+    ['q'.repeat(257), 'p'.repeat(257)],
+    [`${'a'.repeat(256)}-request-tail`, `${'b'.repeat(256)}-operation-tail`],
+  ] as const) {
+    const audit = await createAudit(
+      { client },
+      {},
+      new Request('http://host', { headers: { 'x-request-id': request, 'x-logbird-operation': operation } }),
+    );
     audit('overlong');
     await audit.pending();
     const context = track.mock.lastCall?.[0].context;
-    expect(context?.requestId).not.toBe(value);
-    expect(context?.requestId).not.toBe(value.slice(0, 256));
-    expect(context?.operationId).not.toBe(value.slice(0, 256));
-    expect(context?.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(context?.requestId).toMatch(uuidv7);
+    expect(context?.operationId).toMatch(uuidv7);
+    expect(context?.requestId).not.toBe(context?.operationId);
   }
 });
