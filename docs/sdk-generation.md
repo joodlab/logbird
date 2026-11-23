@@ -22,9 +22,12 @@ Nothing under `experiments/` is a workspace package or imported by production co
 ## Spec export and quality
 
 `pnpm openapi:export` calls `app.request('/openapi.json')` in-process. It never binds a port or calls
-application data endpoints. It currently requires the existing `.env`, generated Prisma client and installed
-dependencies because importing the app loads its environment, database and queue modules. The script closes
-those clients in `finally`. It does not start backing services.
+application data endpoints. It needs valid settings, the generated Prisma client and installed dependencies,
+because importing the app loads its environment, database and queue modules. No backing service has to be running.
+`pnpm openapi:export` reads `.env`. `pnpm openapi:check` uses `.env` if present (CI passes placeholder settings
+instead), exports, and fails if `openapi/` changed; CI runs it in the Quality job. The script closes its clients in
+`finally`. The committed files name the documented local default (`http://localhost:4600`) as their server instead
+of the instance's `APP_URL`, so they depend only on the code.
 
 Committed outputs: `openapi/openapi.json` (34 implemented operations as of the setup endpoints) and `openapi/public.json` (3 operations:
 search, detail and ingest). Objects are recursively sorted, arrays retain their semantic order, JSON is indented

@@ -34,11 +34,14 @@ try {
     }
   }
   await mkdir('openapi', { recursive: true });
+  // The live document names this instance's APP_URL. The committed export names the documented local default instead,
+  // so the files depend only on the code: CI checks them for drift (`pnpm openapi:check`).
+  const servers = [{ url: 'http://localhost:4600', description: 'This Logbird instance' }];
   for (const [name, paths] of [
     ['openapi', spec.paths],
     ['public', Object.fromEntries(Object.entries(spec.paths).filter(([path]) => path.startsWith('/v1/')))],
   ] as const)
-    await writeFile(`openapi/${name}.json`, `${JSON.stringify(stable({ ...spec, paths }), null, 2)}\n`);
+    await writeFile(`openapi/${name}.json`, `${JSON.stringify(stable({ ...spec, servers, paths }), null, 2)}\n`);
   console.log(`Exported ${ids.size} operations in-process (no listening server).`);
 } finally {
   await rateLimitStore.quit();

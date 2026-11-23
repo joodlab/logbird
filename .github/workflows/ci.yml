@@ -35,3 +35,19 @@ jobs:
         env:
           # The query bar's corpus test runs in its own job (query-corpus.yml), only when query code changes.
           LOGBIRD_QUERY_CORPUS: skip
+      - name: OpenAPI export matches the contracts
+        # The export runs the API in-process and only reads its OpenAPI route. Nothing below is contacted: the server and
+        # worker modules need valid settings to load, and Redis refusals at shutdown are expected noise.
+        env:
+          REDIS_URL: redis://127.0.0.1:1
+          APP_URL: http://localhost:4600
+          BETTER_AUTH_SECRET: ci-openapi-export-placeholder-secret-0000
+          CLICKHOUSE_URL: http://127.0.0.1:1
+          CLICKHOUSE_DATABASE: logbird
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ci
+        run: |
+          if ! pnpm openapi:check; then
+            echo "::error title=openapi/ is out of date::The exported API differs from the committed openapi/ files. Run \`pnpm openapi:export\` and commit the result."
+            exit 1
+          fi
