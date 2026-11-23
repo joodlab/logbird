@@ -6,6 +6,7 @@ import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
@@ -17,7 +18,7 @@ afterEach(async () => {
   clock = Date.now();
   vi.useRealTimers();
   await f.cleanup();
-});
+}, slowStore(30_000));
 it.each(['before-send', 'after-ack'] as const)(
   'recovers actual process death %s with independent client pools and no double count',
   async (phase) => {
@@ -74,5 +75,5 @@ it.each(['before-send', 'after-ack'] as const)(
       await exited;
     }
   },
-  90_000,
+  slowStore(90_000),
 );
