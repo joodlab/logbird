@@ -4,12 +4,12 @@ import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
-import { slowStore } from './slow-store';
+import { purgeLimit, slowStore } from './slow-store';
 
 const qa = process.env.CLICKHOUSE_DATABASE === 'logbird_qa_062';
 let f: ImmutableFixture,
   clock = Date.now();
-vi.setConfig({ testTimeout: 90_000, hookTimeout: slowStore(30_000) });
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 30_000 });
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   clock = Math.max(clock, Date.now()) + 61_000;
@@ -21,7 +21,7 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   await f.cleanup();
-});
+}, slowStore(30_000));
 const input = { id: 'partial', action: 'partial.original', actor: { id: 'fixture-actor', type: 'user' }, metadata: { fixture: true } };
 async function assertOne() {
   expect(await f.count()).toBe(1);
@@ -33,7 +33,7 @@ async function assertOne() {
   expect(metrics[0]).toEqual({ ids: 1, minutes: 1, actors: 1, attributes: 1 });
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: { not: null } } })).toBe(1);
 }
-it.runIf(qa)('retains a real async-wait timeout while its insertion remains queued', async () => {
+it.runIf(qa)('retains a real async-wait timeout while its insertion remains queued', purgeLimit(90_000), async () => {
   const insert = clickhouse.exec.bind(clickhouse);
   let serverCode = '';
   vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
@@ -102,4 +102,5 @@ it.runIf(qa).each(['event_ids', 'events_by_minute'] as const)(
     expect(writes.mock.calls.some(([p]) => p.query.startsWith('INSERT INTO events '))).toBe(false);
     await assertOne();
   },
+  slowStore(90_000),
 );

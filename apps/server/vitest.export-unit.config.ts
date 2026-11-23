@@ -20,6 +20,7 @@ export default defineConfig({
       'src/immutable-ingest.test.ts',
       'src/legacy-sdk-011-fixture.test.ts',
       'src/ingest-storage-fault-fixture.test.ts',
+      'src/slow-store.test.ts',
     ],
     maxWorkers: 1,
     fileParallelism: false,

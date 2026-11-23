@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { read } from '@logbird/clickhouse';
 import { prisma, withProjectLock } from '@logbird/database';
-import { expect } from 'vitest';
+import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
 import { ingest } from './ingest';
-import { it } from './slow-store';
+import { purgeLimit } from './slow-store';
 
-it('DELETE project purges confirmed and unresolved receipts before returning 204 (real services)', async () => {
+it('DELETE project purges confirmed and unresolved receipts before returning 204 (real services)', purgeLimit(120_000), async () => {
   const org = randomUUID();
   let userId = '',
     cookie = '',
@@ -67,4 +67,4 @@ it('DELETE project purges confirmed and unresolved receipts before returning 204
     if (userId) await prisma.user.deleteMany({ where: { id: userId } });
   }
   // Whole-file runs take 54–69s while events/event_ids purges share the local two-slot mutation pool.
-}, 120_000);
+});

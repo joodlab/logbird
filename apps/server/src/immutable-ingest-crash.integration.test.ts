@@ -10,7 +10,7 @@ import { slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
-vi.setConfig({ hookTimeout: slowStore(30_000) });
+vi.setConfig({ hookTimeout: 30_000 });
 beforeEach(async () => {
   f = await immutableFixture();
 });
@@ -18,7 +18,7 @@ afterEach(async () => {
   clock = Date.now();
   vi.useRealTimers();
   await f.cleanup();
-});
+}, slowStore(30_000));
 it.each(['before-send', 'after-ack'] as const)(
   'recovers actual process death %s with independent client pools and no double count',
   async (phase) => {

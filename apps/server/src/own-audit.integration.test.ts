@@ -2,15 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
-import { expect } from 'vitest';
+import { expect, it } from 'vitest';
 import { app } from './app';
 import { authEmailHash } from './auth-failures';
 import { clickhouse } from './clickhouse';
 import { env } from './env';
-import { it } from './slow-store';
+import { purgeLimit } from './slow-store';
 import { drainTestAudit, flushTestSignIns } from './test-audit';
 
-it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chip evidence', async () => {
+it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chip evidence', purgeLimit(360_000), async () => {
   const users: string[] = [];
   let organizationId = '';
   let project: { id: string; slug: string } | undefined;
@@ -273,7 +273,7 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     await prisma.authAuditBudget.deleteMany({ where: { stream: `ws:${organizationId}` } });
     await prisma.user.deleteMany({ where: { id: { in: users } } });
   }
-}, 360_000);
+});
 
 /** Every alphanumeric token of every string or number value in `value`, at any depth (keys included). */
 function valueTokens(value: unknown): string[] {

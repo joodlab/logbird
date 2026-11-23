@@ -5,16 +5,16 @@ import { read } from '@logbird/clickhouse';
 import { ProjectBusyError, prisma } from '@logbird/database';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
-import { afterEach, beforeEach, expect, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 import { ingest } from './ingest';
-import { it, slowStore } from './slow-store';
+import { purgeLimit, slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
 const wallClock = Date.now;
-vi.setConfig({ testTimeout: 90_000, hookTimeout: slowStore(60_000) });
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 60_000 });
 beforeEach(async () => {
   f = await immutableFixture();
   await f.authorize();
@@ -27,7 +27,7 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   await f.cleanup();
-});
+}, slowStore(60_000));
 const pending = { id: 'abandoned', action: 'repair.pending' };
 async function populated() {
   expect((await f.post({ id: 'retained', action: 'retained.event', actor: { id: 'person', type: 'user' }, metadata: { key: 'value' } })).status).toBe(
@@ -53,7 +53,7 @@ async function consistent(events: number) {
   expect(overview.status).toBe(200);
   expect((await overview.json()).kpis.events).toBe(events);
 }
-it('fences readers after all rollup DELETEs, excludes repair from settings, and completes before replay', async () => {
+it('fences readers after all rollup DELETEs, excludes repair from settings, and completes before replay', purgeLimit(90_000), async () => {
   await populated();
   await f.pending(pending, { expired: true });
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse),
@@ -101,7 +101,7 @@ it('fences readers after all rollup DELETEs, excludes repair from settings, and 
     await response;
   }
 });
-it('keeps failed repairs read-fenced while healthy siblings commit, then retention restores every destination', async () => {
+it('keeps failed repairs read-fenced while healthy siblings commit, then retention restores every destination', purgeLimit(90_000), async () => {
   await populated();
   await f.pending(pending, { expired: true });
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
@@ -131,8 +131,8 @@ it('keeps failed repairs read-fenced while healthy siblings commit, then retenti
   await enforceProjectRetention(f.project);
   await consistent(4);
   expect(await prisma.retentionRun.count({ where: { projectId: f.project, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } })).toBe(0);
-}, 90_000);
-it('repairs a process killed after destructive deletes without exposing an empty model after lease expiry', async () => {
+});
+it('repairs a process killed after destructive deletes without exposing an empty model after lease expiry', purgeLimit(90_000), async () => {
   vi.useRealTimers();
   await populated();
   await f.pending(pending);
@@ -149,7 +149,7 @@ it('repairs a process killed after destructive deletes without exposing an empty
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const deleted = new Promise<{ stage: string }>((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error('Repair child IPC timeout')), slowStore(20_000));
+      timer = setTimeout(() => reject(new Error('Repair child IPC timeout')), 20_000);
       child.once('message', (m) => resolve(m as { stage: string }));
       child.once('exit', () => reject(new Error('Repair child exited early')));
     });
@@ -171,8 +171,8 @@ it('repairs a process killed after destructive deletes without exposing an empty
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     await exited;
   }
-}, 90_000);
-it('ready-only and grace-only recovery perform no rollup DELETE and expose the remaining ready grace', async () => {
+});
+it('ready-only and grace-only recovery perform no rollup DELETE and expose the remaining ready grace', purgeLimit(90_000), async () => {
   await f.pending(pending, { expired: true });
   await recoverProjectIngest(maintenanceClickhouse, f.project);
   const commands = vi.spyOn(maintenanceClickhouse, 'command');
@@ -215,7 +215,7 @@ it('flush failures retain the pending index and store siblings with a throttled 
   expect(calls.mock.calls.filter(([p]) => p.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE')).toHaveLength(1);
   expect(await f.count()).toBe(3);
 });
-it('sample removal uses the same durable read fence around its rollup rebuild', async () => {
+it('sample removal uses the same durable read fence around its rollup rebuild', purgeLimit(90_000), async () => {
   await populated();
   expect((await f.post({ id: 'sample', action: 'sample', source: 'logbird-sample' })).status).toBe(202);
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);

@@ -6,11 +6,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
-import { slowStore } from './slow-store';
+import { purgeLimit, slowStore } from './slow-store';
 
 let f: ImmutableFixture,
   clock = Date.now();
-vi.setConfig({ testTimeout: 60_000, hookTimeout: slowStore(30_000) });
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   clock = Math.max(clock, Date.now()) + 61_000;
@@ -22,9 +22,9 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   await f.cleanup();
-});
+}, slowStore(30_000));
 const input = { id: 'original', action: 'original.event' };
-it('settles a mismatching stored row terminally instead of keeping an expired claim', async () => {
+it('settles a mismatching stored row terminally instead of keeping an expired claim', purgeLimit(60_000), async () => {
   await f.pending(input, { expired: true });
   const stored = { ...input, action: 'stored.winner' };
   await insertEvents(clickhouse, [f.row(stored)]);
@@ -38,7 +38,7 @@ it('settles a mismatching stored row terminally instead of keeping an expired cl
   expect(commands.mock.calls.filter(([p]) => p.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE')).toHaveLength(1);
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: { not: null } } })).toBe(1);
 });
-it('prechecks five different-content retries without a flush and releases a ready id after grace', async () => {
+it('prechecks five different-content retries without a flush and releases a ready id after grace', purgeLimit(60_000), async () => {
   await f.pending(input, { expired: true });
   await recoverProjectIngest(maintenanceClickhouse, f.project);
   const commands = vi.spyOn(maintenanceClickhouse, 'command');
@@ -49,7 +49,7 @@ it('prechecks five different-content retries without a flush and releases a read
   expect(await f.count()).toBe(1);
   expect(commands.mock.calls.filter(([p]) => p.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE')).toHaveLength(0);
 });
-it('keeps the exclusive lock through a worker-readied replay', async () => {
+it('keeps the exclusive lock through a worker-readied replay', purgeLimit(60_000), async () => {
   await f.pending(input, { expired: true });
   await recoverProjectIngest(maintenanceClickhouse, f.project);
   const insert = clickhouse.exec.bind(clickhouse);
@@ -121,7 +121,7 @@ it('reads frozen old-admission evidence and upgrades its receipt without blockin
   ).toBe(eventFingerprint(row));
   expect(await f.count()).toBe(2);
 });
-it('recovers a missing old long-id claim using the safe stored id and its original clock', async () => {
+it('recovers a missing old long-id claim using the safe stored id and its original clock', purgeLimit(60_000), async () => {
   const receivedAt = new Date(Date.now() - 120_000),
     oldInput = { id: 'x'.repeat(257), action: 'legacy.missing' },
     row = oldRow(oldInput, receivedAt);

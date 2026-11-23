@@ -82,11 +82,12 @@ The purge-heavy server suites (`immutable-ingest*`, `destructive-maintenance`, `
 and `own-audit`) wait on ClickHouse lightweight DELETEs, and those take longer as the
 shared tables gain active parts. On a long-lived development store one purge can take
 30–40 s. Set `LOGBIRD_TEST_SLOW_STORE=1` for such a run: it multiplies by six only the
-limits of work that waits for a purge (cleanup hooks, waits on a background DELETE, and
-test bodies that run retention, sample removal, project deletion or a rollup rebuild).
-Other test bodies keep their committed limits. Leave it unset (or `0`) otherwise; any
-other value is refused. CI uses the committed limits. A test that still times out with
-it set is a finding, not noise.
+limits of work that issues a DELETE (the cleanup hooks that purge the fixture, waits on a
+background DELETE, and test bodies that run retention, sample removal, project deletion
+or an ingest recovery that rebuilds rollups). Fixture setup and every other test body keep
+their committed limits. Leave it unset (or `0`) otherwise; any other value is refused.
+Turbo hashes the variable, and CI uses the committed limits. A test that still times out
+with it set is a finding, not noise.
 
 ## Issues, commits and pull requests
 

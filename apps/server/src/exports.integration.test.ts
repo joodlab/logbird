@@ -3,7 +3,7 @@ import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, EXPORT_FORMAT_LABELS, exportEvidenceRowSchema } from '@logbird/contracts';
 import { prisma, storeAuditEvent, withProjectLock } from '@logbird/database';
 import { enforceProjectRetention } from '@logbird/worker/retention';
-import { expect, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { app } from './app';
 import * as projectStorage from './clickhouse';
 import { clickhouse } from './clickhouse';
@@ -11,12 +11,12 @@ import { reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { ApiError } from './errors';
 import { drainExportAudits } from './export-stream';
 import * as ingestion from './ingest';
-import { it } from './slow-store';
+import { purgeLimit } from './slow-store';
 import { drainTestAudit } from './test-audit';
 
 vi.mock('./clickhouse', async (original) => ({ ...(await original<typeof import('./clickhouse')>()), queryClickhouse: null }));
 
-it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/failed/aborted receipts', async () => {
+it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/failed/aborted receipts', purgeLimit(360_000), async () => {
   const users: string[] = [];
   let organizationId = '';
   let project: { id: string; slug: string } | undefined;
@@ -367,7 +367,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     }
     await prisma.user.deleteMany({ where: { id: { in: users } } });
   }
-}, 360_000);
+});
 
 it('waits for a requested receipt already claimed by another replica', async () => {
   const { deliverOutboxEvent, waitForAuditDelivery } = await import('./outbox-delivery');
