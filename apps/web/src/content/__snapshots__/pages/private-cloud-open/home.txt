@@ -15,35 +15,8 @@ h3 Self-host
 h3 Logbird Cloud
 h2 What Logbird promises, and where the promise ends.
 h2 Start with one event.
-h2 Product
-h2 Developers
-h2 Compare
-h2 Resources
-h2 Company
 
 text:
-Skip to content
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-[sr-only] Color theme
-Sign in
-Request access
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-Request access
-Sign in
-Theme
-[sr-only] Color theme
 Retrace every step.
 The audit log your customers ask for, and the evidence your auditors ask for.
 Send one event per action over HTTP or the TypeScript SDK. Show each customer account its own history in your product, search your events in the console, and export them complete when an auditor asks. MIT-licensed: run it on your own servers once the source opens, or ask for early access to Logbird Cloud.
@@ -171,58 +144,8 @@ Logbird is being integrated with a hotel-booking SaaS, our first design partner.
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
-[sr-only: Logbird]
-Retrace every step.
-The audit log for your product. The source opens soon.
-Product
-Product tour
-Cloud
-Pricing
-Compliance evidence
-Customer-facing audit logs
-Support investigations
-Developers
-Developer guide
-Self-host
-Open source
-Compare
-All comparisons
-Retraced
-WorkOS Audit Logs
-Pangea
-Bemi
-Resources
-Changelog
-Company
-Security
-About
-Contact
-Privacy
-Terms
-© 2026 Logbird contributors. Logbird is MIT-licensed.
-Source on GitHub — coming soon.
 
 links:
-Skip to content → #main
-(no text) [aria-label: Logbird home] → /
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Sign in → https://app.example.test/login
-Request access → /contact
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Request access → /contact
-Sign in → https://app.example.test/login
 Request access → /contact
 Self-host when the source opens → /contact?interest=self-host
 Sign in → https://app.example.test/login
@@ -246,34 +169,8 @@ About Logbird Cloud → /cloud
 Read how Logbird handles data → /security
 Request access → /contact
 Self-host when the source opens → /contact?interest=self-host
-Product tour → /product
-Cloud → /cloud
-Pricing → /pricing
-Compliance evidence → /use-cases/compliance-evidence
-Customer-facing audit logs → /use-cases/customer-audit-logs
-Support investigations → /use-cases/support-investigations
-Developer guide → /developers
-Self-host → /self-hosting
-Open source → /open-source
-All comparisons → /compare
-Retraced → /compare/retraced
-WorkOS Audit Logs → /compare/workos-audit-logs
-Pangea → /compare/pangea
-Bemi → /compare/bemi
-Changelog → /changelog
-Security → /security
-About → /about
-Contact → /contact
-Privacy → /legal/privacy
-Terms → /legal/terms
 
 controls:
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
 button type="button" aria-label="Copy code"
 button type="button" text="Route"
 button type="button" text="Worker"

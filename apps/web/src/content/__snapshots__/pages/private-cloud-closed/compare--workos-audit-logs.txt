@@ -9,33 +9,8 @@ h2 When to choose Logbird
 h2 Sources
 h3 What we couldn't verify
 h2 Start with one event.
-h2 Product
-h2 Developers
-h2 Compare
-h2 Resources
-h2 Company
 
 text:
-Skip to content
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-[sr-only] Color theme
-Join the waitlist
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-Join the waitlist
-Theme
-[sr-only] Color theme
 Compare
 Logbird and WorkOS Audit Logs
 WorkOS Audit Logs is a hosted service for recording what users do in your product and handing that record to your enterprise customers. You define a schema for each action, send events to the WorkOS API, and your customers' IT admins can view and export them through the WorkOS Admin Portal. Events can also stream to Datadog, Splunk, S3, Google Cloud Storage, Microsoft Sentinel, Snowflake or any HTTPS endpoint. If your customers' IT teams expect to browse and export audit logs themselves, it covers that out of the box. [W1, W2, W3, W4, W5]
@@ -214,56 +189,8 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
-[sr-only: Logbird]
-Retrace every step.
-The audit log for your product. The source opens soon.
-Product
-Product tour
-Cloud
-Pricing
-Compliance evidence
-Customer-facing audit logs
-Support investigations
-Developers
-Developer guide
-Self-host
-Open source
-Compare
-All comparisons
-Retraced
-WorkOS Audit Logs
-Pangea
-Bemi
-Resources
-Changelog
-Company
-Security
-About
-Contact
-Privacy
-Terms
-© 2026 Logbird contributors. Logbird is MIT-licensed.
-Source on GitHub — coming soon.
 
 links:
-Skip to content → #main
-(no text) [aria-label: Logbird home] → /
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Join the waitlist → /contact
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Join the waitlist → /contact
 W1 [aria-label: Source W1] → #source-W1
 W2 [aria-label: Source W2] → #source-W2
 W3 [aria-label: Source W3] → #source-W3
@@ -327,31 +254,5 @@ Widgets API, audit events (GraphQL) [sr-only: (opens in a new tab)] → https://
 Pricing page, Audit Logs section [sr-only: (opens in a new tab)] → https://workos.com/pricing
 Join the waitlist → /contact
 Self-host when the source opens → /contact?interest=self-host
-Product tour → /product
-Cloud → /cloud
-Pricing → /pricing
-Compliance evidence → /use-cases/compliance-evidence
-Customer-facing audit logs → /use-cases/customer-audit-logs
-Support investigations → /use-cases/support-investigations
-Developer guide → /developers
-Self-host → /self-hosting
-Open source → /open-source
-All comparisons → /compare
-Retraced → /compare/retraced
-WorkOS Audit Logs → /compare/workos-audit-logs
-Pangea → /compare/pangea
-Bemi → /compare/bemi
-Changelog → /changelog
-Security → /security
-About → /about
-Contact → /contact
-Privacy → /legal/privacy
-Terms → /legal/terms
 
 controls:
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"

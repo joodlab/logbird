@@ -29,33 +29,8 @@ h2 Bounded by design.
 h2 Report a vulnerability privately.
 h2 No certifications yet.
 h2 Start with one event.
-h2 Product
-h2 Developers
-h2 Compare
-h2 Resources
-h2 Company
 
 text:
-Skip to content
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-[sr-only] Color theme
-Join the waitlist
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-Join the waitlist
-Theme
-[sr-only] Color theme
 Security
 How Logbird handles your data.
 An audit log holds sensitive history, so this page says what Logbird does with it and where each protection stops.
@@ -188,56 +163,8 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
-[sr-only: Logbird]
-Retrace every step.
-The audit log for your product. The source opens soon.
-Product
-Product tour
-Cloud
-Pricing
-Compliance evidence
-Customer-facing audit logs
-Support investigations
-Developers
-Developer guide
-Self-host
-Open source
-Compare
-All comparisons
-Retraced
-WorkOS Audit Logs
-Pangea
-Bemi
-Resources
-Changelog
-Company
-Security
-About
-Contact
-Privacy
-Terms
-© 2026 Logbird contributors. Logbird is MIT-licensed.
-Source on GitHub — coming soon.
 
 links:
-Skip to content → #main
-(no text) [aria-label: Logbird home] → /
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Join the waitlist → /contact
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Join the waitlist → /contact
 Where data lives → #self-host
 Retention → #retention
 Projects and keys → #isolation
@@ -252,32 +179,6 @@ security@example.test → mailto:security@example.test
 Email security@example.test → mailto:security@example.test
 Join the waitlist → /contact
 Self-host when the source opens → /contact?interest=self-host
-Product tour → /product
-Cloud → /cloud
-Pricing → /pricing
-Compliance evidence → /use-cases/compliance-evidence
-Customer-facing audit logs → /use-cases/customer-audit-logs
-Support investigations → /use-cases/support-investigations
-Developer guide → /developers
-Self-host → /self-hosting
-Open source → /open-source
-All comparisons → /compare
-Retraced → /compare/retraced
-WorkOS Audit Logs → /compare/workos-audit-logs
-Pangea → /compare/pangea
-Bemi → /compare/bemi
-Changelog → /changelog
-Security → /security
-About → /about
-Contact → /contact
-Privacy → /legal/privacy
-Terms → /legal/terms
 
 controls:
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
 button type="button" aria-label="Copy code"

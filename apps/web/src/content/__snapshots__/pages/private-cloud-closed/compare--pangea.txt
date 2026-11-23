@@ -9,33 +9,8 @@ h2 When to choose Logbird
 h2 Sources
 h3 What we couldn't verify
 h2 Start with one event.
-h2 Product
-h2 Developers
-h2 Compare
-h2 Resources
-h2 Company
 
 text:
-Skip to content
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-[sr-only] Color theme
-Join the waitlist
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-Join the waitlist
-Theme
-[sr-only] Color theme
 Compare
 Logbird and Pangea Secure Audit Log
 Pangea Secure Audit Log is a managed service built around tamper evidence. Every event goes into a Merkle tree. Pangea publishes the tree's root hashes to Arweave, a public, append-only ledger, and every search result can come with a proof that it hasn't been altered. Events can also be signed. Logs move through hot, warm and cold storage, and an embeddable React viewer lets your customers search and verify their logs. If you need to prove that logs weren't changed, that's what it was built for, and Logbird doesn't do it. [P1, P2, P3, P4]
@@ -202,56 +177,8 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
-[sr-only: Logbird]
-Retrace every step.
-The audit log for your product. The source opens soon.
-Product
-Product tour
-Cloud
-Pricing
-Compliance evidence
-Customer-facing audit logs
-Support investigations
-Developers
-Developer guide
-Self-host
-Open source
-Compare
-All comparisons
-Retraced
-WorkOS Audit Logs
-Pangea
-Bemi
-Resources
-Changelog
-Company
-Security
-About
-Contact
-Privacy
-Terms
-© 2026 Logbird contributors. Logbird is MIT-licensed.
-Source on GitHub — coming soon.
 
 links:
-Skip to content → #main
-(no text) [aria-label: Logbird home] → /
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Join the waitlist → /contact
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Join the waitlist → /contact
 P1 [aria-label: Source P1] → #source-P1
 P2 [aria-label: Source P2] → #source-P2
 P3 [aria-label: Source P3] → #source-P3
@@ -309,31 +236,5 @@ Retention tiers (same page as P4); cold export [sr-only: (opens in a new tab)] �
 Billing page: renders no price list ("Loading billing information…") [sr-only: (opens in a new tab)] → https://pangea.cloud/docs/admin-guide/organizations/billing/
 Join the waitlist → /contact
 Self-host when the source opens → /contact?interest=self-host
-Product tour → /product
-Cloud → /cloud
-Pricing → /pricing
-Compliance evidence → /use-cases/compliance-evidence
-Customer-facing audit logs → /use-cases/customer-audit-logs
-Support investigations → /use-cases/support-investigations
-Developer guide → /developers
-Self-host → /self-hosting
-Open source → /open-source
-All comparisons → /compare
-Retraced → /compare/retraced
-WorkOS Audit Logs → /compare/workos-audit-logs
-Pangea → /compare/pangea
-Bemi → /compare/bemi
-Changelog → /changelog
-Security → /security
-About → /about
-Contact → /contact
-Privacy → /legal/privacy
-Terms → /legal/terms
 
 controls:
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"

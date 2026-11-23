@@ -15,35 +15,8 @@ h2 8. Ending the agreement
 h2 9. Warranties and liability
 h2 10. Changes to these terms
 h2 11. Governing law
-h2 Product
-h2 Developers
-h2 Compare
-h2 Resources
-h2 Company
 
 text:
-Skip to content
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-GitHub
-[sr-only] Color theme
-Join the waitlist
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-GitHub
-Join the waitlist
-Theme
-[sr-only] Color theme
 Legal
 Terms of service
 The terms for using this website and Logbird Cloud during early access. The open-source Logbird software stays under the MIT licence.
@@ -94,58 +67,8 @@ Nothing in these terms limits liability that the law doesn't allow to be limited
 We may update these terms. We'll change the effective date above and tell account holders about material changes before they apply.
 11. Governing law
 These terms are governed by the laws of the country where the operator is established. If any part of them can't be enforced, the rest still applies. Questions go to hello@example.test.
-[sr-only: Logbird]
-Retrace every step.
-The open-source audit log for your product.
-Product
-Product tour
-Cloud
-Pricing
-Compliance evidence
-Customer-facing audit logs
-Support investigations
-Developers
-Developer guide
-Self-host
-Open source
-Compare
-All comparisons
-Retraced
-WorkOS Audit Logs
-Pangea
-Bemi
-Resources
-Changelog
-Company
-Security
-About
-Contact
-Privacy
-Terms
-© 2026 Logbird contributors. Logbird is MIT-licensed.
-Source on GitHub
 
 links:
-Skip to content → #main
-(no text) [aria-label: Logbird home] → /
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-GitHub → https://github.com/example-org/logbird
-Join the waitlist → /contact
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-GitHub → https://github.com/example-org/logbird
-Join the waitlist → /contact
 1. These terms → #agreement
 2. Early access → #early-access
 3. Your account → #account
@@ -162,32 +85,5 @@ privacy policy → /legal/privacy
 hello@example.test → mailto:hello@example.test
 contact form → /contact?interest=privacy
 hello@example.test → mailto:hello@example.test
-Product tour → /product
-Cloud → /cloud
-Pricing → /pricing
-Compliance evidence → /use-cases/compliance-evidence
-Customer-facing audit logs → /use-cases/customer-audit-logs
-Support investigations → /use-cases/support-investigations
-Developer guide → /developers
-Self-host → /self-hosting
-Open source → /open-source
-All comparisons → /compare
-Retraced → /compare/retraced
-WorkOS Audit Logs → /compare/workos-audit-logs
-Pangea → /compare/pangea
-Bemi → /compare/bemi
-Changelog → /changelog
-Security → /security
-About → /about
-Contact → /contact
-Privacy → /legal/privacy
-Terms → /legal/terms
-Source on GitHub → https://github.com/example-org/logbird
 
 controls:
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"

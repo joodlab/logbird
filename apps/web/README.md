@@ -6,7 +6,9 @@ wording there. Until they move into modules too, a few shared components still o
 labels, options and messages (`src/components/waitlist-form.tsx`), the header and footer (`src/components/site-shell.tsx`)
 and a few component labels. Each brief names where its page's words live. The files in `marketing/copy/` are the
 briefs: section jobs, sources and owner notes, not the page text.
-`src/content/page-snapshots.test.ts` pins every rendered page; review its snapshot diff with any wording change.
+`src/content/page-snapshots.test.ts` pins every rendered page (and the shared header and footer once per state); review
+its snapshot diff with any wording change. How to update the snapshots, and what a copy PR states, is in
+[CONTRIBUTING.md, "Page snapshots"](../../CONTRIBUTING.md#page-snapshots-marketing-site).
 
 ## Commands
 

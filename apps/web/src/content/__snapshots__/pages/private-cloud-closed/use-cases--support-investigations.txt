@@ -9,33 +9,8 @@ h2 Read who acted, what ran it, and what changed.
 h2 Follow one operation from the request to its jobs.
 h2 Know these before a customer asks.
 h2 Start with one event.
-h2 Product
-h2 Developers
-h2 Compare
-h2 Resources
-h2 Company
 
 text:
-Skip to content
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-[sr-only] Color theme
-Join the waitlist
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-Join the waitlist
-Theme
-[sr-only] Color theme
 Use case · Support investigations
 Answer "what happened in this account?"
 When a customer asks why a booking changed or who removed a user, support and operations open the account or the record and read its events in order: who acted, what ran it, and the before and after values your code sends.
@@ -97,56 +72,8 @@ Self-host when the source opens
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
-[sr-only: Logbird]
-Retrace every step.
-The audit log for your product. The source opens soon.
-Product
-Product tour
-Cloud
-Pricing
-Compliance evidence
-Customer-facing audit logs
-Support investigations
-Developers
-Developer guide
-Self-host
-Open source
-Compare
-All comparisons
-Retraced
-WorkOS Audit Logs
-Pangea
-Bemi
-Resources
-Changelog
-Company
-Security
-About
-Contact
-Privacy
-Terms
-© 2026 Logbird contributors. Logbird is MIT-licensed.
-Source on GitHub — coming soon.
 
 links:
-Skip to content → #main
-(no text) [aria-label: Logbird home] → /
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Join the waitlist → /contact
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-Join the waitlist → /contact
 [img: The explorer filtered to booking actions: a histogram of the last seven days and the matching events.] [aria-label: Open the image full size: Explorer] → /media/explorer-light-1440.webp?v=*
 [img: The explorer filtered to booking actions: a histogram of the last seven days and the matching events.] [aria-label: Open the image full size: Explorer] → /media/explorer-dark-1440.webp?v=*
 [img: One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.] [aria-label: Open the image full size: Event detail] → /media/event-detail-light-639.webp?v=*
@@ -154,31 +81,5 @@ Join the waitlist → /contact
 Take the product tour → /product
 Join the waitlist → /contact
 Self-host when the source opens → /contact?interest=self-host
-Product tour → /product
-Cloud → /cloud
-Pricing → /pricing
-Compliance evidence → /use-cases/compliance-evidence
-Customer-facing audit logs → /use-cases/customer-audit-logs
-Support investigations → /use-cases/support-investigations
-Developer guide → /developers
-Self-host → /self-hosting
-Open source → /open-source
-All comparisons → /compare
-Retraced → /compare/retraced
-WorkOS Audit Logs → /compare/workos-audit-logs
-Pangea → /compare/pangea
-Bemi → /compare/bemi
-Changelog → /changelog
-Security → /security
-About → /about
-Contact → /contact
-Privacy → /legal/privacy
-Terms → /legal/terms
 
 controls:
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"

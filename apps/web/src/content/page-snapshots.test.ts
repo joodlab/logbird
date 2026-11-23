@@ -6,19 +6,24 @@ import { prerenderPaths } from '../lib/site-map';
 import { quietHrefWarnings, renderPages } from '../test/render-pages';
 
 /**
- * Rendered-page snapshots: every prerendered page and the 404, in each repository × Cloud state, as one readable text
- * file under __snapshots__/pages/<state>/<page>.txt. Each file lists the page's <title> and description, its headings,
- * its visible text one block per line (header, main and footer, screen-reader-only and hidden text marked), its links
- * with their targets and its form controls. So ANY rendered change (a dropped or reordered list item, a changed link
- * target, a renamed form option, two values swapped, a changed table cell or sentence) shows up as a snapshot diff that
- * a reviewer reads in the pull request. content-modules.test.ts keeps the wording in the modules; this file pins what
- * the pages show.
+ * Rendered-page snapshots: every prerendered page and the 404, in each repository × Cloud state, as readable text files
+ * under __snapshots__/pages/<state>/. A page's file (<page>.txt) lists its <title> and description, then the headings,
+ * visible text (one block per line, screen-reader-only and hidden text marked), links with their targets and form
+ * controls of its own content: <main>, plus anything <body> renders outside <main> and the shell (nothing today; it would
+ * get its own section rather than be dropped). The shared shell (the skip link, the header and the footer) is in one file
+ * per state, _shell.txt, and a test holds every page to it: the same text, and the same markup apart from the router's
+ * active-link marks, which must sit exactly on the links to the current page and its section. So ANY rendered change (a
+ * dropped or reordered list item, a changed link target, a renamed form option, two values swapped, a changed table cell
+ * or sentence) is a snapshot diff a reviewer reads in the pull request, and a header or footer change is one diff per
+ * state, not one per page. content-modules.test.ts keeps the wording in the modules; this file pins what the pages show.
  *
  * Changing a page on purpose: run
  * `pnpm --filter @logbird/web exec vitest run src/content/page-snapshots.test.ts --update` (`-u` before the path takes
  * the path as its value), review the git diff of the .txt files (only the changes you meant, in every state they apply
- * to) and commit them with the change. In CI (CI=true) a missing snapshot fails, and the last test fails on a snapshot
- * file no page writes any more. Asset cache versions (`?v=`) are masked; nothing depends on the clock or the machine.
+ * to) and commit them with the change (CONTRIBUTING.md, "Page snapshots"). In CI (CI=true) the snapshots are only
+ * verified: a missing or different one fails, `--update` fails before anything is written, and the last test fails on a
+ * snapshot file no page writes any more. Asset cache versions (`?v=`) are masked; nothing depends on the clock or the
+ * machine.
  */
 
 const GITHUB = { WEB_GITHUB_URL: 'https://github.com/example-org/logbird' };
@@ -33,6 +38,8 @@ const STATES = [
 const PATHS = [...prerenderPaths, '/404'];
 const slug = (path: string) => (path === '/' ? 'home' : path.slice(1).replaceAll('/', '--'));
 const SNAPSHOTS = fileURLToPath(new URL('./__snapshots__/pages/', import.meta.url));
+/** The shared shell's snapshot in each state's folder; no page slug starts with an underscore. */
+const SHELL = '_shell.txt';
 
 /** Never page text: the document head, scripts, styles, templates and drawings. */
 const SKIP = new Set(['head', 'script', 'style', 'template', 'svg']);
@@ -146,20 +153,51 @@ function controlLine(element: PageElement, labels: Map<string, PageElement>): st
   return `${prefix(marksAbove(element))}${parts.join(' ')}`;
 }
 
-/** The snapshot text of one rendered page. */
-function pageSnapshot(html: string): string {
+/** The parts of a rendered page: the document head's title and description, the shared shell, <main> and the rest. */
+interface PageParts {
+  all: PageElement[];
+  labels: Map<string, PageElement>;
+  /** The skip link, the site header and the site footer: the same on every page of a state. */
+  shell: PageElement[];
+  main: PageElement[];
+  /** Anything else <body> renders outside <main> and the shell (none today); kept in the page snapshot, never dropped. */
+  outside: PageElement[];
+}
+
+const isShell = (element: PageElement) =>
+  element.tag === 'header' || element.tag === 'footer' || (element.tag === 'a' && (element.attrs.class ?? '').split(/\s+/).includes('skip-link'));
+
+function pageParts(html: string): PageParts {
   const root = parsePage(html);
   const all = [...elements(root)];
-  const shown = all.filter((element) => !skipped(element));
-  const title = all.find((element) => element.tag === 'title');
-  const description = all.find((element) => element.tag === 'meta' && element.attrs.name === 'description');
-  const body = all.find((element) => element.tag === 'body') ?? root;
-  const labels = new Map(
-    shown.filter((element) => element.tag === 'label' && element.attrs.for).map((element) => [element.attrs.for as string, element]),
-  );
+  const body = all.find((element) => element.tag === 'body');
+  if (!body) throw new Error('The page has no <body>');
+  const regions = body.children.filter((child): child is PageElement => typeof child !== 'string' && !SKIP.has(child.tag));
+  return {
+    all,
+    labels: new Map(
+      all
+        .filter((element) => element.tag === 'label' && element.attrs.for && !skipped(element))
+        .map((element) => [element.attrs.for as string, element]),
+    ),
+    shell: regions.filter(isShell),
+    main: regions.filter((element) => element.tag === 'main'),
+    outside: regions.filter((element) => !(isShell(element) || element.tag === 'main')),
+  };
+}
+
+/** Headings, visible text, links and form controls of the given regions, in document order. */
+function regionSections(regions: PageElement[], labels: Map<string, PageElement>): string[] {
+  const shown = regions.flatMap((region) => [region, ...elements(region)]).filter((element) => !skipped(element));
   const headings = shown
     .filter((element) => /^h[1-6]$/.test(element.tag))
     .map((element) => `${prefix(marksAbove(element))}${element.tag} ${flat(element)}`);
+  const text = regions.flatMap((region) => {
+    const own = markOf(region);
+    const marks = [...marksAbove(region), ...(own ? [own] : [])];
+    const lines = textLines(region, marks);
+    return lines.length ? lines : [`${prefix(marks)}∅ ${region.tag}`];
+  });
   const links = shown
     .filter((element) => element.tag === 'a')
     .map((element) => {
@@ -167,51 +205,157 @@ function pageSnapshot(html: string): string {
       return `${prefix(marksAbove(element))}${flat(element) || '(no text)'}${label} → ${maskUrl(element.attrs.href ?? '(no href)')}`;
     });
   const controls = shown.filter((element) => CONTROLS.has(element.tag)).map((element) => controlLine(element, labels));
+  return ['headings:', ...headings, '', 'text:', ...text, '', 'links:', ...links, '', 'controls:', ...controls, ''];
+}
+
+/** The page snapshot: the document title and description, then the page's own content (<main>, and anything outside the shell). */
+function pageSnapshot(parts: PageParts): string {
+  const title = parts.all.find((element) => element.tag === 'title');
+  const description = parts.all.find((element) => element.tag === 'meta' && element.attrs.name === 'description');
+  const outside = parts.outside.length ? ['outside <main> and the shell:', ...regionSections(parts.outside, parts.labels)] : [];
   return [
     `title: ${title ? squash(rawText(title)) : '(none)'}`,
     `description: ${squash(description?.attrs.content ?? '(none)')}`,
     '',
-    'headings:',
-    ...headings,
-    '',
-    'text:',
-    ...textLines(body),
-    '',
-    'links:',
-    ...links,
-    '',
-    'controls:',
-    ...controls,
-    '',
+    ...regionSections(parts.main, parts.labels),
+    ...outside,
   ].join('\n');
 }
 
+/** The shell snapshot: the skip link, header and footer, as the reader gets them. */
+const shellSnapshot = (parts: PageParts) =>
+  [`regions: ${parts.shell.map((element) => element.tag).join(', ')}`, '', ...regionSections(parts.shell, parts.labels)].join('\n');
+
+/**
+ * The only way the shell legitimately differs between pages: the router marks the links to the current page (and, for
+ * the non-exact links, to its parent section) active with `aria-current="page"`, `data-status="active"` and an `active`
+ * class. `shellMarkup` leaves exactly those three out and returns the marked hrefs, which the equality test checks on
+ * their own; every other tag, attribute and text node of the shell must be identical on every page.
+ */
+function shellMarkup(parts: PageParts): { markup: string; active: string[] } {
+  const active: string[] = [];
+  const serialize = (node: PageElement | string): string => {
+    if (typeof node === 'string') return JSON.stringify(node);
+    const attrs = { ...node.attrs };
+    if (node.tag === 'a') {
+      const marked = [attrs['aria-current'] === 'page', attrs['data-status'] === 'active', (attrs.class ?? '').split(/\s+/).includes('active')];
+      // All three or none: a link marked only partly is drift, not the router's active state, so it stays in the markup.
+      if (marked.every(Boolean)) {
+        active.push(attrs.href ?? '');
+        delete attrs['aria-current'];
+        delete attrs['data-status'];
+        attrs.class = (attrs.class ?? '')
+          .split(/\s+/)
+          .filter((token) => token !== 'active')
+          .join(' ');
+      }
+    }
+    const attributes = Object.entries(attrs)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => ` ${key}=${JSON.stringify(value)}`)
+      .join('');
+    return `<${node.tag}${attributes}>${node.children.map(serialize).join('')}</${node.tag}>`;
+  };
+  return { markup: parts.shell.map(serialize).join('\n'), active };
+}
+
+/** Links the router marks active on `path`: the page itself, and its parent section for a non-exact link. None on the 404. */
+const expectedActive = (path: string, hrefs: string[]) =>
+  path === '/404' ? [] : hrefs.filter((href) => href === path || (href !== '/' && path.startsWith(`${href}/`)));
+
+const firstDifference = (a: string, b: string) => {
+  const [left, right] = [a.split('\n'), b.split('\n')];
+  const at = Array.from({ length: Math.max(left.length, right.length) }, (_, index) => index).find((index) => left[index] !== right[index]);
+  return at === undefined
+    ? undefined
+    : `line ${at + 1}: ${JSON.stringify(left[at] ?? '(end)')}, the shell snapshot has ${JSON.stringify(right[at] ?? '(end)')}`;
+};
+
+/**
+ * CI verifies the snapshots and never writes them, like the .NET defaults record (sdks/dotnet/tests/Shared/OptionDefaults.cs).
+ * Vitest's CI default is update mode "none"; `--update` (mode "all") or `--update new` there must fail, and before any
+ * snapshot is compared, so nothing is written. Vitest sets the snapshot state per test, not in hooks, so every test that
+ * writes a snapshot calls this first, and the first test of the file reports why.
+ */
+function updateRefusal(): string | undefined {
+  const inCi = Boolean(process.env.CI) && process.env.CI !== 'false' && process.env.CI !== '0';
+  const update = expect.getState().snapshotState?.snapshotUpdateState;
+  if (!inCi || update === 'none') return undefined;
+  return `vitest --update must not run in CI (snapshot update mode "${update}"): the page and shell snapshots are verified there, never written. Update them locally and commit the files.`;
+}
+const refuseUpdateInCi = () => {
+  if (updateRefusal()) throw new Error('Snapshot update refused in CI: see "snapshot updates never run in CI".');
+};
+
+it('snapshot updates never run in CI', () => {
+  const refusal = updateRefusal();
+  if (refusal) throw new Error(refusal);
+});
+
 describe.each(STATES)('rendered pages, $name', ({ name, env }) => {
-  const rendered = new Map<string, string>();
+  const rendered = new Map<string, PageParts>();
   beforeAll(async () => {
     quietHrefWarnings();
     // The page list comes from this state's own module graph, so a page that only one state publishes can't be missed.
     await renderPages([], env);
     const stateMap = await import('../lib/site-map');
     expect([...stateMap.prerenderPaths, '/404'], 'the page list differs in this state; derive PATHS per state').toEqual(PATHS);
-    for (const { path, html } of await renderPages(PATHS, env)) rendered.set(path, html);
+    for (const { path, html } of await renderPages(PATHS, env)) rendered.set(path, pageParts(html));
   }, 180_000);
   afterAll(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
+  const parts = (path: string) => {
+    const page = rendered.get(path);
+    if (!page) throw new Error(`${path} did not render`);
+    return page;
+  };
+
+  // The home page's shell stands for every page; the next test holds each page to it.
+  it('shell (skip link, header, footer)', async () => {
+    refuseUpdateInCi();
+    await expect(shellSnapshot(parts('/'))).toMatchFileSnapshot(`./__snapshots__/pages/${name}/${SHELL}`);
+  });
+
+  it('every page renders exactly the snapshotted shell', () => {
+    const reference = parts('/');
+    const text = shellSnapshot(reference);
+    const { markup } = shellMarkup(reference);
+    const drift: string[] = [];
+    for (const path of PATHS) {
+      const page = parts(path);
+      const textDiff = firstDifference(shellSnapshot(page), text);
+      if (textDiff) drift.push(`${path}: shell text differs at ${textDiff}`);
+      const own = shellMarkup(page);
+      if (own.markup !== markup) {
+        // The markup is one long line per region: show where it starts to differ, not the whole region.
+        let at = 0;
+        while (own.markup[at] === markup[at]) at++;
+        const around = (text: string) => JSON.stringify(text.slice(Math.max(0, at - 40), at + 80));
+        drift.push(`${path}: shell markup differs (beyond the active-link marks) at ${around(own.markup)}, the home page has ${around(markup)}`);
+      }
+      const hrefs = page.shell
+        .flatMap((region) => [region, ...elements(region)])
+        .filter((element) => element.tag === 'a')
+        .map((element) => element.attrs.href ?? '');
+      const want = [...new Set(expectedActive(path, hrefs))].sort();
+      const got = [...new Set(own.active)].sort();
+      if (JSON.stringify(got) !== JSON.stringify(want)) drift.push(`${path}: active links ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+    }
+    expect(drift, 'pages whose shell differs from the shared one').toEqual([]);
+  });
 
   it.each(PATHS)('%s', async (path) => {
-    const html = rendered.get(path);
-    if (!html) throw new Error(`${path} did not render`);
-    await expect(pageSnapshot(html)).toMatchFileSnapshot(`./__snapshots__/pages/${name}/${slug(path)}.txt`);
+    refuseUpdateInCi();
+    await expect(pageSnapshot(parts(path))).toMatchFileSnapshot(`./__snapshots__/pages/${name}/${slug(path)}.txt`);
   });
 });
 
 // Vitest writes new file snapshots after the run and never reports one that no test reads, so this catches the stale
-// ones (a missing one fails the page's own test in CI).
+// ones (a missing one fails its own test in CI).
 it('every snapshot file belongs to a rendered page and state', () => {
-  const expected = new Set(STATES.flatMap(({ name }) => PATHS.map((path) => `${name}/${slug(path)}.txt`)));
+  const expected = new Set(STATES.flatMap(({ name }) => [SHELL, ...PATHS.map((path) => `${slug(path)}.txt`)].map((file) => `${name}/${file}`)));
   const onDisk = (existsSync(SNAPSHOTS) ? readdirSync(SNAPSHOTS, { recursive: true, encoding: 'utf8' }) : [])
     .map((file) => file.replaceAll('\\', '/'))
     .filter((file) => file.endsWith('.txt'));

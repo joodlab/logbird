@@ -94,6 +94,29 @@ their committed limits. Leave it unset (or `0`) otherwise; any other value is re
 Turbo hashes the variable, and CI uses the committed limits. A test that still times out
 with it set is a finding, not noise.
 
+## Page snapshots (marketing site)
+
+`apps/web/src/content/page-snapshots.test.ts` renders every page of the marketing site in each repository × Cloud
+state and compares it with committed text snapshots in `apps/web/src/content/__snapshots__/pages/<state>/`: one file
+per page (its title, description and the headings, text, links and form controls of `<main>`) and one `_shell.txt` per
+state for the shared skip link, header and footer, which every page must render identically. Any change to what a page
+shows, wording included, fails until the snapshots are updated.
+
+To update them after an intended change, run from the repository root:
+
+```sh
+pnpm --filter @logbird/web exec vitest run src/content/page-snapshots.test.ts --update
+```
+
+Put `--update` after the path (`-u` before it takes the path as its value). Then read `git diff` of the `.txt` files:
+only the changes you meant should appear, in every state they apply to, and a header or footer change only in the four
+`_shell.txt` files. Commit the snapshots with the change. CI only verifies: with `CI` set, the update refuses to run
+and fails before anything is written.
+
+In a pull request that changes copy, the snapshot diff is the review surface. The reviewer reads the diff, not just
+the module change. The author states in the PR body which sentences changed and why (a new claim names its source,
+usually in the page's brief under `marketing/copy/`).
+
 ## Issues, commits and pull requests
 
 Look for the [good first issue](https://github.com/joodlab/logbird/labels/good%20first%20issue) label. For a larger change, open a feature request or Discussion before investing in implementation. Bug reports should include a minimal fictional reproduction, version, expected result and actual result.

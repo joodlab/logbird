@@ -9,35 +9,8 @@ h2 When to choose Logbird
 h2 Sources
 h3 What we couldn't verify
 h2 Start with one event.
-h2 Product
-h2 Developers
-h2 Compare
-h2 Resources
-h2 Company
 
 text:
-Skip to content
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-GitHub
-[sr-only] Color theme
-Join the waitlist
-Product
-Developers
-Self-host
-Cloud
-Pricing
-Open source
-Compare
-GitHub
-Join the waitlist
-Theme
-[sr-only] Color theme
 Compare
 Logbird and Retraced
 Retraced is an open-source audit log service. Replicated created it, and BoxyHQ later co-maintained it. It has an API to send events, an embeddable viewer so your customers can browse their own events, and an Enterprise API so their IT teams can pull events out programmatically. It runs on Postgres with optional Elasticsearch, and you deploy it yourself. Its embeddable, customer-facing viewer is a real strength: Logbird doesn't have one today. [S1, S2, S3, S4]
@@ -229,58 +202,8 @@ Self-host it
 [aria-hidden] booking.cancelled
 [aria-hidden] Lina Haddad → Booking #1042
 [aria-hidden] 14:32:10
-[sr-only: Logbird]
-Retrace every step.
-The open-source audit log for your product.
-Product
-Product tour
-Cloud
-Pricing
-Compliance evidence
-Customer-facing audit logs
-Support investigations
-Developers
-Developer guide
-Self-host
-Open source
-Compare
-All comparisons
-Retraced
-WorkOS Audit Logs
-Pangea
-Bemi
-Resources
-Changelog
-Company
-Security
-About
-Contact
-Privacy
-Terms
-© 2026 Logbird contributors. Logbird is MIT-licensed.
-Source on GitHub
 
 links:
-Skip to content → #main
-(no text) [aria-label: Logbird home] → /
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-GitHub → https://github.com/example-org/logbird
-Join the waitlist → /contact
-Product → /product
-Developers → /developers
-Self-host → /self-hosting
-Cloud → /cloud
-Pricing → /pricing
-Open source → /open-source
-Compare → /compare
-GitHub → https://github.com/example-org/logbird
-Join the waitlist → /contact
 S1 [aria-label: Source S1] → #source-S1
 S2 [aria-label: Source S2] → #source-S2
 S3 [aria-label: Source S3] → #source-S3
@@ -344,32 +267,5 @@ Commits: latest on main 2025-08-26; archived: false [sr-only: (opens in a new ta
 api.github.com/repos/retracedhq/retraced [sr-only: (opens in a new tab)] → https://api.github.com/repos/retracedhq/retraced
 Join the waitlist → /contact
 Self-host it → /self-hosting
-Product tour → /product
-Cloud → /cloud
-Pricing → /pricing
-Compliance evidence → /use-cases/compliance-evidence
-Customer-facing audit logs → /use-cases/customer-audit-logs
-Support investigations → /use-cases/support-investigations
-Developer guide → /developers
-Self-host → /self-hosting
-Open source → /open-source
-All comparisons → /compare
-Retraced → /compare/retraced
-WorkOS Audit Logs → /compare/workos-audit-logs
-Pangea → /compare/pangea
-Bemi → /compare/bemi
-Changelog → /changelog
-Security → /security
-About → /about
-Contact → /contact
-Privacy → /legal/privacy
-Terms → /legal/terms
-Source on GitHub → https://github.com/example-org/logbird
 
 controls:
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
-button type="button" aria-label="Light theme"
-button type="button" aria-label="Dark theme"
-button type="button" aria-label="System theme"
