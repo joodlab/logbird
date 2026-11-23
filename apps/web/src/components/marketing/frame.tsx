@@ -10,6 +10,7 @@ export function ScreenshotFrame({
   className,
   label,
   zoomLabel,
+  priority,
 }: {
   id: string;
   caption?: string;
@@ -19,6 +20,8 @@ export function ScreenshotFrame({
   label?: string;
   /** Makes the image open full size (its accessible name); for detailed captures that are small on a phone. */
   zoomLabel?: string;
+  /** The page's largest image above the fold (see Screenshot). */
+  priority?: boolean;
 }) {
   return (
     <figure className={cn('flex flex-col gap-3', className)}>
@@ -29,7 +32,7 @@ export function ScreenshotFrame({
           <i />
           {label ? <span className="ms-2 truncate font-mono text-[11px] text-muted-foreground">{label}</span> : null}
         </div>
-        <Screenshot id={id} sizes={sizes} zoomLabel={zoomLabel} />
+        <Screenshot id={id} priority={priority} sizes={sizes} zoomLabel={zoomLabel} />
       </div>
       {caption ? <figcaption className="text-muted-foreground text-sm">{caption}</figcaption> : null}
     </figure>
