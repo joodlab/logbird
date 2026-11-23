@@ -13,12 +13,12 @@ import {
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { encryptWebhookSecret, webhookCursorClock } from '@logbird/database/webhooks';
 import { generateWebhookSecret } from '@logbird/sdk';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from './webhook-delivery';
 
 const ch = createClickHouseClient();
 const runId = randomUUID();
-const projects = ['p1', 'p2', 'p3', 'p4'].map((name) => `qa-webhook-claims-${name}-${runId}`);
+const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9'].map((name) => `qa-webhook-claims-${name}-${runId}`);
 const secretKey = Buffer.alloc(32, 9);
 const received: { path: string; id: string }[] = [];
 const receiver = createServer(async (req, res) => {
@@ -246,4 +246,118 @@ it("delivers another project's due row in the first pass while one project has m
   // The busy project still took the other slot, and no row was claimed twice.
   expect(backlog.filter(({ eventId }) => sent(eventId) === 1)).toHaveLength(1);
   expect(received.filter(({ id }) => backlog.some(({ eventId }) => eventId === id)).length).toBe(1);
+});
+
+// Hold rows locked from an open transaction, as another worker or a long transaction would, until released.
+async function holdLocked(ids: string[]) {
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((done) => {
+    release = done;
+  });
+  let ready: () => void = () => undefined;
+  const holding = new Promise<void>((done) => {
+    ready = done;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "WebhookDelivery" WHERE id = ANY(${ids}::text[]) FOR UPDATE`;
+      ready();
+      await released;
+    },
+    { timeout: 50_000, maxWait: 5000 },
+  );
+  await holding;
+  return async () => {
+    release();
+    await holder;
+  };
+}
+
+it("delivers another project within bounded passes while all of one project's older rows stay locked", { timeout: 60_000 }, async () => {
+  const [, , , , first = '', second = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const busy = await endpoint(first, 'all-locked');
+  // Four older rows, one more than enough to use every refill round of a one-slot pass on a skipped row.
+  const lockedRows = await Promise.all(
+    Array.from({ length: 4 }, (_, index) => ping(busy.id, `all-locked-${index}`, new Date(+now - 300_000 + index))),
+  );
+  const other = await ping((await endpoint(second, 'past-locked')).id, 'past-locked', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const unlock = await holdLocked(lockedRows.map(({ id }) => id));
+  let passes = 0;
+  try {
+    while (!sent(other.eventId) && passes < 3) {
+      passes++;
+      await deliverWebhooks(ch, options(), [first, second]);
+    }
+    expect(sent(other.eventId)).toBe(1);
+    expect(passes).toBe(1);
+  } finally {
+    await unlock();
+  }
+  for (const row of lockedRows) {
+    expect(sent(row.eventId)).toBe(0);
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+      status: 'pending',
+      attemptNumber: 0,
+      leaseUntil: null,
+    });
+  }
+});
+
+it('dispatches the claims of earlier rounds when a refill selection fails', { timeout: 60_000 }, async () => {
+  const [, , , , , , first = '', second = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const claimable = await ping((await endpoint(first, 'refill-claimable')).id, 'refill-claimable', new Date(+now - 120_000));
+  const locked = await ping((await endpoint(second, 'refill-locked')).id, 'refill-locked', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const unlock = await holdLocked([locked.id]);
+  // Round one claims the first project's row and finds the second project's row locked. Round two's selection fails.
+  const queryRaw = prisma.$queryRaw.bind(prisma);
+  let selections = 0;
+  const injected = vi.spyOn(prisma, '$queryRaw').mockImplementation(((...args: Parameters<typeof prisma.$queryRaw>) => {
+    if (String((args[0] as { sql?: string }).sql ?? '').includes('PARTITION BY') && ++selections === 2)
+      return Promise.reject(new Error('QA refill selection failure'));
+    return queryRaw(...args);
+  }) as typeof prisma.$queryRaw);
+  const errors = vi.spyOn(console, 'error');
+  try {
+    await expect(deliverWebhooks(ch, { ...options(), concurrency: 2 }, [first, second])).resolves.toBeUndefined();
+    expect(selections).toBe(2);
+    expect(errors.mock.calls.map(([message]) => String(message))).toContainEqual(expect.stringContaining('webhook.claim_refill_failed'));
+  } finally {
+    injected.mockRestore();
+    errors.mockRestore();
+    await unlock();
+  }
+  // The committed claim was dispatched in the same pass instead of waiting out its lease.
+  expect(sent(claimable.eventId)).toBe(1);
+  expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: claimable.id } })).toMatchObject({ status: 'succeeded', attemptNumber: 1 });
+  expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: locked.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
+});
+
+it("claims a project's next endpoint while its oldest due row stays locked", { timeout: 60_000 }, async () => {
+  const [, , , , , , , , project = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const oldest = await ping((await endpoint(project, 'sibling-locked')).id, 'sibling-locked', new Date(+now - 120_000));
+  const sibling = await ping((await endpoint(project, 'sibling-free')).id, 'sibling-free', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const unlock = await holdLocked([oldest.id]);
+  let passes = 0;
+  try {
+    while (!sent(sibling.eventId) && passes < 3) {
+      passes++;
+      await deliverWebhooks(ch, options(), project);
+    }
+    expect(sent(sibling.eventId)).toBe(1);
+    expect(passes).toBe(1);
+    expect(sent(oldest.eventId)).toBe(0);
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: oldest.id } })).toMatchObject({
+      status: 'pending',
+      attemptNumber: 0,
+      leaseUntil: null,
+    });
+  } finally {
+    await unlock();
+  }
 });

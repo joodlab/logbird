@@ -1201,9 +1201,14 @@ Each delivery claim has a two-minute lease. Before a POST starts, the worker res
 
 Webhook delivery runs on PostgreSQL time: the server assigns arrival times and the worker
 scans, schedules and selects signing secrets with it. The PostgreSQL server clock must not
-step backwards. Use a time service that slews the clock instead of stepping it, for
-example chrony configured to step only during its first clock updates after boot
-(such as `makestep 1 3`) and to slew afterwards. If the clock does step
+step backwards. Use a time service that slews the clock instead of stepping it. With
+chrony, `makestep 1 3` steps the clock when it is off by more than one second, but only during the first three clock updates
+after `chronyd` starts and slews afterwards. Those startup steps must finish before
+PostgreSQL takes traffic: start chronyd at boot before the database, and do not
+restart chronyd while PostgreSQL is serving Logbird. Chrony slews by default, but it can
+still step the clock, for example with `makestep`, with `initstepslew` at
+startup, or with a manual `chronyc makestep`. Apply the same startup rule to `initstepslew`,
+and never run a manual step while PostgreSQL is live. If the clock does step
 back, an event admitted after the step can get an arrival time behind a cursor that discovery
 already committed. That event is stored and searchable, but its webhook delivery can be
 missed. Use [Rewind a webhook cursor after a missed delivery](#rewind-a-webhook-cursor-after-a-missed-delivery)

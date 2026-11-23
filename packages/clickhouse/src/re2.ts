@@ -1,6 +1,6 @@
 /**
  * ClickHouse runs `match` with RE2 (https://github.com/google/re2/wiki/Syntax). Webhook filters are checked with RE2's
- * grammar instead of JavaScript's, so a pattern only JavaScript accepts (`\cK`, `A`, lookaround, backreferences)
+ * grammar instead of JavaScript's, so a pattern only JavaScript accepts (`\cK`, lookaround, backreferences)
  * is refused at save time, and RE2 syntax JavaScript lacks (`\Q…\E`, `(?i)`, `(?P<name>…)`, `[[:alpha:]]`) is accepted.
  * The scanner refuses only constructs RE2 is known to reject. Anything it cannot decide, such as an unknown Unicode
  * class name or a program that is too large, is left to ClickHouse, whose RE2 error holds the endpoint for review.
@@ -131,7 +131,8 @@ export function re2Problem(p: string): string | null {
       i++;
       // A group's own prefix such as ?: or ?i: is not something to repeat.
       if (p[i] === '?') {
-        const prefix = /^\?(?:P?<[A-Za-z_][A-Za-z0-9_]*>|[A-Za-z-]*[:)])/.exec(p.slice(i));
+        // RE2 decides whether a capture name is valid.
+        const prefix = /^\?(?:P?<[^>]+>|[A-Za-z-]*[:)])/.exec(p.slice(i));
         if (prefix) {
           i += prefix[0].length;
           if (prefix[0].endsWith(')')) {

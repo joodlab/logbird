@@ -25,6 +25,7 @@ describe('RE2 regex validation for webhook filters', () => {
     '(?i)booking',
     '(?i:Booking)\\.(?s:.)',
     '(?P<kind>booking)\\.(?<verb>created)',
+    '(?P<1>a)',
     'a*?b+?c??d{2}?',
   ])('accepts %s', (pattern) => {
     expect(re2Problem(pattern)).toBeNull();
