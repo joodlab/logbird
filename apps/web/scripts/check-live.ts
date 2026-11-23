@@ -1,6 +1,7 @@
 import { siteDecision } from '../../app/server/site-paths';
 import { inlineScripts, scriptHash, scriptSources } from '../src/lib/csp';
 import { OBFUSCATED_EMAIL } from '../src/lib/email-off';
+import { collectAssetUrls, compareAssets, manifestIconUrls } from '../src/lib/live-assets';
 import { securityHeaders } from '../src/lib/security-headers';
 import { prerenderPaths } from '../src/lib/site-map';
 
@@ -28,10 +29,11 @@ import { prerenderPaths } from '../src/lib/site-map';
  *
  *   SHARED_ORIGIN=1 BASE_URL=https://<console origin> tsx scripts/check-live.ts
  *
- * Media served stale: every /media/ and /og/ URL a page references is fetched twice, as written and with a random
- * extra query that no cache has seen, and the bytes must be identical. A difference means a cache (the CDN or a
- * browser) is serving an old file under a URL whose page now describes a new one; the run fails and lists the files.
- * Run it after each deploy.
+ * Files served stale: every /media/, /og/, /brand/ and web-manifest URL a page references (and the manifest's icons)
+ * is fetched twice, as written and with a random extra query that no cache has seen, and the bytes must be identical.
+ * A difference means a cache (the CDN or a browser) is serving an old file under a URL whose page now describes a new
+ * one; the run fails and lists the files. An unversioned URL to such a file, or a capture page that references no
+ * /media/ file, fails too. Run it after each deploy.
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
 const shared = process.env.SHARED_ORIGIN === '1';
@@ -68,23 +70,18 @@ const SITE_MARKER = 'logbird.site.theme';
 const api = process.env.NO_API === '1' ? [] : ['/site-api/no-such-endpoint', '/site-api/waitlist/x'];
 const problems: string[] = [];
 const rows: Record<string, string | number>[] = [];
-/** Media and card URLs the pages reference, as path + query on the checked origin. */
-const mediaUrls = new Set<string>();
+/** Fixed-name files the pages reference (src/lib/live-assets.ts), as path + query on the checked origin. */
+const assetUrls = new Set<string>();
+/** Pages that show console captures: each must reference at least one /media/ file, so a lost image fails the run. */
+const MEDIA_PAGES = ['/', '/product', '/use-cases/compliance-evidence', '/use-cases/customer-audit-logs', '/use-cases/support-investigations'];
 
-function collectMedia(body: string) {
-  for (const [, value] of body.matchAll(/(?:src|srcSet|srcset|poster|content|href)="([^"]+)"/g)) {
-    for (const candidate of (value ?? '').split(',')) {
-      const url = candidate.trim().split(/\s+/)[0] ?? '';
-      if (!/\/(media|og)\//.test(url)) continue;
-      const parsed = new URL(url.replaceAll('&amp;', '&'), base);
-      mediaUrls.add(`${parsed.pathname}${parsed.search}`);
-    }
-  }
-}
-
-async function bytesAt(path: string) {
-  const response = await fetch(new URL(path, base));
-  return { status: response.status, bytes: Buffer.from(await response.arrayBuffer()) };
+function collectAssets(path: string, body: string) {
+  const found = collectAssetUrls(body, base);
+  for (const url of found) assetUrls.add(url);
+  const fail = (problem: string) => problems.push(`${path}: ${problem}`);
+  if (MEDIA_PAGES.includes(path) && ![...found].some((url) => url.startsWith('/media/'))) fail('references no /media/ file');
+  if (![...found].some((url) => url.startsWith('/brand/logbird-favicon.svg'))) fail('references no favicon');
+  if (![...found].some((url) => url.startsWith('/site.webmanifest'))) fail('references no web manifest');
 }
 
 async function checkHtml(path: string, expected: number) {
@@ -130,7 +127,7 @@ async function checkHtml(path: string, expected: number) {
     }
   }
   rows.push({ path, status: response.status, inline: scripts.length, uncovered: missing, url: response.url.replace(base, '') });
-  if (expectedStatus === 200) collectMedia(body);
+  if (expectedStatus === 200) collectAssets(path, body);
 }
 
 for (const path of prerenderPaths) {
@@ -175,22 +172,18 @@ for (const path of consoleOwned) {
   }
   rows.push({ path: `console ${path}`, status: response.status, inline: '-', uncovered: '-', url: response.headers.get('content-type') ?? '-' });
 }
-let staleMedia = 0;
-for (const path of [...mediaUrls].sort()) {
-  const plain = await bytesAt(path);
-  const fresh = await bytesAt(`${path}${path.includes('?') ? '&' : '?'}cb=${crypto.randomUUID()}`);
-  if (plain.status !== 200 || fresh.status !== 200) {
-    problems.push(`${path}: media answered ${plain.status} (as written) and ${fresh.status} (uncached)`);
-  } else if (!plain.bytes.equals(fresh.bytes)) {
-    staleMedia++;
-    problems.push(`${path}: stale media, ${plain.bytes.length} bytes as written vs ${fresh.bytes.length} bytes uncached`);
-  }
+// The manifest's own icons are fixed-name files too.
+for (const manifest of [...assetUrls].filter((url) => url.startsWith('/site.webmanifest'))) {
+  const response = await fetch(new URL(manifest, base));
+  if (response.ok) for (const icon of manifestIconUrls(await response.text(), base)) assetUrls.add(icon);
 }
+const assetProblems = await compareAssets(assetUrls, base);
+for (const { path, problem } of assetProblems) problems.push(`${path}: ${problem}`);
 rows.push({
-  path: `media ${mediaUrls.size} URLs`,
-  status: staleMedia ? 'stale' : 'same',
+  path: `assets ${assetUrls.size} URLs`,
+  status: assetProblems.length ? 'problems' : 'same',
   inline: '-',
-  uncovered: staleMedia,
+  uncovered: assetProblems.length,
   url: 'as written vs uncached',
 });
 console.table(rows);

@@ -4,6 +4,7 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-r
 import { type ReactNode, Suspense } from 'react';
 import { NotFound } from '../components/not-found';
 import { SiteFooter, SiteHeader } from '../components/site-shell';
+import { brandUrl, manifestUrl } from '../lib/asset-url';
 import appCss from '../styles.css?url';
 export const THEME_KEY = 'logbird.site.theme';
 export const Route = createRootRoute({
@@ -18,9 +19,9 @@ export const Route = createRootRoute({
       // Preload the Latin UI font so first paint already uses Geist (no swap repaint of the headline).
       { rel: 'preload', href: geistLatin, as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' },
       { rel: 'stylesheet', href: appCss },
-      { rel: 'icon', type: 'image/svg+xml', href: '/brand/logbird-favicon.svg' },
-      { rel: 'apple-touch-icon', href: '/brand/logbird-apple-touch-icon.png' },
-      { rel: 'manifest', href: '/site.webmanifest' },
+      { rel: 'icon', type: 'image/svg+xml', href: brandUrl('logbird-favicon.svg') },
+      { rel: 'apple-touch-icon', href: brandUrl('logbird-apple-touch-icon.png') },
+      { rel: 'manifest', href: manifestUrl() },
     ],
   }),
   shellComponent: RootDocument,

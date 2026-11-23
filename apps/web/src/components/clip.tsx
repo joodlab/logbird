@@ -1,7 +1,7 @@
 import { PauseIcon, PlayIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { mediaUrl } from '../lib/asset-url';
 import { clips } from '../lib/media-manifest';
-import { mediaUrl } from '../lib/media-url';
 export function Clip({ id }: { id: string }) {
   const entry = clips.find((item) => item.id === id);
   const ref = useRef<HTMLVideoElement>(null);

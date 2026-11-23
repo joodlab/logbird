@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "media": "tsx scripts/media.ts",
-    "media:versions": "tsx scripts/media-versions.ts",
+    "assets:versions": "tsx scripts/asset-versions.ts",
     "og": "tsx scripts/og.ts",
     "releases:sync": "tsx scripts/releases.ts && biome format --write src/lib/releases.snapshot.ts",
     "lighthouse": "node --import tsx scripts/lighthouse.mjs",

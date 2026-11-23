@@ -1,9 +1,9 @@
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
+import { ASSET_VERSIONS, OG_DESIGN_VERSION } from '../src/lib/asset-versions';
 import { clips, imageWidths, MEDIA_ENCODING, screenshots, type Variant } from '../src/lib/media-manifest';
-import { MEDIA_VERSIONS } from '../src/lib/media-versions';
-import { computeMediaVersions } from './media-versions-lib';
+import { computeAssetVersions, computeOgDesignVersion } from './asset-versions-lib';
 
 const root = resolve('../..');
 const output = resolve('public/media');
@@ -22,10 +22,12 @@ async function source(path: string) {
 }
 // Every URL the site writes carries the content version of its source (src/lib/media-url.ts). A build whose versions
 // do not match the sources would serve new bytes under old URLs, which the long media cache keeps for a day: stop.
-const current = await computeMediaVersions();
-const stale = Object.keys({ ...current, ...MEDIA_VERSIONS }).filter((key) => current[key] !== MEDIA_VERSIONS[key]);
+const { versions: current, manifestText } = await computeAssetVersions();
+const stale = Object.keys({ ...current, ...ASSET_VERSIONS }).filter((key) => current[key] !== ASSET_VERSIONS[key]);
+if ((await readFile(resolve('public/site.webmanifest'), 'utf8')) !== manifestText) stale.push('site.webmanifest icons');
+if ((await computeOgDesignVersion()) !== OG_DESIGN_VERSION) stale.push('OG_DESIGN_VERSION');
 if (stale.length) {
-  throw new Error(`Media versions are stale for ${stale.join(', ')}. Run pnpm media:versions and commit src/lib/media-versions.ts.`);
+  throw new Error(`Asset versions are stale for ${stale.join(', ')}. Run pnpm assets:versions and commit the result.`);
 }
 // Sequential encoding keeps the build's memory use bounded.
 sharp.concurrency(1);
@@ -44,7 +46,7 @@ async function encode(id: string, variant: Variant, widths: number[]) {
       for (const format of ['avif', 'webp'] as const) {
         await sharp(bytes)
           .resize({ width, withoutEnlargement: true })
-          [format]({ quality: MEDIA_ENCODING[format] })
+          [format](MEDIA_ENCODING[format])
           .toFile(resolve(output, `${id}-${theme}-${width}.${format}`));
       }
     }
@@ -62,7 +64,7 @@ for (const clip of clips) {
   const poster = await source(clip.poster);
   await copyFile(video.file, resolve(output, `${clip.id}.webm`));
   await sharp(poster.bytes)
-    .webp({ quality: MEDIA_ENCODING.poster })
+    .webp(MEDIA_ENCODING.poster)
     .toFile(resolve(output, `${clip.id}-poster.webp`));
 }
 console.log(`Prepared ${screenshots.length} screenshots and ${clips.length} clips.`);

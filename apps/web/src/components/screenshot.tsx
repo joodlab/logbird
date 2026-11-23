@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { mediaUrl } from '../lib/asset-url';
 import { imageWidths, type ScreenshotEntry, screenshots, type Variant } from '../lib/media-manifest';
-import { mediaUrl } from '../lib/media-url';
 
 const FORMATS = ['avif', 'webp'] as const;
 

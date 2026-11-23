@@ -27,7 +27,7 @@ node --env-file=.env --import tsx apps/app/scripts/prepare-media.ts
 node apps/app/scripts/capture-media.mjs
 CAPTURE_VIDEO=1 node apps/app/scripts/capture-media.mjs
 VIDEO_START=1.0 node apps/app/scripts/encode-media.mjs
-pnpm --filter @logbird/web media:versions
+pnpm --filter @logbird/web assets:versions
 pnpm --filter @logbird/web test
 pnpm --filter @logbird/web build
 ```
@@ -41,9 +41,9 @@ Review the raw recording before choosing the start, and keep the GIF under the 6
 ## Media URLs carry a content version
 
 `/media/*` is cached for a day (plus a week of stale-while-revalidate) by the CDN and by browsers, so a file replaced
-under the same name would keep being served old. Every URL the site writes carries the content version of its source
-(`?v=`, `apps/web/src/lib/media-url.ts`), from `apps/web/src/lib/media-versions.ts`. After replacing a capture or the
-video, run `pnpm --filter @logbird/web media:versions` and commit the result: the media build and a test refuse stale
+under the same name would keep being served old. Every URL the site writes to a media, brand, manifest or OG file carries its content version
+(`?v=`, `apps/web/src/lib/asset-url.ts`), from `apps/web/src/lib/asset-versions.ts`. After replacing a capture or the
+video, run `pnpm --filter @logbird/web assets:versions` and commit the result: the media build and a test refuse stale
 versions. After a deploy, `check:live` fetches every media URL as written and with a random query, and fails if the bytes
 differ.
 
