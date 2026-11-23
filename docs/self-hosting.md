@@ -306,9 +306,9 @@ timestamps from migration start through the last old server shutdown. For an end
 cursor, include that earlier receive time. Set the event-time range wide enough to include backdated or future-dated
 events. Compare matching event IDs and receive times against
 the endpoint's delivery log and receiver records. A missed occurrence has no delivery row to resend. To deliver
-still-retained events, use [Reconcile a webhook discovery cursor](#reconcile-a-webhook-discovery-cursor) to rewind
-the affected endpoint to the earliest uncertain eligible receive millisecond. Preserve delivery history and expect
-possible duplicates where the deduplication records have expired.
+still-retained events, use [Rewind a webhook cursor after a missed delivery](#rewind-a-webhook-cursor-after-a-missed-delivery)
+to rewind the affected endpoint to the earliest uncertain eligible receive millisecond. Delivery history is preserved;
+expect possible duplicates where the deduplication records have expired.
 
 An existing enabled endpoint with an empty filter starts automatically. Its first eligible delivery is the first matching event
 received at or after the delivery migration's UTC start time (`20261122140000_webhook_deliveries`).
@@ -1122,7 +1122,24 @@ its path or query string. A signature proves who sent a message; it doesn't hide
 network you trust, and never put a credential in an HTTP endpoint URL.
 
 PATCH `scope` replaces the whole scope; `null` clears it. `filterQuery` uses the
-Logbird query language (empty matches everything). A scope can name a tenant, a
+Logbird query language (empty matches everything). In a webhook filter, `now` in a
+relative time means each event's own arrival time (`receivedAt`), not the time the
+worker scans. `occurredAt:[now-5m TO now]` matches events that occurred up to five
+minutes before they arrived, so a filter selects the same events however late or
+often discovery runs, including after a worker outage. `now/d` is the UTC start of
+the arrival day. The Explorer evaluates `now` at search time, so a relative filter
+can show different results there.
+
+Regexes run in ClickHouse with RE2. Create and PATCH reject a pattern that RE2 does
+not accept, such as `\cK`, `A`, lookaround or backreferences, with HTTP 422
+`invalid_query`. A stored filter that can never run, such as one saved before this
+check or one that RE2 refuses as too large, is held: discovery stops at the saved
+cursor, the API returns `filterWarning: webhook_filter_invalid`, the worker logs
+`webhook.filter_invalid` and sends the filter-review email. Network errors, timeouts and
+read limits never hold a filter. Save a valid `filterQuery` through PATCH to resume
+from the saved cursor.
+
+A scope can name a tenant, a
 target, or both. Like scoped read access, it uses [stored IDs](security.md#scopes-name-stored-ids),
 including the maintainer decision about whitespace on ingest. The scope input
 allows at most 250 UTF-16 code units per ID and 60 for a target type, with no
@@ -1144,7 +1161,8 @@ to code that predates masks.
 
 Secret rotation accepts an
 `overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH
-remain unchanged.
+remain unchanged. A rotation with `overlapSeconds: 0` deletes every earlier secret
+of the endpoint at once.
 
 Run the additive Postgres migrations before upgrading the API and worker.
 Compose runs it through the existing migrate service. If the worker uses a
@@ -1178,6 +1196,15 @@ no longer matches is recorded as `skipped` with `scope_mismatch`, without an HTT
 request or a charge to the endpoint's failure counters.
 Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
 Each delivery claim has a two-minute lease. Before a POST starts, the worker reserves 56.5 seconds of that lease to store the outcome. Each settlement can wait up to 12.25 seconds for a PostgreSQL connection, and the worker retries the same result within the lease when settlement fails.
+
+Webhook delivery runs on PostgreSQL time: the server assigns arrival times and the worker
+scans, schedules and selects signing secrets with it. The PostgreSQL server clock must not
+step backwards. Use a time service that slews the clock (for example chrony or
+systemd-timesyncd with its default slewing) instead of stepping it. If the clock does step
+back, an event admitted after the step can get an arrival time behind a cursor that discovery
+already committed. That event is stored and searchable, but its webhook delivery can be
+missed. Use [Rewind a webhook cursor after a missed delivery](#rewind-a-webhook-cursor-after-a-missed-delivery)
+to deliver such events.
 
 On very large projects delivery can stall until the arrival-time index is present.
 The cursor never skips events when a scan exceeds its read budget.
@@ -1297,3 +1324,96 @@ RETURNING id;
 
 Run `COMMIT;` or `ROLLBACK;` as described above, then follow the restart and
 verification step. Keep the recorded floor for future scans and reconciliations.
+
+### Rewind a webhook cursor after a missed delivery
+
+Use this procedure when an endpoint's cursor is valid and not held for review, but an incident shows it moved past
+an eligible event that has no delivery row. Examples are an overlap of previous-version servers with the new worker on
+the [first webhook delivery upgrade](#webhook-delivery-on-upgrade), or a PostgreSQL clock that stepped backwards.
+An endpoint that shows `cursorWarning: webhook_cursor_review_required` follows
+[Reconcile a webhook discovery cursor](#reconcile-a-webhook-discovery-cursor) instead.
+
+1. Take a database backup. Record the endpoint's `id`, `projectId`, `createdAt`, `cursorReceivedAt`,
+   `cursorEventId`, `lastScannedAt` and `cursorVerifiedFloor`. The rewind compares the cursor with these values, so
+   copy `cursorReceivedAt` and `cursorEventId` exactly.
+2. Find the missed occurrences. Search the project in Explorer with `receivedAt:>=… receivedAt:<…` over the
+   incident window, with a wide event-time range. Compare the event IDs and receive times with the endpoint's
+   delivery log and receiver records. Choose the **checkpoint**: the earliest receive millisecond whose delivery is
+   uncertain.
+3. Determine the endpoint's **eligible start**, the first receive millisecond the endpoint could ever deliver.
+   This is the later of the endpoint's `createdAt` and its starting bound (its `cursorVerifiedFloor`, or else the
+   start of `20261122140000_webhook_deliveries` in `_prisma_migrations`). The one exception is an endpoint
+   created at or after that bound through a previous-version API during a rolling upgrade. Its first cursor can be
+   up to 60 seconds before `createdAt`. If a backup or its earliest delivery shows that earlier cursor, use it.
+   The statement rejects any other value, and a checkpoint before the eligible start.
+4. In `psql`, set `endpoint_id`, `project_id`, `expected_cursor`, `expected_event_id`, `eligible_start`,
+   `checkpoint`, `evidence_ref` and `audit_namespace` with `\set`. Use ISO 8601 timestamps with `Z`, and an empty
+   string for `expected_event_id` when `cursorEventId` is `NULL`. Use an incident or backup reference without
+   credentials or payload data for `evidence_ref`, and the worker's `BULLMQ_PREFIX` (default `{logbird}`) for
+   `audit_namespace`.
+
+Workers can keep running. The update only applies while the cursor still has the recorded value. If a worker
+advanced it in the meantime, the statement changes nothing and returns no row: roll back, re-read the endpoint and
+start again from step 1. Commit only when the statement returned one audit ID.
+
+```sql
+BEGIN;
+
+WITH bounds AS (
+  SELECT (:'expected_cursor'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS expected_cursor,
+         nullif(:'expected_event_id', '') AS expected_event_id,
+         (:'eligible_start'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS eligible_start,
+         (:'checkpoint'::timestamptz AT TIME ZONE 'UTC')::timestamp(3) AS checkpoint,
+         (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now_utc,
+         (SELECT (started_at AT TIME ZONE 'UTC')::timestamp(3) FROM "_prisma_migrations"
+          WHERE migration_name = '20261122140000_webhook_deliveries'
+            AND finished_at IS NOT NULL AND rolled_back_at IS NULL
+          ORDER BY started_at LIMIT 1) AS ledger_rollout
+), rewound AS (
+  UPDATE "WebhookEndpoint" e
+  SET "cursorReceivedAt" = b.checkpoint, "cursorEventId" = NULL,
+      -- A checkpoint before createdAt is a never-scanned start, which discovery accepts without a scan time.
+      "lastScannedAt" = CASE
+        WHEN b.checkpoint < greatest(e."createdAt", coalesce(e."cursorVerifiedFloor", b.ledger_rollout)) THEN NULL
+        ELSE e."lastScannedAt" END,
+      "updatedAt" = b.now_utc
+  FROM bounds b, "Project" p
+  WHERE e.id = :'endpoint_id' AND e."projectId" = :'project_id' AND p.id = e."projectId"
+    AND NOT e."cursorReviewRequired"
+    AND coalesce(e."cursorVerifiedFloor", b.ledger_rollout) IS NOT NULL
+    -- Compare and swap: the cursor is still where the incident review found it.
+    AND e."cursorReceivedAt" = b.expected_cursor
+    AND e."cursorEventId" IS NOT DISTINCT FROM b.expected_event_id
+    -- Rewind only, and never before the endpoint's eligible start.
+    AND b.checkpoint <= e."cursorReceivedAt" AND b.checkpoint >= b.eligible_start
+    AND (b.eligible_start = greatest(e."createdAt", coalesce(e."cursorVerifiedFloor", b.ledger_rollout))
+         OR (e."createdAt" >= coalesce(e."cursorVerifiedFloor", b.ledger_rollout)
+             AND b.eligible_start < e."createdAt"
+             AND b.eligible_start >= greatest(e."createdAt" - interval '60 seconds',
+                                              coalesce(e."cursorVerifiedFloor", b.ledger_rollout))))
+    AND length(trim(:'evidence_ref')) > 0 AND length(trim(:'audit_namespace')) > 0
+  RETURNING e.id, p."organizationId", e."projectId", b.expected_cursor, b.expected_event_id,
+            b.eligible_start, b.checkpoint, b.now_utc
+), audit AS (
+  SELECT *, gen_random_uuid()::text AS audit_id FROM rewound
+)
+INSERT INTO "AuditOutbox" (id, namespace, stream, payload, "createdAt", "nextAttemptAt", "confirmedAt")
+SELECT audit_id, :'audit_namespace', 'ws:' || "organizationId", jsonb_build_object(
+  'id', audit_id, 'action', 'webhook.cursor_rewound', 'occurredAt', clock_timestamp(),
+  'actor', jsonb_build_object('type', 'database-operator', 'id', session_user),
+  'targets', jsonb_build_array(jsonb_build_object('type', 'webhook', 'id', id),
+                             jsonb_build_object('type', 'project', 'id', "projectId")),
+  'metadata', jsonb_build_object('previousCursor', expected_cursor AT TIME ZONE 'UTC',
+                                'previousEventId', expected_event_id,
+                                'eligibleStart', eligible_start AT TIME ZONE 'UTC',
+                                'checkpoint', checkpoint AT TIME ZONE 'UTC', 'evidenceRef', :'evidence_ref'::text)
+), now_utc, now_utc, now_utc
+FROM audit
+RETURNING id;
+```
+
+Run `COMMIT;` or `ROLLBACK;` as described above. Delivery and attempt history stay intact. Discovery then
+rescans from the checkpoint and queues each eligible occurrence that matches the endpoint's current filter and
+scope and has no delivery row. Occurrences whose delivery rows are still retained are not queued again. A receiver
+can see a duplicate only for an occurrence whose delivery record has already expired after 30 days, with the same
+`webhook-id` as before. Verify that the missed events appear in the delivery log.

@@ -575,8 +575,16 @@ rows with prior attempts. The worker rechecks the current scope and filter befor
 sending an event. If a stored event no longer matches, the delivery is `skipped`
 with `scope_mismatch` and does not count toward endpoint failure. A missing event
 finishes with `event_unavailable`.
-Relative filter times use the start of the discovery scan as `now`. Send-time
-rechecks use the same clock for that delivery.
+In webhook filters, `now` in a relative time is each event's arrival time (`received_at`), and `now/d` is the
+UTC start of the arrival day. Discovery and the send-time recheck therefore select the same events whenever and
+however often they run, including after a partial page or a worker outage. Regexes use RE2 syntax: create and
+update reject a pattern RE2 does not accept with HTTP 422 `invalid_query`. When discovery meets a stored filter
+that can never run (a compile error, or ClickHouse error 427 `CANNOT_COMPILE_REGEXP`), it holds the endpoint at
+its cursor with `filterWarning: webhook_filter_invalid` and sends the filter-review notice. Timeouts, limits and
+network errors are retried and never hold a filter. A PATCH with a valid `filterQuery` resumes from the cursor.
+The PostgreSQL server clock must not step backwards; run a time service that slews it. After a backward step, an
+event admitted behind a committed cursor is stored and searchable but its webhook delivery can be missed until an
+operator [rewinds the cursor](self-hosting.md#rewind-a-webhook-cursor-after-a-missed-delivery).
 Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
 If settings change while the worker prepares a request, it discards the prepared request without counting an attempt.
 
@@ -595,6 +603,7 @@ The SDK verifies the signature using the exact header value.
 Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800. Up to ten active secrets
 can contribute space-separated `v1,<base64>` signatures. A rotation above the limit returns 409
 `webhook_secret_overlap_limit`. Wait for an overlap to expire or rotate with zero overlap.
+A zero-overlap rotation deletes every earlier secret in the same transaction, so no clock change can make one sign again.
 An endpoint with more than ten active secrets from an earlier version returns
 `secretOverlapWarning: webhook_secret_overlap_limit` and signs with the ten newest active secrets.
 The worker logs the condition once per endpoint.
