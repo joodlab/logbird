@@ -27,7 +27,14 @@ sets private/no-store caching, and only forwards the query returned by authorize
 server, not serialized runtime config. Authorize every page/cursor; tenant selectors are not a policy.
 If authorize throws a `TypeError` (from `trailQuery`) or returns a query with no `q`, the route answers 400 and reads
 nothing. Because authorize decides the scope on the server, `useAuditTrail({})` may send an empty trail to this route;
-a selector passed without a value (`tenant: undefined`) still throws on the client.
+a selector passed without a value (`tenant: undefined`) still throws on the client. Only a `TrailQueryError` from the
+SDK becomes a 400; any other error in `authorize` stays a server error.
+Pass `session` (the signed-in user or session id) in the options, for example
+`useAuditTrail(() => ({ target: { id }, session: user.value?.id }))`: when it changes, the rows on screen, the cursor
+and any read in flight are dropped and the trail reloads. Remounting the component on a session change
+(`<AuditTrail :key="user.id" />`) does the same. Without either, the previous session's rows stay on screen until the
+next reload or trail change, and "load more" sends the old cursor; the route re-authorizes it for the new session, so
+the page can skip rows but never contains events the new session may not read.
 
 `ModuleOptions`: endpoint, ingestKey, readKey (private runtimeConfig.logbird), hooks (server module path).
 Hook types: authorize(event, query) => false | Partial<SearchQuery> (async supported), optional actor,

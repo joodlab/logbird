@@ -13,8 +13,12 @@ components or browser bundles. Vue only calls an application-owned, authenticate
 The backend must authorize the requested tenant/record, including every cursor request.
 A project read key is project-wide; a query filter is not authorization.
 `trailQuery` never widens a read: it throws a `TypeError` for a trail with no target, actor, tenant or query, and for a
-selector key passed without a value (`tenant: session.tenantId` with no tenant id), and the Vue, Nuxt and TanStack
-integrations then report an error instead of fetching.
+selector key passed without a value (`tenant: session.tenantId` with no tenant id), and the Vue and TanStack integrations
+then report an error instead of fetching. The one exception is the Nuxt composable: it talks only to its own read route,
+whose `authorize` decides the scope on the server, so `useAuditTrail({})` sends an empty trail there; the route refuses
+a trusted query without `q`. Every read helper first copies its input into a frozen snapshot of strings and numbers,
+reading each property once, and refuses a value of the wrong type (`TrailQueryError`, a `TypeError`): selectors and `q`
+are strings, range bounds are a `Date`, epoch milliseconds or an ISO 8601 string.
 The read helpers require Logbird 0.2.0 or later: against an older server a selector value containing `*` is read as a
 prefix, so it can match more than the named tenant, actor or record.
 

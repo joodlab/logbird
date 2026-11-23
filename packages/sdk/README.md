@@ -82,6 +82,11 @@ const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
 `trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or
 query, and a selector key passed without a value (say `tenant: undefined`) is an error, not an absent filter. A `q` must
 parse as one complete Logbird query on its own; it is ANDed with the selectors.
+`trailQuery` and `readAuditTrail` first copy their input into a frozen snapshot of strings and numbers, reading each
+property once (getters, inherited and non-enumerable properties included), and throw a `TrailQueryError` (a `TypeError`;
+test with `isTrailQueryError`) for a value of the wrong type. Selectors, `q` and `cursor` are strings; a range bound is
+a `Date`, epoch milliseconds or an ISO 8601 string; `limit` is an integer. `readAuditTrail` sends only the known search
+fields (`q`, `lang`, `from`, `to`, `limit`, `cursor`, `order`).
 The read helpers require Logbird 0.2.0 or later: against an older server a selector value containing `*` is read as a
 prefix, so it can match more than the named tenant, actor or record.
 Read adapters expose failures: Vue `useAuditTrail` sets `error` and clears `loading`;

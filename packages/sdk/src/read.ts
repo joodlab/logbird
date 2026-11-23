@@ -44,29 +44,61 @@ export interface SearchResponse {
   tookMs: number;
 }
 
+/** A range bound: an ISO 8601 string, a `Date`, or epoch milliseconds. Anything else is refused. */
+export type RangeBound = string | Date | number;
 export interface TrailQuery {
   target?: { type?: string; id: string };
   actor?: string;
   tenant?: string;
   q?: string;
-  range?: { from: string; to: string };
+  range?: { from?: RangeBound; to?: RangeBound };
   limit?: number;
   cursor?: string;
 }
+/** A trail after the input boundary: plain, deeply frozen, holding only strings and numbers. */
+export type TrailSnapshot = Readonly<{
+  target?: Readonly<{ type?: string; id: string }>;
+  actor?: string;
+  tenant?: string;
+  /** Absent when the caller's `q` was absent or blank. */
+  q?: string;
+  range?: Readonly<{ from?: string; to?: string }>;
+  limit?: number;
+  cursor?: string;
+}>;
+/** What `readAuditTrail` accepts: a search query whose range bounds may also be `Date`s or epoch milliseconds. */
+export type SearchInput = Omit<Partial<SearchQuery>, 'from' | 'to'> & { from?: RangeBound; to?: RangeBound };
+/** A search query after the input boundary: plain, frozen, holding only strings and numbers. */
+export type SearchSnapshot = Readonly<Partial<SearchQuery>>;
+
+/** What the read helpers throw for input they will not use: a TypeError with a stable `code`. */
+export class TrailQueryError extends TypeError {
+  readonly code = 'trail_query_invalid';
+  constructor(message: string) {
+    super(message);
+    this.name = 'TrailQueryError';
+  }
+}
+/** True for a TrailQueryError, also one thrown by another copy of this module (checked by its code). */
+export function isTrailQueryError(error: unknown): error is TrailQueryError {
+  try {
+    return error instanceof TrailQueryError || (error instanceof TypeError && (error as { code?: unknown }).code === 'trail_query_invalid');
+  } catch {
+    return false;
+  }
+}
+
+// The input boundary (#263). Every public read entry point first copies its input into a plain frozen snapshot of
+// primitives, reading each property exactly once; nothing after that point touches the caller's object. A value that
+// is not the primitive type its field expects is refused here, never interpreted: no getter, prototype, toJSON,
+// toString or Proxy trap of the caller's object runs after the check, so what is checked is what is sent.
+
+const fail = (where: string, message: string): never => {
+  throw new TrailQueryError(`${where}: ${message}`);
+};
+const isObject = (value: unknown): value is object => value !== null && typeof value === 'object';
 /** Blank means only whitespace, as JavaScript's `trim()` sees it (the .NET builder uses the same rule). */
 const isBlank = (value: string) => value.trim().length === 0;
-/** A lone UTF-16 surrogate becomes U+FFFD in the URL, so it could match a different identifier: refused (as in .NET). */
-const hasLoneSurrogate = (value: string) => /[\uD800-\uDFFF]/u.test(value);
-const fail = (message: string): never => {
-  throw new TypeError(`trailQuery: ${message}`);
-};
-/** A present selector must name something: an absent value would silently widen the read (#263). */
-function selectorValue(key: string, value: unknown): string {
-  if (typeof value !== 'string' || isBlank(value))
-    return fail(`\`${key}\` was given but is empty; pass a value or leave the key out (an empty ${key} would widen the read).`);
-  if (hasLoneSurrogate(value)) return fail(`\`${key}\` contains an unpaired UTF-16 surrogate.`);
-  return value;
-}
 /**
  * Reads a key once. It is present when its value is defined (a Proxy may serve a value its `has` trap denies) or the
  * key is `in` the object, so a present `undefined` still counts and Vue tracks a key added to reactive options later.
@@ -75,6 +107,123 @@ function readOnce(object: object, key: string): { present: boolean; value: unkno
   const value = (object as Record<string, unknown>)[key];
   return { present: value !== undefined || key in object, value };
 }
+/** Every string the boundary accepts is well-formed UTF-16: a lone surrogate becomes U+FFFD in a URL (as in .NET). */
+function text(where: string, field: string, value: unknown): string {
+  if (typeof value !== 'string') return fail(where, `\`${field}\` must be a string.`);
+  if (/[\uD800-\uDFFF]/u.test(value)) return fail(where, `\`${field}\` contains an unpaired UTF-16 surrogate.`);
+  return value;
+}
+const optionalText = (where: string, field: string, value: unknown) => (value === undefined ? undefined : text(where, field, value));
+/** A present selector must name something: an absent or blank value would silently widen the read. */
+function selector(where: string, field: string, value: unknown): string {
+  if (typeof value !== 'string' || isBlank(value))
+    return fail(where, `\`${field}\` was given but is empty; pass a value or leave the key out (an empty ${field} would widen the read).`);
+  return text(where, field, value);
+}
+const BOUND_TYPES = 'must be a Date, epoch milliseconds or an ISO 8601 string.';
+/**
+ * A range bound becomes an ISO 8601 string. A `Date` is read through its internal time value (never its own toJSON or
+ * toISOString); a number is epoch milliseconds; a string is passed as is for the server to validate.
+ */
+function rangeBound(where: string, field: string, value: unknown): string | undefined {
+  if (value === undefined || typeof value === 'string') return optionalText(where, field, value);
+  let time = Number.NaN;
+  if (typeof value === 'number') time = value;
+  else if (isObject(value)) {
+    try {
+      time = Date.prototype.getTime.call(value);
+    } catch {
+      return fail(where, `\`${field}\` ${BOUND_TYPES}`);
+    }
+  } else return fail(where, `\`${field}\` ${BOUND_TYPES}`);
+  const date = new Date(time);
+  if (!Number.isFinite(date.getTime())) return fail(where, `\`${field}\` is not a valid time.`);
+  return date.toISOString();
+}
+/** An integer, or its decimal digits (how a page size arrives in a URL query). */
+function optionalLimit(where: string, value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value === 'string' && /^\d{1,6}$/.test(value)) return Number(value);
+  return fail(where, '`limit` must be an integer.');
+}
+function optionalChoice<T extends string>(where: string, field: string, value: unknown, choices: readonly T[]): T | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string' && (choices as readonly string[]).includes(value)) return value as T;
+  return fail(where, `\`${field}\` must be one of ${choices.map((choice) => `'${choice}'`).join(', ')}.`);
+}
+/** Keeps only the defined fields, so the snapshot's own keys are exactly the ones it holds. */
+function frozen<T extends object>(fields: T): Readonly<T> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) if (value !== undefined) out[key] = value;
+  return Object.freeze(out) as Readonly<T>;
+}
+
+/** The trail input boundary: the caller's trail as a plain frozen snapshot of primitives, each property read once. */
+export function snapshotTrail(input: TrailQuery, where = 'trailQuery'): TrailSnapshot {
+  if (!isObject(input)) return fail(where, 'expects an options object.');
+  let target: TrailSnapshot['target'];
+  const givenTarget = readOnce(input, 'target');
+  if (givenTarget.present) {
+    const given = givenTarget.value;
+    if (!isObject(given)) return fail(where, '`target` was given but is empty; pass `{ id }` or `{ type, id }`, or leave the key out.');
+    const id = selector(where, 'target.id', (given as { id?: unknown }).id);
+    const givenType = readOnce(given, 'type');
+    // An empty type is a real record type; an undefined one would drop the type and widen to every type with this id.
+    if (givenType.present && typeof givenType.value !== 'string')
+      return fail(where, '`target.type` was given but is not a string; pass the type or leave the key out.');
+    target = Object.freeze(givenType.present ? { type: text(where, 'target.type', givenType.value), id } : { id });
+  }
+  const givenActor = readOnce(input, 'actor');
+  const actor = givenActor.present ? selector(where, 'actor', givenActor.value) : undefined;
+  const givenTenant = readOnce(input, 'tenant');
+  const tenant = givenTenant.present ? selector(where, 'tenant', givenTenant.value) : undefined;
+  const q = optionalText(where, 'q', (input as { q?: unknown }).q);
+  const givenRange: unknown = (input as { range?: unknown }).range;
+  let range: TrailSnapshot['range'];
+  if (givenRange !== undefined) {
+    if (!isObject(givenRange)) return fail(where, '`range` must be an object with `from` and/or `to`.');
+    range = frozen({
+      from: rangeBound(where, 'range.from', (givenRange as { from?: unknown }).from),
+      to: rangeBound(where, 'range.to', (givenRange as { to?: unknown }).to),
+    });
+  }
+  const limit = optionalLimit(where, (input as { limit?: unknown }).limit);
+  const cursor = optionalText(where, 'cursor', (input as { cursor?: unknown }).cursor);
+  return frozen({
+    target,
+    actor,
+    tenant,
+    q: q === undefined || isBlank(q) ? undefined : q,
+    range,
+    limit,
+    cursor: cursor || undefined,
+  });
+}
+/** The fields of a search query in canonical order. */
+const SEARCH_FIELDS = ['q', 'lang', 'from', 'to', 'limit', 'cursor', 'order'] as const;
+/** The search query boundary: a plain frozen snapshot of the known search fields, each read once; others are dropped. */
+export function snapshotSearchQuery(query: SearchInput, where = 'readAuditTrail'): SearchSnapshot {
+  if (!isObject(query)) return fail(where, 'expects a query object.');
+  const input = query as Record<string, unknown>;
+  // One read per key, in the canonical order.
+  const q = optionalText(where, 'q', input.q);
+  const lang = optionalChoice(where, 'lang', input.lang, ['query', 'sql'] as const);
+  const from = rangeBound(where, 'from', input.from);
+  const to = rangeBound(where, 'to', input.to);
+  const limit = optionalLimit(where, input.limit);
+  const cursor = optionalText(where, 'cursor', input.cursor);
+  const order = optionalChoice(where, 'order', input.order, ['asc', 'desc'] as const);
+  return frozen({ q, lang, from, to, limit, cursor: cursor || undefined, order });
+}
+/**
+ * The canonical serialisation of a search snapshot without its cursor: two snapshots share a key exactly when they ask
+ * for the same events. It is a fixed-order array of strings, numbers and nulls, so two different trails cannot collide.
+ */
+export function searchKey(snapshot: SearchSnapshot): string {
+  return JSON.stringify(SEARCH_FIELDS.filter((field) => field !== 'cursor').map((field) => snapshot[field] ?? null));
+}
+
 /**
  * The extra query is wrapped in parentheses and ANDed with the selectors, so it must be one complete expression on its
  * own, checked with the same query parser the server and console use. Otherwise `a) OR (b` would become
@@ -84,55 +233,28 @@ function assertSelfContained(q: string) {
   try {
     parseQueryExpression(q);
   } catch (cause) {
-    fail(`\`q\` is not a complete Logbird query on its own (${cause instanceof Error ? cause.message : String(cause)}).`);
+    fail('trailQuery', `\`q\` is not a complete Logbird query on its own (${cause instanceof Error ? cause.message : 'parse error'}).`);
   }
 }
 /**
- * The search query for one record's, actor's or tenant's trail. Throws a TypeError instead of ever returning a query
- * wider than the caller asked for (#263): a trail needs a target, actor, tenant or non-blank query, and a selector key
- * that is present (own or inherited) must have a value (`tenant: session.tenantId` with no tenant id throws rather
- * than reading the whole project). Every input value is read once.
+ * The search query for one record's, actor's or tenant's trail. Throws a TrailQueryError (a TypeError) instead of
+ * ever returning a query wider than the caller asked for (#263): a trail needs a target, actor, tenant or non-blank
+ * query, and a selector key that is present (own or inherited) must have a value (`tenant: session.tenantId` with no
+ * tenant id throws rather than reading the whole project). The input passes the boundary first (`snapshotTrail`).
  */
 export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
-  if (!input || typeof input !== 'object') return fail('expects an options object.');
-  let target: { type?: string; id: string } | undefined;
-  const givenTarget = readOnce(input, 'target');
-  if (givenTarget.present) {
-    const given = givenTarget.value;
-    if (!given || typeof given !== 'object') return fail('`target` was given but is empty; pass `{ id }` or `{ type, id }`, or leave the key out.');
-    const id = selectorValue('target.id', (given as { id?: unknown }).id);
-    const givenType = readOnce(given, 'type');
-    if (givenType.present) {
-      // An empty type is a real record type; an undefined one would drop the type and widen to every type with this id.
-      const type = givenType.value;
-      if (typeof type !== 'string') return fail('`target.type` was given but is not a string; pass the type or leave the key out.');
-      if (hasLoneSurrogate(type)) return fail('`target.type` contains an unpaired UTF-16 surrogate.');
-      target = { type, id };
-    } else target = { id };
-  }
-  const givenActor = readOnce(input, 'actor');
-  const actor = givenActor.present ? selectorValue('actor', givenActor.value) : undefined;
-  const givenTenant = readOnce(input, 'tenant');
-  const tenant = givenTenant.present ? selectorValue('tenant', givenTenant.value) : undefined;
-  const rawQ: unknown = input.q;
-  if (rawQ !== undefined && typeof rawQ !== 'string') return fail('`q` must be a string when given.');
-  const q = rawQ !== undefined && !isBlank(rawQ) ? rawQ : undefined;
-  if (q !== undefined) {
-    if (hasLoneSurrogate(q)) fail('`q` contains an unpaired UTF-16 surrogate.');
-    assertSelfContained(q);
-  }
-  const range = input.range;
-  const limit = input.limit;
-  const cursor = input.cursor;
+  const trail = snapshotTrail(input);
+  const { target, actor, tenant, q } = trail;
+  if (q !== undefined) assertSelfContained(q);
   if (!target && actor === undefined && tenant === undefined && q === undefined)
-    fail('a trail needs a target, actor, tenant or query; an empty trail would be the whole project.');
+    fail('trailQuery', 'a trail needs a target, actor, tenant or query; an empty trail would be the whole project.');
   const terms = [
     q === undefined ? '' : `(${q})`,
     target ? (target.type !== undefined ? formatRecordTerm(target.type, target.id) : `target:${quoteQueryValue(target.id)}`) : '',
     actor === undefined ? '' : `actor:${quoteQueryValue(actor)}`,
     tenant === undefined ? '' : `tenant:${quoteQueryValue(tenant)}`,
   ].filter(Boolean);
-  return { ...range, q: terms.join(' AND '), limit, cursor };
+  return { ...trail.range, q: terms.join(' AND '), limit: trail.limit, cursor: trail.cursor };
 }
 
 export interface ReadOptions {
@@ -140,10 +262,18 @@ export interface ReadOptions {
   readKey: string;
   fetch?: typeof fetch;
 }
-export async function readAuditTrail(options: ReadOptions, query: Partial<SearchQuery>, signal?: AbortSignal): Promise<SearchResponse> {
+/**
+ * One page of events for an explicit search query. The query passes the boundary first (`snapshotSearchQuery`): only
+ * its known fields are sent, each read once. An explicit `q` (or none) is the way to read a whole project on purpose.
+ */
+export async function readAuditTrail(options: ReadOptions, query: SearchInput, signal?: AbortSignal): Promise<SearchResponse> {
   if (typeof window !== 'undefined') throw new Error('Logbird read keys are server-only');
+  const snapshot = snapshotSearchQuery(query);
   const url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events`);
-  for (const [key, value] of Object.entries(query)) if (value !== undefined) url.searchParams.set(key, String(value));
+  for (const field of SEARCH_FIELDS) {
+    const value = snapshot[field];
+    if (value !== undefined) url.searchParams.set(field, String(value));
+  }
   const response = await (options.fetch ?? fetch)(url, {
     headers: { Authorization: `Bearer ${options.readKey}` },
     signal: signal ?? AbortSignal.timeout(30_000),

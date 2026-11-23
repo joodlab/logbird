@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
 import { expect, it, vi } from 'vitest';
-import { h, ref } from 'vue';
-import { type AuditTrailOptions, useAuditTrail, useAuditTrailRequests } from './index';
+import { h, reactive, ref } from 'vue';
+import { type AuditFetcher, type AuditTrailOptions, useAuditTrail, useAuditTrailRequests } from './index';
 
 it('refreshes selectors, paginates and exposes errors without exposing keys', async () => {
   const target = ref('one');
@@ -307,4 +307,152 @@ it('never sends a cursor from the options on page one, and survives a thrown obj
   expect(trail.loading.value).toBe(false);
   expect(trail.error.value).toBeInstanceOf(Error);
   wrapper.unmount();
+});
+
+// Round 4 on #311: the composable runs on the SDK's input boundary (one frozen snapshot of primitives per read), and
+// its rows and cursor belong to that snapshot's canonical key, the session and the fetcher.
+const ISO = '2026-11-01T00:00:00.000Z';
+const page = (ids: string[], nextCursor: string | null = null) =>
+  ({ data: ids.map((id) => ({ id })), nextCursor, total: ids.length, tookMs: 0 }) as unknown as Awaited<ReturnType<AuditFetcher>>;
+function mountTrail<T>(make: () => T) {
+  let trail!: T;
+  const wrapper = mount({
+    setup() {
+      trail = make();
+      return () => h('span');
+    },
+  });
+  return { trail, wrapper };
+}
+
+it('drops rows, cursor and the read in flight when the session changes, and starts again at page one', async () => {
+  const session = ref<string | null>('user-a');
+  const signals: AbortSignal[] = [];
+  let resolvePending!: (value: ReturnType<typeof page>) => void;
+  const fetcher = vi.fn((_query: Record<string, unknown>, signal?: AbortSignal) => {
+    signals.push(signal as AbortSignal);
+    if (fetcher.mock.calls.length === 2)
+      return new Promise<ReturnType<typeof page>>((resolve) => {
+        resolvePending = resolve;
+      });
+    return Promise.resolve(fetcher.mock.calls.length === 1 ? page(['a-1'], 'a-cursor') : page(['b-1']));
+  });
+  const { trail, wrapper } = mountTrail(() => useAuditTrailRequests(() => ({ query: { q: 'scope:server' }, fetcher, session: session.value })));
+  await flushPromises();
+  expect(trail.data.value.map((e) => e.id)).toEqual(['a-1']);
+  const more = trail.loadMore();
+  expect(fetcher.mock.calls[1]?.[0].cursor).toBe('a-cursor');
+  session.value = 'user-b';
+  await flushPromises();
+  expect(signals[1]?.aborted).toBe(true);
+  expect(fetcher.mock.calls[2]?.[0].cursor).toBeUndefined();
+  resolvePending(page(['a-2'], 'a-cursor-2'));
+  await more;
+  await flushPromises();
+  expect(trail.data.value.map((e) => e.id)).toEqual(['b-1']);
+  expect(trail.nextCursor.value).toBeNull();
+  // A session that is not a string or number is refused before any read.
+  session.value = { id: 'x' } as unknown as string;
+  await flushPromises();
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(trail.error.value?.message).toMatch(/`session` must be a string or a number/);
+  wrapper.unmount();
+});
+
+it('reads Vue reactive options with Date bounds and class getters through the boundary', async () => {
+  class Scope {
+    get tenant() {
+      return 'acme';
+    }
+  }
+  const fetcher = vi.fn().mockResolvedValue(page([]));
+  const options = reactive(Object.assign(new Scope(), { fetcher, range: { from: new Date(ISO) } })) as unknown as AuditTrailOptions;
+  const { wrapper } = mountTrail(() => useAuditTrail(options));
+  await flushPromises();
+  expect(fetcher.mock.lastCall?.[0]).toEqual({ q: 'tenant:"acme"', from: ISO });
+  expect(Object.isFrozen(fetcher.mock.lastCall?.[0])).toBe(true);
+  (options.range as { from: Date }).from = new Date('2026-11-05T00:00:00.000Z');
+  await flushPromises();
+  expect(fetcher.mock.lastCall?.[0].from).toBe('2026-11-05T00:00:00.000Z');
+  wrapper.unmount();
+});
+
+it('never continues a cursor across trails that only a lying toJSON makes look alike', async () => {
+  const lying = (from: string) => ({ from, toJSON: () => ({}) });
+  const range = ref(lying(ISO));
+  const fetcher = vi.fn().mockResolvedValue(page(['x'], 'next'));
+  const { trail, wrapper } = mountTrail(() => useAuditTrail(() => ({ fetcher, tenant: 'acme', range: range.value })));
+  await flushPromises();
+  range.value = lying('2026-11-09T00:00:00.000Z');
+  // loadMore before the watcher has run: the snapshot is a different trail, so it starts at page one.
+  await trail.loadMore();
+  expect(fetcher.mock.lastCall?.[0]).toEqual({ q: 'tenant:"acme"', from: '2026-11-09T00:00:00.000Z' });
+  wrapper.unmount();
+});
+
+it('runs loadMore for a changed trail even while the old trail is loading or has no next page', async () => {
+  const tenant = ref('acme');
+  let release!: () => void;
+  const fetcher = vi.fn(
+    (query: Record<string, unknown>) =>
+      new Promise<ReturnType<typeof page>>((resolve) => {
+        if (query.q === 'tenant:"acme"') release = () => resolve(page(['acme-1']));
+        else resolve(page(['globex-1']));
+      }),
+  );
+  const { trail, wrapper } = mountTrail(() => useAuditTrail(() => ({ fetcher, tenant: tenant.value })));
+  expect(trail.loading.value).toBe(true);
+  tenant.value = 'globex';
+  await trail.loadMore();
+  expect(fetcher.mock.lastCall?.[0]).toEqual({ q: 'tenant:"globex"' });
+  release();
+  await flushPromises();
+  expect(trail.data.value.map((e) => e.id)).toEqual(['globex-1']);
+  // The trail on screen with no next page: loadMore does nothing.
+  const calls = fetcher.mock.calls.length;
+  await trail.loadMore();
+  expect(fetcher).toHaveBeenCalledTimes(calls);
+  wrapper.unmount();
+});
+
+it('calls the fetcher with the options (or the request) as this', async () => {
+  const receivers: unknown[] = [];
+  const options = {
+    tenant: 'acme',
+    fetcher(this: unknown) {
+      receivers.push(this);
+      return Promise.resolve(page([]));
+    },
+  };
+  const request = { query: { q: 'a' }, fetcher: options.fetcher };
+  const first = mountTrail(() => useAuditTrail(() => options));
+  const second = mountTrail(() => useAuditTrailRequests(() => request));
+  await flushPromises();
+  expect(receivers).toEqual([options, request]);
+  first.wrapper.unmount();
+  second.wrapper.unmount();
+});
+
+it('stays consistent when an abort listener re-enters the composable synchronously', async () => {
+  let reentered = false;
+  let trail!: ReturnType<typeof useAuditTrail>;
+  const fetcher = vi.fn((_query: Record<string, unknown>, signal?: AbortSignal) => {
+    const call = fetcher.mock.calls.length;
+    signal?.addEventListener('abort', () => {
+      if (!reentered) {
+        reentered = true;
+        void trail.refresh();
+      }
+    });
+    return call === 1 ? new Promise<ReturnType<typeof page>>(() => undefined) : Promise.resolve(page([`row-${call}`]));
+  });
+  const mounted = mountTrail(() => useAuditTrail(() => ({ fetcher, tenant: 'acme' })));
+  trail = mounted.trail;
+  await trail.refresh();
+  await flushPromises();
+  expect(trail.loading.value).toBe(false);
+  expect(trail.error.value).toBeUndefined();
+  expect(trail.data.value).toHaveLength(1);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  mounted.wrapper.unmount();
 });

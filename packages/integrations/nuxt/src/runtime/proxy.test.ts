@@ -119,3 +119,37 @@ it('refuses a trusted query with an unpaired surrogate before it is serialized',
   expect((await toWebHandler(app)(new Request('http://local/'))).status).toBe(400);
   expect(upstream).toBe(0);
 });
+
+it('refuses wrong-typed trusted fields with 400, forwards Dates and URL digits, and leaves the app own errors alone', async () => {
+  const urls: string[] = [];
+  const options = {
+    endpoint: 'http://logbird.test',
+    readKey: 'lb_read_fake',
+    fetch: async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Response.json({ data: [], nextCursor: null, total: 0, tookMs: 0 });
+    },
+  };
+  const status = async (authorize: Parameters<typeof createReadHandler>[1]['authorize'], url = 'http://local/') => {
+    const app = createApp();
+    app.use(createReadHandler(options, { authorize }));
+    return (await toWebHandler(app)(new Request(url))).status;
+  };
+  // A repeated browser parameter spread into the trusted query arrives as an array; objects are not strings either.
+  expect(await status((_, query) => ({ ...query, q: query.q }) as never, 'http://local/?q=a&q=b')).toBe(400);
+  expect(await status(() => ({ q: { toString: () => 'tenant:"acme"' } }) as never)).toBe(400);
+  expect(await status(() => ({ q: 'tenant:"acme"', limit: { valueOf: () => 20 } }) as never)).toBe(400);
+  expect(await status(() => ({ q: 'tenant:"acme"', order: 'sideways' }) as never)).toBe(400);
+  expect(urls).toHaveLength(0);
+  // A plain TypeError from the application's own code is not an incomplete trail: it stays a server error.
+  expect(
+    await status(() => {
+      throw new TypeError('session.user is undefined');
+    }),
+  ).toBe(500);
+  expect(urls).toHaveLength(0);
+  const from = new Date('2026-11-01T00:00:00.000Z');
+  expect(await status((_, query) => ({ q: 'tenant:"acme"', limit: query.limit, from }) as never, 'http://local/?limit=20')).toBe(200);
+  const sent = new URL(urls[0] ?? '').searchParams;
+  expect(Object.fromEntries(sent)).toEqual({ q: 'tenant:"acme"', from: '2026-11-01T00:00:00.000Z', limit: '20' });
+});
