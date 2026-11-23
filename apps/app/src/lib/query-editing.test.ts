@@ -7,7 +7,8 @@ vi.mock('@/lib/api/client', () => ({ api: {} }));
 import { editorQuery } from '@/components/query-input/query-input';
 import { activityChip, activityFreeText } from './activity-search';
 import { presenceTerms } from './presence-filter';
-import { fieldTerms, formatTerm, queryCompletionAt, removeTerm, tokenize } from './query-language';
+import { fieldTerms, formatTerm, highlightQuery, queryCompletionAt, removeTerm, tokenize } from './query-language';
+import { lintQuery } from './query-lint';
 import { translateQueryToSql } from './query-translate';
 import { nameableTerms } from './views';
 
@@ -74,5 +75,19 @@ describe('workspace activity chips (item 15)', () => {
     const q = 'description:"category:alpha beta"';
     expect(activityChip(q)).toBeUndefined();
     expect(activityFreeText(q)).toBe(q);
+  });
+});
+
+describe('a quoted key is kept as written by every reader (item 12)', () => {
+  it('highlights the whole key, completes after the real colon and proposes no rewrite of it', () => {
+    const q = '"attr.ticket status":open';
+    const key = highlightQuery(q).find((s) => s.cls === 'key');
+    expect(key && q.slice(key.start, key.end)).toBe('"attr.ticket status"');
+    expect(lintQuery(q, () => true)).toEqual([]);
+    expect(lintQuery('"attr.ticket status" : open', () => true)).toEqual([
+      expect.objectContaining({ replacement: '"attr.ticket status":open', message: 'Remove space around the colon' }),
+    ]);
+    const colonInside = '"attr.a:b":x';
+    expect(queryCompletionAt(colonInside, colonInside.length)).toMatchObject({ kind: 'value', field: 'attr.a:b', from: colonInside.indexOf('x') });
   });
 });

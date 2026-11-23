@@ -38,6 +38,8 @@ export interface QueryToken {
   valueStart?: number;
   /** `>`, `>=`, `<`, `<=` for comparisons. */
   op?: string;
+  /** End of the field name as written, after any quotes (`field` is the decoded name) and before the `:`. */
+  keyEnd?: number;
 }
 
 const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
@@ -171,6 +173,7 @@ export function tokenize(input: string): QueryToken[] {
         valueKind: v.kind,
         valueStart,
         op: v.op,
+        keyEnd: i + key[1].length + (key[2] ?? '').length,
       });
       i = v.end;
       continue;
@@ -323,6 +326,7 @@ function fieldToken(q: string, node: Extract<QueryAtom, { kind: 'field' }>, star
     valueKind,
     valueStart,
     op: value.kind === 'compare' ? value.op : undefined,
+    keyEnd: node.key.end,
   };
 }
 
@@ -569,7 +573,7 @@ export function highlightQuery(input: string): Segment[] {
         break;
       case 'field': {
         const keyStart = t.start + (t.negated ? 1 : 0);
-        const keyEnd = keyStart + (t.field?.length ?? 0);
+        const keyEnd = t.keyEnd ?? keyStart + (t.field?.length ?? 0);
         const colon = input.indexOf(':', keyEnd);
         const valueStart = t.valueStart ?? colon + 1;
         if (t.negated) out.push({ start: t.start, end: keyStart, cls: 'negation' });
@@ -686,7 +690,7 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
   const valueStart = t.valueStart ?? t.end;
   if (caret < keyStart) return { kind: 'none' };
   const field = t.field ?? '';
-  const colon = q.indexOf(':', keyStart + field.length);
+  const colon = q.indexOf(':', t.keyEnd ?? keyStart + field.length);
   if (caret <= colon) return key(keyStart, colon + 1);
   if (field === '_exists_') return { kind: 'exists', prefix: q.slice(valueStart, caret), from: keyStart, to: t.end };
   const value = (prefix: string, from: number, to: number, extra: Partial<Extract<QueryCompletion, { kind: 'value' }>> = {}): QueryCompletion => ({

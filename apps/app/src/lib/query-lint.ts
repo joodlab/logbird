@@ -61,7 +61,9 @@ export function lintQuery(q: string, isField: (name: string) => boolean): QueryF
 
     // Canonicalize optional spacing without changing the value or how it is lexed.
     if (t.kind === 'field' && t.value && t.valueStart !== undefined) {
-      const prefix = `${t.negated ? '-' : ''}${t.field}:`;
+      // The key as written (a quoted key keeps its quotes), never rebuilt from the decoded name.
+      const keyEnd = t.keyEnd ?? t.start + (t.negated ? 1 : 0) + (t.field?.length ?? 0);
+      const prefix = `${t.raw.slice(0, keyEnd - t.start)}:`;
       const value = t.raw.slice(t.valueStart - t.start);
       if (t.raw !== prefix + value && !/^[-!]|^[\w.]+:/.test(value)) {
         fixes.push({ start: t.start, end: t.end, replacement: prefix + value, message: 'Remove space around the colon' });
