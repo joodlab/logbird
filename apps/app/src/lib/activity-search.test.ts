@@ -1,3 +1,4 @@
+import { parseQueryExpression } from '@logbird/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activityChip, activityFreeText, activityQuery, queryMeaning, toggleActivityChip } from './activity-search';
 import { createSearchCommitter } from './search-committer';
@@ -72,9 +73,29 @@ describe('workspace activity chips (#226)', () => {
       const toggled = toggleActivityChip(q, value);
       expect(queryMeaning(toggled), `${q} → ${toggled}`).toBe(queryMeaning(expected));
       expect(queryMeaning(toggled)).not.toBeNull();
+      // And the same Boolean shape: AND inside a branch, OR between branches, negation where it was.
+      expect(booleanShape(toggled), `${q} → ${toggled}`).toBe(booleanShape(expected));
     }
   });
 });
+
+/** A query's Boolean shape from the server's parse, order-insensitive: OR of ANDs, groups and NOT kept as they are. */
+function booleanShape(q: string): string {
+  type Atom = ReturnType<typeof parseQueryExpression>[number][number]['atom'];
+  const atom = (node: Atom): unknown => {
+    if (node.kind === 'not') return ['not', atom(node.operand)];
+    if (node.kind === 'group') return ['group', or(node.expression)];
+    return node.kind === 'text' ? ['t', node.token.kind, node.token.value] : ['f', node.field, node.value];
+  };
+  const or = (expression: ReturnType<typeof parseQueryExpression>) =>
+    expression
+      .map((branch) =>
+        branch.map((part) => JSON.stringify(atom(part.atom), (k, v) => (['start', 'end', 'valueStart', 'key'].includes(k) ? undefined : v))).sort(),
+      )
+      .map((b) => JSON.stringify(b))
+      .sort();
+  return JSON.stringify(or(parseQueryExpression(q)));
+}
 
 describe('search committer', () => {
   afterEach(() => vi.useRealTimers());

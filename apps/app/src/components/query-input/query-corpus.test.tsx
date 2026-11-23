@@ -1,14 +1,14 @@
 // @vitest-environment happy-dom
 /**
  * The query bar against a whole corpus of valid queries, not the cases found so far (#220 follow-up, a maintainer's
- * condition). The corpus is every query literal in the server parser's own tests and in the console's query tests
- * (each review's cases), kept when the server accepts it. For each query, with the completion panel live against a
- * fixture:
+ * condition). The corpus is every literal in the server parser's own tests and in the console's query tests (each
+ * review's cases) that the parser accepts, with spaces around some. With the completion panel live against a fixture:
  * 1. typed character by character and run with plain Enter, the submitted text is the typed text, character for
  *    character;
- * 2. with the caret at every term boundary the server's parse gives, a completion chosen with ↓ and accepted with Enter
- *    leaves a query that parses (or does once a value is typed at the caret) and every term away from the caret
- *    unchanged in the server's parse.
+ * 2. at every term boundary of the server's parse, each of the first rows offered, accepted by click, changes the text
+ *    only inside that row's own span, leaves a query that parses (or does once a word is typed at the caret), and
+ *    leaves every other term unchanged in the server's parse, by an oracle written here on the parser; a row that is
+ *    refused is checked to have been unsafe in every form.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -59,9 +59,6 @@ vi.mock('@/lib/api/client', () => ({
   },
 }));
 
-import { coreField } from '@/lib/query-catalog';
-import { termsOutside } from '@/lib/query-language';
-import { lintQuery } from '@/lib/query-lint';
 import { QueryInput } from './query-input';
 
 /* ---------------- the corpus ---------------- */
@@ -85,21 +82,62 @@ const parses = (q: string) => {
     return false;
   }
 };
-const corpus = [
+const literals = [
   ...new Set(
     SOURCES.flatMap((file) => {
       const text = readFileSync(resolve(ROOT, file), 'utf8');
       return [...text.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"/g)].map((m) => unescapeLiteral(m[1] ?? m[2] ?? ''));
     }),
   ),
-]
-  // Queries only: a field or a group, no control characters (a textarea has its own rules for those), as the server accepts them.
-  .filter((q) => q.length > 2 && q.length <= 160 && q === q.trim() && /[:(]/.test(q) && ![...q].some((c) => c.charCodeAt(0) < 0x20) && parses(q))
-  .sort();
+];
+// Every literal the parser accepts (free text, KQL-looking text and bare prefixes included), without control characters
+// (a textarea has its own rules for those), plus each query with spaces around it, which Enter must keep too.
+const valid = literals.filter((q) => q.trim() && q.length <= 160 && ![...q].some((c) => c.charCodeAt(0) < 0x20) && parses(q)).sort();
+const corpus = [
+  ...valid,
+  ...valid
+    .filter((q) => /[:(]/.test(q))
+    .slice(0, 40)
+    .map((q) => `  ${q} `),
+  'action=booked',
+  'act',
+];
 
-/** As the bar decides it: a core field, an explicit attribute, or a key the fixture lists. */
-const isFieldName = (name: string) =>
-  Boolean(coreField(name)) || /^(attr|attributes)\.\S/.test(name) || fixture.fields.some((f) => f.key === `attr.${name}`);
+/* ---------------- an oracle of its own, from the server's parser ---------------- */
+
+/**
+ * Every term of `q` outside `[from, to)` as the server parses it: field or word, value, polarity and, when `structural`,
+ * the OR branches it sits in. Written here independently of the console's comparator.
+ */
+function outsideTerms(q: string, from: number, to: number, structural: boolean): string | null {
+  let expression: ReturnType<typeof parseQueryExpression>;
+  try {
+    expression = parseQueryExpression(q);
+  } catch {
+    return null;
+  }
+  const out: string[] = [];
+  const omit = (k: string, v: unknown) => (['start', 'end', 'valueStart', 'key'].includes(k) ? undefined : v);
+  const walk = (node: QueryAtom, negated: boolean, path: string): void => {
+    if (node.kind === 'not') {
+      walk(node.operand, !negated, path);
+      return;
+    }
+    if (node.kind === 'group') {
+      node.expression.forEach((branch, i) => {
+        for (const p of branch) walk(p.atom, negated, `${path}.${i}`);
+      });
+      return;
+    }
+    if (node.start < to && node.end > from) return;
+    const value = node.kind === 'field' ? [node.field, node.value] : [node.token.kind, node.token.value];
+    out.push(JSON.stringify([structural ? path : '', node.kind, value, negated], omit));
+  };
+  expression.forEach((branch, i) => {
+    for (const p of branch) walk(p.atom, false, `${i}`);
+  });
+  return out.join('\n');
+}
 
 /* ---------------- the bar ---------------- */
 
@@ -113,9 +151,13 @@ const flush = async () => {
     await vi.advanceTimersByTimeAsync(260);
   });
 };
+// React ignores an input event whose value did not change, so the text is cleared first: a new caret in the same
+// text reaches the bar too.
 const setValue = (value: string, caret = value.length) =>
   act(() => {
     const t = textarea();
+    setNative?.call(t, t.value === value ? `${value}#` : value);
+    t.dispatchEvent(new Event('input', { bubbles: true }));
     setNative?.call(t, value);
     t.setSelectionRange(caret, caret);
     t.dispatchEvent(new Event('input', { bubbles: true }));
@@ -124,6 +166,7 @@ const key = (k: string, init: KeyboardEventInit = {}) =>
   act(() => {
     textarea().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: k, ...init }));
   });
+const options = () => [...host.querySelectorAll<HTMLElement>('[role="option"]')].filter((o) => o.getAttribute('aria-disabled') !== 'true');
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -149,10 +192,10 @@ afterAll(() => {
 });
 
 it('has a real corpus', () => {
-  expect(corpus.length).toBeGreaterThan(60);
+  expect(valid.length).toBeGreaterThan(200);
 });
 
-/** Term boundaries of the server's parse: where each field term starts, where its value starts, and where it ends. */
+/** Term boundaries of the server's parse: where each term starts and ends, where a field's value starts, and the ends. */
 function boundaries(q: string): number[] {
   const at = new Set<number>([0, q.length]);
   const visit = (node: QueryAtom) => {
@@ -168,53 +211,57 @@ function boundaries(q: string): number[] {
   return [...at].sort((a, b) => a - b);
 }
 
-/** The span of the terms at `caret` (the one being completed): every term touching it. */
-function termSpanAt(q: string, caret: number): [number, number] {
-  let from = caret;
-  let to = caret;
-  const visit = (node: QueryAtom) => {
-    if (node.kind === 'not') visit(node.operand);
-    else if (node.kind === 'group') for (const b of node.expression) for (const p of b) visit(p.atom);
-    else if (node.start <= caret && node.end >= caret) {
-      from = Math.min(from, node.start);
-      to = Math.max(to, node.end);
-    }
-  };
-  for (const b of parseQueryExpression(q)) for (const p of b) visit(p.atom);
-  return [from, to];
+/**
+ * Whether accepting a row (`insert` over `[from, to)` in `q`) gave `result` within the rules: the text changed only
+ * inside the row's span, the query parses (or does once a word is typed at the caret), and every term outside the span
+ * is unchanged in the server's parse (structure too, unless the row is an operator or a snippet the reader chose).
+ */
+function withinRules(q: string, from: number, to: number, result: string, caret: number, structural: boolean): boolean {
+  if (!result.startsWith(q.slice(0, from)) || !result.endsWith(q.slice(to))) return false;
+  // As the reader will finish it: a word typed at the caret (`action:`, `OR`, `()`), or both bounds of a range template.
+  const finished = [result, `${result.slice(0, caret)} x${result.slice(caret)}`, result.replace(/([[{])\s*TO\s*([\]}])/, '$1x TO x$2')].find(parses);
+  if (finished === undefined) return false;
+  const end = from + (finished.length - (q.length - (to - from)));
+  return outsideTerms(finished, from, end, structural) === outsideTerms(q, from, to, structural);
 }
 
-it('a completion accepted at any term boundary changes only the term there, and the query still parses', async () => {
+it('a row accepted at any term boundary changes only its own span, and the query still parses', async () => {
   const broken: string[] = [];
-  for (const q of corpus) {
+  let accepted = 0;
+  for (const q of ['', '  ', ...valid]) {
     for (const b of boundaries(q)) {
-      setValue(q, b);
-      key(' ', { ctrlKey: true });
-      await flush();
-      if (!host.querySelector('[role="option"]')) continue;
-      key('ArrowDown');
-      // A fix row converts the spelling it names (`tenant =` → `tenant:`), its own span, not only the term at the caret.
-      const chosenFix = host.querySelector('[role="option"][aria-selected="true"]')?.getAttribute('data-kind') === 'fix';
-      key('Enter');
-      await flush();
-      const result = textarea().value;
-      if (result === q) continue;
-      const caret = textarea().selectionStart ?? result.length;
-      // Parses as it is, or once a value is typed at the caret (a key or a group awaiting it).
-      const finished = parses(result) ? result : `${result.slice(0, caret)}x${result.slice(caret)}`;
-      let [from, to] = termSpanAt(q, b);
-      if (chosenFix)
-        for (const f of lintQuery(q, isFieldName)) {
-          from = Math.min(from, f.start);
-          to = Math.max(to, f.end);
+      for (let row = 0; row < 3; row++) {
+        setValue(q, b);
+        key(' ', { ctrlKey: true });
+        await flush();
+        const option = options()[row];
+        if (!option) break;
+        const from = Number(option.dataset.from);
+        const to = Number(option.dataset.to);
+        const insert = option.dataset.insert ?? '';
+        const kind = option.dataset.kind ?? '';
+        if (kind === 'recent' || kind === 'view') continue; // these replace the whole query, by design
+        act(() => option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })));
+        await flush();
+        const result = textarea().value;
+        const caret = textarea().selectionStart ?? result.length;
+        const structural = kind !== 'keyword' && kind !== 'snippet';
+        const label = `${JSON.stringify(q)} @${b} row ${row} (${kind} ${JSON.stringify(insert)}) → ${JSON.stringify(result)}`;
+        if (result !== q) {
+          accepted += 1;
+          if (!withinRules(q, from, to, result, caret, structural)) broken.push(label);
+        } else if (insert !== q.slice(from, to)) {
+          // Refused: that is right only when no form of the row would have kept the other terms.
+          const forms = [insert, insert.trimEnd()];
+          const kept = forms.some((f) => withinRules(q, from, to, q.slice(0, from) + f + q.slice(to), from + f.length, structural));
+          if (kept) broken.push(`${label} (refused, though it was safe)`);
         }
-      const grown = finished.length - q.length;
-      const same = parses(finished) && termsOutside(finished, from, to + grown) === termsOutside(q, from, to);
-      if (!same) broken.push(`${JSON.stringify(q)} @${b} → ${JSON.stringify(result)}`);
+      }
     }
   }
   expect(broken).toEqual([]);
-}, 600_000);
+  expect(accepted).toBeGreaterThan(500);
+}, 900_000);
 
 // After the boundary phase: running each query adds it to the recent queries, whose rows replace the whole query by design.
 it('typed and run with plain Enter, every valid query is submitted exactly as typed', async () => {
@@ -229,4 +276,4 @@ it('typed and run with plain Enter, every valid query is submitted exactly as ty
     if (sent !== q) changed.push(`${JSON.stringify(q)} → ${JSON.stringify(sent)}`);
   }
   expect(changed).toEqual([]);
-}, 600_000);
+}, 900_000);

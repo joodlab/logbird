@@ -11,6 +11,7 @@ import {
   highlightQuery,
   includeTerm,
   markErrorSpan,
+  neighbourSafeInsert,
   queryCompletionAt,
   removeTerm,
   type Segment,
@@ -479,5 +480,26 @@ describe('a dash negates where the server says it does (#220)', () => {
       'field:action:true',
     ]);
     expect(fields('a:b)-(c:d)').slice(0, 3)).toEqual(['field:a:false', 'paren:):false', 'text:-:false']);
+  });
+});
+
+describe('neighbourSafeInsert (accepting a completion changes only its own term)', () => {
+  it('takes a first term in an empty or blank bar', () => {
+    expect(neighbourSafeInsert('', 0, 0, 'action:', 7)).toBe('action:');
+    expect(neighbourSafeInsert('  ', 2, 2, 'action:', 7)).toBe('action:');
+  });
+
+  it('keeps a range template as a template, never quoted', () => {
+    expect(neighbourSafeInsert('attempt:2', 8, 9, '[ TO ]', 1, false, false)).toBe('[ TO ]');
+    expect(neighbourSafeInsert('attempt:2 tenant:west', 8, 9, '[ TO ]', 1, false, false)).toBe('[ TO ]');
+  });
+
+  it('keeps the space after an operator the reader chose', () => {
+    expect(neighbourSafeInsert('action:booked ', 14, 14, 'OR ', 3, false, false)).toBe('OR ');
+  });
+
+  it('refuses a key that would take the next term as its value', () => {
+    expect(neighbourSafeInsert('action:booked', 0, 0, 'outcome:', 8)).toBeNull();
+    expect(neighbourSafeInsert('fixed in #290', 6, 8, 'impersonator:', 13)).toBeNull();
   });
 });
