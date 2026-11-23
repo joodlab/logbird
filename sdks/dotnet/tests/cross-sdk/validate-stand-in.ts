@@ -48,35 +48,44 @@ const eventsOf = (body: unknown): unknown[] =>
 const idOf = (event: unknown) =>
   event && typeof event === 'object' && typeof (event as { id?: unknown }).id === 'string' ? (event as { id: string }).id.trim() : undefined;
 
-/** Every event is settled exactly once: by index in rejected or unresolved, otherwise by its id in ids. */
-function checkCoverage(
+/**
+ * Every event is settled exactly once: by index in rejected or unresolved, otherwise by its id in ids. Returns what the
+ * answer says happened to each event, in order.
+ */
+function settle(
   fail: (why: string) => void,
   events: unknown[],
   result: { accepted: number; ids: string[]; rejected: { index: number }[]; indices?: number[]; eventIds?: string[] },
-) {
+): string[] {
+  const outcome: string[] = events.map(() => 'unsettled');
   if (result.accepted !== result.ids.length) fail(`accepted ${result.accepted} but ${result.ids.length} ids`);
-  const byIndex = new Set<number>();
+  if ((result.indices ?? []).length !== (result.eventIds ?? []).length)
+    fail(`${result.indices?.length ?? 0} unresolved indices but ${result.eventIds?.length ?? 0} eventIds`);
   for (const r of result.rejected) {
-    if (r.index < 0 || r.index >= events.length || byIndex.has(r.index)) fail(`rejected index ${r.index} out of range or repeated`);
-    byIndex.add(r.index);
+    if (r.index < 0 || r.index >= events.length || outcome[r.index] !== 'unsettled') fail(`rejected index ${r.index} out of range or repeated`);
+    else outcome[r.index] = 'rejected';
   }
 
   for (const [k, index] of (result.indices ?? []).entries()) {
-    if (index < 0 || index >= events.length || byIndex.has(index)) fail(`unresolved index ${index} out of range or repeated`);
-    byIndex.add(index);
+    if (index < 0 || index >= events.length || outcome[index] !== 'unsettled') fail(`unresolved index ${index} out of range or repeated`);
+    else outcome[index] = 'unresolved';
     if (result.eventIds?.[k] !== idOf(events[index])) fail(`eventIds[${k}] does not name the event at index ${index}`);
   }
 
   const ids = [...result.ids];
   for (let index = 0; index < events.length; index++) {
-    if (byIndex.has(index)) continue;
+    if (outcome[index] !== 'unsettled') continue;
     const id = idOf(events[index]);
     const at = id === undefined ? -1 : ids.indexOf(id);
     if (at < 0) fail(`event ${index} is neither rejected, unresolved nor in ids`);
-    else ids.splice(at, 1);
+    else {
+      ids.splice(at, 1);
+      outcome[index] = 'accepted';
+    }
   }
 
   if (ids.length) fail(`${ids.length} ids in the answer match no event of the batch`);
+  return outcome;
 }
 
 for (const [number, x] of exchanges.entries()) {
@@ -90,6 +99,7 @@ for (const [number, x] of exchanges.entries()) {
   }
 
   const events = x.request === null || x.request === undefined ? [] : eventsOf(x.request);
+  let outcome: string[] | undefined;
   if (x.status === 202) {
     if (JSON.stringify(x.response) === '{}') {
       if (x.fault !== 'EmptyAck') fail('202 {} is only the EmptyAck fault');
@@ -102,7 +112,7 @@ for (const [number, x] of exchanges.entries()) {
       continue;
     }
 
-    checkCoverage(fail, events, parsed.data);
+    outcome = settle(fail, events, parsed.data);
   } else {
     const error = apiErrorSchema.safeParse(x.response);
     if (!error.success) {
@@ -117,20 +127,24 @@ for (const [number, x] of exchanges.entries()) {
       // The server always sends details with ingest_pending.
       const details = ingestPendingDetailsSchema.strict().safeParse(error.data.error.details);
       if (!details.success) fail(`details: ${details.error.message}`);
-      else checkCoverage(fail, events, details.data);
+      else outcome = settle(fail, events, details.data);
     } else if (error.data.error.details !== undefined) {
       fail(`${code} carries details the server does not send`);
     }
   }
 
-  // Stand-in mode records what it did with each event; accepted events must be valid by the contracts.
-  if (config.mode === 'stand-in' && x.dispositions.length) {
-    if (x.dispositions.length !== events.length) fail(`${x.dispositions.length} dispositions for ${events.length} events`);
-    for (const [index, disposition] of x.dispositions.entries()) {
-      if (disposition !== 'accepted') continue;
-      const parsed = eventInputSchema.safeParse(events[index]);
-      if (!parsed.success) fail(`accepted event ${index} is invalid by the contracts: ${parsed.error.message}`);
-    }
+  if (!outcome) continue;
+
+  // Every event the answer acknowledges must be one the server's schema accepts.
+  for (const [index, result] of outcome.entries()) {
+    if (result !== 'accepted') continue;
+    const parsed = eventInputSchema.safeParse(events[index]);
+    if (!parsed.success) fail(`acknowledged event ${index} is invalid by the contracts: ${parsed.error.message}`);
+  }
+
+  // In stand-in mode the stand-in also records what it did with each event: it must match the answer exactly.
+  if (config.mode === 'stand-in' && JSON.stringify(x.dispositions) !== JSON.stringify(outcome)) {
+    fail(`dispositions ${JSON.stringify(x.dispositions)} do not match the answer ${JSON.stringify(outcome)}`);
   }
 }
 

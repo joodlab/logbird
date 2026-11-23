@@ -73,6 +73,9 @@ internal sealed class SoakOptions
 
     public string? ClickHouseDatabase { get; private set; }
 
+    /// <summary>The most events one run may track: its exact bookkeeping (five tables) stays under about 700 MB.</summary>
+    public const long MaxEvents = 4_000_000;
+
     /// <summary>An estimate of the events the run tracks, to size the bookkeeping tables once.</summary>
     public long ExpectedEvents => (long)(Rate * Duration.TotalSeconds * 1.3) + 10_000;
 
@@ -116,6 +119,11 @@ internal sealed class SoakOptions
                 case "--upstream": o.Upstream = Loopback(value, "--upstream"); break;
                 default: throw new ArgumentException("unknown option " + name);
             }
+        }
+
+        if (o.Rate * o.Duration.TotalSeconds > MaxEvents)
+        {
+            throw new ArgumentException($"--rate x --duration is {o.Rate * o.Duration.TotalSeconds:F0} events; one run tracks at most {MaxEvents} exactly (for example 2h at 500/s or 5h at 200/s)");
         }
 
         if (o.Upstream is not null)

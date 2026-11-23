@@ -18,7 +18,7 @@ internal sealed class LongMap
     public LongMap(long expected)
     {
         var capacity = 1024;
-        while (capacity < expected * 2 && capacity < (1 << 28))
+        while (capacity < expected * 4 / 3 && capacity < (1 << 26))
         {
             capacity <<= 1;
         }
@@ -68,7 +68,7 @@ internal sealed class LongMap
                 return false;
             }
 
-            if ((_count + 1) * 2 > _keys.Length)
+            if ((_count + 1) * 4 > _keys.Length * 3)
             {
                 Grow();
                 slot = Find(_keys, key);

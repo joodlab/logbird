@@ -23,7 +23,8 @@ internal sealed class ClickHouseCheck : IDisposable
 
     public ClickHouseCheck(Uri url, string user, string password, string database, string projectId)
     {
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        // Never follow a redirect: the login travels in headers and must not leave this machine.
+        _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(60) };
         _http.DefaultRequestHeaders.Add("X-ClickHouse-User", user);
         _http.DefaultRequestHeaders.Add("X-ClickHouse-Key", password);
         _baseUrl = url.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/?database=" + Uri.EscapeDataString(database);
@@ -44,19 +45,28 @@ internal sealed class ClickHouseCheck : IDisposable
             "SELECT count() FROM (SELECT event_id FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String} GROUP BY event_id HAVING count() > 1)",
             ("p", _projectId), ("r", runTag)).ConfigureAwait(false), CultureInfo.InvariantCulture);
 
-    /// <summary>Inserts two identical rows under <paramref name="selfTestTag"/> and returns what the check reports for them.</summary>
-    public async Task<long> SelfTestAsync(string selfTestTag, DateTimeOffset at)
+    /// <summary>
+    /// Inserts two identical rows (one statement, so one part) under a fresh self-test tag and returns whether the check
+    /// reports them as one duplicated id. A background merge could collapse them before the count, so a healthy check
+    /// gets three attempts; a broken query never reports them.
+    /// </summary>
+    public async Task<bool> SelfTestAsync(string selfTestTag, DateTimeOffset at)
     {
-        var id = "soak-selftest-" + Guid.NewGuid().ToString("N");
         var when = at.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
-        for (var i = 0; i < 2; i++)
+        for (var attempt = 0; attempt < 3; attempt++)
         {
+            var tag = selfTestTag + "-" + attempt.ToString(CultureInfo.InvariantCulture);
+            var id = "soak-selftest-" + Guid.NewGuid().ToString("N");
             await QueryAsync(
-                "INSERT INTO events (project_id, event_id, timestamp, received_at, action, attributes) SELECT {p:String}, {id:String}, toDateTime64({t:String}, 3, 'UTC'), toDateTime64({t:String}, 3, 'UTC'), 'soak.selftest', map('metadata.soakRun', {r:String})",
-                ("p", _projectId), ("id", id), ("t", when), ("r", selfTestTag)).ConfigureAwait(false);
+                "INSERT INTO events (project_id, event_id, timestamp, received_at, action, attributes) SELECT {p:String}, {id:String}, toDateTime64({t:String}, 3, 'UTC'), toDateTime64({t:String}, 3, 'UTC'), 'soak.selftest', map('metadata.soakRun', {r:String}) FROM numbers(2)",
+                ("p", _projectId), ("id", id), ("t", when), ("r", tag)).ConfigureAwait(false);
+            if (await DuplicatedIdsAsync(tag).ConfigureAwait(false) == 1)
+            {
+                return true;
+            }
         }
 
-        return await DuplicatedIdsAsync(selfTestTag).ConfigureAwait(false);
+        return false;
     }
 
     private async Task<string> QueryAsync(string sql, params (string Name, string Value)[] parameters)

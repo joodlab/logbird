@@ -80,8 +80,12 @@ internal static class Program
 
 internal sealed class SoakRun(SoakOptions options)
 {
+    /// <summary>The SDK's batch size, which the harness leaves at its default.</summary>
+    private static readonly int BatchSize = new LogbirdOptions().BatchSize;
+
     private readonly LongMap _tracked = new(options.ExpectedEvents);
-    private readonly LongMap _dropped = new(options.ExpectedEvents / 4);
+    private readonly LongMap _dropped = new(options.ExpectedEvents);
+    private readonly ConcurrentDictionary<LogbirdClient, byte> _retiring = new();
     private readonly ConcurrentDictionary<DropReason, long> _dropReasons = new();
     private readonly ConcurrentDictionary<string, long> _errors = new(StringComparer.Ordinal);
     private readonly LatencyHistogram _trackLatency = new();
@@ -95,6 +99,7 @@ internal sealed class SoakRun(SoakOptions options)
     private long _flushesFailed;
     private long _restarts;
     private long _queueHighWater;
+    private long _sent;
     private LogbirdClient? _client;
     private double _loadSeconds;
 
@@ -166,15 +171,50 @@ internal sealed class SoakRun(SoakOptions options)
     {
         var canary = new LogbirdClient(new LogbirdOptions { Endpoint = options.Upstream, IngestKey = options.IngestKey, AllowInsecureHttp = true, Environment = "soak" });
         canary.Track(new AuditEvent("soak.canary").WithMetadata("soakRun", _runId + "-canary"));
+        var canaryId = LogbirdClient.NewEventId();
+        canary.Track(new AuditEvent("soak.canary") { Id = canaryId }.WithMetadata("soakRun", _runId + "-canary"));
         var flushed = await Program.WithinAsync(canary.FlushAsync(), TimeSpan.FromSeconds(60)).ConfigureAwait(false) == true;
         var delivered = canary.Stats.Delivered;
         await canary.DisposeAsync().ConfigureAwait(false);
         checks.Add(Program.Check("the server accepted a canary event with the ingest key", flushed && delivered == 1, $"flushed {flushed}, delivered {delivered}"));
+        if (!flushed || delivered != 1)
+        {
+            return false;
+        }
 
-        long found;
+        // The ClickHouse self-test writes rows under LOGBIRD_SOAK_PROJECT_ID: confirm first that this is the project the
+        // ingest and read keys belong to, by reading the canary back.
+        string? project = null;
+        using (var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = options.Upstream, ReadKey = options.ReadKey, AllowInsecureHttp = true }))
+        {
+            for (var attempt = 0; attempt < 30 && project is null; attempt++)
+            {
+                try
+                {
+                    project = (await reader.GetAsync(canaryId).ConfigureAwait(false))?.Event.ProjectId;
+                }
+                catch (LogbirdApiException)
+                {
+                }
+
+                if (project is null)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                }
+            }
+        }
+
+        var sameProject = string.Equals(project, options.ProjectId, StringComparison.Ordinal);
+        checks.Add(Program.Check("LOGBIRD_SOAK_PROJECT_ID is the keys' project", sameProject, project is null ? "the canary could not be read back with the read key" : sameProject ? "the canary was stored in that project" : "the canary was stored in a different project; nothing is written to ClickHouse"));
+        if (!sameProject)
+        {
+            return false;
+        }
+
+        bool detected;
         try
         {
-            found = await clickHouse.SelfTestAsync(_runId + "-selftest", started).ConfigureAwait(false);
+            detected = await clickHouse.SelfTestAsync(_runId + "-selftest", started).ConfigureAwait(false);
         }
         catch (Exception e) when (e is InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException)
         {
@@ -182,8 +222,8 @@ internal sealed class SoakRun(SoakOptions options)
             return false;
         }
 
-        checks.Add(Program.Check("the raw-row duplicate check detects two identical rows", found == 1, $"{found} duplicated id(s) reported for the two self-test rows"));
-        return flushed && delivered == 1 && found == 1;
+        checks.Add(Program.Check("the raw-row duplicate check detects two identical rows", detected, detected ? "two identical self-test rows were reported as one duplicated id" : "three attempts, never reported"));
+        return detected;
     }
 
     private LogbirdClient NewClient(Uri endpoint)
@@ -225,18 +265,28 @@ internal sealed class SoakRun(SoakOptions options)
 
     private async Task ProduceAsync(int producer, Stopwatch clock, CancellationToken stop)
     {
-        // Paced against elapsed time with fractional credit, so the total holds the requested rate at any setting.
-        var perSecond = options.Rate / (double)options.Producers;
+        // One shared budget paced against elapsed time: producers claim events from it, so the total holds the requested
+        // rate at any setting, even below one event per producer per second.
         var actions = new[] { "booking.created", "booking.cancelled", "invoice.paid", "user.signed_in", "settings.updated" };
-        long sent = 0;
         while (!stop.IsCancellationRequested)
         {
-            var due = (long)(clock.Elapsed.TotalSeconds * perSecond) - sent;
-            for (var i = 0; i < due && i < 10_000; i++)
+            var due = (long)(clock.Elapsed.TotalSeconds * options.Rate);
+            while (true)
             {
+                var claimed = Interlocked.Read(ref _sent);
+                if (claimed >= due || Interlocked.CompareExchange(ref _sent, claimed + 1, claimed) != claimed)
+                {
+                    if (claimed >= due)
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
+
                 var id = LogbirdClient.NewEventId();
                 _tracked.TryAdd(LongMap.Hash(id), 0);
-                var n = sent++;
+                var n = claimed;
                 var e = new AuditEvent(actions[n % actions.Length])
                 {
                     Id = id,
@@ -282,9 +332,11 @@ internal sealed class SoakRun(SoakOptions options)
                 return;
             }
 
-            // Swap first, then dispose the old client while producers already write to the new one.
+            // Swap first, then dispose the old client while producers already write to the new one. A flush of the old
+            // client may return false only once its disposal has begun.
             var old = Interlocked.Exchange(ref _client, NewClient(endpoint))!;
             await Task.Delay(100).ConfigureAwait(false);
+            _retiring.TryAdd(old, 0);
             var disposing = old.DisposeAsync().AsTask();
             if (await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromMinutes(1))).ConfigureAwait(false) != disposing || disposing.IsFaulted)
             {
@@ -327,8 +379,9 @@ internal sealed class SoakRun(SoakOptions options)
 
             var result = await Program.WithinAsync(SafeFlush(flush), limit + TimeSpan.FromSeconds(30)).ConfigureAwait(false);
 
-            // A restart may dispose the client mid-flush; its shutdown then settles the rest and reports it.
-            if (result is null || (result == false && Volatile.Read(ref _client) == client))
+            // False is a failure unless a restart had already begun disposing this client (its shutdown then settles and
+            // reports the rest).
+            if (result is null || (result == false && !_retiring.ContainsKey(client)))
             {
                 Interlocked.Increment(ref _flushesFailed);
             }
@@ -427,7 +480,7 @@ internal sealed class SoakRun(SoakOptions options)
         using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = options.Upstream, ReadKey = options.ReadKey, AllowInsecureHttp = true });
         var search = new EventSearch { Query = "metadata.soakRun:" + (char)34 + _runId + (char)34, From = started.AddMinutes(-5), Limit = 200 };
         var expected = acknowledged.Entries().Select(e => e.Key).ToArray();
-        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(5);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var stored = new LongMap(options.ExpectedEvents);
         var missing = expected.Length;
         string? lastError = null;
@@ -436,7 +489,7 @@ internal sealed class SoakRun(SoakOptions options)
             try
             {
                 var found = new LongMap(options.ExpectedEvents);
-                await foreach (var e in reader.SearchAllAsync(search).ConfigureAwait(false))
+                await foreach (var e in reader.SearchAllAsync(search, deadline.Token).ConfigureAwait(false))
                 {
                     found.TryAdd(LongMap.Hash(e.Id), 0);
                 }
@@ -449,13 +502,24 @@ internal sealed class SoakRun(SoakOptions options)
             {
                 lastError = e.Code;
             }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+            {
+                lastError = "deadline";
+            }
 
-            if ((missing == 0 && lastError is null) || DateTime.UtcNow > deadline)
+            if ((missing == 0 && lastError is null) || deadline.IsCancellationRequested)
             {
                 break;
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
 
         checks.Add(Program.Check("every event the server acknowledged is read back", missing == 0 && lastError is null, $"{missing} of {expected.Length} acknowledged ids missing{(lastError is null ? string.Empty : ", last read error " + lastError)}"));
@@ -473,6 +537,8 @@ internal sealed class SoakRun(SoakOptions options)
 
         return stored;
     }
+
+    private int Growths(StandIn standIn) => _tracked.Growths + _dropped.Growths + standIn.Stored.Growths + standIn.Acknowledged.Growths + standIn.FirstSeen.Growths;
 
     private JsonObject Report(StandIn standIn, LongMap stored, bool drained, double drainSeconds, bool disposed, bool quiet, TimeSpan elapsed, JsonArray preflight, JsonArray upstreamChecks)
     {
@@ -522,7 +588,9 @@ internal sealed class SoakRun(SoakOptions options)
             Program.Check("the final drain settled everything", drained && disposed && quiet, $"final flush {(drained ? "completed" : "did not complete")} in {drainSeconds:F1} s, shutdown {(disposed ? "completed" : "hung")}, stand-in {(quiet ? "idle" : "still busy")}"),
             Program.Check("at most 1% of Track calls took over 5 ms", calls > 0 && slow * 100 <= calls, $"{slow} of {calls} over 5 ms; p50 {_trackLatency.Percentile(0.5)}, p99 {_trackLatency.Percentile(0.99)}, max {_trackLatency.Max:F3} ms"),
             Program.Check("the requested rate was held", achieved >= options.Rate * 0.9, $"achieved {achieved:F0} of {options.Rate} events/s"),
-            Program.Check("the queue never exceeded MaxQueueSize", Interlocked.Read(ref _queueHighWater) <= options.MaxQueueSize, $"high-water mark {_queueHighWater} (polled every 50 ms)"),
+            // MaxQueueSize bounds the events waiting to be sent; Stats.QueueLength also counts the batch being sent.
+            Program.Check("the queue stayed within MaxQueueSize plus the batch in flight", Interlocked.Read(ref _queueHighWater) <= options.MaxQueueSize + BatchSize, $"high-water mark {_queueHighWater} (polled every 50 ms), bound {options.MaxQueueSize} waiting + {BatchSize} in flight"),
+            Program.Check("the bookkeeping tables never grew during the run", Growths(standIn) == 0, $"{Growths(standIn)} growths (each would allocate inside the heap measurement)"),
             Program.Check("enough samples to judge resources", resources.Valid, resources.ValidDetail),
             Program.Check("heap stayed bounded", resources.Valid && resources.HeapBounded, resources.HeapDetail),
             Program.Check("handle count stayed bounded", resources.Valid && resources.HandlesBounded, resources.HandlesDetail),
@@ -578,7 +646,7 @@ internal sealed class SoakRun(SoakOptions options)
                 ["requests"] = standIn.Requests,
                 ["connections"] = standIn.Connections,
                 ["resendsAfterStore"] = standIn.Resends,
-                ["bookkeepingTableGrowths"] = _tracked.Growths + standIn.Stored.Growths + standIn.Acknowledged.Growths + standIn.FirstSeen.Growths,
+                ["bookkeepingTableGrowths"] = Growths(standIn),
             },
             ["faults"] = faults,
             ["dropReasons"] = reasons,

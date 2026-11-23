@@ -9,6 +9,9 @@ cd sdks/dotnet
 dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --duration 30m --rate 200 --report ../../soak-report
 ```
 
+One run tracks at most 4 million events (`--rate` x `--duration`, for example 2 h at 500/s or 5 h at 200/s): its exact
+bookkeeping is allocated once, up front, in tables of about 700 MB at that size.
+
 The run ends with a list of checks and exits 1 if any fails. A watchdog writes a failing report and exits 1 if the run
 is still going 15 minutes after its duration. `soak-report/` holds:
 - `report.json`: configuration, achieved rate, totals, fault and drop counts, latency, resources and every check;
@@ -43,18 +46,20 @@ proxy in front of a real Logbird.
 - **Faults that never reach the server:** `reset`, `hang`, `ratelimited`, `unavailable` and `toolarge` answer without
   forwarding, as a broken network or gateway would. `reject` is not used.
 - **Canary:** before the load, one event goes straight to the server and must be delivered, so a wrong ingest key
-  fails the run at once.
+  fails the run at once. It is then read back with the read key, and its project must be `LOGBIRD_SOAK_PROJECT_ID`
+  before anything is written to ClickHouse.
 - **Completeness:** after the load, the run reads its events back by tag (`metadata.soakRun`), retrying transient
   errors, until every id the server acknowledged to the client is there, or five minutes pass.
 - **Duplicates:** search answers one row per event id, so it cannot show a duplicate. The run counts, in the local
   server's ClickHouse, the run's event ids with more than one **raw row** (no `FINAL`). It proves that check first by
-  inserting two identical rows under a self-test tag in the same fictional project and requiring them to be reported.
+  inserting two identical rows in one statement under a self-test tag in the same fictional project and requiring them
+  to be reported (three attempts, in case a merge collapses them first).
   A background merge can collapse duplicates before the count, so a pass is evidence, not proof; a fail is a real
   duplicate.
 
 Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse, with no user
-info, query or fragment, so keys never leave the machine and a production host is refused. Everything else comes from
-the environment:
+info, query or fragment, and its HTTP clients never follow a redirect, so keys never leave the machine and a production
+host is refused. Everything else comes from the environment:
 
 ```bash
 export LOGBIRD_SOAK_INGEST_KEY=... LOGBIRD_SOAK_READ_KEY=... LOGBIRD_SOAK_PROJECT_ID=...    # a fictional fixture project
@@ -98,7 +103,10 @@ local server built from master, with its report attached to the gate brief.
     lives in tables allocated before the baseline, so it does not count.
   - **Handles:** at most 1.5 × baseline + 100.
   - **Threads:** at most baseline + 50.
-  - **Queue:** its high-water mark, polled every 50 ms, stays within `MaxQueueSize`.
+  - **Queue:** its high-water mark, polled every 50 ms, stays within `MaxQueueSize` plus one batch.
+    `MaxQueueSize` bounds the events waiting to be sent, while `Stats.QueueLength` also counts the batch being sent.
+  - **Bookkeeping:** the harness's tables never grow during the run, so no harness allocation lands inside the heap
+    measurement.
 
 ## Fidelity
 
@@ -129,7 +137,8 @@ The `reject` fault rejects valid events on purpose, to exercise the rejection pa
 ## What a 30-minute run can and cannot show
 
 It catches:
-- an event lost, stored twice or counted twice under any of the faults above;
+- an event lost or counted twice under any of the faults above (layer 1 stores one entry per id, so it cannot show the
+  server storing an event twice; layer 2's raw-row check does);
 - a retry that changes an event;
 - a counter that disagrees with what was acknowledged;
 - an undocumented drop reason;

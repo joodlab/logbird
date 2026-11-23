@@ -315,6 +315,33 @@ internal sealed class StandIn : IDisposable
         }
 
         exchange.Request = body;
+        List<JsonNode?>? events;
+        try
+        {
+            var root = JsonNode.Parse(body);
+            events = root is JsonArray array ? [.. array]
+                : root is JsonObject obj && obj.ContainsKey("events") ? obj["events"] is JsonArray list ? [.. list] : []
+                : [root];
+        }
+        catch (JsonException)
+        {
+            events = null;
+        }
+
+        // Every arrival is fingerprinted as soon as its body is read, whatever the answer will be, so a retry with changed
+        // content is caught in both modes, also after a 429, a 503 or a 413.
+        foreach (var e in events ?? [])
+        {
+            if (e is JsonObject o && o["id"] is JsonValue v && v.TryGetValue<string>(out var id) && id.Trim().Length > 0)
+            {
+                var fingerprint = Fingerprint(e);
+                if (!_firstSeen.TryAdd(LongMap.Hash(id.Trim()), fingerprint, out var first) && first != fingerprint)
+                {
+                    Interlocked.Increment(ref _conflicts);
+                }
+            }
+        }
+
         switch (fault)
         {
             case Fault.RateLimited:
@@ -337,15 +364,7 @@ internal sealed class StandIn : IDisposable
             return true;
         }
 
-        List<JsonNode?> events;
-        try
-        {
-            var root = JsonNode.Parse(body);
-            events = root is JsonArray array ? [.. array]
-                : root is JsonObject obj && obj.ContainsKey("events") ? obj["events"] is JsonArray list ? [.. list] : []
-                : [root];
-        }
-        catch (JsonException)
+        if (events is null)
         {
             await WriteAsync(stream, exchange, 400, Error("invalid_json", "Invalid JSON or gzip body."), null).ConfigureAwait(false);
             return true;
@@ -361,19 +380,6 @@ internal sealed class StandIn : IDisposable
         {
             await WriteAsync(stream, exchange, 413, Error("payload_too_large", "Maximum 1000 events per request."), null).ConfigureAwait(false);
             return true;
-        }
-
-        // Every arrival is fingerprinted, stored or not, so a retry with changed content is caught in both modes.
-        foreach (var e in events)
-        {
-            if (e is JsonObject o && o["id"] is JsonValue v && v.TryGetValue<string>(out var id))
-            {
-                var fingerprint = Fingerprint(e);
-                if (!_firstSeen.TryAdd(LongMap.Hash(id.Trim()), fingerprint, out var first) && first != fingerprint)
-                {
-                    Interlocked.Increment(ref _conflicts);
-                }
-            }
         }
 
         return _upstream is null
@@ -563,8 +569,8 @@ internal sealed class StandIn : IDisposable
 
     /// <summary>
     /// The server's per-event acceptance rules (packages/clickhouse/src/normalize.ts): the action must be a string; a
-    /// string id must be valid Unicode without NUL and at most 256 UTF-16 code units once trimmed; the event's JSON must
-    /// be at most 256 KB. A missing id gets a generated one, as the server does. Null when the event is accepted.
+    /// string id must hold no NUL and no lone surrogate and be at most 256 UTF-16 code units once trimmed; the event's
+    /// JSON must be at most 256 KB. A missing or blank id gets a generated one, as the server does. Null when accepted.
     /// </summary>
     private static (string Code, string Reason)? Normalize(JsonNode? e, out string id)
     {
@@ -577,14 +583,15 @@ internal sealed class StandIn : IDisposable
 
         if (o["id"] is JsonValue idValue && idValue.TryGetValue<string>(out var given))
         {
-            if (given.IndexOf((char)0) >= 0 || given.Any(char.IsSurrogate) || given.Trim().Length > 256)
+            if (given.IndexOf((char)0) >= 0 || HasLoneSurrogate(given) || given.Trim().Length > 256)
             {
                 return ("invalid_event_id", "invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL");
             }
 
             id = given.Trim();
         }
-        else
+
+        if (id.Length == 0)
         {
             id = Guid.NewGuid().ToString();
         }
@@ -595,6 +602,23 @@ internal sealed class StandIn : IDisposable
         }
 
         return null;
+    }
+
+    private static bool HasLoneSurrogate(string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (char.IsHighSurrogate(value[i]) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+            {
+                i++;
+            }
+            else if (char.IsSurrogate(value[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>A fingerprint of an event's parsed content, independent of key order and whitespace (like the server's identity).</summary>
