@@ -52,8 +52,9 @@ proxy in front of a real Logbird.
   errors, until every id the server acknowledged to the client is there, or five minutes pass.
 - **Duplicates:** search answers one row per event id, so it cannot show a duplicate. The run counts, in the local
   server's ClickHouse, the run's event ids with more than one **raw row** (no `FINAL`). It proves that check first by
-  inserting two identical rows in one statement under a self-test tag in the same fictional project and requiring them
-  to be reported (three attempts, in case a merge collapses them first).
+  inserting two identical rows in one statement (with `optimize_on_insert = 0`, so ClickHouse does not collapse them on
+  insert) under a self-test tag in the same fictional project and requiring them to be reported (three attempts, in
+  case a background merge collapses them first).
   A background merge can collapse duplicates before the count, so a pass is evidence, not proof; a fail is a real
   duplicate.
 

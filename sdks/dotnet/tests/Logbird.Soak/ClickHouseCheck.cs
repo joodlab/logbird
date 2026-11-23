@@ -52,8 +52,9 @@ internal sealed class ClickHouseCheck : IDisposable
 
     /// <summary>
     /// Inserts two identical rows (one statement, so one part) under a fresh self-test tag and returns whether the check
-    /// reports them as one duplicated id. A background merge could collapse them before the count, so a healthy check
-    /// gets three attempts; a broken query never reports them.
+    /// reports them as one duplicated id. <c>optimize_on_insert = 0</c> keeps ClickHouse from collapsing the identical rows
+    /// of this ReplacingMergeTree inside the inserted block; a background merge could still collapse them before the
+    /// count, so a healthy check gets three attempts. A broken query never reports them.
     /// </summary>
     public async Task<bool> SelfTestAsync(string selfTestTag, DateTimeOffset at)
     {
@@ -63,7 +64,7 @@ internal sealed class ClickHouseCheck : IDisposable
             var tag = selfTestTag + "-" + attempt.ToString(CultureInfo.InvariantCulture);
             var id = "soak-selftest-" + Guid.NewGuid().ToString("N");
             await QueryAsync(
-                "INSERT INTO events (project_id, event_id, timestamp, received_at, action, attributes) SELECT {p:String}, {id:String}, toDateTime64({t:String}, 3, 'UTC'), toDateTime64({t:String}, 3, 'UTC'), 'soak.selftest', map('metadata.soakRun', {r:String}) FROM numbers(2)",
+                "INSERT INTO events (project_id, event_id, timestamp, received_at, action, attributes) SELECT {p:String}, {id:String}, toDateTime64({t:String}, 3, 'UTC'), toDateTime64({t:String}, 3, 'UTC'), 'soak.selftest', map('metadata.soakRun', {r:String}) FROM numbers(2) SETTINGS optimize_on_insert = 0",
                 ("p", _projectId), ("id", id), ("t", when), ("r", tag)).ConfigureAwait(false);
             if (await DuplicatedIdsAsync(tag).ConfigureAwait(false) == 1)
             {

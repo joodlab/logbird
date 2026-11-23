@@ -463,12 +463,18 @@ internal sealed class StandIn : IDisposable
             {
                 Interlocked.Increment(ref _resends);
             }
-            else if (!_stored.TryAdd(key, fingerprint, out var raced) && raced != fingerprint)
+            else if (!_stored.TryAdd(key, fingerprint, out var raced))
             {
-                // Another request stored this id meanwhile with different content.
-                rejected.Add((JsonNode)Rejection(index, "duplicate_id_conflict", "duplicate_id_conflict: id conflicts with different content in this request or stored history."));
-                exchange.Dispositions.Add("rejected");
-                continue;
+                if (raced != fingerprint)
+                {
+                    // Another request stored this id meanwhile with different content.
+                    rejected.Add((JsonNode)Rejection(index, "duplicate_id_conflict", "duplicate_id_conflict: id conflicts with different content in this request or stored history."));
+                    exchange.Dispositions.Add("rejected");
+                    continue;
+                }
+
+                // Another request stored the same content meanwhile: this arrival is a resend.
+                Interlocked.Increment(ref _resends);
             }
 
             accepted.Add((JsonNode)id);
