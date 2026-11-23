@@ -41,6 +41,10 @@ export interface QueryToken {
 }
 
 const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
+/** A field name that needs no quotes: the keys `KEY_RE` reads. */
+const BARE_KEY = /^[A-Za-z_][\w.$@-]*$/;
+/** A quoted field name, as the server reads one: `"attr.ticket status":open`. */
+const QUOTED_KEY_RE = /^(-?)("(?:[^"\\]|\\[\s\S])*")\s*:/;
 /** A key whose leading `-` cannot negate (it follows `)`): the dash is part of the field name. */
 const LITERAL_DASH_KEY_RE = /^(-)([\w.$@-]*)\s*:/;
 const OPERATORS = new Set(['OR', 'AND', 'NOT']);
@@ -87,6 +91,13 @@ function scanPlain(input: string, i: number): number {
   return j;
 }
 
+/** End of a bare group member starting at `i` (stops at whitespace or a bracket), never past `limit`. */
+function scanPlainMember(input: string, i: number, limit: number): number {
+  let j = i;
+  while (j < limit && !/[\s()]/.test(input[j] ?? '')) j += 1;
+  return j;
+}
+
 function skipWhitespace(input: string, start: number): number {
   let i = start;
   while (i < input.length && /\s/.test(input[i] ?? '')) i += 1;
@@ -130,10 +141,13 @@ export function tokenize(input: string): QueryToken[] {
       i += raw.length;
       continue;
     }
-    const key = KEY_RE.exec(rest) ?? (negatable ? null : LITERAL_DASH_KEY_RE.exec(rest));
+    const quotedKey = QUOTED_KEY_RE.exec(rest);
+    const key =
+      KEY_RE.exec(rest) ?? (quotedKey && (negatable || !quotedKey[1]) ? quotedKey : null) ?? (negatable ? null : LITERAL_DASH_KEY_RE.exec(rest));
     if (key) {
       const negated = key[1] === '-' && negatable;
-      const field = negated || key[1] !== '-' ? (key[2] ?? '') : `-${key[2] ?? ''}`;
+      const name = key === quotedKey ? readQueryValue(key[2] ?? '').value : (key[2] ?? '');
+      const field = negated || key[1] !== '-' ? name : `-${name}`;
       const valueStart = skipWhitespace(input, i + key[0].length);
       const v = scanValue(input, valueStart, field === 'record');
       const raw = input.slice(i, v.end);
@@ -207,8 +221,13 @@ export function quoteIfNeeded(value: string): string {
   return PLAIN_VALUE.test(value) && value !== 'TO' && !OPERATORS.has(value) ? value : quoteQueryValue(value);
 }
 
+/** A field name as the query language reads it: bare when it is a plain key, quoted otherwise (`"attr.ticket status"`). */
+export function formatField(field: string): string {
+  return BARE_KEY.test(field) && !OPERATORS.has(field) && field !== 'TO' ? field : quoteQueryValue(field);
+}
+
 export function formatTerm(field: string, value: string, negated = false): string {
-  return `${negated ? '-' : ''}${field}:${quoteIfNeeded(value)}`;
+  return `${negated ? '-' : ''}${formatField(field)}:${quoteIfNeeded(value)}`;
 }
 
 /**
@@ -217,13 +236,26 @@ export function formatTerm(field: string, value: string, negated = false): strin
  */
 export const formatExactTerm = formatTerm;
 
+/**
+ * Recent parses by query text. A facet list asks "is this value included / excluded?" once per row and per state, each
+ * walking the same query: one parse serves them all. The parse is never mutated, so sharing it is safe.
+ */
+const PARSES = new Map<string, QueryExpression | null>();
+const PARSE_CACHE_SIZE = 16;
+
 function editableExpression(q: string): QueryExpression | null {
+  const cached = PARSES.get(q);
+  if (cached !== undefined) return cached;
+  let parsed: QueryExpression | null;
   try {
-    return parseQueryExpression(q);
+    parsed = parseQueryExpression(q);
   } catch (error) {
-    if (error instanceof QueryError) return null;
-    throw error;
+    if (!(error instanceof QueryError)) throw error;
+    parsed = null;
   }
+  if (PARSES.size >= PARSE_CACHE_SIZE) PARSES.delete(PARSES.keys().next().value as string);
+  PARSES.set(q, parsed);
+  return parsed;
 }
 
 /** True when the query has an OR outside every group. */
@@ -303,14 +335,15 @@ function unwrapNot(atom: QueryAtom) {
 /** Drop matched operands with their unary operators, and omit Boolean branches emptied by the edit. */
 export function removeTokens(q: string, test: (t: QueryToken) => boolean): string {
   let removed = false;
-  function rewriteAtom(atom: QueryAtom): string {
+  // `outer`: whether an enclosing group is negated, so a term is tested with the polarity it has in the whole query.
+  function rewriteAtom(atom: QueryAtom, outer: boolean): string {
     const { node, negated } = unwrapNot(atom);
     const prefix = q.slice(atom.start, node.start);
     if (node.kind === 'group') {
-      const inner = rewrite(node.expression);
+      const inner = rewrite(node.expression, outer !== negated);
       return inner ? `${prefix}(${inner})` : '';
     }
-    if (node.kind === 'field' && test(fieldToken(q, node, atom.start, negated))) {
+    if (node.kind === 'field' && test(fieldToken(q, node, atom.start, outer !== negated))) {
       removed = true;
       return '';
     }
@@ -320,13 +353,13 @@ export function removeTokens(q: string, test: (t: QueryToken) => boolean): strin
     return q.slice(atom.start, atom.end);
   }
 
-  function rewrite(expression: QueryExpression): string {
+  function rewrite(expression: QueryExpression, outer: boolean): string {
     return expression
       .map((branch) => {
         let text = '';
         let previousEnd: number | undefined;
         for (const { atom, explicitAnd } of branch) {
-          const term = rewriteAtom(atom);
+          const term = rewriteAtom(atom, outer);
           if (!term) continue;
           if (text) {
             // An inserted separator must also avoid forming a foreign-dialect "key = value".
@@ -343,29 +376,29 @@ export function removeTokens(q: string, test: (t: QueryToken) => boolean): strin
   }
 
   const expression = editableExpression(q);
-  const edited = expression && rewrite(expression);
+  const edited = expression && rewrite(expression, false);
   return removed && edited !== null ? edited : q.trim();
 }
 
-/** Field operands with the effective polarity of their directly attached unary operators. */
-/** Field terms with their effective polarity: a leading `-` or a unary `NOT` before them (not both) negates. */
+/** Field terms with their effective polarity: each `-` or unary `NOT` before them or before an enclosing group negates. */
 export function fieldTermsWithPolarity(q: string): { token: QueryToken; negated: boolean }[] {
-  // The parsed walk already folds `-` and unary NOT (an even number cancels) into each term's `negated`.
+  // The parsed walk already folds `-` and unary NOT, on the term and on enclosing groups (an even number cancels).
   return fieldTerms(q).map((token) => ({ token, negated: Boolean(token.negated) }));
 }
 
 export function fieldTerms(q: string, topLevelOnly = false): QueryToken[] {
   const fields: QueryToken[] = [];
-  function visit(expression: QueryExpression) {
+  // A negated group negates every term inside it: `NOT (record:page:7)` excludes that record, it never names it.
+  function visit(expression: QueryExpression, outer: boolean) {
     for (const branch of expression) {
       for (const { atom } of branch) {
         const { node, negated } = unwrapNot(atom);
-        if (node.kind === 'field') fields.push(fieldToken(q, node, atom.start, negated));
-        else if (node.kind === 'group' && !topLevelOnly) visit(node.expression);
+        if (node.kind === 'field') fields.push(fieldToken(q, node, atom.start, outer !== negated));
+        else if (node.kind === 'group' && !topLevelOnly) visit(node.expression, outer !== negated);
       }
     }
   }
-  visit(editableExpression(q) ?? []);
+  visit(editableExpression(q) ?? [], false);
   return fields;
 }
 
@@ -679,12 +712,24 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
     }
     case 'group': {
       if (caret <= valueStart) return value('', valueStart, t.end);
-      // Find the member word around the caret inside `( … )`.
+      // Find the member around the caret inside `( … )`, walking whole members: a quoted member ("page:New York") is one
+      // member however many spaces it holds, so a completion replaces all of it, never just the word under the caret.
       let s = caret;
-      while (s > valueStart + 1 && !/[\s()]/.test(q[s - 1] ?? '')) s -= 1;
       let e = caret;
-      while (e < t.end && !/[\s()]/.test(q[e] ?? '')) e += 1;
-      if (q[s] === '"') e = Math.min(t.end, scanDelimited(q, s, '"'));
+      for (let i = valueStart + 1; i < t.end; ) {
+        if (/[\s()]/.test(q[i] ?? '')) {
+          i += 1;
+          continue;
+        }
+        const end = q[i] === '"' ? Math.min(t.end, scanDelimited(q, i, '"')) : scanPlainMember(q, i, t.end);
+        if (caret >= i && caret <= end) {
+          s = i;
+          e = end;
+          break;
+        }
+        if (i > caret) break;
+        i = end;
+      }
       const word = q.slice(s, caret);
       if (q.slice(s, e) === 'OR') return { kind: 'none' };
       // A member before the caret (not `(` or `OR`) means the next thing is `OR`.
