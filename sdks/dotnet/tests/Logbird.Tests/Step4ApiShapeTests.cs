@@ -127,6 +127,23 @@ public class Step4ApiShapeTests
     }
 
     [Fact]
+    public void A_dictionary_built_in_code_keeps_its_comparer_and_any_other_is_ordinal()
+    {
+        var caseless = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Plan"] = "pro" };
+        var stored = new StoredEvent { Attributes = caseless };
+        Assert.Equal("pro", stored.Attributes["plan"]);
+        AssertReadOnly(stored.Attributes);
+
+        var empty = new StoredEvent { Attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) };
+        Assert.Empty(empty.Attributes);
+        AssertReadOnly(empty.Attributes);
+
+        var other = new StoredEvent { Attributes = new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(caseless) };
+        Assert.True(other.Attributes.ContainsKey("Plan"));
+        Assert.False(other.Attributes.ContainsKey("plan"));
+    }
+
+    [Fact]
     public void Rejection_codes_are_read_only()
     {
         var codes = new List<string> { "invalid_event", "duplicate_id_conflict" };
@@ -147,9 +164,10 @@ public class Step4ApiShapeTests
             delay: (_, _) => Task.CompletedTask);
 
     [Fact]
-    public async Task Two_long_ids_that_share_a_prefix_are_reported_apart_and_whole()
+    public async Task Two_long_ids_that_share_a_prefix_are_reported_apart_by_their_fingerprints()
     {
-        // Ids the server refuses (over 256 code units) but must still correlate: before, both were cut to the same 256.
+        // Ids the server refuses (over 256 code units) but must still correlate: before, both were cut to the same 256 with
+        // nothing to tell them apart.
         var drops = new ConcurrentQueue<DroppedEvent>();
         var first = new string('a', 300) + "-1";
         var second = new string('a', 300) + "-2";
@@ -161,8 +179,69 @@ public class Step4ApiShapeTests
             await client.FlushAsync();
         }
 
-        Assert.Equal(new[] { first, second }.OrderBy(i => i), drops.Select(d => d.Id!).OrderBy(i => i));
-        Assert.All(drops, d => Assert.False(d.Truncated));
+        Assert.Equal(2, drops.Count);
+        Assert.All(drops, d =>
+        {
+            Assert.True(d.Truncated);
+            Assert.Equal(new string('a', DroppedEvent.MaxIdLength), d.Id);
+        });
+        Assert.Equal(
+            new[] { DroppedEvent.Fingerprint(first), DroppedEvent.Fingerprint(second) }.OrderBy(f => f, StringComparer.Ordinal),
+            drops.Select(d => d.IdFingerprint!).OrderBy(f => f, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Ids_the_server_accepts_once_trimmed_are_told_apart_even_with_empty_json()
+    {
+        // The reviewer's case: two valid ids padded far past the bound, dropped before serialization.
+        var padding = new string(' ', 65_536);
+        var a = new DroppedEvent(DropReason.TooLarge, padding + "A", "x", null, null);
+        var b = new DroppedEvent(DropReason.TooLarge, padding + "B", "x", null, null);
+        Assert.Equal(a.Id, b.Id);
+        Assert.True(a.Json.IsEmpty && b.Json.IsEmpty);
+        Assert.NotEqual(a.IdFingerprint, b.IdFingerprint);
+        Assert.Equal(DroppedEvent.Fingerprint(padding + "A"), a.IdFingerprint);
+
+        // An id within the bound is exactly as given, with no fingerprint.
+        var whole = new DroppedEvent(DropReason.TooLarge, "evt_1", "x", null, null);
+        Assert.Equal("evt_1", whole.Id);
+        Assert.Null(whole.IdFingerprint);
+        Assert.False(whole.Truncated);
+    }
+
+    [Fact]
+    public void The_fingerprint_is_the_sha256_of_the_utf16_code_units()
+    {
+        Assert.Equal("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", DroppedEvent.Fingerprint(string.Empty));
+        Assert.Equal("ffe9aaeaa2a2d5048174df0b80599ef0197ec024c4b051bc9860cff58ef7f9f3", DroppedEvent.Fingerprint("a"));
+
+        // A lone surrogate counts exactly: never confused with U+FFFD.
+        Assert.Equal("205022e3428b7c8276cf247b36e4e512db5651e5cb3472c253d9ee893a8ac750", DroppedEvent.Fingerprint(((char)0xD800).ToString()));
+        Assert.Equal("15cc44da5e294721a0fc16c8fb952382d4dc51dbaa28950d9903acfbac0ccee5", DroppedEvent.Fingerprint("\uFFFD"));
+        Assert.Throws<ArgumentNullException>(() => DroppedEvent.Fingerprint(null!));
+    }
+
+    [Fact]
+    public async Task An_event_without_an_id_tracked_after_shutdown_is_reported_with_neither_id_nor_json()
+    {
+        // As DroppedEvent.Json documents: an event refused before Track assigns an id has neither.
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var client = Client(drops.Enqueue, new FakeServer());
+        await client.DisposeAsync();
+        client.Track(new AuditEvent("after.shutdown"));
+        client.Track(new AuditEvent("after.shutdown") { Id = "evt_own" });
+        await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+        {
+            while (drops.Count < 2)
+            {
+                await Task.Delay(10);
+            }
+        });
+
+        var withoutId = Assert.Single(drops, d => d.Id is null);
+        Assert.Equal(DropReason.Shutdown, withoutId.Reason);
+        Assert.True(withoutId.Json.IsEmpty);
+        Assert.Equal("evt_own", Assert.Single(drops, d => d.Id is not null).Id);
     }
 
     [Fact]

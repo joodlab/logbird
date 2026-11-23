@@ -70,10 +70,10 @@ public sealed class DroppedEvent
     private readonly byte[]? _json;
 
     /// <summary>
-    /// The longest <see cref="Id"/> and <see cref="Action"/> reported whole, in UTF-16 code units: far more than any
-    /// event Logbird stores can have (the server takes ids of at most 256 code units, trimmed, and actions of at most 200).
+    /// The longest <see cref="Id"/> and <see cref="Action"/> reported whole, in UTF-16 code units. A longer id is cut and
+    /// identified by <see cref="IdFingerprint"/> instead, which keeps what a pending notification holds small.
     /// </summary>
-    public const int MaxIdLength = 65_536;
+    public const int MaxIdLength = 256;
 
     /// <summary>The longest <see cref="Detail"/> reported whole, in UTF-16 code units.</summary>
     public const int MaxDetailLength = 1_024;
@@ -82,6 +82,11 @@ public sealed class DroppedEvent
     {
         Reason = reason;
         var truncated = false;
+        if (id is not null && id.Length > MaxIdLength)
+        {
+            IdFingerprint = Fingerprint(id);
+        }
+
         Id = Bounded(id, MaxIdLength, ref truncated);
         Action = Bounded(action, MaxIdLength, ref truncated)!;
         _json = json;
@@ -95,13 +100,21 @@ public sealed class DroppedEvent
     public DropReason Reason { get; }
 
     /// <summary>
-    /// The event id exactly as the event carried it, the one to correlate the drop with your own records (an outbox row,
-    /// for one), or <see langword="null"/> when it had none yet. It is never cut unless it is longer than
-    /// <see cref="MaxIdLength"/>, which no storable event's id is; <see cref="Truncated"/> then says so.
+    /// The event id as the event carried it, or <see langword="null"/> when it had none yet (see <see cref="Json"/>). An id
+    /// of at most <see cref="MaxIdLength"/> code units is exactly as given; a longer one (an id the server refuses, or one
+    /// padded with whitespace) is cut there, <see cref="Truncated"/> is set, and <see cref="IdFingerprint"/> identifies the
+    /// whole id, so two ids that share their first 256 code units are never mistaken for each other.
     /// </summary>
     public string? Id { get; }
 
-    /// <summary>The event action, never cut unless it is longer than <see cref="MaxIdLength"/> (see <see cref="Truncated"/>).</summary>
+    /// <summary>
+    /// When <see cref="Id"/> was cut, the fingerprint of the whole id (<see cref="Fingerprint(string)"/>); otherwise
+    /// <see langword="null"/>. To correlate the drop with your own records, compute the fingerprint of each of your ids
+    /// longer than <see cref="MaxIdLength"/> and compare.
+    /// </summary>
+    public string? IdFingerprint { get; }
+
+    /// <summary>The event action, cut past <see cref="MaxIdLength"/> code units (the server takes at most 200; see <see cref="Truncated"/>).</summary>
     public string Action { get; }
 
     /// <summary>
@@ -112,10 +125,42 @@ public sealed class DroppedEvent
 
     /// <summary>
     /// Whether <see cref="Id"/>, <see cref="Action"/> or <see cref="Detail"/> was cut to its limit (never inside a surrogate
-    /// pair). An id is cut only past <see cref="MaxIdLength"/>, so a <see langword="false"/> here means every field is
-    /// exactly as given, and a cut <see cref="Id"/> is never mistaken for another event's.
+    /// pair). <see langword="false"/> means every field is exactly as given. A cut <see cref="Id"/> comes with
+    /// <see cref="IdFingerprint"/>.
     /// </summary>
     public bool Truncated { get; }
+
+    /// <summary>
+    /// The fingerprint <see cref="IdFingerprint"/> reports for an id: the SHA-256 of its UTF-16 code units (little-endian,
+    /// so a lone surrogate counts exactly), as 64 lowercase hexadecimal characters. It is the same on every platform and
+    /// SDK version.
+    /// </summary>
+    /// <param name="id">The whole event id.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null.</exception>
+    public static string Fingerprint(string id)
+    {
+        Internal.Guard.NotNull(id, nameof(id));
+        var bytes = new byte[id.Length * 2];
+        for (var i = 0; i < id.Length; i++)
+        {
+            bytes[2 * i] = (byte)id[i];
+            bytes[(2 * i) + 1] = (byte)(id[i] >> 8);
+        }
+
+#if NET8_0_OR_GREATER
+        var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+#else
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = sha.ComputeHash(bytes);
+#endif
+        var text = new StringBuilder(hash.Length * 2);
+        foreach (var b in hash)
+        {
+            text.Append(b.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return text.ToString();
+    }
 
     private static string? Bounded(string? value, int max, ref bool truncated)
     {
@@ -149,8 +194,10 @@ public sealed class DroppedEvent
     /// <summary>
     /// The exact JSON that was (or would have been) sent, as UTF-8, after redaction. Persist it to replay the event later
     /// with the same id. Empty when the event was dropped before it was serialized: <see cref="DropReason.TooLarge"/> and
-    /// <see cref="DropReason.Invalid"/> (and <see cref="DropReason.Shutdown"/> for an event tracked after shutdown) can be;
-    /// <see cref="Id"/> then still identifies it.
+    /// <see cref="DropReason.Invalid"/> (and <see cref="DropReason.Shutdown"/> for an event tracked after shutdown) can be.
+    /// <see cref="Id"/> then identifies the event only if it already had one: an id you set, or the one <c>Track</c>
+    /// assigned. An event without an id of its own that is refused before <c>Track</c> assigns one (tracked after
+    /// shutdown, or refused by the first size and depth check) is reported with both empty.
     /// </summary>
     public ReadOnlyMemory<byte> Json => _json ?? ReadOnlyMemory<byte>.Empty;
 

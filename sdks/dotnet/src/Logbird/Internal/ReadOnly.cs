@@ -33,15 +33,22 @@ internal static class ReadOnly
     /// <summary>A read-only copy of <paramref name="value"/>, or null when it is null.</summary>
     public static IReadOnlyList<T>? ListOrNull<T>(IReadOnlyList<T>? value) => value is null ? null : List(value);
 
-    /// <summary>A read-only copy of <paramref name="value"/> with ordinal keys; an empty one for null or empty.</summary>
+    /// <summary>
+    /// A read-only copy of <paramref name="value"/>; an empty one for null or empty. A <see cref="Dictionary{TKey, TValue}"/>
+    /// keeps its key comparer (System.Text.Json's, and most dictionaries built in code, are ordinal); any other
+    /// implementation's keys are compared ordinally, since its comparer cannot be read.
+    /// </summary>
     public static IReadOnlyDictionary<string, string> Dictionary(IReadOnlyDictionary<string, string>? value)
     {
+        var comparer = value is Dictionary<string, string> dictionary ? dictionary.Comparer : StringComparer.Ordinal;
         if (value is null || value.Count == 0)
         {
-            return ReadOnlyMap.Empty;
+            return ReferenceEquals(comparer, StringComparer.Ordinal) || ReferenceEquals(comparer, EqualityComparer<string>.Default)
+                ? ReadOnlyMap.Empty
+                : new ReadOnlyMap(new Dictionary<string, string>(comparer));
         }
 
-        var copy = new Dictionary<string, string>(value.Count, StringComparer.Ordinal);
+        var copy = new Dictionary<string, string>(value.Count, comparer);
         foreach (var pair in value)
         {
             copy[pair.Key] = pair.Value;

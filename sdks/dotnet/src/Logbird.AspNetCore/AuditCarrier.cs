@@ -22,8 +22,10 @@ public sealed record AuditCarrier
     /// without its type), which <see cref="FromJson(string)"/> would refuse, or one of its values holds a lone surrogate,
     /// which JSON cannot carry (it would be read back as U+FFFD, a different id). It is refused here, before you store it,
     /// rather than changed. A request's <see cref="IAuditLog.Carrier"/> never fails here: it leaves out a resolved party or
-    /// id that would, and reports it. A job's carrier keeps the values of the carrier it was started with, so a carrier
-    /// built or changed outside these methods can still fail here.
+    /// id that would, and reports it. A job's <see cref="IAuditLog.Carrier"/> keeps the request, trace and party values of
+    /// the carrier the job was started with, and its operation id (a new one when that carrier had none); its parent event
+    /// id is the one you pass. A carrier built or changed outside these methods, or a job started from one, can still fail
+    /// here.
     /// </exception>
     public string ToJson() => JsonSerializer.Serialize(Writable(), AuditCarrierJsonContext.Default.AuditCarrier);
 

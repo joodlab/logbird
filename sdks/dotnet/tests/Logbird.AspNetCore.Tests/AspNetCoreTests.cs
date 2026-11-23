@@ -738,6 +738,38 @@ public class AspNetCoreTests
         Assert.All(reported, m => Assert.DoesNotContain("acct_7", m, StringComparison.Ordinal));
     }
 
+    private sealed class ThrowingAccessor : Microsoft.AspNetCore.Http.IHttpContextAccessor
+    {
+        public Microsoft.AspNetCore.Http.HttpContext? HttpContext
+        {
+            get => throw new InvalidOperationException("fictional accessor failure");
+            set => throw new InvalidOperationException("fictional accessor failure");
+        }
+    }
+
+    [Fact]
+    public async Task A_carrier_captured_when_the_request_cannot_be_read_is_still_writable()
+    {
+        // The fallback path: the accessor throws, so a new operation starts; a parent id it could not carry is left out.
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", () => Results.Ok()),
+            options: o => o.OnError = errors.Enqueue,
+            services: b => b.Services.AddSingleton<Microsoft.AspNetCore.Http.IHttpContextAccessor, ThrowingAccessor>());
+        using var scope = app.Host.Services.CreateScope();
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditLog>();
+
+        var carrier = audit.Carrier("evt_" + (char)0xD800);
+
+        Assert.Null(carrier.ParentEventId);
+        Assert.Matches("^[0-9a-f]{8}-", carrier.OperationId);
+        Assert.Equal(carrier, AuditCarrier.FromJson(carrier.ToJson()));
+        Assert.Equal("evt_ok", audit.Carrier("evt_ok").ParentEventId);
+        Assert.True(await app.Client.FlushAsync());
+        Assert.Contains(errors, e => e.Message.Contains("parent event id out of an audit carrier", StringComparison.Ordinal));
+        Assert.DoesNotContain(errors, e => e.Message.Contains("evt_", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task Correlation_headers_are_ignored_unless_turned_on()
     {

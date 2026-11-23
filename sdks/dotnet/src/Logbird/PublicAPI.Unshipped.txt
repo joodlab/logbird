@@ -132,6 +132,7 @@ Logbird.DroppedEvent.Action.get -> string!
 Logbird.DroppedEvent.Code.get -> string?
 Logbird.DroppedEvent.Detail.get -> string?
 Logbird.DroppedEvent.Id.get -> string?
+Logbird.DroppedEvent.IdFingerprint.get -> string?
 Logbird.DroppedEvent.Json.get -> System.ReadOnlyMemory<byte>
 Logbird.DroppedEvent.JsonText.get -> string!
 Logbird.DroppedEvent.MayBeStored.get -> bool
@@ -456,7 +457,7 @@ const Logbird.AuditSeverity.Info = "info" -> string!
 const Logbird.AuditSeverity.Notice = "notice" -> string!
 const Logbird.AuditSeverity.Warning = "warning" -> string!
 const Logbird.DroppedEvent.MaxDetailLength = 1024 -> int
-const Logbird.DroppedEvent.MaxIdLength = 65536 -> int
+const Logbird.DroppedEvent.MaxIdLength = 256 -> int
 const Logbird.Redactor.DefaultReplacement = "[redacted]" -> string!
 const Logbird.WebhookHeaders.Id = "webhook-id" -> string!
 const Logbird.WebhookHeaders.Signature = "webhook-signature" -> string!
@@ -518,4 +519,5 @@ static Logbird.StoredChange.operator !=(Logbird.StoredChange? left, Logbird.Stor
 static Logbird.StoredChange.operator ==(Logbird.StoredChange? left, Logbird.StoredChange? right) -> bool
 static Logbird.WebhookVerifier.GenerateSecret() -> string!
 static Logbird.WebhookVerifier.Sign(string! id, long timestamp, string! payload, params string![]! secrets) -> string!
+static Logbird.DroppedEvent.Fingerprint(string! id) -> string!
 static readonly Logbird.Redactor.DefaultSecretKeys -> System.Text.RegularExpressions.Regex!

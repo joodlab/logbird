@@ -322,7 +322,7 @@ internal sealed class RequestAuditLog(AuditSink sink, IHttpContextAccessor acces
         catch (Exception e)
         {
             Client.Diagnostic("Logbird could not capture an audit carrier (" + e.GetType().Name + "); a new operation was started.");
-            return new AuditCarrier { OperationId = LogbirdClient.NewEventId(), ParentEventId = parentEventId };
+            return new AuditCarrier { OperationId = LogbirdClient.NewEventId(), ParentEventId = Kept(parentEventId, "parent event id") };
         }
     }
 

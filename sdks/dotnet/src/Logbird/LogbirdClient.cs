@@ -1060,8 +1060,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             return null;
         }
 
-        // Fields are bounded (DroppedEvent: an oversized action or id must not be kept whole in the backlog), far above any
-        // storable value, so the id still correlates; the JSON, when kept, carries the event for replay.
+        // Fields are bounded (DroppedEvent: an oversized action or id must not be kept whole in the backlog); a cut id is
+        // identified by its fingerprint, and the JSON, when kept, carries the event for replay.
         var dropped = new DroppedEvent(reason, id, action, json, detail, code, mayBeStored);
         return () => Notify(() => onDrop(dropped));
     }

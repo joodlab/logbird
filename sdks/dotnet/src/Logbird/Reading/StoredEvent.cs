@@ -70,7 +70,10 @@ public sealed class StoredEvent
     /// <summary>Correlation and request details.</summary>
     public AuditContext Context { get; init; } = new();
 
-    /// <summary>Flattened extra fields, for example <c>metadata.plan</c>. Read-only, like <see cref="Targets"/>.</summary>
+    /// <summary>
+    /// Flattened extra fields, for example <c>metadata.plan</c>. Read-only, like <see cref="Targets"/>. Keys are compared
+    /// ordinally (as Logbird stores them); a <see cref="Dictionary{TKey, TValue}"/> you pass keeps its own comparer.
+    /// </summary>
     public IReadOnlyDictionary<string, string> Attributes { get => _attributes; init => _attributes = Internal.ReadOnly.Dictionary(value); }
 
     private readonly IReadOnlyDictionary<string, string> _attributes = Internal.ReadOnly.Dictionary(null);
