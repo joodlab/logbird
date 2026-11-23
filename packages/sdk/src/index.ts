@@ -348,7 +348,49 @@ export class Logbird {
 }
 
 export const DEFAULT_SECRET_KEYS = /passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key/i;
-/** Redact a deep copy; combine this hook with application-specific filtering as needed. */
+/**
+ * The parties' identifier and classification fields: never redacted, whatever the pattern. A redacted id would merge
+ * every identity into one, and an executor's attempt must stay a number. To pseudonymise an id, transform it before
+ * recording. The .NET SDK's `Redactor.IdentifierFields` lists the same fields.
+ */
+export const IDENTIFIER_FIELDS: readonly string[] = Object.freeze([
+  'actor.type',
+  'actor.id',
+  'impersonator.id',
+  'executor.type',
+  'executor.id',
+  'executor.jobId',
+  'executor.attempt',
+  'tenant.id',
+  'targets[].type',
+  'targets[].id',
+]);
+
+type Level = 'nested' | 'top' | 'actor' | 'impersonator' | 'executor' | 'tenant' | 'targets' | 'target';
+
+const IDENTITY: Record<Level, readonly string[]> = {
+  nested: [],
+  top: ['id', 'action'],
+  actor: ['id', 'type'],
+  impersonator: ['id'],
+  executor: ['id', 'type', 'jobId', 'attempt'],
+  tenant: ['id'],
+  targets: [],
+  target: ['id', 'type'],
+};
+
+const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'impersonator', executor: 'executor', tenant: 'tenant', targets: 'targets' };
+
+/**
+ * Redact a deep copy; combine this hook with application-specific filtering as needed.
+ *
+ * A key matches when the pattern matches any part of it (the default redacts `tokenCount` and `secretary` too); anchor
+ * your own pattern (`/^name$/`) to match whole keys. A matching key keeps its name and its value becomes the replacement,
+ * at any depth. Identity is never redacted: the top-level `id` and `action`, and {@link IDENTIFIER_FIELDS}. A pattern
+ * that matches a party's own key (`actor`, `impersonator`, `executor`, `tenant` or `targets`) redacts every other field of
+ * that party and keeps its identifier fields; the party is never replaced as a whole. The .NET SDK's `Redactor` follows
+ * the same rules, checked against one shared fixture.
+ */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
   const keys = options.keys ?? DEFAULT_SECRET_KEYS;
   const fields = options.changeFields ?? keys;
@@ -359,20 +401,44 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
   };
   return (event) => {
     const copy = structuredClone(event);
-    function walk(value: unknown, top = false): void {
-      if (!value || typeof value !== 'object') return;
-      for (const [key, child] of Object.entries(value)) {
-        if (top && (key === 'id' || key === 'action')) continue;
-        if (matches(keys, key)) (value as Record<string, unknown>)[key] = replacement;
-        else walk(child);
-      }
-    }
+    // Change values first, as the .NET SDK does; the walk below may then replace a matching key holding them.
     for (const change of copy.changes ?? []) {
       if (!matches(fields, change.field)) continue;
       if (Object.hasOwn(change, 'before')) change.before = replacement;
       if (Object.hasOwn(change, 'after')) change.after = replacement;
     }
-    walk(copy, true);
+    // Iterative, like the .NET SDK, so any depth is redacted on any stack. Each decision depends only on the node's own
+    // key and level, so the visiting order does not change the result.
+    const pending: Array<{ node: unknown; level: Level; whole: boolean }> = [{ node: copy, level: 'top', whole: false }];
+    while (pending.length > 0) {
+      const { node, level, whole } = pending.pop()!;
+      if (!node || typeof node !== 'object') continue;
+      const record = node as Record<string, unknown>;
+      if (Array.isArray(node) && level === 'targets') {
+        // Target entries are parties: never replaced as a whole, and their type and id are kept.
+        node.forEach((entry, index) => {
+          if (entry && typeof entry === 'object' && !Array.isArray(entry)) pending.push({ node: entry, level: 'target', whole });
+          else if (whole) node[index] = replacement;
+          else pending.push({ node: entry, level: 'nested', whole: false });
+        });
+        continue;
+      }
+      // Arrays are walked by their index keys ("0", "1", ...), as Object.entries gives them.
+      for (const [key, child] of Object.entries(record)) {
+        if (IDENTITY[level].includes(key)) continue;
+        if (whole) {
+          record[key] = replacement;
+          continue;
+        }
+        const party = level === 'top' && Object.hasOwn(PARTIES, key) ? PARTIES[key]! : 'nested';
+        const matched = matches(keys, key);
+        const isParty =
+          party !== 'nested' && (party === 'targets' ? Array.isArray(child) : !!child && typeof child === 'object' && !Array.isArray(child));
+        if (isParty) pending.push({ node: child, level: party, whole: matched });
+        else if (matched) record[key] = replacement;
+        else pending.push({ node: child, level: 'nested', whole: false });
+      }
+    }
     return copy;
   };
 }

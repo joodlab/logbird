@@ -132,8 +132,16 @@ stamping, before serialization and size checks. Returning null/undefined silentl
 a throwing hook fails closed and reports onError. Neither counts as an overflow drop.
 
 `redact({ keys?, changeFields?, replacement? })` deep copies the event, redacts matching
-object-key values throughout objects/arrays (except top-level id/action), retaining the keys, and replaces present
+object-key values throughout objects/arrays, retaining the keys, and replaces present
 before/after values of matching change fields. Default replacement is `[redacted]`.
+Keys match as substrings (the default also redacts `tokenCount` and `secretary`; anchor
+your own pattern, `/^token$/`, to match whole keys). Identity is never redacted: the
+top-level `id` and `action`, and `IDENTIFIER_FIELDS` (the actor's type and id, the
+impersonator's and tenant's id, the executor's type, id, jobId and attempt, and each
+target's type and id). A pattern matching a party's own key (`actor`, `impersonator`,
+`executor`, `tenant` or `targets`) redacts that party's other fields, such as its name and
+email, and keeps its identifier fields; a party is never replaced as a whole. The .NET
+SDK redacts by the same rules, checked against one shared fixture.
 `DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
 cookies, credentials and private keys. Add email/phone patterns for your PII policy;
 the default secret pattern does not cover all PII. Supplying `keys` replaces the default pattern; combine them to retain secret protection. `changeFields` defaults to the resulting `keys` pattern. Hooks compose:

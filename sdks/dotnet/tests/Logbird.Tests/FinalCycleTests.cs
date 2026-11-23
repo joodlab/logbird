@@ -92,18 +92,26 @@ public class FinalCycleTests
     }
 
     [Fact]
-    public void Only_id_is_exempt_on_entities_and_only_type_and_id_on_targets()
+    public void Identifier_fields_are_kept_whatever_the_pattern_and_other_party_fields_are_not()
     {
-        var redactor = new Redactor(new Regex("type|id"));
+        // The parties' identifier and classification fields (Redactor.IdentifierFields) are structural; a matching name,
+        // email or extra field is redacted. An executor's attempt stays a number, as the server requires.
+        var redactor = new Redactor(new Regex("type|id|jobId|attempt|name"));
         var result = redactor.Redact(JsonNode.Parse("""
-            { "id": "e", "action": "a", "actor": { "type": "user", "id": "u" }, "executor": { "type": "worker", "id": "w" },
-              "targets": [{ "type": "invoice", "id": "i" }] }
+            { "id": "e", "action": "a", "actor": { "type": "user", "id": "u", "name": "Fictional" },
+              "executor": { "type": "worker", "id": "w", "jobId": "j", "attempt": 2, "name": "billing" },
+              "targets": [{ "type": "invoice", "id": "i", "name": "INV-1" }] }
             """)!.AsObject());
-        Assert.Equal("[redacted]", (string?)result["actor"]!["type"]);
+        Assert.Equal("user", (string?)result["actor"]!["type"]);
         Assert.Equal("u", (string?)result["actor"]!["id"]);
-        Assert.Equal("[redacted]", (string?)result["executor"]!["type"]);
+        Assert.Equal("[redacted]", (string?)result["actor"]!["name"]);
+        Assert.Equal("worker", (string?)result["executor"]!["type"]);
+        Assert.Equal("j", (string?)result["executor"]!["jobId"]);
+        Assert.Equal(2, (int)result["executor"]!["attempt"]!);
+        Assert.Equal("[redacted]", (string?)result["executor"]!["name"]);
         Assert.Equal("invoice", (string?)result["targets"]![0]!["type"]);
         Assert.Equal("i", (string?)result["targets"]![0]!["id"]);
+        Assert.Equal("[redacted]", (string?)result["targets"]![0]!["name"]);
     }
 
     [Fact]

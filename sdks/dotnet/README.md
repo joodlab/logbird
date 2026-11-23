@@ -304,19 +304,32 @@ What the client's own methods guarantee:
 Secrets are redacted by default. A key matching passwords, secrets, tokens, one-time codes, API keys,
 authorization, cookies, credentials or private keys keeps its name, and its value becomes `[redacted]`. This applies
 at any depth (actor, targets, context, metadata) and to the before and after values of matching change fields.
+
+- **Keys match as substrings**: the default also redacts `tokenCount`, `csrfTokenValue` and `secretary`. To match
+  whole keys only, set `Redaction.Keys` to an anchored pattern such as `^(token|secret)$`.
+- **Only ASCII letter case is ignored** by the default pattern and by `AddKeys`: `TOKEN` matches, but a key spelled
+  with a look-alike character (U+212A KELVIN SIGN for `k`, U+017F LONG S for `s`) does not, exactly as JavaScript's
+  `/i` behaves. A pattern you supply is matched with the options you give it.
+
 The default does not cover personal data, so add your own keys:
 
 ```csharp
 options.Redaction.AddKeys("email", "phone", "iban");
 ```
 
-**Identifier fields are never redacted**: actor, impersonator, executor and tenant ids, and each target's type and id.
-They are structural; a redacted id would merge every identity into one and destroy the trail. If your pattern would match
-one of them (for example `AddKeys("id")`), Logbird reports it once at startup through the logger and `OnError` and keeps
-running, redacting everything else. To pseudonymise an id, transform it before recording, for example with a keyed hash.
-This is stricter than today's TypeScript `redact()`, which redacts any matching key.
+**Identifier fields are never redacted** (`Redactor.IdentifierFields`): the actor's type and id, the impersonator's
+and tenant's id, the executor's type, id, job id and attempt, and each target's type and id, as well as the event's own
+`id` and `action`. They are structural: a redacted id would merge every identity into one and destroy the trail, and an
+executor's attempt must stay a number. If your pattern would match one of their names (for example `AddKeys("id")`),
+Logbird reports it once at startup through the logger and `OnError` and keeps running, redacting everything else. To
+pseudonymise an id, transform it before recording, for example with a keyed hash.
 
-Otherwise redaction behaves like the TypeScript SDK's `redact()`. Set `Redaction.Enabled = false` to turn it off, or replace
+**A pattern that matches a party's own key** (`actor`, `impersonator`, `executor`, `tenant` or `targets`, for example
+`AddKeys("actor")`) redacts every other field of that party, such as its name and email, and keeps its identifier
+fields. A party is never replaced as a whole.
+
+Redaction follows the same rules as the TypeScript SDK's `redact()`: both run one shared fixture of cases
+(`tests/Logbird.Tests/Fixtures/redaction-parity.json`). Set `Redaction.Enabled = false` to turn it off, or replace
 `Redaction.Keys` with your own pattern. `BeforeSend` runs before redaction on a copy of each event; return `null`
 to skip an event.
 
@@ -462,4 +475,3 @@ bytes, and a live test replays a TypeScript event from C#. Deliberate difference
   both SDKs can represent; a test lists these differences.
 - `OccurredAt` is always sent as UTC with milliseconds (`2026-11-22T08:00:00.123Z`), the form the TypeScript SDK
   generates by default.
-- Identifier fields are never redacted (see Redaction).
