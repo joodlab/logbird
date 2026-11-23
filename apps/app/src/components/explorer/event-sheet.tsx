@@ -423,7 +423,8 @@ function ClampedTitle({ text }: { text: string }) {
       {/* Expanded, a very long title (up to 4,096 characters) scrolls inside its own region, so the toggle and the event's
           facts below stay reachable on a phone. */}
       <div className={cn('w-full', open && 'max-h-[40svh] overflow-y-auto')}>
-        <SheetTitle className={cn('font-semibold text-[17px] leading-snug tracking-tight', !open && 'line-clamp-3')} dir="auto" ref={ref}>
+        <SheetTitle
+          className={cn('font-semibold text-[17px] leading-snug tracking-tight [overflow-wrap:anywhere]', !open && 'line-clamp-3')} dir="auto" ref={ref}>
           {text}
         </SheetTitle>
       </div>
