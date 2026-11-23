@@ -43,6 +43,31 @@ it('supports custom patterns including global regexes and never redacts identity
   expect(result.changes?.[0]).not.toHaveProperty('before');
 });
 
+it('redacts an object reached twice as two copies, so an identity is never redacted through an alias', () => {
+  const party = { type: 'user', id: 'user_1', name: 'Fictional User' };
+  const event = { id: 'e', action: 'a', actor: party, metadata: { who: party } } as EventInput;
+  const result = redact({ keys: /^(who|id|type)$/ })(event) as unknown as Record<string, Record<string, unknown>>;
+  expect(result.actor).toEqual({ type: 'user', id: 'user_1', name: 'Fictional User' });
+  expect(result.metadata).toEqual({ who: '[redacted]' });
+  const nested = redact({ keys: /^name$/ })(event) as unknown as { actor: unknown; metadata: { who: unknown } };
+  expect(nested.actor).toEqual({ type: 'user', id: 'user_1', name: '[redacted]' });
+  expect(nested.metadata.who).toEqual({ type: 'user', id: 'user_1', name: '[redacted]' });
+  expect(nested.actor).not.toBe(nested.metadata.who);
+  expect(party.name).toBe('Fictional User');
+});
+
+it('throws for an event with a cycle, as sending it would, instead of redacting forever', () => {
+  const metadata: Record<string, unknown> = { plan: 'pro' };
+  metadata.self = metadata;
+  expect(() => redact()({ id: 'e', action: 'a', metadata } as EventInput)).toThrow(TypeError);
+});
+
+it('returns the event as JSON sends it', () => {
+  const at = new Date('2026-11-24T00:00:00.000Z');
+  const result = redact()({ id: 'e', action: 'a', occurredAt: at, metadata: { skip: undefined } } as unknown as EventInput);
+  expect(result).toStrictEqual({ id: 'e', action: 'a', occurredAt: '2026-11-24T00:00:00.000Z', metadata: {} });
+});
+
 it('lists the same identifier fields as the .NET SDK', () => {
   expect(IDENTIFIER_FIELDS).toEqual([
     'actor.type',

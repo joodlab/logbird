@@ -395,7 +395,8 @@ const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'imperson
  * names added like the .NET `AddKeys`), both redact exactly the same keys. A pattern of your own runs on each platform's
  * regular-expression engine, which can differ at the edges (in .NET, `$` also matches before a final line feed; flags
  * such as `i` fold case differently), so keep custom patterns to plain alternatives and anchors that mean the same in
- * both. The deep copy uses `structuredClone`, which accepts nesting within the JavaScript engine's limits.
+ * both. It returns the event as JSON will send it (a `Date` becomes its ISO string; an object reached twice becomes two
+ * copies), and throws a `TypeError` for an event with a cycle, which could not be sent either.
  */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
   const keys = options.keys ?? DEFAULT_SECRET_KEYS;
@@ -406,7 +407,10 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
     return pattern.test(key);
   };
   return (event) => {
-    const copy = structuredClone(event);
+    // The copy is the event as JSON will send it: an object reached twice (an alias) becomes two copies, as on the wire and
+    // in the .NET SDK, so redacting one never changes the other; a cycle throws a TypeError, as serializing it would,
+    // instead of redacting forever.
+    const copy = JSON.parse(JSON.stringify(event)) as EventInput;
     // Change values first, as the .NET SDK does; the walk below may then replace a matching key holding them. Only an
     // object entry whose field is a string is matched (any other shape is left to the walk, never thrown on).
     const changes: unknown = copy.changes;
@@ -419,9 +423,8 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
         if (Object.hasOwn(entry, 'after')) entry.after = replacement;
       }
     }
-    // Iterative, like the .NET SDK, so the walk itself never recurses (the deep copy is structuredClone's, within the
-    // engine's limits). Each decision depends only on the node's own key and level, so the visiting order does not change
-    // the result.
+    // Iterative, like the .NET SDK, so the walk itself never recurses (the copy is JSON's, within the engine's limits).
+    // Each decision depends only on the node's own key and level, so the visiting order does not change the result.
     const pending: Array<{ node: unknown; level: Level; whole: boolean }> = [{ node: copy, level: 'top', whole: false }];
     while (pending.length > 0) {
       const { node, level, whole } = pending.pop()!;
