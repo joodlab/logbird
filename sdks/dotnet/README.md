@@ -159,8 +159,9 @@ var options = new LogbirdOptions
 - A 4xx other than 429 (for example a revoked key) drops the batch (`DropReason.HttpError`) and reports it. So does
   a redirect: the client never follows one, because that would send audit data to another address.
 - **Proxies and your own transport.** The HTTP clients the SDK creates (for `LogbirdClient`, `LogbirdReadClient` and the
-  ASP.NET Core package's named client) never use a proxy, not even the system or environment one: a proxy would receive
-  the ingest or read key, in clear text for an HTTP endpoint. To go through a proxy, pass your own `HttpClient` (or, with
+  ASP.NET Core package's named client) never use a proxy, not even the system or environment one: a proxy reads the
+  ingest or read key in clear text on an HTTP endpoint, and so does one that intercepts TLS (an HTTPS tunnel through an
+  ordinary proxy does not expose it). To go through a proxy, pass your own `HttpClient` (or, with
   ASP.NET Core, configure the `Logbird` named client's primary handler). A transport you supply is yours to secure:
   disable automatic redirects (`AllowAutoRedirect = false`), use only a proxy you trust with the key, and keep request
   and header logging off, since the `Authorization` header carries the key.

@@ -684,7 +684,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     /// <summary>
     /// The handler of a client this SDK creates. It never follows redirects (a redirect would forward the audit body to
     /// another origin; a 3xx is reported as a permanent HTTP error instead) and never uses a proxy (a system or environment
-    /// proxy would receive the ingest key, in clear text for an HTTP endpoint). To send through a proxy, pass your own
+    /// proxy would read the ingest key on an HTTP endpoint, or behind TLS interception). To send through a proxy, pass your own
     /// <see cref="HttpClient"/>.
     /// </summary>
     internal static HttpMessageHandler CreateHandler()

@@ -162,7 +162,7 @@ public static class LogbirdServiceCollectionExtensions
 
     /// <summary>
     /// The primary handler of the SDK's named client: connections recycled every five minutes, redirects never followed,
-    /// and no proxy (a system or environment proxy would receive the ingest key, in clear text for an HTTP endpoint).
+    /// and no proxy (a system or environment proxy would read the ingest key on an HTTP endpoint, or behind TLS interception).
     /// </summary>
     internal static HttpMessageHandler CreatePrimaryHandler()
         => new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false, UseProxy = false };
