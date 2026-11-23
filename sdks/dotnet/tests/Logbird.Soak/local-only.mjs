@@ -1,6 +1,7 @@
 // Refuses (exit 1) unless every service URL the fixture script and the server would use points at this machine.
 // Run it in the same environment as the fixture commands, for example:
-//   pnpm exec dotenv -o -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs && pnpm exec dotenv -o -e .env -- ...
+//   pnpm exec dotenv -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs && pnpm exec dotenv -e .env -- ...
+// dotenv fills in only what the shell has not set, so a value passed explicitly (a second server's DATABASE_URL) is checked.
 // It prints only host names, never credentials.
 const loopback = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 const failures = [];

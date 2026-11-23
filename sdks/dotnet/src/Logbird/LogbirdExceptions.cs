@@ -41,7 +41,8 @@ public class LogbirdDeliveryException : Exception
 
 /// <summary>
 /// An event needs attention, reported through <see cref="LogbirdOptions.OnError"/> and the logger; nothing was dropped.
-/// The SDK's own warning (surrounding whitespace in an identifier) is raised by <c>Track</c> just after it queues the
+/// The SDK's own warning (an identifier a server may index differently from what is sent: surrounding whitespace, longer
+/// than the indexed length, a lone surrogate, more than 64 targets) is raised by <c>Track</c> just after it queues the
 /// event, so a flush may already be sending it; a server warning (such as an adjusted <c>occurredAt</c>) is raised after
 /// the server stored the event.
 /// </summary>

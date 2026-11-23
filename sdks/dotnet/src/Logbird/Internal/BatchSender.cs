@@ -46,7 +46,7 @@ internal sealed class BatchSender
     private readonly AuthenticationHeaderValue _authorization;
     private readonly int _maxRetries;
     private readonly TimeSpan _requestTimeout;
-    private readonly Action<QueuedEvent, DropReason, string?> _drop;
+    private readonly Action<QueuedEvent, DropReason, string?, string?> _drop;
     private readonly Action<QueuedEvent, string> _warn;
     private readonly Action _progress;
 
@@ -67,7 +67,7 @@ internal sealed class BatchSender
         string ingestKey,
         int maxRetries,
         TimeSpan requestTimeout,
-        Action<QueuedEvent, DropReason, string?> drop,
+        Action<QueuedEvent, DropReason, string?, string?> drop,
         Action<QueuedEvent, string> warn,
         Action progress,
         Action<Exception> report,
@@ -296,7 +296,7 @@ internal sealed class BatchSender
                             continue;
                         }
 
-                        _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture));
+                        _drop(batch[index], DropReason.HttpError, "HTTP " + status.ToString(CultureInfo.InvariantCulture), null);
                     }
 
                     _report(new LogbirdDeliveryException($"Logbird HTTP {status}; batch dropped.", (HttpStatusCode)status));
@@ -316,7 +316,7 @@ internal sealed class BatchSender
                             if (state.TryReject(index, DropReason.Unacknowledged))
                             {
                                 count++;
-                                _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.");
+                                _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.", null);
                             }
                         }
 
@@ -539,7 +539,7 @@ internal sealed class BatchSender
             }
 
             codes.Add(code);
-            _drop(state.Batch[index], DropReason.Rejected, reason);
+            _drop(state.Batch[index], DropReason.Rejected, reason, code);
         }
 
         if (codes.Count > 0)
@@ -759,6 +759,7 @@ internal sealed class BatchSender
     {
         "invalid_event",
         "invalid_event_id",
+        "invalid_entity_id",
         "duplicate_id_conflict",
         "stored_event_unreadable",
         "unverified_after_parse_failure",
