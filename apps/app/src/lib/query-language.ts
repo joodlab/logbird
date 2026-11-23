@@ -181,13 +181,24 @@ function readingOutside(text: string, from: number, to: number): string | null {
   return `${covered.slice(0, from).join('')}|${covered.slice(to).join('')}`;
 }
 
-/** The text `q` up to a cut at or after `to` that some ending finishes, with that ending; null when none does. */
+/** Endings that close what is still open: a word, a quote, a range, then up to eight groups (`((a`). */
+const CLOSINGS = ['', ' x', 'x', '"', 'x"', ' x]', 'x]', 'x TO x]', '/', 'x/'].flatMap((inner) =>
+  Array.from({ length: 9 }, (_, depth) => inner + ')'.repeat(depth)),
+);
+
+/**
+ * The text `q` up to a cut that some ending finishes, with that ending: the whole text when it can be finished, else the
+ * longest whole-term prefix that still holds the term after `[from, to)`, so the completed term's neighbours on both
+ * sides are always checked. Null when even that cannot be finished.
+ */
 function finishable(q: string, to: number): { base: string; ending: string } | null {
-  for (let cut = q.length; cut >= to; cut--) {
+  // The end of the next term after the span (the next run of non-space characters).
+  const next = /^\s*\S*/.exec(q.slice(to))?.[0].length ?? 0;
+  for (let cut = q.length; cut >= to + next; cut--) {
     // Whole terms only: cut at the end of the text or before a space.
     if (cut < q.length && !/\s/.test(q[cut] ?? '')) continue;
     const base = q.slice(0, cut);
-    const ending = UNFINISHED.find((end) => editableExpression(base + end));
+    const ending = (cut === q.length ? UNFINISHED : []).concat(CLOSINGS).find((end) => editableExpression(base + end));
     if (ending !== undefined) return { base, ending };
   }
   return null;
@@ -213,7 +224,8 @@ export function neighbourSafeInsert(
   structural = true,
 ): string | null {
   const finished = finishable(q, to);
-  if (!finished) return insert;
+  // Nothing around the span can be read yet: only an insertion at the very end, with nothing after it, goes unchecked.
+  if (!finished) return q.slice(to).trim() ? null : insert;
   const { base, ending } = finished;
   const shape = (out: string | null) => (out === null || structural ? out : out.replace(/(^|\|)\["[^"]*/g, '$1["'));
   // At the end of the text the placeholder ending stands for what the reader types next, so it is no neighbour.
@@ -958,6 +970,10 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
   if (t.kind === 'phrase' || t.kind === 'regex') return caret === t.start ? key(caret, caret) : { kind: 'phrase' };
   if (t.kind === 'operator' || t.kind === 'text') {
     if (caret === t.start && t.kind === 'text') return key(caret, caret);
+    // Right after a finished operator (`one OR|`) a new term starts here: the operator is never replaced.
+    if (t.kind === 'operator' && caret === t.end && /^(AND|OR|NOT|&&|\|\|)$/.test(t.raw)) {
+      return { kind: 'key', prefix: '', from: caret, to: caret, afterTerm: false };
+    }
     const from = t.start + (t.negated || t.raw === '-' ? 1 : 0);
     if (caret < from) return { kind: 'none' };
     return key(from, t.end);

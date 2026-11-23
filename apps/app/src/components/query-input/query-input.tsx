@@ -190,7 +190,9 @@ export function QueryInput({
   });
   // A filter offered for the text search that just ran (`action=booked` → `action:booked`), shown until the text changes.
   // Worked out live, so it appears once the project's field names arrive even when they arrive after the run.
-  const [offerFor, setOfferFor] = useState<string | null>(null);
+  const [offerFor, setOfferFor] = useState<string | null>(editorValue);
+  // A search that ran from outside the bar (a link, Undo) gets its offer too.
+  useEffect(() => setOfferFor(editorValue), [editorValue]);
   const offer = useMemo(() => {
     if (offerFor === null || lang !== 'query' || draft !== offerFor) return null;
     const text = suggestedConversion(draft, completions.fixes);
@@ -203,8 +205,9 @@ export function QueryInput({
   const activeIndex = Math.min(active, Math.max(0, suggestions.length - 1));
   const activeSuggestion = showList ? suggestions[activeIndex] : undefined;
 
-  // Reset the highlight whenever the list changes shape (new context, group or length).
-  const shape = `${completions.context.kind}|${suggestions.length}|${suggestions[0]?.id ?? ''}`;
+  // Reset the highlight, and any row chosen with the arrows, whenever the rows change: a row that moved into the chosen
+  // place (field names arriving, values loading) was never chosen.
+  const shape = `${completions.context.kind}|${suggestions.map((s) => s.id).join(' ')}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the list's shape on purpose
   useEffect(() => {
     setActive(0);
