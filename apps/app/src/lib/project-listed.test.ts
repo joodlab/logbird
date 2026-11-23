@@ -62,7 +62,12 @@ it('reads the cache when a refresh already in flight lands first, so a project t
   queryClient.setQueryData(keys.projects, [{ id: 'proj_a', name: 'A' }], { updatedAt: Date.now() - 60_000 });
   // A background refresh is already running; it lands with the new project while the check waits.
   let land: (v: unknown) => void = () => undefined;
-  list.mockImplementationOnce(() => new Promise((resolve) => (land = resolve)));
+  list.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        land = resolve;
+      }),
+  );
   const refresh = queryClient.fetchQuery({ queryKey: keys.projects, queryFn: () => list(), staleTime: 0 });
   const check = projectIsListed(queryClient, 'proj_new');
   land([
