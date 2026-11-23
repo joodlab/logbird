@@ -139,19 +139,32 @@ export function termsOutside(q: string, from: number, to: number): string | null
 }
 
 /**
+ * The query after inserting `insert` over `[from, to)`, as the reader will finish it: when it does not parse yet (a key
+ * awaiting its value, `action:`; an empty group, `()`), with a placeholder value typed at the caret. Returns the text to
+ * check and the span the completed term occupies in it.
+ */
+export function completedForCheck(q: string, from: number, to: number, insert: string, caretOffset = insert.length) {
+  const text = q.slice(0, from) + insert + q.slice(to);
+  if (editableExpression(text)) return { text, from, to: from + insert.length };
+  const at = from + Math.min(caretOffset, insert.length);
+  return { text: `${text.slice(0, at)}x${text.slice(at)}`, from, to: from + insert.length + 1 };
+}
+
+/**
  * What to insert so that accepting a completion changes only the term it completes: the insertion as built, else
  * without its trailing space, else quoted, whichever first leaves every other term of the server's parse unchanged (a
  * space before `-tenant:west` would turn the attribute `-tenant` into NOT tenant). Null when none does: the completion
  * is not applied. A query that does not parse yet takes the insertion as built.
  */
-export function neighbourSafeInsert(q: string, from: number, to: number, insert: string): string | null {
+export function neighbourSafeInsert(q: string, from: number, to: number, insert: string, caretOffset = insert.length): string | null {
   const before = termsOutside(q, from, to);
   if (before === null) return insert;
   const bare = insert.trimEnd();
   const candidates = [insert, bare];
   if (bare && !bare.endsWith(':') && !/^["/(]/.test(bare)) candidates.push(quoteQueryValue(readQueryValue(bare).value));
   for (const candidate of candidates) {
-    if (termsOutside(q.slice(0, from) + candidate + q.slice(to), from, from + candidate.length) === before) return candidate;
+    const check = completedForCheck(q, from, to, candidate, Math.min(caretOffset, candidate.length));
+    if (termsOutside(check.text, check.from, check.to) === before) return candidate;
   }
   return null;
 }

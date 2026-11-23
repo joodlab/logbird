@@ -291,7 +291,7 @@ export function QueryInput({
       return;
     }
     // Accepting changes only the term at the caret: never a separator or quote that changes how a neighbour parses.
-    const insert = lang === 'query' ? neighbourSafeInsert(draft, s.from, s.to, s.insert) : s.insert;
+    const insert = lang === 'query' ? neighbourSafeInsert(draft, s.from, s.to, s.insert, s.caret - s.from) : s.insert;
     if (insert === null) return;
     const text = draft.slice(0, s.from) + insert + draft.slice(s.to);
     setText(text, Math.max(s.from, s.caret - (s.insert.length - insert.length)));
@@ -537,7 +537,8 @@ export function QueryInput({
         </p>
       ) : null}
       <span className="sr-only" id={`${listId}-keys`}>
-        Arrows choose a suggestion, Enter or Right arrow inserts it, Escape closes. Enter runs the query.
+        Arrows choose a suggestion and Enter inserts the one chosen; Right arrow at the end of the text inserts the one shown. Otherwise Enter runs
+        the query exactly as typed. Escape closes.
       </span>
       <span aria-live="polite" className="sr-only">
         {announcement}

@@ -125,6 +125,24 @@ export function QueryHelp({ lang, projectId, onInsert }: { lang: QueryLang; proj
             </p>
           </div>
         ) : null}
+        <div className="flex flex-col gap-1 px-1 text-[11.5px] text-muted-foreground leading-relaxed" data-testid="query-keys-help">
+          <span className="font-medium text-[10.5px] uppercase tracking-wider">Keys</span>
+          <p>
+            <span className="font-medium text-foreground">Enter</span> runs the query exactly as typed. A suggestion is used only when you choose it:
+            move to it with <span className="font-medium text-foreground">↑ ↓</span> and press Enter, press{' '}
+            <span className="font-medium text-foreground">→</span> at the end of the text, or click it.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Tab</span> only moves on: leaving the bar never changes your query.
+            {lang === 'query' ? (
+              <>
+                {' '}
+                When a search looks like <code className="font-mono">field=value</code>,{' '}
+                <span className="font-medium text-foreground">Alt+Enter</span> uses the filter offered under the bar.
+              </>
+            ) : null}
+          </p>
+        </div>
         <Link
           className={cn('inline-flex items-center gap-1 self-start px-1 text-[12px] text-muted-foreground hover:text-foreground')}
           hash="query"
