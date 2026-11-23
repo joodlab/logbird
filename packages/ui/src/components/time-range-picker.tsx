@@ -144,7 +144,13 @@ export function TimeRangePicker({
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger
         render={
-          <Button className={cn('justify-between gap-2 font-normal tabular-nums', className)} size={size} variant="outline">
+          <Button
+            className={cn('justify-between gap-2 font-normal tabular-nums', className)}
+            size={size}
+            // The label can be truncated on a narrow screen: the whole range is in the title and at the top of the editor.
+            title={label}
+            variant="outline"
+          >
             <span className="flex min-w-0 items-center gap-1.5">
               {isPreset ? <ClockIcon className="text-muted-foreground" /> : <CalendarIcon className="text-muted-foreground" />}
               <span className="truncate">{label}</span>
@@ -154,6 +160,13 @@ export function TimeRangePicker({
         }
       />
       <PopoverContent align={align} className="w-auto max-w-[calc(100vw-1rem)] p-0">
+        {/* The trigger can cut a custom range short and its title needs a hover: the whole range is written out here,
+            where touch and keyboard readers reach it too. */}
+        {!isPreset ? (
+          <p className="border-b px-3 py-2 text-muted-foreground text-xs tabular-nums" data-testid="time-range-full">
+            {label}
+          </p>
+        ) : null}
         <div className="flex flex-col sm:flex-row">
           <div className="flex flex-row flex-wrap gap-0.5 border-b p-1.5 sm:w-44 sm:flex-col sm:flex-nowrap sm:border-e sm:border-b-0">
             {presets.map((p) => (

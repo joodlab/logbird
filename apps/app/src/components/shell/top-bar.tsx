@@ -91,7 +91,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <div className="flex shrink-0 items-center gap-2">
         {showRange ? (
           <TimeRangePicker
-            className="w-auto max-w-[min(60vw,15rem)]"
+            className="w-auto max-w-[min(60vw,15rem)] md:max-w-48 lg:max-w-[min(40vw,28rem)]"
             // An entity page with no range chosen shows its whole History; the range scopes only the summary (stats,
             // support split, activity chart). The picker says so; picking a range narrows the History too.
             label={rangeButtonLabel(range, wholeHistory, typeof window !== 'undefined' && window.innerWidth < 640)}
@@ -105,7 +105,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         ) : null}
         <Button
           aria-label="Open command palette"
-          className="w-(--control-size-compact) justify-start gap-2 px-0 font-normal text-muted-foreground max-sm:justify-center sm:w-52 sm:px-2.5 sm:pe-1.5"
+          className="w-(--control-size-compact) justify-start gap-2 px-0 font-normal text-muted-foreground max-sm:justify-center sm:w-40 sm:px-2.5 sm:pe-1.5 lg:w-52"
           onClick={onOpenPalette}
           size="sm"
           variant="outline"
