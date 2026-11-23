@@ -116,6 +116,46 @@ function joinColons(input: string, from: number, limit: number): number {
   return j;
 }
 
+/**
+ * The server's terms of `q` outside `[from, to)`, in order, as field, value and polarity (offsets left out), or null
+ * when `q` does not parse. Two queries whose outside terms match differ only in the span between.
+ */
+export function termsOutside(q: string, from: number, to: number): string | null {
+  const parts: string[] = [];
+  const strip = (key: string, v: unknown) => (key === 'start' || key === 'end' || key === 'valueStart' || key === 'key' ? undefined : v);
+  const visit = (node: QueryAtom, negated: boolean) => {
+    if (node.kind === 'not') return visit(node.operand, !negated);
+    if (node.kind === 'group') {
+      for (const branch of node.expression) for (const part of branch) visit(part.atom, negated);
+      return;
+    }
+    if (node.start < to && node.end > from) return;
+    parts.push(JSON.stringify([node.kind, node.kind === 'field' ? node.field : '', node.kind === 'field' ? node.value : node.token, negated], strip));
+  };
+  const expression = editableExpression(q);
+  if (!expression) return null;
+  for (const branch of expression) for (const part of branch) visit(part.atom, false);
+  return `${expression.length}|${parts.join('|')}`;
+}
+
+/**
+ * What to insert so that accepting a completion changes only the term it completes: the insertion as built, else
+ * without its trailing space, else quoted, whichever first leaves every other term of the server's parse unchanged (a
+ * space before `-tenant:west` would turn the attribute `-tenant` into NOT tenant). Null when none does: the completion
+ * is not applied. A query that does not parse yet takes the insertion as built.
+ */
+export function neighbourSafeInsert(q: string, from: number, to: number, insert: string): string | null {
+  const before = termsOutside(q, from, to);
+  if (before === null) return insert;
+  const bare = insert.trimEnd();
+  const candidates = [insert, bare];
+  if (bare && !bare.endsWith(':') && !/^["/(]/.test(bare)) candidates.push(quoteQueryValue(readQueryValue(bare).value));
+  for (const candidate of candidates) {
+    if (termsOutside(q.slice(0, from) + candidate + q.slice(to), from, from + candidate.length) === before) return candidate;
+  }
+  return null;
+}
+
 /** Value completion for the server's term `atom` at `caret`; null for `_exists_` (the console's own path handles it). */
 function serverValueCompletion(q: string, caret: number, atom: Extract<QueryAtom, { kind: 'field' }>): QueryCompletion | null {
   const field = atom.field;
@@ -130,7 +170,8 @@ function serverValueCompletion(q: string, caret: number, atom: Extract<QueryAtom
     ...extra,
   });
   const v = atom.value;
-  if (v.kind === 'presence') return null;
+  // `_exists_:field`: the whole presence term, as the server reads it (never part of a neighbouring group).
+  if (v.kind === 'presence') return { kind: 'exists', prefix: q.slice(atom.valueStart, caret), from: atom.start, to: atom.end };
   if (v.kind === 'range') return caret <= atom.valueStart ? value('', atom.valueStart, atom.end) : { kind: 'range', field };
   if (v.kind === 'compare') {
     if (caret < atom.valueStart + v.op.length) return value('', atom.valueStart, atom.end);
@@ -139,7 +180,8 @@ function serverValueCompletion(q: string, caret: number, atom: Extract<QueryAtom
   }
   const inGroup = v.kind === 'group';
   const members = v.kind === 'value' ? [v.token] : v.members;
-  if (inGroup && caret <= atom.valueStart) return value('', atom.valueStart, atom.end);
+  // Between the colon and the value (`action:| booked`): the whole value is what a completion replaces.
+  if (caret <= atom.valueStart) return value('', atom.valueStart, atom.end);
   const member = members.find((m) => caret >= m.start && caret <= m.end);
   if (!member) {
     if (!inGroup) return { kind: 'none' };

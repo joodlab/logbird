@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { suggestQuery, viewsQuery } from '@/lib/api/queries';
 import { coreField, sqlColumn } from '@/lib/query-catalog';
 import type { QueryProblem } from '@/lib/query-error';
+import { neighbourSafeInsert } from '@/lib/query-language';
 import { applyFixes, fixesOnSubmit, suggestedConversion } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { useRecentQueries } from '@/lib/recent-queries';
@@ -289,8 +290,11 @@ export function QueryInput({
       });
       return;
     }
-    const text = draft.slice(0, s.from) + s.insert + draft.slice(s.to);
-    setText(text, s.caret);
+    // Accepting changes only the term at the caret: never a separator or quote that changes how a neighbour parses.
+    const insert = lang === 'query' ? neighbourSafeInsert(draft, s.from, s.to, s.insert) : s.insert;
+    if (insert === null) return;
+    const text = draft.slice(0, s.from) + insert + draft.slice(s.to);
+    setText(text, Math.max(s.from, s.caret - (s.insert.length - insert.length)));
     setAnnouncement((prev) => `Inserted ${s.insert.trim() || s.label}${prev.endsWith('​') ? '' : '​'}`);
     if (s.run) {
       submit(text);
@@ -375,7 +379,9 @@ export function QueryInput({
     if (e.key === 'Enter') {
       if (e.shiftKey && lang === 'sql' && !(showList && navigated)) return; // newline
       e.preventDefault();
-      if (activeSuggestion && activeSuggestion.id !== 'loading' && !e.metaKey && !e.ctrlKey && (navigated || partial)) {
+      // Plain Enter runs what the reader typed. Only a suggestion the reader moved to with the arrows is accepted: the
+      // first row, highlighted by default, is never taken as chosen (→ at the end of the text is the accept key).
+      if (activeSuggestion && activeSuggestion.id !== 'loading' && !e.metaKey && !e.ctrlKey && navigated) {
         accept(activeSuggestion);
         return;
       }

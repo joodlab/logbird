@@ -229,3 +229,16 @@ describe('#283 verification', () => {
     expect(whoFilter('impersonator:(amy OR bea)')).toBe('support');
   });
 });
+
+describe('#283 review threads, fixed in #290', () => {
+  it('completes the value right after the colon, before its whitespace', () => {
+    expect(queryCompletionAt('action: booked', 7)).toMatchObject({ kind: 'value', field: 'action', from: 8, to: 14 });
+  });
+
+  it('reads an ORed group inside a branch, and impersonator:(*) as presence', () => {
+    expect(whoFilter('action:x (impersonator:amy OR impersonator:bea)')).toBe('support');
+    expect(whoFilter('action:x (impersonator:amy OR outcome:failure)')).toBe('all');
+    expect(whoFilter('impersonator:(*)')).toBe('support');
+    expect(whoFilter('NOT impersonator:(*)')).toBe('self');
+  });
+});
