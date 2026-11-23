@@ -107,16 +107,45 @@ const isObject = (value: unknown): value is object => value !== null && typeof v
  */
 function isRecord(value: unknown): value is object {
   if (!isObject(value) || Array.isArray(value) || ArrayBuffer.isView(value)) return false;
-  const entries = value as { get?: unknown; getTime?: unknown; [Symbol.iterator]?: unknown };
-  if (Symbol.iterator in value || typeof entries.get === 'function' || typeof entries.getTime === 'function') return false;
+  for (const key of CONTAINER_METHODS) if (hasMethod(value, key)) return false;
   for (const name of PLATFORM_CONTAINERS) {
     const type = (globalThis as Record<string, unknown>)[name];
     if (typeof type === 'function' && value instanceof type) return false;
   }
   return true;
 }
-/** Built-ins with neither an iterator nor a `get` method that still hold no named fields. */
-const PLATFORM_CONTAINERS = ['Date', 'RegExp', 'Promise', 'Error', 'WeakMap', 'WeakSet', 'URL', 'Request', 'Response', 'Blob', 'EventTarget'];
+/**
+ * Methods that mark a container keeping its entries elsewhere than named properties: sync and async iterators (arrays,
+ * Maps, Sets, URLSearchParams, Headers, FormData, streams), `get` (any Map-like store), `getTime` (Date-likes),
+ * `getReader` (streams) and `then` (a promise or thenable, from any realm, that was never awaited).
+ */
+const CONTAINER_METHODS: (string | symbol)[] = [Symbol.iterator, Symbol.asyncIterator, 'get', 'getTime', 'getReader', 'then'];
+/** Built-ins with none of those methods that still hold no named fields. */
+const PLATFORM_CONTAINERS = [
+  'Date',
+  'RegExp',
+  'Promise',
+  'Error',
+  'WeakMap',
+  'WeakSet',
+  'URL',
+  'Request',
+  'Response',
+  'Blob',
+  'EventTarget',
+  'ReadableStream',
+];
+/**
+ * Whether the object or its prototype chain defines `key` as a function-valued data property. Read through property
+ * descriptors, so no accessor of the caller's object runs here (an accessor named `get` is not a method).
+ */
+function hasMethod(value: object, key: string | symbol): boolean {
+  for (let object: object | null = value; object !== null; object = Object.getPrototypeOf(object)) {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (descriptor) return 'value' in descriptor && typeof descriptor.value === 'function';
+  }
+  return false;
+}
 /** Blank means only whitespace, as JavaScript's `trim()` sees it (the .NET builder uses the same rule). */
 const isBlank = (value: string) => value.trim().length === 0;
 /**

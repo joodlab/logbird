@@ -80,8 +80,8 @@ function createTrail(source: () => RawRequest) {
     // Ownership goes first: setting the refs below can run a synchronous consumer that changes the options again, and
     // its change must not look like the trail already on screen.
     owner = undefined;
-    nextCursor.value = null;
     data.value = [];
+    nextCursor.value = null;
   };
   const owns = (state: State) => !('error' in state) && owner !== undefined && owner.key === state.key && owner.fetcher === state.fetcher;
   /** Nothing in flight may publish any more, and nothing on screen belongs to the current trail. */
@@ -116,6 +116,8 @@ function createTrail(source: () => RawRequest) {
     owner = { key: state.key, fetcher: state.fetcher };
     const query = cursor ? Object.freeze({ ...state.query, cursor }) : state.query;
     loading.value = true;
+    // A synchronous consumer of `loading` may have changed the trail or disposed the scope: nothing is fetched then.
+    if (current !== generation || disposed) return;
     try {
       // A plain call: the fetcher cannot read a different scope through `this`.
       const fetcher = state.fetcher;
@@ -123,8 +125,11 @@ function createTrail(source: () => RawRequest) {
       if (current !== generation) return;
       const unique = new Map((cursor ? data.value : []).map((event) => [event.id, event]));
       for (const event of page.data) unique.set(event.id, event);
-      data.value = [...unique.values()];
+      // The cursor first, the rows last: a synchronous consumer of either may switch trails, and nothing of this trail
+      // is written after that.
       nextCursor.value = page.nextCursor;
+      if (current !== generation) return;
+      data.value = [...unique.values()];
     } catch (cause) {
       if (current === generation) {
         // A failed or refused read leaves nothing of this trail on screen.
@@ -146,12 +151,17 @@ function createTrail(source: () => RawRequest) {
   };
   /** The newest read, so an overtaken explicit call can resolve when the read that won finishes. */
   let latest: Promise<void> = Promise.resolve();
-  const start = (state: State, append: boolean) => {
-    latest = run(state, append);
-    return latest;
+  const start = (state: State, append: boolean): Promise<void> => {
+    const before = generation;
+    const read = run(state, append);
+    // A read started re-entrantly inside this one (say, from the fetcher) is newer: it stays the latest.
+    if (generation === before + 1) latest = read;
+    return follow(read);
   };
+  /** Resolves when this read, or the read that superseded it, has finished. */
+  const follow = (read: Promise<void>): Promise<void> => read.then(() => (latest === read ? undefined : follow(latest)));
   // The queued run is scheduled before this continuation, so `latest` is already the winning read when it runs.
-  const afterQueued = () => Promise.resolve().then(() => latest);
+  const afterQueued = () => Promise.resolve().then(() => follow(latest));
   const refresh = () => {
     if (disposed) return Promise.resolve();
     const state = explicitState();

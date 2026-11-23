@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
 import { expect, it, vi } from 'vitest';
-import { h, reactive, ref, watch } from 'vue';
+import { effectScope, h, reactive, ref, watch } from 'vue';
 import { type AuditFetcher, type AuditTrailOptions, useAuditTrail, useAuditTrailRequests } from './index';
 
 it('refreshes selectors, paginates and exposes errors without exposing keys', async () => {
@@ -597,4 +597,44 @@ it('treats a switch back made while rows are cleared as a new trail, never as th
   expect(fetcher.mock.calls.map((call) => call[0].q)).toEqual(['tenant:"a"', 'tenant:"a"']);
   expect(trail.data.value.map((e) => e.id)).toEqual(['tenant:"a"-1']);
   wrapper.unmount();
+});
+
+// Round 8: a consumer of `loading` that disposes the scope means nothing is fetched.
+it('fetches nothing when a synchronous consumer of loading disposes the scope', async () => {
+  const fetcher = vi.fn().mockResolvedValue(page([]));
+  const scope = effectScope();
+  const trail = scope.run(() => useAuditTrail(() => ({ fetcher, tenant: 'acme' }))) as ReturnType<typeof useAuditTrail>;
+  await flushPromises();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  watch(
+    trail.loading,
+    (value) => {
+      if (value) scope.stop();
+    },
+    { flush: 'sync' },
+  );
+  await trail.refresh();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+// Round 8: an awaited refresh follows a read started re-entrantly inside it.
+it('resolves an awaited refresh only after a read the fetcher started re-entrantly has finished', async () => {
+  let nested = false;
+  let trail!: ReturnType<typeof useAuditTrail>;
+  const fetcher = vi.fn((): Promise<Awaited<ReturnType<AuditFetcher>>> => {
+    const call = fetcher.mock.calls.length;
+    if (call === 2 && !nested) {
+      nested = true;
+      void trail.refresh();
+      return new Promise((resolve) => setTimeout(() => resolve(page(['superseded'])), 5));
+    }
+    return new Promise((resolve) => setTimeout(() => resolve(page([`call-${call}`])), 20));
+  });
+  const mounted = mountTrail(() => useAuditTrail(() => ({ fetcher, tenant: 'acme' })));
+  trail = mounted.trail;
+  await flushPromises();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await trail.refresh();
+  expect(trail.data.value.map((e) => e.id)).toEqual(['call-3']);
+  mounted.wrapper.unmount();
 });

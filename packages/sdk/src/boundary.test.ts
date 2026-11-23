@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import {
   isTrailQueryError,
@@ -126,6 +127,17 @@ describe('the trail boundary accepts the shapes a careful developer passes', () 
         Object.setPrototypeOf(Scope.prototype, base);
         return new Scope();
       },
+      'tenant:"acme"',
+    ],
+    [
+      'a record with an accessor named get (never evaluated) and an undefined iterator slot',
+      () => ({
+        tenant: 'acme',
+        get get(): never {
+          throw new Error('the boundary must not run this accessor');
+        },
+        [Symbol.iterator]: undefined,
+      }),
       'tenant:"acme"',
     ],
     ['a null-prototype object', () => Object.assign(Object.create(null), { tenant: 'acme' }), 'tenant:"acme"'],
@@ -331,6 +343,19 @@ describe('the search query boundary (readAuditTrail, the Vue engine, the Nuxt ro
       })(),
     ],
     ['a Date-like object', { getTime: () => 0, toISOString: () => '' }],
+    // Round 8: async entry sources and never-awaited promises (from any realm) hold no named fields either.
+    ['a ReadableStream of entries', new ReadableStream({ start: (controller) => controller.enqueue(['q', 'tenant:"acme"']) })],
+    [
+      'an async-iterable entry source',
+      new (class {
+        async *[Symbol.asyncIterator]() {
+          yield ['q', 'tenant:"acme"'];
+        }
+      })(),
+    ],
+    ['an unawaited promise from another realm', runInNewContext('Promise.resolve({ q: "tenant:\\"acme\\"" })')],
+    // biome-ignore lint/suspicious/noThenProperty: the thenable is the hostile shape under test
+    ['a thenable', { then: (resolve: (value: unknown) => void) => resolve({ q: 'tenant:"acme"' }) }],
     [
       'FormData as the query',
       (() => {
