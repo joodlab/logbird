@@ -338,7 +338,7 @@ export function useCompletions({
   ]);
 }
 
-interface Input {
+export interface CompletionInput {
   draft: string;
   caret: number;
   lang: QueryLang;
@@ -361,7 +361,7 @@ interface Input {
 /* Shared groups                                                       */
 /* ------------------------------------------------------------------ */
 
-function recentItems({ draft, recent }: Input, limit: number, filter?: string): Suggestion[] {
+function recentItems({ draft, recent }: CompletionInput, limit: number, filter?: string): Suggestion[] {
   const f = filter?.toLowerCase();
   return recent
     .filter((r) => !f || (r.q.toLowerCase().includes(f) && r.q !== draft))
@@ -381,7 +381,7 @@ function recentItems({ draft, recent }: Input, limit: number, filter?: string): 
     }));
 }
 
-function viewItems({ draft, views }: Input, limit: number): Suggestion[] {
+function viewItems({ draft, views }: CompletionInput, limit: number): Suggestion[] {
   return views.slice(0, limit).map((v) => ({
     id: `view:${v.id}`,
     kind: 'view' as const,
@@ -397,7 +397,7 @@ function viewItems({ draft, views }: Input, limit: number): Suggestion[] {
   }));
 }
 
-function fixItems({ fixes, caret, draft }: Input): Suggestion[] {
+function fixItems({ fixes, caret, draft }: CompletionInput): Suggestion[] {
   // The fix under (or right before) the caret first; one is enough to make the point.
   const near = fixes.find((f) => caret >= f.start && caret <= f.end) ?? (draft.trim() ? undefined : fixes[0]);
   if (!near) return [];
@@ -440,7 +440,7 @@ function keyItem(
   return { ...spec, label: key, from: c.from, to: c.to, insert, caret: c.from + insert.length, keepOpen: true };
 }
 
-function fieldItems(input: Input, p: string, c: { from: number; to: number }, typedAttr?: string): Suggestion[] {
+function fieldItems(input: CompletionInput, p: string, c: { from: number; to: number }, typedAttr?: string): Suggestion[] {
   const { attributes, coverage } = input;
   const covered = (f: QueryKeySpec) => coverage.get(f.key) ?? 0;
   // With no prefix: core fields the project actually uses first (console order), then unused ones.
@@ -473,7 +473,7 @@ function fieldItems(input: Input, p: string, c: { from: number; to: number }, ty
   return [...coreItems, ...attrs];
 }
 
-function querySuggestions(input: Input): Suggestion[] {
+function querySuggestions(input: CompletionInput): Suggestion[] {
   const { draft } = input;
   const context = input.context as QueryCompletion;
   const after = (to: number) => draft.slice(to);
@@ -590,7 +590,7 @@ function querySuggestions(input: Input): Suggestion[] {
   return fix;
 }
 
-function queryValueItems(input: Input, context: Extract<QueryCompletion, { kind: 'value' }>): Suggestion[] {
+function queryValueItems(input: CompletionInput, context: Extract<QueryCompletion, { kind: 'value' }>): Suggestion[] {
   const { draft, values, valueField, valuesLoading } = input;
   const after = draft.slice(context.to);
   const p = context.prefix;
@@ -751,7 +751,8 @@ const SQL_COMPARE: { op: string; detail: string; insert: string; back?: number }
   { op: 'BETWEEN … AND …', detail: 'Inclusive range', insert: 'BETWEEN ' },
 ];
 
-function sqlSuggestions(input: Input): Suggestion[] {
+/** SQL-mode suggestions for one caret context (exported for tests of what each one inserts). */
+export function sqlSuggestions(input: CompletionInput): Suggestion[] {
   const { attributes, draft, values, valuesLoading } = input;
   const context = input.context as SqlCompletion;
   if (context.kind === 'ident' && draft.trim() === '') {
@@ -884,7 +885,7 @@ function sqlSuggestions(input: Input): Suggestion[] {
   return [];
 }
 
-function sqlIdentItems(input: Input, context: Extract<SqlCompletion, { kind: 'ident' }>): Suggestion[] {
+function sqlIdentItems(input: CompletionInput, context: Extract<SqlCompletion, { kind: 'ident' }>): Suggestion[] {
   const { attributes } = input;
   const p = context.prefix;
   const space = input.call ? '' : ' ';

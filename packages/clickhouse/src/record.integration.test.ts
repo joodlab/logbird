@@ -7,6 +7,7 @@ import { type ClickHouseClient, createClickHouseClient, createQueryClickHouseCli
 import { normalizeEvent } from './normalize';
 import { entityMetadata, entityProfile, exportEvents, facets, listEntities, purgeProject, read, searchEvents } from './queries';
 import { compileQuery } from './query';
+import { validateSql } from './sql-guard';
 import { suggestValues } from './suggest';
 
 function expectSiteProfile(profile: EntityProfile | null) {
@@ -188,11 +189,17 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
           ['record:(page:12 OR site:12) NOT _exists_:"target.name"', ['paired']],
           ['record:(page:12 OR site:12) occurredAt:[now-1d TO now+1m]', ['paired', 'separate']],
           ['record:(page:12 OR site:12) occurredAt:>=now-1d/d', ['paired', 'separate']],
+          // The date must really constrain: an upper bound before the fixtures excludes them in both modes.
+          ['record:(page:12 OR site:12) occurredAt:<now-1d', []],
+          ['record:(page:12 OR site:12) occurredAt:["2020-01-01" TO now-1d]', []],
+          ['record:(page:12 OR site:12) occurredAt:["2020-01-01" TO now+1m]', ['paired', 'separate']],
           // A dash right after `)` belongs to the field name (`-action`), which no event has: not NOT action.
           ['(outcome:failure)-action:booked', []],
         ] as const) {
           const translated = translateQueryToSql(q);
           expect(translated, q).not.toBeNull();
+          // What the server would accept from the console: the restricted SQL guard, as the search route runs it.
+          await expect(validateSql(sqlClient, translated ?? '')).resolves.toBe(translated);
           const query = await searchEvents(ch, projectId, { ...range, limit: 10, order: 'asc', q });
           const sql = await searchEvents(sqlClient, projectId, { ...range, limit: 10, order: 'asc', q: translated ?? '', lang: 'sql' });
           expect(query.data.map((e) => e.id).sort(), q).toEqual(ids);

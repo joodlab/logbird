@@ -1,7 +1,10 @@
 import { compileQuery } from '@logbird/clickhouse';
-import { formatRecordTerm, QUERY_FIELDS } from '@logbird/contracts';
+import { formatRecordTerm, QUERY_FIELDS, SQL_ALLOWED_FUNCTIONS } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
+import { sqlSuggestions } from '@/components/query-input/use-completions';
+import { parsePresenceSql } from './presence-filter';
 import { sqlColumn } from './query-catalog';
+import { tokenize } from './query-language';
 import { translateQueryToSql } from './query-translate';
 import {
   appendSqlPredicate,
@@ -427,20 +430,55 @@ describe('query ↔ SQL correctness (#220)', () => {
     expect(translateQueryToSql('(outcome:failure) -action:booked')).toBe("(outcome = 'failure') AND NOT action = 'booked'");
   });
 
-  it('turns relative dates into SQL that is resolved when the query runs, and refuses what the server refuses', () => {
-    expect(translateQueryToSql('occurredAt:[now-7d TO now]')).toBe('(timestamp >= now64(3) - INTERVAL 7 DAY AND timestamp <= now64(3))');
-    expect(translateQueryToSql('occurredAt:>=now-1w/d')).toBe("timestamp >= toStartOfDay(now64(3) - INTERVAL 1 WEEK, 'UTC')");
+  it('turns relative dates into elapsed time resolved when the query runs, and refuses what SQL cannot compute alike', () => {
+    // Elapsed seconds, as the server counts: a day is 86,400 s even across a daylight-saving change.
+    expect(translateQueryToSql('occurredAt:[now-7d TO now]')).toBe('(timestamp >= now64(3) - INTERVAL 604800 SECOND AND timestamp <= now64(3))');
+    expect(translateQueryToSql('occurredAt:>=now-1w/d')).toBe("timestamp >= toStartOfDay(now64(3) - INTERVAL 604800 SECOND, 'UTC')");
     expect(translateQueryToSql('attr.seen:>now-1h')).toBe(
-      "parseDateTime64BestEffortOrNull(attributes['seen'], 3, 'UTC') > now64(3) - INTERVAL 1 HOUR",
+      "parseDateTime64BestEffortOrNull(attributes['seen'], 3, 'UTC') > now64(3) - INTERVAL 3600 SECOND",
     );
     expect(translateQueryToSql('occurredAt:>now-7x')).toBeNull();
+    // Before 1970 toStartOfDay clamps where the server does not, and far futures are past what the server accepts.
+    expect(translateQueryToSql('occurredAt:>now-21000d/d')).toBeNull();
+    expect(translateQueryToSql('occurredAt:>now+4000000d')).toBeNull();
     expect(translateQueryToSql('occurredAt:>now-99999999999d')).toBeNull();
   });
 
-  it('reads quoted range bounds as their values, and a quoted star as no open bound', () => {
+  it('reads range bounds as the server does: decoded, and open only for an unescaped star, quoted or not', () => {
     expect(translateQueryToSql('attempt:["2" TO "5"]')).toBe('(job_attempt >= 2 AND job_attempt <= 5)');
     expect(translateQueryToSql('duration_ms:["10" TO *]')).toBe("toFloat64OrNull(attributes['duration_ms']) >= 10");
-    expect(translateQueryToSql('attempt:["*" TO 5]')).toBeNull();
+    expect(compileQuery('attempt:["*" TO 5]').sql).toContain('job_attempt <=');
+    expect(translateQueryToSql('attempt:["*" TO 5]')).toBe('job_attempt <= 5');
+    expect(translateQueryToSql(String.raw`attempt:["\*" TO 5]`)).toBeNull();
+  });
+
+  it('decides number or date per bound, with the server number grammar and only allowed SQL functions', () => {
+    expect(translateQueryToSql('attr.v:[2 TO now]')).toBe(
+      "(toFloat64OrNull(attributes['v']) >= 2 AND parseDateTime64BestEffortOrNull(attributes['v'], 3, 'UTC') <= now64(3))",
+    );
+    expect(translateQueryToSql('occurredAt:["2026-11-01" TO now]')).toBe(
+      "(timestamp >= parseDateTime64BestEffortOrNull('2026-11-01T00:00:00.000Z', 3, 'UTC') AND timestamp <= now64(3))",
+    );
+    expect(translateQueryToSql('attempt:["1e2" TO +200]')).toBe('(job_attempt >= 100 AND job_attempt <= 200)');
+    expect(translateQueryToSql('attempt:>now')).toBeNull();
+    expect(translateQueryToSql('attempt:2*')).toBeNull();
+    expect(translateQueryToSql('occurredAt:2026-02-30')).toBeNull();
+    const allowed = new Set<string>(SQL_ALLOWED_FUNCTIONS);
+    for (const q of ['attr.v:[2 TO now]', 'occurredAt:["2026-11-01" TO now]', 'occurredAt:>=now-1w/d', 'attr.seen:>2026-01-01', 'attempt:(1 OR 2)']) {
+      const sql = translateQueryToSql(q) ?? '';
+      for (const [, name] of sql.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)) expect(allowed.has(name ?? ''), `${name} in ${q}`).toBe(true);
+    }
+  });
+
+  it('reads handwritten SQL literals as ClickHouse does in presence filters', () => {
+    expect(parsePresenceSql(String.raw`impersonator_id = 'agent\x41'`, 'impersonator_id')).toEqual({ value: 'agentA', negated: false });
+    expect(parsePresenceSql("impersonator_id = 'O''Brien'", 'impersonator_id')).toEqual({ value: "O'Brien", negated: false });
+  });
+
+  it('never mistakes a bracket inside an attribute key for a call', () => {
+    const old = "attributes['phase(v2)'] = 'old'";
+    expect(isColumnPredicate(old, 'attributes', 'phase(v2)')).toBe(true);
+    expect(toggleSqlPredicate(old, "attributes['phase(v2)'] = 'new'", 'attributes', 'include', 'phase(v2)')).toBe("attributes['phase(v2)'] = 'new'");
   });
 
   it('never takes a whole top-level OR for one facet predicate', () => {
@@ -462,5 +500,48 @@ describe('query ↔ SQL correctness (#220)', () => {
     // Two apostrophes as sqlString writes them stay two (the facet must find the agent whose id has both).
     expect(unquoteSql(String.raw`a\'\'b`)).toBe("a''b");
     expect(unquoteSql(String.raw`tab\there\nnew`)).toBe('tab\there\nnew');
+    expect(unquoteSql(String.raw`\x41\x2a`)).toBe('A*');
+  });
+
+  it('SQL value autocomplete inserts a CR as the escape, never a raw CR', () => {
+    const base = { caret: 0, lang: 'sql' as const, fixes: [], attributes: [], coverage: new Map(), valueField: 'tenant', valuesLoading: false };
+    const draft = 'tenant_id = ';
+    const [item] = sqlSuggestions({
+      ...base,
+      draft,
+      caret: draft.length,
+      recent: [],
+      views: [],
+      call: null,
+      entities: [],
+      values: [{ value: 'qa\rtenant', label: 'qa\rtenant', count: 1 }],
+      context: {
+        kind: 'value',
+        field: 'tenant',
+        column: 'tenant_id',
+        prefix: '',
+        from: draft.length,
+        to: draft.length,
+        closeQuote: true,
+        openQuote: true,
+      },
+    });
+    expect(item?.insert).toBe(String.raw`'qa\rtenant'`);
+    expect(unquoteSql((item?.insert ?? '').slice(1, -1))).toBe('qa\rtenant');
+  });
+});
+
+describe("the tokenizer reads a dash that cannot negate as the server's bare word", () => {
+  it('keeps quotes and slashes inside that word, so no chip or term is invented from inside it', () => {
+    const q = '(action:x)-/a"b"category:auth tail/';
+    const fields = tokenize(q).filter((t) => t.kind === 'field');
+    expect(fields.map((t) => t.field)).toEqual(['action', '-/a"b"category']);
+    expect(compileQuery(q).params).toMatchObject({ q1: '-/a"b"category' });
+    // A quoted run after `)-` is not a phrase to the server: `category:auth` inside it is a real term.
+    const quoted = tokenize('(action:x)-"two category:auth tail"').filter((t) => t.kind === 'field');
+    expect(quoted.map((t) => [t.field, t.value])).toEqual([
+      ['action', 'x'],
+      ['category', 'auth'],
+    ]);
   });
 });
