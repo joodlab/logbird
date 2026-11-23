@@ -166,14 +166,16 @@ it('delivers a late non-UTC insert once, signs stored text and catches up on dis
         ],
       }),
     ]);
-    await discoverWebhookDeliveries(ch, endpoint);
+    const clock = { now: new Date(), rollout: endpoint.createdAt };
+    await discoverWebhookDeliveries(ch, endpoint, clock);
     expect(await prisma.webhookDelivery.count({ where: { endpointId: endpoint.id } })).toBe(0);
     await insertEvents(ch, [delayed]);
     await prisma.ingestReceipt.update({
       where: { projectId_eventId: { projectId: id, eventId: delayed.event_id } },
       data: { confirmedAt: new Date() },
     });
-    const scan = async () => discoverWebhookDeliveries(ch, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } }));
+    const scan = async () =>
+      discoverWebhookDeliveries(ch, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } }), { ...clock, now: new Date() });
     await scan();
     await scan();
     await tick();

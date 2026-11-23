@@ -244,3 +244,124 @@ it.runIf(process.env.CLICKHOUSE_URL)(
   },
   60_000,
 );
+
+it.runIf(process.env.CLICKHOUSE_URL)(
+  'entity search ranks an exact id, then id prefix, name prefix, substring and fuzzy, before activity',
+  async () => {
+    const ch = createClickHouseClient();
+    const p = `test-entity-search-${randomUUID()}`;
+    const now = Date.now();
+    let n = 0;
+    const event = (
+      count: number,
+      e: { tenant?: { id: string; name?: string }; actor?: { id: string; name?: string }; targets?: { type: string; id: string; name?: string }[] },
+    ) =>
+      Array.from({ length: count }, () => {
+        n += 1;
+        const r = normalizeEvent(
+          { id: `e${n}`, action: 'x', occurredAt: new Date(now - n * 1000).toISOString(), actor: { id: 'u', type: 'user' }, ...e },
+          { projectId: p, receivedAt: new Date(now) },
+        );
+        if (!r.ok) throw new Error(r.reason);
+        return r.row;
+      });
+    try {
+      await insertEvents(ch, [
+        // The searched-for tenant is quiet and unnamed; busier near-matches must not push it out of a short list.
+        ...event(1, { tenant: { id: 'biz_27' } }),
+        ...event(2, { tenant: { id: 'biz_270', name: 'Rimal Crescent' } }),
+        ...event(9, { tenant: { id: 'biz_2', name: 'Rawda Suites' } }),
+        ...event(8, { tenant: { id: 'biz_7', name: 'Marsa Lantern Suites' } }),
+        ...event(7, { tenant: { id: 'biz_1', name: 'Dar Al Wafa' } }),
+        ...event(6, { tenant: { id: 'biz_3', name: 'Qamar Dunes' } }),
+        ...event(9, { actor: { id: 'crm-hourly-biz_7', name: 'Hourly scheduler - Marsa Lantern Suites' } }),
+        ...event(1, { actor: { id: 'usr_131', name: 'Sophie Patel' } }),
+        ...event(9, { actor: { id: 'usr_1', name: 'Noura Al-Harbi' } }),
+        ...event(8, { actor: { id: 'usr_13', name: 'Omar Kapoor' } }),
+        ...event(1, { targets: [{ type: 'article', id: 'article_27_2', name: 'Umrah Season Packages' }] }),
+        ...event(9, { targets: [{ type: 'website', id: 'web_27_2', name: 'darb-pearl-residences.example.com' }] }),
+        ...event(9, { targets: [{ type: 'article', id: 'article_1_2', name: 'Umrah Packages' }] }),
+        // Colons: tenants whose ids merely end in `biz_27` are not it; a record type may itself contain a colon.
+        ...['a', 'b', 'c', 'd'].flatMap((x) => event(5, { tenant: { id: `${x}:biz_27` } })),
+        ...event(1, { targets: [{ type: 'catalog:item', id: 'item_99_1', name: 'Catalog item' }] }),
+        ...event(9, { targets: [{ type: 'post', id: 'item_99_10', name: 'Busier post' }] }),
+      ]);
+      const ids = async (kind: 'actor' | 'tenant' | 'target', q: string, limit = 4) =>
+        entityListResponseSchema.parse(await listEntities(ch, p, { kind, q, limit })).data.map((e) => e.id);
+      // Exact id first, whatever the activity and the cap; an id prefix next.
+      expect((await ids('tenant', 'biz_27')).slice(0, 2)).toEqual(['biz_27', 'biz_270']);
+      expect(await ids('tenant', 'BIZ_27', 1)).toEqual(['biz_27']);
+      expect(await ids('actor', 'usr_131', 1)).toEqual(['usr_131']);
+      // Case variants are exact too, but the literal id always leads: four busier `Biz_27`-style tenants never push it out.
+      await insertEvents(
+        ch,
+        ['Biz_27', 'bIz_27', 'biZ_27', 'BIZ_27'].flatMap((id, i) => event(i + 2, { tenant: { id } })),
+      );
+      expect((await ids('tenant', 'biz_27', 4))[0]).toBe('biz_27');
+      expect((await ids('tenant', 'BIZ_27', 1))[0]).toBe('BIZ_27');
+      // A record stored without a type (`:7`) is found by its bare id, even as a one-character search.
+      await insertEvents(ch, event(1, { targets: [{ id: '7' } as { type: string; id: string }] }));
+      expect(await ids('target', '7', 1)).toEqual([':7']);
+      // Only a record loses its own type prefix: four busier `x:biz_27` tenants never push out the exact `biz_27`.
+      expect(await ids('tenant', 'biz_27', 1)).toEqual(['biz_27']);
+      expect(await ids('target', 'item_99_1', 1)).toEqual(['catalog:item:item_99_1']);
+      // Targets are stored as type:id; the bare id is an exact match too.
+      expect(await ids('target', 'article_27_2', 1)).toEqual(['article:article_27_2']);
+      // A name prefix beats a busier entity that only contains the words.
+      expect(await ids('tenant', 'Marsa', 1)).toEqual(['biz_7']);
+      expect(await ids('actor', 'marsa')).toContain('crm-hourly-biz_7');
+      // One or two characters match only what starts with them (ids, a record's bare id, names), exact first.
+      expect(await ids('tenant', 'bi')).toEqual(expect.arrayContaining(['biz_2']));
+      expect(await ids('tenant', 'Ma', 1)).toEqual(['biz_7']);
+      expect(await ids('actor', 'rs')).toEqual([]);
+      // A renamed entity keeps its whole history: 99 events as "North", then one as "Marsa Main", in separate inserts
+      // (separate rollup parts). Wherever it is found, its count, first sighting and paging stay whole.
+      await insertEvents(ch, event(99, { actor: { id: 'act_renamed', name: 'North' } }));
+      await insertEvents(ch, event(1, { actor: { id: 'act_renamed', name: 'Marsa Main' } }));
+      await insertEvents(ch, event(10, { actor: { id: 'act_annex', name: 'Marsa Annex' } }));
+      for (const q of ['Ma', 'Marsa', 'act_renamed']) {
+        const found = entityListResponseSchema.parse(await listEntities(ch, p, { kind: 'actor', q, limit: 25 })).data;
+        const renamed = found.find((e) => e.id === 'act_renamed');
+        if (renamed) expect(renamed.events, q).toBe(100);
+        // Paging one at a time returns the same entities as one page: nothing skipped, nothing repeated.
+        const paged: string[] = [];
+        let next: string | undefined;
+        do {
+          const page = entityListResponseSchema.parse(await listEntities(ch, p, { kind: 'actor', q, limit: 1, cursor: next }));
+          paged.push(...page.data.map((e) => e.id));
+          next = page.nextCursor ?? undefined;
+        } while (next);
+        expect(paged, q).toEqual(found.map((e) => e.id));
+      }
+      expect((await listEntities(ch, p, { kind: 'actor', q: 'act_renamed', limit: 1 })).data[0]?.events).toBe(100);
+      // Without a search, the directory order is unchanged (most active first).
+      expect((await listEntities(ch, p, { kind: 'tenant', limit: 2 })).data.map((e) => e.id)).toEqual(['biz_2', 'biz_7']);
+      // A search pages by rank, then activity, without gaps or repeats; its cursor only fits a search.
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = entityListResponseSchema.parse(await listEntities(ch, p, { kind: 'tenant', q: 'biz_2', limit: 1, cursor }));
+        seen.push(...page.data.map((e) => e.id));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      // biz_2 is exact; every other match is an id prefix (biz_27, biz_270 and the case variants), busiest first. Paging one
+      // at a time returns exactly the one-page order.
+      const whole = entityListResponseSchema.parse(await listEntities(ch, p, { kind: 'tenant', q: 'biz_2', limit: 25 })).data;
+      expect(whole[0]?.id).toBe('biz_2');
+      // Then the id prefixes (any case), busiest first, before the ids that only contain it (`a:biz_27`).
+      const prefixes = whole.slice(1).filter((e) => e.id.toLowerCase().startsWith('biz_2'));
+      expect(whole.slice(1, 1 + prefixes.length)).toEqual(prefixes);
+      expect(prefixes.map((e) => e.events)).toEqual(prefixes.map((e) => e.events).sort((a, b) => b - a));
+      expect(whole.slice(1 + prefixes.length).every((e) => !e.id.toLowerCase().startsWith('biz_2'))).toBe(true);
+      expect(whole.map((e) => e.id)).toEqual(expect.arrayContaining(['biz_27', 'biz_270', 'BIZ_27']));
+      expect(seen).toEqual(whole.map((e) => e.id));
+      expect(new Set(seen).size).toBe(seen.length);
+      const searched = await listEntities(ch, p, { kind: 'tenant', q: 'biz', limit: 1 });
+      await expect(listEntities(ch, p, { kind: 'tenant', limit: 1, cursor: searched.nextCursor ?? '' })).rejects.toThrow('Invalid cursor');
+    } finally {
+      await purgeProject(ch, p);
+      await ch.close();
+    }
+  },
+  60_000,
+);

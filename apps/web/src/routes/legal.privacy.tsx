@@ -67,9 +67,10 @@ const sections: LegalSection[] = [
       <>
         <p>
           Only your email address is required; without it we can't reply. When you send the form we store your email address, the topic you choose,
-          and the name, company and message if you give them, with the time you sent it. We don't store your IP address or browser details with it. To
-          stop the form being flooded, the server keeps a count of submissions per IP address in memory only. The form never writes the address to
-          disk or to its own logs, and each count is dropped after its one-minute window (on a later request) or when the server restarts.
+          and the name, company, expected monthly event volume, needs and message if you give them, with the time you sent it. We don't store your IP
+          address or browser details with it. To stop the form being flooded, the server keeps a count of submissions per IP address in memory only.
+          The form never writes the address to disk or to its own logs, and each count is dropped after its one-minute window (on a later request) or
+          when the server restarts.
         </p>
         <p>
           We keep submissions on our server, and our server emails each one to our team's mailbox, where we answer them. We use them to reply, to

@@ -154,7 +154,7 @@ function SecurityPage() {
             items={[
               'Each project has a retention window, from 7 days to 10 years. New projects start at 90 days.',
               'A worker deletes events older than the window every hour. Each run is recorded and shown in Settings.',
-              "Before you lower retention, Logbird shows roughly how many events it will delete. To confirm, you type the project's slug. The purge starts immediately.",
+              "Before you lower retention, Logbird shows roughly how many events it will delete. To confirm, you type the project's slug. The purge starts right away.",
               'Deleting a project deletes all of its events.',
               <strong className="font-semibold" key="undo">
                 There's no archive and no undo.

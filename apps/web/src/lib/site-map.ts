@@ -1,3 +1,6 @@
+import { homeMeta } from '../content/home';
+import { pricing } from '../content/pricing';
+import { complianceEvidence } from '../content/use-cases/compliance-evidence';
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from './cloud';
 import { buildLog, postPath, posts, releases } from './publications';
@@ -14,6 +17,8 @@ export interface SitePage {
   inFooter?: boolean;
   /** Shorter label for the footer, when the title is long. */
   footerTitle?: string;
+  /** The whole <title>, when the page sets its own instead of "<title> · Logbird". */
+  fullTitle?: string;
   /**
    * Designed and approved for publishing. Pages that aren't ready render a placeholder, are `noindex`, and are left out
    * of the nav, footer, sitemap and llms.txt. Each page PR flips its own flag.
@@ -23,8 +28,7 @@ export interface SitePage {
 export const siteMap: SitePage[] = [
   {
     path: '/',
-    title: 'Home',
-    description: 'Open-source audit logs you can self-host.',
+    ...homeMeta,
     section: 'product',
     priority: 1,
     changefreq: 'daily',
@@ -77,14 +81,36 @@ export const siteMap: SitePage[] = [
     path: '/cloud',
     title: 'Cloud',
     description: CLOUD_OPEN
-      ? "Logbird Cloud runs the same open-source codebase for you. Early access for invited teams: request access or sign in. Pricing isn't set yet."
-      : "Logbird Cloud will run the same open-source codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.",
+      ? `Logbird Cloud runs the same ${GITHUB_PUBLIC ? 'open-source ' : ''}codebase for you. Early access for invited teams: request access or sign in. ${pricing.cloud.metaNote}`
+      : `Logbird Cloud will run the same ${GITHUB_PUBLIC ? 'open-source ' : ''}codebase for you. It isn't open yet. Join the waitlist. ${pricing.cloud.metaNote}`,
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
     ready: true,
     ogSlug: 'cloud',
     inNav: true,
+    inFooter: true,
+  },
+  {
+    path: '/pricing',
+    ...pricing.meta,
+    section: 'product',
+    priority: 0.8,
+    changefreq: 'weekly',
+    ready: true,
+    ogSlug: 'pricing',
+    inNav: true,
+    inFooter: true,
+  },
+  {
+    path: '/use-cases/compliance-evidence',
+    ...complianceEvidence.meta,
+    section: 'product',
+    priority: 0.7,
+    changefreq: 'monthly',
+    ready: true,
+    ogSlug: 'use-case-compliance-evidence',
+    inNav: false,
     inFooter: true,
   },
   {
@@ -193,7 +219,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/blog',
     title: 'Blog',
-    description: 'Notes on building an open-source audit log: design decisions, guarantees and limits, written by the people building Logbird.',
+    description: `Notes on building ${GITHUB_PUBLIC ? 'an open-source' : 'an'} audit log: design decisions, guarantees and limits, written by the people building Logbird.`,
     section: 'resources',
     priority: 0.6,
     changefreq: 'weekly',
@@ -218,7 +244,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/about',
     title: 'About',
-    description: 'Logbird is an open-source audit log for teams who owe their customers a trail of who did what.',
+    description: `Logbird is ${GITHUB_PUBLIC ? 'an open-source' : 'an'} audit log for teams who owe their customers a trail of who did what.`,
     section: 'company',
     priority: 0.6,
     changefreq: 'monthly',

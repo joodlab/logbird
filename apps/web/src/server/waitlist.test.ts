@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { notificationSettings } from './env';
 import { clientAddress, createRateLimiter, handleWaitlist } from './waitlist';
 import { createCloudflareStore } from './waitlist-cloudflare';
-import { createNodeStore } from './waitlist-node';
+import { createNodeStore, formatRecord } from './waitlist-node';
 
 const origin = 'https://site.example.test';
 const valid = { email: 'test-waitlist@example.test', interest: 'cloud', name: 'Fictional Tester' };
@@ -61,6 +61,106 @@ describe('waitlist boundary', () => {
     expect((await handleWaitlist(req(), { ...deps, ip: '192.0.2.2' })).status).toBe(200);
     expect((await handleWaitlist(req(), { ...deps, now: () => 61_000 })).status).toBe(200);
   });
+  it('stores the optional qualifying answers from JSON and native forms, and drops unanswered ones', async () => {
+    const json = dependencies();
+    await handleWaitlist(req({ ...valid, volume: '1m-10m', needs: ['compliance', 'customer-audit-log', 'compliance'] }), json);
+    expect(json.store).toHaveBeenCalledWith(expect.objectContaining({ volume: '1m-10m', needs: ['compliance', 'customer-audit-log'] }));
+
+    const native = dependencies();
+    const body = new URLSearchParams([
+      ['email', valid.email],
+      ['interest', 'cloud'],
+      ['volume', ''],
+      ['needs', 'investigations'],
+      ['needs', 'other'],
+    ]);
+    const response = await handleWaitlist(
+      new Request(`${origin}/site-api/waitlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin },
+        body,
+      }),
+      native,
+    );
+    expect(response.status).toBe(303);
+    const [record] = native.store.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(record).toMatchObject({ needs: ['investigations', 'other'] });
+    expect(record).not.toHaveProperty('volume', expect.anything());
+
+    // The browser sends an empty list when no box is ticked.
+    const none = dependencies();
+    await handleWaitlist(req({ ...valid, volume: '', needs: [] }), none);
+    const [stored] = none.store.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(stored.volume).toBeUndefined();
+    expect(stored.needs).toBeUndefined();
+
+    for (const input of [
+      { ...valid, volume: 'lots' },
+      { ...valid, needs: ['pricing'] },
+      // Both forms send a list; a scalar is a client mistake, not a one-item list.
+      { ...valid, needs: 'compliance' },
+    ]) {
+      const deps = dependencies();
+      expect((await handleWaitlist(req(input), deps)).status).toBe(400);
+      expect(deps.store).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses a repeated single field in a native form, whichever value comes last', async () => {
+    for (const volumes of [
+      ['lots', 'unsure'],
+      ['unsure', 'lots'],
+      ['unsure', 'unsure'],
+    ]) {
+      const deps = dependencies();
+      const body = new URLSearchParams([['email', valid.email], ['interest', 'cloud'], ...volumes.map((volume) => ['volume', volume])]);
+      const response = await handleWaitlist(
+        new Request(`${origin}/site-api/waitlist`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin },
+          body,
+        }),
+        deps,
+      );
+      expect(response.headers.get('Location')).toBe('/contact?status=validation_error#waitlist-validation_error');
+      expect(deps.store).not.toHaveBeenCalled();
+    }
+  });
+
+  it('answers a bot with the silent success even when it repeats fields', async () => {
+    for (const pairs of [
+      [
+        ['volume', 'lots'],
+        ['volume', 'unsure'],
+        ['website', 'spam'],
+      ],
+      [
+        ['website', 'spam'],
+        ['website', ''],
+      ],
+    ]) {
+      const deps = dependencies();
+      const response = await handleWaitlist(
+        new Request(`${origin}/site-api/waitlist`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin },
+          body: new URLSearchParams([['email', valid.email], ['interest', 'cloud'], ...pairs]),
+        }),
+        deps,
+      );
+      expect(response.headers.get('Location')).toBe('/contact?status=ok#waitlist-ok');
+      expect(deps.store).not.toHaveBeenCalled();
+    }
+  });
+
+  it('leaves unanswered questions out of the notification email', () => {
+    const base = { receivedAt: '2026-11-22T00:00:00.000Z', email: valid.email, interest: 'cloud' as const };
+    expect(formatRecord({ ...base, volume: undefined, needs: undefined })).toBe(
+      `receivedAt: 2026-11-22T00:00:00.000Z\nemail: ${valid.email}\ninterest: cloud`,
+    );
+    expect(formatRecord({ ...base, needs: ['compliance', 'other'] })).toContain('needs: compliance, other');
+  });
+
   it('redirects native form submissions for success and validation errors', async () => {
     for (const [email, status] of [
       ['test-waitlist@example.test', 'ok'],

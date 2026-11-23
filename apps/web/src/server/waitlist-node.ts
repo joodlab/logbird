@@ -47,6 +47,13 @@ export function createNodeStore(
     }
   };
 }
+/** The notification body: one `key: value` line per answered field; unanswered optional questions are left out. */
+export const formatRecord = (record: WaitlistRecord) =>
+  Object.entries(record)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
+    .join('\n');
+
 export async function notifyWaitlist(record: WaitlistRecord) {
   const transport = nodemailer.createTransport({
     host: env.SMTP_HOST,
@@ -65,9 +72,7 @@ export async function notifyWaitlist(record: WaitlistRecord) {
       to: env.WAITLIST_NOTIFY_TO as string,
       // The topic leads the subject, so privacy requests (answered within 30 days) stand out in the team mailbox.
       subject: `Logbird form: ${record.interest}`,
-      text: Object.entries(record)
-        .map(([key, value]) => `${key}: ${value ?? ''}`)
-        .join('\n'),
+      text: formatRecord(record),
     });
   } finally {
     transport.close();

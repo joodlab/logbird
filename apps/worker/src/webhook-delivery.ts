@@ -42,74 +42,100 @@ const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }
   scopeMask: { equals: scopeMask },
 });
 
-export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint'>, projectId?: string) {
-  const held = new Map<string, { scope: ScopeColumns; updatedAt: Date }>();
-  const claims = await prisma.$transaction(async (tx) => {
-    // Sample before PostgreSQL's clock so the local retry deadline is conservative and immune to host clock skew.
-    const leaseDeadline = performance.now() + LEASE_MS;
-    const now = await webhookDatabaseTime(tx);
-    // The delivery queue's global concurrency is one. Limit each endpoint independently and exclude live leases
-    // from its allowance, even after a worker restarts while some requests are still in flight.
-    const liveLeases = await tx.webhookDelivery.count({
-      where: { status: 'pending', leaseUntil: { gt: now }, ...(projectId ? { endpoint: { projectId } } : {}) },
-    });
-    const capacity = options.concurrency - liveLeases;
-    if (capacity <= 0) return [];
-    const due = await tx.$queryRaw<(WebhookDelivery & { scope: ScopeColumns; scopeUpdatedAt: Date })[]>(Prisma.sql`
-      SELECT d.*, e."updatedAt" AS "scopeUpdatedAt", jsonb_build_object(
-        'scopeTenantId', e."scopeTenantId", 'scopeTargetType', e."scopeTargetType",
-        'scopeTargetId', e."scopeTargetId", 'scopeMask', e."scopeMask"
-      ) AS scope FROM "WebhookEndpoint" e
-      CROSS JOIN LATERAL (
-        SELECT id FROM "WebhookDelivery"
-        WHERE "endpointId" = e.id AND status = 'pending'
-          AND "nextAttemptAt" <= ${now} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${now})
-        ORDER BY "nextAttemptAt", id
-        LIMIT greatest(0, least(
-          ${options.perEndpoint} - (
-            SELECT count(*) FROM "WebhookDelivery"
-            WHERE "endpointId" = e.id AND status = 'pending' AND "leaseUntil" > ${now}
-          ),
-          ${MAX_ENDPOINT_ATTEMPTS_PER_SECOND} - (
-            SELECT count(*) FROM "WebhookAttempt" a JOIN "WebhookDelivery" recent ON recent.id = a."deliveryId"
-            WHERE recent."endpointId" = e.id AND a."startedAt" > ${new Date(+now - 1000)}
-          )
-        ))
-      ) candidate
-      JOIN "WebhookDelivery" d ON d.id = candidate.id
-      WHERE e.enabled AND NOT e."scopeReviewRequired" AND NOT e."filterReviewRequired"
-        ${projectId ? Prisma.sql`AND e."projectId" = ${projectId}` : Prisma.empty}
-      ORDER BY d."nextAttemptAt", d.id LIMIT ${capacity} FOR UPDATE OF d SKIP LOCKED`);
-    const claims: Claim[] = [];
-    for (const row of due) {
-      if (storedWebhookScope(row.scope) === undefined) {
-        held.set(row.endpointId, { scope: row.scope, updatedAt: row.scopeUpdatedAt });
-        continue;
-      }
-      if (row.leaseUntil)
-        await tx.webhookAttempt.updateMany({
-          where: { deliveryId: row.id, number: row.attemptNumber, status: 'sending' },
-          data: { status: 'interrupted' },
-        });
-      const expired = row.retryUntil !== null && row.retryUntil <= now;
-      const delivery = await tx.webhookDelivery.update({
-        where: { id: row.id },
-        data: {
-          leaseUntil: new Date(+now + LEASE_MS),
-          ...(!expired && {
-            attemptNumber: { increment: 1 },
-            windowAttempts: { increment: 1 },
-            retryUntil: row.retryUntil ?? new Date(+now + RETRY_WINDOW_MS),
-          }),
-        },
+type DueRow = { id: string; endpointId: string; projectId: string; scope: ScopeColumns; scopeUpdatedAt: Date };
+
+/** Lock, recheck and claim one project's chosen rows with set-based writes in a short transaction of their own. */
+async function claimRows(ids: string[], now: Date, leaseDeadline: number): Promise<Claim[]> {
+  // Bind UTC wall time to the timestamp columns independently of the session time zone.
+  const at = (time: Date) => Prisma.sql`${time.toISOString()}::timestamp`;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL lock_timeout = '1s'`;
+    await tx.$executeRaw`SET LOCAL statement_timeout = '2s'`;
+    // A settlement, resend or endpoint edit can change a row between selection and this lock.
+    const locked = await tx.$queryRaw<{ id: string; leased: boolean }[]>`
+      SELECT id, "leaseUntil" IS NOT NULL AS leased FROM "WebhookDelivery"
+      WHERE id = ANY(${ids}::text[]) AND status = 'pending' AND "nextAttemptAt" <= ${at(now)}
+        AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${at(now)})
+      ORDER BY "nextAttemptAt", id FOR UPDATE SKIP LOCKED`;
+    if (!locked.length) return [];
+    const leased = locked.filter((row) => row.leased).map((row) => row.id);
+    if (leased.length)
+      await tx.$executeRaw`
+        UPDATE "WebhookAttempt" a SET status = 'interrupted' FROM "WebhookDelivery" d
+        WHERE d.id = ANY(${leased}::text[]) AND a."deliveryId" = d.id AND a.number = d."attemptNumber" AND a.status = 'sending'`;
+    // An expired row only takes the lease, so the claimant can settle its ended retry window without a new attempt.
+    const claimed = await tx.$queryRaw<(WebhookDelivery & { expired: boolean })[]>`
+      UPDATE "WebhookDelivery" d SET
+        "leaseUntil" = ${at(new Date(+now + LEASE_MS))},
+        "attemptNumber" = d."attemptNumber" + CASE WHEN d."retryUntil" <= ${at(now)} THEN 0 ELSE 1 END,
+        "windowAttempts" = d."windowAttempts" + CASE WHEN d."retryUntil" <= ${at(now)} THEN 0 ELSE 1 END,
+        "retryUntil" = coalesce(d."retryUntil", ${at(new Date(+now + RETRY_WINDOW_MS))})
+      WHERE d.id = ANY(${locked.map((row) => row.id)}::text[])
+      RETURNING d.*, coalesce(d."retryUntil" <= ${at(now)}, false) AS expired`;
+    const attempts = claimed.filter((row) => !row.expired);
+    if (attempts.length)
+      await tx.webhookAttempt.createMany({
+        data: attempts.map((row) => ({ deliveryId: row.id, number: row.attemptNumber, startedAt: now, status: 'sending' })),
       });
-      if (!expired)
-        await tx.webhookAttempt.create({ data: { deliveryId: row.id, number: delivery.attemptNumber, startedAt: now, status: 'sending' } });
-      claims.push({ delivery, expired, leaseDeadline });
-    }
-    return claims;
+    const byId = new Map(claimed.map(({ expired, ...delivery }) => [delivery.id, { delivery, expired, leaseDeadline }]));
+    return locked.flatMap(({ id }) => byId.get(id) ?? []);
   });
-  // Release delivery locks before marking endpoints. Endpoint edits lock the endpoint before its deliveries.
+}
+
+export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint'>, projectId?: string | readonly string[]) {
+  const projects = projectId === undefined ? undefined : typeof projectId === 'string' ? [projectId] : [...projectId];
+  const held = new Map<string, { scope: ScopeColumns; updatedAt: Date }>();
+  // Sample before PostgreSQL's clock so the local retry deadline is conservative and immune to host clock skew.
+  const leaseDeadline = performance.now() + LEASE_MS;
+  const now = await webhookDatabaseTime();
+  // The delivery queue's global concurrency is one. Limit each endpoint independently and exclude live leases
+  // from its allowance, even after a worker restarts while some requests are still in flight.
+  const liveLeases = await prisma.webhookDelivery.count({
+    where: { status: 'pending', leaseUntil: { gt: now }, ...(projects ? { endpoint: { projectId: { in: projects } } } : {}) },
+  });
+  const capacity = options.concurrency - liveLeases;
+  if (capacity <= 0) return [];
+  // Choose without locks, then claim each project's rows in its own transaction: a slow or failing claim for one
+  // project cannot roll back another project's claims.
+  const due = await prisma.$queryRaw<DueRow[]>(Prisma.sql`
+    SELECT d.id, d."endpointId", e."projectId", e."updatedAt" AS "scopeUpdatedAt", jsonb_build_object(
+      'scopeTenantId', e."scopeTenantId", 'scopeTargetType', e."scopeTargetType",
+      'scopeTargetId', e."scopeTargetId", 'scopeMask', e."scopeMask"
+    ) AS scope FROM "WebhookEndpoint" e
+    CROSS JOIN LATERAL (
+      SELECT id FROM "WebhookDelivery"
+      WHERE "endpointId" = e.id AND status = 'pending'
+        AND "nextAttemptAt" <= ${now} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${now})
+      ORDER BY "nextAttemptAt", id
+      LIMIT greatest(0, least(
+        ${options.perEndpoint} - (
+          SELECT count(*) FROM "WebhookDelivery"
+          WHERE "endpointId" = e.id AND status = 'pending' AND "leaseUntil" > ${now}
+        ),
+        ${MAX_ENDPOINT_ATTEMPTS_PER_SECOND} - (
+          SELECT count(*) FROM "WebhookAttempt" a JOIN "WebhookDelivery" recent ON recent.id = a."deliveryId"
+          WHERE recent."endpointId" = e.id AND a."startedAt" > ${new Date(+now - 1000)}
+        )
+      ))
+    ) candidate
+    JOIN "WebhookDelivery" d ON d.id = candidate.id
+    WHERE e.enabled AND NOT e."scopeReviewRequired" AND NOT e."filterReviewRequired"
+      ${projects ? Prisma.sql`AND e."projectId" = ANY(${projects}::text[])` : Prisma.empty}
+    ORDER BY d."nextAttemptAt", d.id LIMIT ${capacity}`);
+  const byProject = new Map<string, string[]>();
+  for (const row of due) {
+    if (storedWebhookScope(row.scope) === undefined) held.set(row.endpointId, { scope: row.scope, updatedAt: row.scopeUpdatedAt });
+    else byProject.set(row.projectId, [...(byProject.get(row.projectId) ?? []), row.id]);
+  }
+  const claims: Claim[] = [];
+  for (const [project, ids] of byProject) {
+    try {
+      claims.push(...(await claimRows(ids, now, leaseDeadline)));
+    } catch {
+      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, deliveries: ids.length }));
+    }
+  }
+  // Mark endpoints after the claim transactions commit. Endpoint edits lock the endpoint before its deliveries.
   await Promise.all(
     [...held].map(async ([id, { scope, updatedAt }]) => {
       try {
@@ -285,16 +311,27 @@ function sameDispatchSettings(current: WebhookEndpoint, snapshot: WebhookEndpoin
 
 async function attemptDelivery(
   ch: ClickHouseClient,
-  delivery: WebhookDelivery,
+  { delivery, leaseDeadline }: Claim,
   endpoint: WebhookEndpoint,
   scope: WebhookScope | null,
   options: DeliveryOptions,
   warnOverlap: (time: Date) => void,
 ): Promise<DeliveryResult | undefined> {
   if (scope?.mask?.includes('actor_email') && !options.maskKey) return { error: 'signing_failed' } as const;
-  const event = delivery.receivedAt
-    ? await webhookEvent(ch, endpoint, scope, delivery.eventId, delivery.receivedAt, delivery.createdAt)
-    : testEvent(delivery, endpoint.projectId);
+  const transportTimeout = options.transport?.totalTimeoutMs ?? TOTAL_TIMEOUT_MS;
+  let event: Awaited<ReturnType<typeof webhookEvent>> | ReturnType<typeof testEvent>;
+  if (delivery.receivedAt) {
+    // The event read runs before the HTTP timer. Stop it while the lease still fits the dispatch, the request and
+    // settlement. A slow read then becomes a retryable lookup failure with a later attempt time, so it cannot hold
+    // the only delivery slot while other endpoints wait.
+    const budget = Math.floor(leaseDeadline - SETTLE_RESERVE_MS - 2 * transportTimeout - performance.now());
+    if (budget <= 0) return { error: 'lookup_failed' } as const;
+    try {
+      event = await webhookEvent(ch, endpoint, scope, delivery.eventId, delivery.receivedAt, AbortSignal.timeout(budget));
+    } catch {
+      return { error: 'lookup_failed' } as const;
+    }
+  } else event = testEvent(delivery, endpoint.projectId);
   if (!event) return { error: 'event_unavailable' } as const;
   if (event === 'scope_mismatch') return { error: event };
   const webhookId = delivery.webhookId ?? legacyWebhookHeaderId(delivery.eventId);
@@ -330,9 +367,13 @@ async function attemptDelivery(
           await boundDispatchWaits(tx, dispatchDeadline);
           const clockStarted = performance.now();
           const signingTime = await webhookDatabaseTime(tx);
-          const timeRemaining =
-            Math.min(+live.leaseUntil - SETTLE_RESERVE_MS - (options.transport?.totalTimeoutMs ?? TOTAL_TIMEOUT_MS), +live.retryUntil) - +signingTime;
-          if (timeRemaining <= 0) return;
+          const leaseRemaining = +live.leaseUntil - SETTLE_RESERVE_MS - transportTimeout - +signingTime;
+          const retryRemaining = +live.retryUntil - +signingTime;
+          // The next claim settles an ended retry window. Without enough lease left, record a retryable lookup failure
+          // so the row moves back in the queue instead of winning the next claim again.
+          if (retryRemaining <= 0) return;
+          if (leaseRemaining <= 0) return { error: 'lookup_failed' } as const;
+          const timeRemaining = Math.min(leaseRemaining, retryRemaining);
           await boundDispatchWaits(tx, dispatchDeadline);
           const secrets = await tx.webhookSecret.findMany({
             where: { endpointId: endpoint.id, ...activeWebhookSecrets(signingTime) },
@@ -350,7 +391,8 @@ async function attemptDelivery(
             return { error: 'signing_failed' } as const;
           }
           // Account for time spent preparing the signature without relying on the worker's wall clock.
-          if (performance.now() - clockStarted >= timeRemaining) return;
+          if (performance.now() - clockStarted >= timeRemaining)
+            return leaseRemaining <= retryRemaining ? ({ error: 'lookup_failed' } as const) : undefined;
           if (performance.now() >= dispatchDeadline) return { error: 'lookup_failed' } as const;
           // Start under the locks so Prisma can release them without waiting for the receiver.
           return startRequest(timestamp, signature);
@@ -384,7 +426,8 @@ async function warnSecretOverlap(endpoint: WebhookEndpoint, overlapAt: Date) {
   }
 }
 
-async function sendClaim(ch: ClickHouseClient, { delivery, expired, leaseDeadline }: Claim, options: DeliveryOptions) {
+async function sendClaim(ch: ClickHouseClient, claim: Claim, options: DeliveryOptions) {
+  const { delivery, expired, leaseDeadline } = claim;
   const start = performance.now();
   let endpoint: WebhookEndpoint | null | undefined;
   let result: DeliveryResult | undefined;
@@ -395,7 +438,7 @@ async function sendClaim(ch: ClickHouseClient, { delivery, expired, leaseDeadlin
       const scope = storedWebhookScope(endpoint);
       if (scope !== undefined) {
         if (expired) return settle(delivery, endpoint, undefined, 0, options.failureLimit);
-        result = await attemptDelivery(ch, delivery, endpoint, scope, options, (time) => {
+        result = await attemptDelivery(ch, claim, endpoint, scope, options, (time) => {
           overlapAt = time;
         });
       }
@@ -438,7 +481,7 @@ async function sendClaim(ch: ClickHouseClient, { delivery, expired, leaseDeadlin
   );
 }
 
-export async function deliverWebhooks(ch: ClickHouseClient, options: DeliveryOptions, projectId?: string) {
+export async function deliverWebhooks(ch: ClickHouseClient, options: DeliveryOptions, projectId?: string | readonly string[]) {
   const claims = await claimWebhookDeliveries(options, projectId);
   const results = await Promise.allSettled(claims.map((claim) => sendClaim(ch, claim, options)));
   for (const [index, result] of results.entries()) {

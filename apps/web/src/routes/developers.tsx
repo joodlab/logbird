@@ -378,7 +378,7 @@ function DevelopersPage() {
       <FeatureRow
         eyebrow="Integrations"
         id="integrations"
-        limit="Express, Next.js, Laravel and Django are planned. We'll add them when we use those stacks ourselves."
+        limit="There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from those stacks."
         title="Middleware for the stacks we run."
         visual={<SiteCodeTabs tabs={[{ id: 'hono', label: 'Hono', code: hono, language: 'ts' }]} />}
       >
@@ -523,7 +523,7 @@ function DevelopersPage() {
       <FeatureRow
         eyebrow="Read API"
         id="read-api"
-        limit="A read key can read the whole project. A query filter is not authorization: your backend must check the tenant and record on every request, including each next page. The read API accepts the query language, not SQL mode. Tenant-scoped read tokens are on the roadmap."
+        limit="A read key can read the whole project. A query filter is not authorization: your backend must check the tenant and record on every request, including each next page. The read API accepts the query language, not SQL mode."
         title="Read your own history back."
         visual={<SiteCode code={read} language="ts" title="Your backend" />}
       >

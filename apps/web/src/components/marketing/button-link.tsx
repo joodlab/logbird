@@ -29,13 +29,15 @@ type ButtonLinkProps = {
   className?: string;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
   search?: Record<string, string>;
+  /** A section anchor on the target page, without `#`. */
+  hash?: string;
 } & ({ to: string; href?: never } | { href: string; to?: never });
 
 /** Internal links to pages that aren't designed yet (site-map `ready: false`) render nothing until those pages ship. */
 const unreadyPaths = new Set(siteMap.filter((page) => !page.ready).map((page) => page.path));
 
 /** A link styled as a button. `to` is an internal route (client navigation); `href` is anything else. */
-export function ButtonLink({ to, href, variant = 'default', size = 'default', className, children, onClick, search }: ButtonLinkProps) {
+export function ButtonLink({ to, href, variant = 'default', size = 'default', className, children, onClick, search, hash }: ButtonLinkProps) {
   if (to !== undefined && unreadyPaths.has(to)) {
     return null;
   }
@@ -45,7 +47,7 @@ export function ButtonLink({ to, href, variant = 'default', size = 'default', cl
       // A call to action is never "current" for a sub-path: exact matching keeps the 404 page's "Product tour" button
       // inactive at /product/x, as it is in the prerendered 404.html that URL hydrates. The query string never matters:
       // /contact?status=… hydrates the same contact/index.html.
-      <Link activeOptions={{ exact: true, includeSearch: false }} className={classes} onClick={onClick} search={search} to={to}>
+      <Link activeOptions={{ exact: true, includeSearch: false }} className={classes} onClick={onClick} hash={hash} search={search} to={to}>
         {children}
       </Link>
     );

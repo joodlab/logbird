@@ -1,6 +1,7 @@
 import type { EntityKind, EntitySort, QueryLang } from '@logbird/contracts';
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { authClient } from '@/lib/auth-client';
+import { entityMatchRank } from '@/lib/entities';
 import { isBudgetLimit, isOverBudget } from '@/lib/query-budget';
 import { resolveRange } from '@/lib/range';
 import { api, langParam } from './client';
@@ -279,6 +280,31 @@ export const webhooksQuery = (projectId: string) =>
     queryKey: [...keys.project(projectId), 'webhooks'] as const,
     queryFn: ({ signal }) => api.webhooks.list(projectId, signal),
     retry: shouldRetry,
+  });
+
+/**
+ * Entities of every kind whose id or name matches `text` (Jump to, the explorer's empty state), best match first: the
+ * server ranks each kind (an exact id always leads), and the kinds are merged by the same rank. A kind that fails to
+ * load is left out rather than failing the lookup, and such a partial answer is never treated as fresh.
+ */
+export const entitySearchQuery = (projectId: string, text: string, perKind = 4) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'entity-search', text, perKind] as const,
+    queryFn: async ({ signal }) => {
+      const kinds: EntityKind[] = ['actor', 'tenant', 'executor', 'target'];
+      const settled = await Promise.allSettled(kinds.map((kind) => api.entities.list(projectId, { kind, q: text, limit: perKind }, signal)));
+      const failure = settled.find((r) => r.status === 'rejected');
+      if (failure && settled.every((r) => r.status === 'rejected')) throw failure.reason;
+      const partial = Boolean(failure);
+      const lists = settled.map((r) => (r.status === 'fulfilled' ? r.value : { data: [] }));
+      const found = lists
+        .flatMap((l) => l.data)
+        .map((e, i) => ({ e, i, rank: entityMatchRank(e, text) }))
+        .sort((a, b) => a.rank - b.rank || a.i - b.i)
+        .map((x) => x.e);
+      return { entities: found, partial };
+    },
+    staleTime: (query) => (query.state.data?.partial ? 0 : 30_000),
   });
 
 export const keysQuery = (projectId: string) =>

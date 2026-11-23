@@ -1,6 +1,6 @@
 # Logbird for .NET
 
-Audit logging for C# backends. Record who did what to which record, then search, prove and export that history
+Audit logging for C# backends. Record who did what to which record, then search and export that history
 in [Logbird](https://github.com/joodlab/logbird). The client is built to sit inside a production application:
 
 - **It never slows your requests.** `Track` serializes the event and queues it in memory. A background loop sends
@@ -15,7 +15,12 @@ in [Logbird](https://github.com/joodlab/logbird). The client is built to sit ins
   bytes, and Logbird stores one event per id.
 
 Targets .NET 8 and later (trimming and Native AOT compatible) and .NET Standard 2.0, so .NET Framework 4.6.2+
-applications can use it too. Dependencies: `System.Text.Json` and `Microsoft.Extensions.Logging.Abstractions`.
+applications can use it too. Dependencies: `System.Text.Json` and `Microsoft.Extensions.Logging.Abstractions`. A .NET
+Framework project also needs a reference to `System.Net.Http` (`<Reference Include="System.Net.Http" />`).
+
+New to Logbird? [Logbird for .NET](https://github.com/joodlab/logbird/blob/master/docs/sdk-dotnet.md) walks through a
+first event in an ASP.NET Core app, and [`examples/aspnetcore`](https://github.com/joodlab/logbird/tree/master/examples/aspnetcore)
+is a complete app to copy from.
 
 ## Install
 
@@ -86,20 +91,22 @@ one, and `AuditChange.Secret("password")` records that a secret changed without 
 ### Identifiers
 
 Actor, impersonator, executor and tenant ids and each target's type and id are **sent exactly as you give them**:
-never trimmed, truncated or converted. The text is the identity, so `"user_42"` and `" user_42 "` are different
-actors. Before sending, the client applies the server's identifier rule (servers before that rule ships may still trim
-identifiers when they store them; the client never does):
+never trimmed, truncated or converted, so `"user_42"` and `" user_42 "` reach Logbird as different strings. Logbird
+servers up to 0.2.x keep each as sent in the stored payload but index both as the same actor `user_42`, so a search for
+`" user_42 "` does not find the event ([#269](https://github.com/joodlab/logbird/issues/269)). They also index only the
+first 64 targets of an event. Before sending, the client checks every identifier:
 
-- An identifier that cannot be stored as sent drops the event with `DropReason.InvalidEntityId` (reason
-  `invalid_entity_id`): longer than 256 UTF-16 code units (64 for a target type), containing a lone surrogate, or more
-  than 256 targets on one event.
-- Surrounding whitespace is kept and reported as a `LogbirdEventWarning` through `OnError` and the logger.
-- An empty string means the field is absent.
+- One that Logbird would not index as given is refused by the SDK, and the event is not sent: it is dropped with
+  `DropReason.InvalidEntityId` (reason `invalid_entity_id`). That is an identifier longer than 256 UTF-16 code units (64
+  for a target type) or containing a lone surrogate, or more than 256 targets on one event.
+- Surrounding whitespace is sent as given and reported as a `LogbirdEventWarning` through `OnError` and the logger.
+- An empty string is not checked and is sent as `""`; Logbird treats an empty id as no id when it indexes the event.
 
 Identifiers are strings in this SDK. For a numeric id, pass an integer's invariant text, for example
 `userId.ToString(CultureInfo.InvariantCulture)` for a `long` gives `"42"`. Avoid formatting a `decimal` (`42.0m` keeps its
-scale and becomes `"42.0"`). The server stores a numeric identifier as the plain decimal text of its value, so the string
-`"42"` and the number `42` are the same identity, while `"42.0"` is a different one. For a `Guid`, pick one format
+scale and becomes `"42.0"`). Logbird 0.2.x indexes a JSON-number id such as `42` (sent by another SDK) as `42`, so the
+string `"42"` from this SDK and the number `42` match, while `"42.0"` does not. A very large number can be indexed in
+another spelling (for example `1e33`), so keep such ids as strings everywhere. For a `Guid`, pick one format
 (`guid.ToString()` gives lowercase `d0c4…`) and keep it, because a different format is a different identity.
 
 The server can also attach warnings to stored events (for example an `occurredAt` outside the accepted window, stored
@@ -230,7 +237,7 @@ using var reader = new LogbirdReadClient(new LogbirdReadOptions
 });
 
 var page = await reader.SearchAsync(new EventSearch { Query = "action:invoice.* actor:user_42", Limit = 50 });
-await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: invoice.Id)))
+await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: invoice.Id, targetType: "invoice")))
 {
     Console.WriteLine($"{e.Timestamp:u} {e.Actor?.Name} {e.Action}");
 }
@@ -243,10 +250,52 @@ against a misbehaving server, the client stops with `LogbirdApiException` (`pagi
 its last 1,000 pages, and you can bound every iteration with `LogbirdReadOptions.MaxPages` (code `page_limit` when more
 pages remain).
 
-`ForTrail` throws `ArgumentException` when it has no selector or query, for an empty selector (pass `null` to leave one
-out) and for a value ending in `*` (the query language would read it as a prefix wildcard), so a bug cannot silently
-widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
+`ForTrail` builds the same query as the TypeScript SDK's `trailQuery`. With `targetType`, it matches a target of exactly
+that type and id together (the `record:` query field); with only `targetId`, any target with that id. Every value is
+quoted, and quotes, backslashes, `*` and line breaks are matched literally, so a value can never widen the search. A
+trail with `targetType`, or with a selector that ends in `*` or contains a carriage return, needs Logbird 0.2.0 or later
+(older servers read those differently): the read client checks the server's version once (from its public OpenAPI
+document, shared by all searches) and throws `LogbirdApiException` instead of sending the trail: `server_too_old`, or
+`server_version_unknown` when the document has no readable version, or `unreachable` when it cannot be fetched. A failed
+check is retried by the next search. `ForTrail` throws `ArgumentException` when it has no selector or query, or for an empty selector (pass `null`
+to leave one out), so a bug cannot silently widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
 may see the tenant or record first, on every request including next-page requests.
+
+## Show customers their own audit trail
+
+For a multi-tenant product, keep one unscoped read key on your server and mint a short-lived **viewer token** for each
+customer view. Logbird enforces the token's scope on every read route, so nothing in a query can widen it; see
+[scoped read access](https://github.com/joodlab/logbird/blob/master/docs/scoped-read-access.md). These routes need
+Logbird 0.2.0 or later (the client checks the server's version first).
+
+```csharp
+// On your server, after checking that the signed-in user may see this business:
+var token = await reader.MintViewerTokenAsync(
+    new ViewerScope(businessId) { Target = new ViewerScopeTarget("website", websiteId), Mask = ViewerMask.Ip },
+    lifetime: TimeSpan.FromMinutes(15));
+// Hand token.Token to the browser (never in a URL); it sends it as "Authorization: Bearer".
+// The browser's exact origin (https://app.example.com) must be on the minting key's embed origins.
+
+// Or read with the token from another server:
+using var scoped = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = endpoint, ReadKey = token.Token });
+var byAction = await scoped.FacetsAsync(new FacetQuery("action") { By = "outcome" });
+await using var file = File.Create("audit.csv");
+await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
+```
+
+- A scope names a tenant and, optionally, one target (type and id together), action prefixes and masks (`Ip`,
+  `UserAgent`, `ActorEmail`; any mask also hides the original payload). Ids must be as Logbird stored them; the client
+  rejects a scope that could never match before sending it.
+- A browser can use a viewer token only from an origin listed in the minting key's **embed origins** (set when the key
+  is created, as `https://host[:port]`, lowercase, no path). From any other origin every read answers
+  `403 origin_not_allowed`. A server-to-server call sends no `Origin` and is not affected.
+- Minting fails with `scope_mismatch` (and returns no token) if the server grants a different scope than requested,
+  or if the token's own scope or expiry differs from the grant. `ViewerToken.ToString()` never prints the token.
+- `FacetsAsync` counts events by a stored field (such as `action`, `outcome`, `tenant`, `target.type`) or an attribute
+  (`attr.<path>`), optionally split by a second. Virtual selectors such as `record` work in `Query` but cannot be
+  counted. `ExportAsync` streams CSV, JSONL or JSONL with payloads (`JsonlEvidence`, refused for a masked scope) into
+  your stream. Queries are at most 4,096 characters. The read `Timeout` covers the start of an export; pass a
+  cancellation token to bound the download.
 
 ## Verify webhooks
 

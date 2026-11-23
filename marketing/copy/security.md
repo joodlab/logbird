@@ -40,7 +40,7 @@ path: /security
   - Each project has a retention window, from 7 days to 10 years. New projects start at 90 days.
   - A worker deletes events older than the window every hour. Each run is recorded and shown in Settings.
   - Before you lower retention, Logbird shows roughly how many events it will delete. To confirm, you type the
-    project's slug. The purge starts immediately.
+    project's slug. The purge starts right away.
   - Deleting a project deletes all of its events.
   - There's no archive and no undo.
   <!-- source: docs/SPEC.md §1.4, §4 (retention), §5 (preview), §6, §7.1; packages/contracts/src/api.ts RETENTION_OPTIONS -->
@@ -153,7 +153,7 @@ path: /security
 - **id:** `reporting`
 - **eyebrow:** Responsible disclosure
 - **heading:** Report a vulnerability privately.
-- **body:** Please don't post details in a public issue. Email the security contact below. Include the affected
+- **body:** Please don't post details in a public issue. Email <security contact>. Include the affected
   version, a reproduction using fictional data, and the impact. We'll coordinate the fix and the disclosure with
   you. We don't offer a response-time SLA yet.
   <!-- site rule: the site names only the security email, never a GitHub reporting flow -->

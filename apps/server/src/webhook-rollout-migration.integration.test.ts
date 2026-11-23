@@ -141,7 +141,7 @@ it.each(['Pacific/Auckland', 'America/Los_Angeles'])('detects a stranded rollout
     for (const sql of reconciliation) await tx.$executeRawUnsafe(sql);
     const clock = await webhookCursorClock(tx);
     const [stranded] = await tx.$queryRaw<Parameters<typeof webhookCursorNeedsReview>[0][]>`
-      SELECT "createdAt", "cursorReceivedAt", "cursorVerifiedFloor", "lastScannedAt" FROM "WebhookEndpoint"`;
+      SELECT "createdAt", "cursorReceivedAt", "cursorEventId", "cursorVerifiedFloor", "lastScannedAt" FROM "WebhookEndpoint"`;
     if (!stranded) throw new Error('Missing restored cursor fixture');
     expect(+stranded.cursorReceivedAt).toBeLessThan(+clock.now);
     expect(webhookCursorNeedsReview(stranded, clock)).toBe(true);

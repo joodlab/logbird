@@ -85,7 +85,10 @@ internal static class LiveServer
     {
         using var http = new HttpClient();
         using var document = JsonDocument.Parse(await http.GetStringAsync(new Uri(new Uri(Endpoint!), "/openapi.json")));
-        return Version.Parse(document.RootElement.GetProperty("info").GetProperty("version").GetString()!);
+        // A pre-release or build suffix (0.2.1-rc.1, 0.2.0+abc) is ignored, as the read client's own version check does.
+        var text = document.RootElement.GetProperty("info").GetProperty("version").GetString()!;
+        var end = text.IndexOfAny(['-', '+']);
+        return Version.Parse(end >= 0 ? text.Substring(0, end) : text);
     }
 }
 
@@ -105,17 +108,33 @@ public sealed class LiveFactAttribute : FactAttribute
     }
 }
 
-/// <summary>Turns a successful response into a 503 after the server has processed it, like a proxy timing out.</summary>
+/// <summary>
+/// Turns the first successful responses into a 503 after the server has processed them, like a proxy timing out. Other
+/// responses (a 429 from a rate limit, a 5xx) pass through unchanged and are counted separately, so a retry the server
+/// itself caused is visible without being mistaken for a duplicate.
+/// </summary>
 internal sealed class FailAfterForwardingHandler(int failures) : DelegatingHandler(new HttpClientHandler())
 {
     private int _remaining = failures;
+    private int _accepted;
+    private int _other;
 
-    public int Forwarded { get; private set; }
+    /// <summary>Requests the server accepted (2xx), including the ones turned into a 503.</summary>
+    public int Forwarded => Volatile.Read(ref _accepted);
+
+    /// <summary>Requests the server answered with anything else (passed through unchanged).</summary>
+    public int OtherResponses => Volatile.Read(ref _other);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var response = await base.SendAsync(request, cancellationToken);
-        Forwarded++;
+        if (!response.IsSuccessStatusCode)
+        {
+            Interlocked.Increment(ref _other);
+            return response;
+        }
+
+        Interlocked.Increment(ref _accepted);
         if (Interlocked.Decrement(ref _remaining) >= 0)
         {
             response.Dispose();

@@ -1,7 +1,7 @@
 import { createHmac, hkdfSync } from 'node:crypto';
 import type { AuditEvent, ReadScope } from '@logbird/contracts';
 import { facetColumn } from './queries';
-import { compileQuery, QueryError } from './query';
+import { type CompileOptions, compileQuery, QueryError } from './query';
 import { MASKED_ATTRIBUTES, MASKED_COLUMNS } from './scope';
 
 type Masks = ReadScope['mask'];
@@ -37,8 +37,8 @@ function maskedFieldError(start: number | null, end: number | null): never {
 }
 
 /** Guard the compiled columns and bound attribute keys so filtering cannot reveal masked values. */
-export function compileMaskedQuery(q: string, mask: Masks, clock?: number) {
-  const compiled = compileQuery(q, clock);
+export function compileMaskedQuery(q: string, mask: Masks, clock?: number, options?: CompileOptions) {
+  const compiled = compileQuery(q, clock, options);
   if (!mask?.length) return compiled;
   if (mask.some((preset) => new RegExp(`\\b${MASKED_COLUMNS[preset]}\\b`).test(compiled.sql))) maskedFieldError(0, q.length);
   const hiddenPaths = mask.flatMap((preset) => MASKED_ATTRIBUTES[preset]);

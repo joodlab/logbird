@@ -223,7 +223,7 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
                   // The history matches this record's type and id at the same position (`record:`), but the all-time count
                   // comes from the colon-joined rollup key, which another type can share: no exact count is claimed here.
                   <>
-                    Events with this record's id and type since <Timestamp format="date" iso={own.entity.firstSeen} />, newest first
+                    Every event for this record since <Timestamp format="date" iso={own.entity.firstSeen} />, newest first
                   </>
                 ) : (
                   <>

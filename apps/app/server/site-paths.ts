@@ -2,6 +2,8 @@
 export const siteSegments = [
   '/product',
   '/cloud',
+  '/pricing',
+  '/use-cases',
   '/self-hosting',
   '/open-source',
   '/developers',

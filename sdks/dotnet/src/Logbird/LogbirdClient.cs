@@ -164,7 +164,10 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
         var http = httpClient ?? (_ownedHttp = CreateHttpClient());
         _queue = new EventQueue(options.MaxQueueSize, options.QueueFullBehavior, OnEvicted);
-        _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay);
+        _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay,
+            delivered: () => Interlocked.Increment(ref _delivered),
+            countDrop: CountDrop,
+            settle: (item, count) => _queue!.Settle(item, count));
         _loop = Task.Run(RunAsync);
         LogbirdMetrics.Register(this);
     }
@@ -273,8 +276,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 id = UuidV7.NewId();
             }
 
-            // Identifiers are sent exactly as given. One the server could not store as sent drops the event here, with the
-            // server's reason; surrounding whitespace is kept and reported once the event is queued.
+            // Identifiers are sent exactly as given. One Logbird would not index as given is refused here by the SDK and the
+            // event is not sent; surrounding whitespace is sent as given and reported once the event is queued.
             var whitespace = _whitespaceFields ??= [];
             whitespace.Clear();
             if (EntityIds.Validate(source, whitespace) is { } invalidEntity)
@@ -310,7 +313,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 foreach (var field in whitespace)
                 {
-                    Warn(eventId, eventAction, $"surrounding whitespace in {field} is kept as sent", $"surrounding whitespace in {field}");
+                    // Field names and fixed text only: the message never carries event data.
+                    var reason = EntityIds.WhitespaceReason(field);
+                    Warn(eventId, eventAction, reason, "Logbird warning about an event it is sending: " + reason);
                 }
 
                 Interlocked.Increment(ref _tracked);
@@ -782,11 +787,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 result = new SendResult([.. batch.Where(item => item.IsPending)], new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name), 0);
             }
 
-            if (result.Delivered > 0)
-            {
-                Interlocked.Add(ref _delivered, result.Delivered);
-            }
-
+            // Deliveries were counted as each event settled (a flush can complete mid-send, and its caller may read Stats).
             if (!_queue.FinishBatch(result.Failure is null ? [] : result.Unsettled, out _))
             {
                 // Shutdown took ownership of this batch and reported it; ignore the late result.
@@ -872,12 +873,13 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private static string? Bounded(string? value, int max = 256)
         => value is null || value.Length <= max ? value : value.Substring(0, max);
 
+    // The sender counted the drop when it settled the event (under the queue lock); this only notifies.
     private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail)
-        => Drop(reason, item.Id, item.Action, item.Json, detail);
+        => Drop(reason, item.Id, item.Action, item.Json, detail, counted: true);
 
     // A server reason can quote the event's values; the message and log line keep only its leading field or code.
     private void OnSenderWarning(QueuedEvent item, string reason)
-        => Warn(item.Id, item.Action, reason, "server warning (" + SafePrefix(reason) + ")");
+        => Warn(item.Id, item.Action, reason, "Logbird warning about a stored event: server warning (" + SafePrefix(reason) + ")");
 
     // A server reason is free text that can quote the event's values; the summary names only a fixed topic.
     private static string SafePrefix(string reason)
@@ -886,10 +888,10 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             : reason.Contains("id") ? "id"
             : "other";
 
-    private void Warn(string id, string action, string reason, string summary)
+    private void Warn(string id, string action, string reason, string message)
     {
         Interlocked.Increment(ref _warnings);
-        Report(new LogbirdEventWarning(id, action, reason, summary));
+        Report(new LogbirdEventWarning(id, action, reason, message));
     }
 
     internal long NotificationsLost => Interlocked.Read(ref _notificationsLost);
@@ -904,7 +906,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
     }
 
-    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail)
+    /// <summary>Counts a drop (counters only, so it can run under the queue lock).</summary>
+    private void CountDrop(DropReason reason)
     {
         if ((int)reason >= 0 && (int)reason < _droppedByReason.Length)
         {
@@ -918,6 +921,14 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         else
         {
             Interlocked.Increment(ref _dropped);
+        }
+    }
+
+    private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail, bool counted = false)
+    {
+        if (!counted)
+        {
+            CountDrop(reason);
         }
 
         if (_onDrop is { } onDrop)

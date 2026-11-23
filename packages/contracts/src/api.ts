@@ -228,7 +228,12 @@ export type EntitySort = z.infer<typeof entitySortSchema>;
 
 export const entityListQuerySchema = z.object({
   kind: entityKindSchema,
-  q: z.string().max(200).optional(), // fuzzy match on id + name
+  /**
+   * Search by id and name. Results rank by match first (exact id, id prefix, name prefix, substring, fuzzy; a record's
+   * bare id counts as its id), then by `sort`, so an exact id always leads whatever the limit. One or two characters
+   * match only ids and names that start with them.
+   */
+  q: z.string().max(1024).optional(),
   type: z.string().optional(),
   /** events: most active first (then most recently seen); lastSeen: most recent first; name: A→Z. */
   sort: entitySortSchema.default('events'),

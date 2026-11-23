@@ -10,13 +10,23 @@ import {
   MAX_WEBHOOK_ENDPOINTS,
   SCOPE_MASKS,
   webhookEndpointSchema,
+  webhookLookupBusySchema,
   webhookSettingsPath,
+  webhookUrlOrMutationBusySchema,
 } from '@logbird/contracts';
 import { prisma, withProjectLock } from '@logbird/database';
-import { decryptWebhookSecret, encryptWebhookSecret, type WebhookLookup, webhookCursorClock, webhookSecretKey } from '@logbird/database/webhooks';
+import {
+  activeWebhookSecrets,
+  decryptWebhookSecret,
+  encryptWebhookSecret,
+  type WebhookLookup,
+  webhookCursorClock,
+  webhookSecretKey,
+} from '@logbird/database/webhooks';
 import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES, verifyWebhook } from '@logbird/sdk';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { deliverWebhooks } from '../../worker/src/webhook-delivery';
 import { discoverWebhookDeliveries } from '../../worker/src/webhook-discovery';
 import { sendWebhookFilterReviewNotices } from '../../worker/src/webhook-notices';
@@ -244,10 +254,14 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
     { legacy: 'qaNumber:1e-7', confirmed: 'qaNumber:0.0000001', id: 'qa-legacy-number', qaNumber: 1e-7 },
   ];
   const target = { id: 'qa-new-target', targets: [{ type: 'site', id: '12' }] };
-  const time = new Date(Date.now() - 45_000);
+  const { now } = await webhookCursorClock(prisma);
+  // Model a settled rollout independently of when the test database was migrated.
+  const time = new Date(+now - 45_000);
   const cursorReceivedAt = new Date(+time - 1000);
-  const expiresAt = new Date(Date.now() + 86_400_000);
+  const rollout = new Date(+cursorReceivedAt - 1000);
+  const expiresAt = new Date(+now + 86_400_000);
   const lookup = (id: string) => prisma.webhookEndpoint.findUniqueOrThrow({ where: { id } });
+  const scan = async (id: string) => discoverWebhookDeliveries(clickhouse, await lookup(id), { now, rollout });
   const warning = 'webhook_filter_review_required';
   const { endpoint: current, secret } = await create('owner', { url: receiver, filterQuery: 'record:site:12' });
   const { endpoint: empty } = await create();
@@ -290,15 +304,15 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
       for (const { id } of legacy) {
         await prisma.webhookEndpoint.update({
           where: { id },
-          data: { url: liveReceiver, filterReviewRequired: true, cursorReceivedAt, createdAt: cursorReceivedAt },
+          data: { url: liveReceiver, filterReviewRequired: true, cursorReceivedAt: rollout, createdAt: new Date(+rollout - 1000) },
         });
         const path = `${base()}/${id}`;
         expect(await (await request(path)).json()).toMatchObject({ filterWarning: warning });
         const ping = await request(`${path}/test`, 'POST');
         expect(ping.status).toBe(409);
         expect(await ping.json()).toMatchObject({ error: { code: warning } });
-        await discoverWebhookDeliveries(clickhouse, await lookup(id));
-        expect(await lookup(id)).toMatchObject({ cursorReceivedAt, cursorEventId: null, lastScannedAt: null });
+        await scan(id);
+        expect(await lookup(id)).toMatchObject({ cursorReceivedAt: rollout, cursorEventId: null, lastScannedAt: null });
       }
       const resend = await request(`${base()}/${first.id}/deliveries/${completed.id}/resend`, 'POST');
       expect(resend.status).toBe(409);
@@ -314,7 +328,10 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
       await send();
       expect(received).toHaveLength(0);
       expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: queued.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
-      await discoverWebhookDeliveries(clickhouse, await lookup(current.id));
+      await scan(current.id);
+      expect(await prisma.webhookDelivery.findMany({ where: { endpointId: current.id }, select: { eventId: true } })).toEqual([
+        { eventId: target.id },
+      ]);
       await send();
       expect(received).toHaveLength(1);
       const [targetWire] = received;
@@ -326,8 +343,8 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
         const patch = await request(path, 'PATCH', { filterQuery: fixture.confirmed });
         expect(patch.status, await patch.clone().text()).toBe(200);
         expect(await patch.json()).not.toHaveProperty('filterWarning');
-        expect(await lookup(id)).toMatchObject({ filterReviewRequired: false, cursorReceivedAt });
-        await discoverWebhookDeliveries(clickhouse, await lookup(id));
+        expect(await lookup(id)).toMatchObject({ filterReviewRequired: false, cursorReceivedAt: rollout });
+        await scan(id);
         await send();
         await send();
         expect(received).toHaveLength(index + 2);
@@ -550,7 +567,7 @@ it('advances discovery while HTTP ingest keeps arriving behind a slow admitted w
     const admitted = Promise.resolve(fixture.post({ id: 'qa-slow', action: 'qa.webhook' }));
     ongoing = [admitted];
     await expect.poll(() => held, { interval: 20, timeout: 20_000 }).toBe(true);
-    const scan = discoverWebhookDeliveries(clickhouse, hook);
+    const scan = discoverWebhookDeliveries(clickhouse, hook, { now: new Date(), rollout: from });
     const arrivals = [0, 100, 250, 400].map(async (ms) => {
       await delay(ms);
       return fixture.post({ id: `qa-arrival-${ms}`, action: 'qa.webhook' });
@@ -581,10 +598,11 @@ it('documents and returns a retryable lookup error on create and update while an
   expect(openapi.status).toBe(200);
   const { paths } = await openapi.json();
   const documented = [paths['/api/projects/{projectId}/webhooks'].post, paths['/api/projects/{projectId}/webhooks/{id}'].patch];
+  const { anyOf } = z.toJSONSchema(webhookUrlOrMutationBusySchema, { io: 'input' });
   for (const route of documented) {
     expect(route.responses['503']).toMatchObject({
       headers: { 'Retry-After': { schema: { type: 'integer', example: 3 } } },
-      content: { 'application/json': { schema: { properties: { error: { properties: { code: { const: 'webhook_lookup_busy' } } } } } } },
+      content: { 'application/json': { schema: { anyOf } } },
     });
   }
   let release!: (value: Awaited<ReturnType<WebhookLookup>>) => void;
@@ -605,7 +623,7 @@ it('documents and returns a retryable lookup error on create and update while an
     for (const busy of await Promise.all([request(base(), 'POST', input), request(`${base()}/${endpoint.id}`, 'PATCH', input)])) {
       expect(busy.status).toBe(503);
       expect(busy.headers.get('Retry-After')).toBe('3');
-      expect(await busy.json()).toMatchObject({ error: { code: 'webhook_lookup_busy' } });
+      expect(webhookLookupBusySchema.safeParse(await busy.json()).success).toBe(true);
     }
     expect((await request(`/api/projects/${foreignId}/webhooks`, 'POST', { url: 'https://ready.example.invalid' }, 'foreign-owner')).status).toBe(
       201,
@@ -696,16 +714,20 @@ it('rotates with default, zero and maximum overlap without extending already exp
     const next = await response.json();
     expect(Object.keys(next)).toEqual(['secret']);
     expect(next.secret).not.toBe(secret);
-    const old = await prisma.webhookSecret.findUniqueOrThrow({ where: { id: previous.id } });
-    expect(old.expiresAt?.getTime()).toBeGreaterThanOrEqual(start + (overlapSeconds ?? 86_400) * 1000);
-    expect(old.expiresAt?.getTime()).toBeLessThanOrEqual(Date.now() + (overlapSeconds ?? 86_400) * 1000);
+    const old = await prisma.webhookSecret.findUnique({ where: { id: previous.id } });
+    // A zero overlap deletes every earlier secret; a positive one gives it the overlap window.
+    if (overlapSeconds === 0) expect(old).toBeNull();
+    else {
+      expect(old?.expiresAt?.getTime()).toBeGreaterThanOrEqual(start + (overlapSeconds ?? 86_400) * 1000);
+      expect(old?.expiresAt?.getTime()).toBeLessThanOrEqual(Date.now() + (overlapSeconds ?? 86_400) * 1000);
+    }
     const active = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: null } });
     expect(active).toHaveLength(1);
     if (!active[0]) throw new Error('Current webhook secret missing');
     expect(decryptWebhookSecret(active[0].ciphertext, webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY))).toBe(next.secret);
     previous = active[0];
   }
-  // The secrets the zero-overlap rotation retired were deleted by the next one: only the 7-day one is still waiting.
+  // The zero-overlap rotation deleted the secrets it retired: only the 7-day one is still waiting.
   const before = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: { not: null } } });
   expect(before).toHaveLength(1);
   // A later rotation caps every earlier expiry at its own window: exactly that window, neither later nor sooner.
@@ -737,14 +759,27 @@ it('a zero-overlap rotation retires every earlier secret, including one still in
   // A -> B with the default 24-hour overlap: A stays valid for a day.
   expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', {})).status).toBe(200);
   const second = await prisma.webhookSecret.findFirstOrThrow({ where: { endpointId: endpoint.id, expiresAt: null } });
-  // B -> C with no overlap (say, B leaked): neither A nor B may keep signing.
-  const now = Date.now();
+  // B -> C with no overlap (say, B leaked): neither A nor B may keep signing, so both are deleted.
   expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 0 })).status).toBe(200);
-  for (const id of [first.id, second.id]) {
-    expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id } })).expiresAt?.getTime()).toBeLessThanOrEqual(Date.now());
-    expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id } })).expiresAt?.getTime()).toBeGreaterThanOrEqual(now - 1000);
-  }
+  expect(await prisma.webhookSecret.count({ where: { id: { in: [first.id, second.id] } } })).toBe(0);
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id, expiresAt: null } })).toBe(1);
+});
+
+it('after a zero-overlap rotation only the new secret can sign, even on a database clock read before the rotation', async () => {
+  const { endpoint } = await create();
+  const key = webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY);
+  // A -> B with the default overlap, then B -> C with none (B leaked).
+  expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', {})).status).toBe(200);
+  const [{ now }] = await prisma.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+  const rotated = await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 0 });
+  expect(rotated.status).toBe(200);
+  const { secret } = await rotated.json();
+  // The worker selects signing secrets on PostgreSQL time. Evaluate that selection at instants before the rotation,
+  // as after a backward clock step: no retired secret may come back.
+  for (const instant of [now, new Date(+now - 1000), new Date(+now - 3_600_000)]) {
+    const signing = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, ...activeWebhookSecrets(instant) } });
+    expect(signing.map(({ ciphertext }) => decryptWebhookSecret(ciphertext, key))).toEqual([secret]);
+  }
 });
 
 it('signs with only the new key after zero-overlap rotation when the API clock is ahead', async () => {
@@ -979,6 +1014,63 @@ it('rejects invalid filters, scopes and URLs on create and PATCH without writing
     }
   }
   expect(await prisma.webhookEndpoint.count({ where: { projectId } })).toBe(1);
+});
+
+it('refuses a regex RE2 rejects, holds a stored one after one scan, and resumes delivery after a corrected PATCH', async () => {
+  const invalid = String.raw`action:/qa\.re2\cK/`;
+  const { endpoint, secret } = await create('owner', { url: receiver, filterQuery: 'action:qa.re2' });
+  const path = `${base()}/${endpoint.id}`;
+  for (const method of ['POST', 'PATCH']) {
+    const response = await request(method === 'POST' ? base() : path, method, { url: receiver, filterQuery: invalid });
+    expect(response.status).toBe(422);
+    expect((await response.json()).error).toMatchObject({ code: 'invalid_query', message: String.raw`RE2 does not support the escape \c` });
+  }
+  expect(await prisma.webhookEndpoint.count({ where: { projectId } })).toBe(1);
+  expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } })).toMatchObject({ filterQuery: 'action:qa.re2' });
+  const { now } = await webhookCursorClock(prisma);
+  const time = new Date(+now - 45_000);
+  const cursorReceivedAt = new Date(+time - 1000);
+  const clock = { now, rollout: new Date(+cursorReceivedAt - 1000) };
+  const lookup = () => prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
+  const event = normalizeEvent({ id: 'qa-re2-event', action: 'qa.re2' }, { projectId, receivedAt: time });
+  if (!event.ok) throw new Error(event.reason);
+  try {
+    await insertEvents(clickhouse, [event.row]);
+    await withLocalReceiver(endpoint.id, async (received) => {
+      // A filter stored before save-time RE2 validation existed.
+      await prisma.webhookEndpoint.update({
+        where: { id: endpoint.id },
+        data: { filterQuery: invalid, cursorReceivedAt, createdAt: cursorReceivedAt },
+      });
+      await discoverWebhookDeliveries(clickhouse, await lookup(), clock);
+      expect(await lookup()).toMatchObject({
+        filterReviewRequired: true,
+        filterReviewReason: 'invalid_filter',
+        cursorReceivedAt,
+        cursorEventId: null,
+      });
+      expect(await (await request(path)).json()).toMatchObject({ filterWarning: 'webhook_filter_invalid' });
+      expect(listWebhooksResponseSchema.parse(await (await request(base())).json()).data).toMatchObject([
+        { filterWarning: 'webhook_filter_invalid' },
+      ]);
+      await discoverWebhookDeliveries(clickhouse, await lookup(), clock);
+      await send();
+      expect(received).toHaveLength(0);
+      expect(await prisma.webhookDelivery.count({ where: { endpointId: endpoint.id } })).toBe(0);
+      const patch = await request(path, 'PATCH', { filterQuery: String.raw`action:/qa\.re2/` });
+      expect(patch.status, await patch.clone().text()).toBe(200);
+      expect(await patch.json()).not.toHaveProperty('filterWarning');
+      expect(await lookup()).toMatchObject({ filterReviewRequired: false, filterReviewReason: null, cursorReceivedAt });
+      await discoverWebhookDeliveries(clickhouse, await lookup(), clock);
+      await send();
+      expect(received).toHaveLength(1);
+      const [wire] = received;
+      if (!wire) throw new Error('Missing resumed delivery');
+      expect(await verifyWebhook<{ id: string }>({ ...wire, secret })).toMatchObject({ id: 'qa-re2-event' });
+    });
+  } finally {
+    await purgeProjectEvents(projectId);
+  }
 });
 
 it('blocks a seeded legacy scope that would match a truncated tenant and resumes after correction', async () => {
@@ -1234,7 +1326,10 @@ it('signs identical masked bytes on initial delivery and resend of a target-only
   try {
     await insertEvents(clickhouse, [event.row]);
     await withLocalReceiver(endpoint.id, async (received) => {
-      await discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } }));
+      await discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } }), {
+        now: new Date(),
+        rollout: at,
+      });
       await send();
       const delivery = await prisma.webhookDelivery.findFirstOrThrow({ where: { endpointId: endpoint.id, status: 'succeeded' } });
       expect((await request(`${base()}/${endpoint.id}/deliveries/${delivery.id}/resend`, 'POST')).status).toBe(202);

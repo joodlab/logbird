@@ -385,8 +385,13 @@ UTC multiples of their size, so ≥ 1h buckets start on whole hours (24h → 15m
 
 `GET /api/projects/:projectId/entities?kind=…&sort=events|lastSeen|name` lists a directory.
 `events` (default) is most active first, ties broken by most recently seen; `lastSeen` is most
-recent first; `name` is A→Z (unnamed entities by id). `nextCursor` is an opaque keyset cursor
-bound to its sort.
+recent first; `name` is A→Z (unnamed entities by id). With `q`, entities whose id or name contains
+it or resembles it are listed best match first: the id exactly as typed, the same id in another
+case, id prefix, name prefix, substring, then
+fuzzy (a record's bare id, `article_27_2` for `article:article_27_2`, counts as its id), and the
+sort orders each group, so an exact id always leads whatever the limit. One or two characters
+match only ids and names that start with them. `nextCursor` is an opaque
+keyset cursor bound to its sort (and, for a search, to the match rank).
 
 `GET /api/projects/:projectId/entities/:kind/:entityId/metadata` returns `kind`, `id`, `type` and `name` for an
 exact entity under the same session and project access rules as the profile. For targets, pass the composite
@@ -519,11 +524,21 @@ returns 503 `webhook_lookup_busy` with `Retry-After: 3`. A scope needs a `tenant
 or a `target` and uses the same [stored-ID rules as scoped reads](security.md#scopes-name-stored-ids).
 An invalid legacy scope returns `scopeWarning: webhook_invalid_scope` and blocks discovery and delivery until corrected.
 Create and update reject filters on masked fields with HTTP 422 `invalid_query`.
-After upgrade, every existing non-empty filter returns `filterWarning: webhook_filter_review_required` and pauses discovery and delivery at the stored cursor.
-The worker sends one review notice per held endpoint to workspace owners and admins, and an explicit `filterQuery` in PATCH confirms the filter and resumes processing.
+An existing enabled endpoint with an empty filter starts automatically at the delivery migration's UTC start time.
+Its first eligible delivery is the first matching event received at or after that millisecond. Events received before it are excluded.
+A new endpoint starts at its creation millisecond, inclusive. For endpoints created at or after rollout by the old API,
+the worker accepts a never-scanned cursor up to 60 seconds before creation and can deliver matching events received
+from that stored cursor, inclusive.
 
-Each endpoint starts at the creation millisecond, inclusive, or at rollout for existing endpoints.
-There is no historical backfill. The worker reads ClickHouse in
+An existing endpoint with a non-empty filter delivers nothing until an owner or admin confirms its filter in the console.
+It returns `filterWarning: webhook_filter_review_required` and keeps the rollout cursor while held.
+The worker sends one review notice per held endpoint to workspace owners and admins.
+An explicit `filterQuery` in PATCH confirms the filter, even when its text stays the same.
+Discovery then starts at rollout and queues each still-stored occurrence that matches the confirmed filter and current scope,
+including events received during the hold. Project event retention determines which occurrences remain available.
+The 30-day delivery log retention applies to delivery records and attempts, and the regular discovery limits govern catch-up speed.
+
+The worker reads ClickHouse in
 `(received_at, event_id)` order through the Logbird query compiler. The scope
 applies as an AND. A target must match both the type and ID on the same event
 target. The scan window ends at the earlier of:
@@ -531,16 +546,24 @@ target. The scan window ends at the earlier of:
 - The current database time minus the async-insert flush bound and a safety margin (15 seconds total).
 - The millisecond before the project's oldest unconfirmed ingest receipt.
 
-The worker queues for the receipt gate while writers assign their arrival clocks and register receipts.
-Unconfirmed receipts then fence the scan during ClickHouse writes. Each query examines up to five minutes of
+With webhook-delivery-aware writers, the worker queues for the receipt gate while writers assign their arrival
+clocks and register receipts. Unconfirmed receipts then fence the scan during ClickHouse writes. Stop previous-version
+API servers before starting the worker on the first
+[webhook delivery upgrade](self-hosting.md#webhook-delivery-on-upgrade). If the roles overlap, a stalled old
+identity lookup can leave an accepted, searchable event without a webhook delivery.
+Each discovery pass takes up to 32 eligible endpoints
+in order of oldest scan attempt, with never-attempted endpoints first and endpoint ID breaking ties. Blocked or failed
+attempts also update this order. Only recorded progress updates the cursor and its scan timestamp. Each query examines up to five minutes of
 receive time and reads up to 10,000 matching event positions, ordered by receive time and ID. Empty slices advance
 the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
 through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
 sorts by event time. On very large projects delivery can stall until the arrival-time index is present.
 A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
 Larger pages shorten that delay by requiring fewer ClickHouse queries to drain the import.
-The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an implausible cursor and the
-API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
+The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an untrusted cursor, including a future
+position, an early position outside the tolerance or without evidence of progress, an event ID without a recorded scan,
+or a position beyond the allowed scan bound.
+The API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
 The worker commits at most 100 deliveries with their cursor position in each Postgres transaction. An interrupted page
 resumes after the last committed position. Deliveries are unique
 by endpoint, event ID, and stored receive time. If retention frees an event ID and it is used again,
@@ -552,8 +575,16 @@ rows with prior attempts. The worker rechecks the current scope and filter befor
 sending an event. If a stored event no longer matches, the delivery is `skipped`
 with `scope_mismatch` and does not count toward endpoint failure. A missing event
 finishes with `event_unavailable`.
-Relative filter times use the start of the discovery scan as `now`. Send-time
-rechecks use the same clock for that delivery.
+In webhook filters, `now` in a relative time is each event's arrival time (`received_at`), and `now/d` is the
+UTC start of the arrival day. Discovery and the send-time recheck therefore select the same events whenever and
+however often they run, including after a partial page or a worker outage. Regexes use RE2 syntax: create and
+update reject a pattern RE2 does not accept with HTTP 422 `invalid_query`. When discovery meets a stored filter
+that can never run (a compile error, or ClickHouse error 427 `CANNOT_COMPILE_REGEXP`), it holds the endpoint at
+its cursor with `filterWarning: webhook_filter_invalid` and sends the filter-review notice. Timeouts, limits and
+network errors are retried and never hold a filter. A PATCH with a valid `filterQuery` resumes from the cursor.
+The PostgreSQL server clock must not step backwards; run a time service that slews it. After a backward step, an
+event admitted behind a committed cursor is stored and searchable but its webhook delivery can be missed until an
+operator [rewinds the cursor](self-hosting.md#rewind-a-webhook-cursor-after-a-missed-delivery).
 Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
 If settings change while the worker prepares a request, it discards the prepared request without counting an attempt.
 
@@ -572,6 +603,7 @@ The SDK verifies the signature using the exact header value.
 Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800. Up to ten active secrets
 can contribute space-separated `v1,<base64>` signatures. A rotation above the limit returns 409
 `webhook_secret_overlap_limit`. Wait for an overlap to expire or rotate with zero overlap.
+A zero-overlap rotation deletes every earlier secret in the same transaction, so no clock change can make one sign again.
 An endpoint with more than ten active secrets from an earlier version returns
 `secretOverlapWarning: webhook_secret_overlap_limit` and signs with the ten newest active secrets.
 The worker logs the condition once per endpoint.

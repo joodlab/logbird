@@ -1,6 +1,6 @@
 {
   "name": "@logbird/vue",
-  "version": "0.1.3",
+  "version": "0.2.1",
   "license": "MIT",
   "type": "module",
   "exports": {

@@ -373,6 +373,8 @@ model WebhookEndpoint {
   filterQuery String @default("")
   filterReviewRequired Boolean @default(false)
   filterReviewNoticeClaimedAt DateTime?
+  // Null: confirm a filter stored before webhook delivery. invalid_filter: the stored filter cannot run.
+  filterReviewReason String?
   scopeTenantId String?
   scopeTargetType String?
   scopeTargetId String?
@@ -387,6 +389,7 @@ model WebhookEndpoint {
   cursorEventId String?
   cursorReviewRequired Boolean @default(false)
   cursorVerifiedFloor DateTime?
+  scanAttemptedAt DateTime?
   lastScannedAt DateTime?
   secretOverlapWarnedAt DateTime?
   consecutiveFailures Int @default(0)
@@ -396,6 +399,7 @@ model WebhookEndpoint {
 
   @@index([projectId])
   @@index([enabled, lastScannedAt, id])
+  @@index([enabled, scanAttemptedAt, id])
 }
 
 model WebhookSecret {

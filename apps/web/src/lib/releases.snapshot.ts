@@ -7,6 +7,24 @@ import type { Release } from './releases';
  */
 export const snapshotReleases: Release[] = [
   {
+    version: '0.2.1',
+    date: '2026-11-22',
+    highlights: [
+      'Jump to (Ctrl K) finds an entity by its id: the exact id leads the list, a record is found by its bare id (`article_27_2` for `article:article_27_2`), and "Search events for" runs the id query instead of free text.',
+      'For a recognized entity ID entered as a single free-text term, the explorer\'s empty state offers the ID query. Otherwise, it offers "Search all time" when the all-time check finds matches outside the selected range.',
+      'The console forwards `/pricing` and `/use-cases` to the marketing site when one is configured.',
+    ],
+  },
+  {
+    version: '0.2.0',
+    date: '2026-11-22',
+    highlights: [
+      "Show each customer only its own audit trail: tenant-scoped read keys and short-lived viewer tokens (15 minutes by default) read one tenant's (or one record's) events through search, event detail, counts grouped by a field and export. The server enforces the scope, and ClickHouse enforces the tenant as well when the restricted query user is configured.",
+      "Stored events are exact: 64-bit ids and long decimals keep every digit, a record's history matches its type and id on the same target, and a slow total count no longer fails a search.",
+      'Breaking for some saved queries and API filters: `record:` now selects one record (to search a custom attribute named `record`, write `attr.record:`), `\\*` and `\\r` are now escapes, and numeric attribute values are indexed under one spelling. Read the Breaking changes section of CHANGELOG.md for 0.2.0 before upgrading.',
+    ],
+  },
+  {
     version: '0.1.3',
     date: '2026-11-22',
     highlights: [

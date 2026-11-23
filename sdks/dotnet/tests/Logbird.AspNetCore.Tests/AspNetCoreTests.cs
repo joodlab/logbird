@@ -363,6 +363,9 @@ public class AspNetCoreTests
 
         public Func<string, bool> Blocks { get; set; } = _ => false;
 
+        /// <summary>Held closed while a blocking logger must stay blocked; the test opens it when done.</summary>
+        public ManualResetEventSlim Release { get; } = new();
+
         public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
 
         public void Dispose()
@@ -380,7 +383,7 @@ public class AspNetCoreTests
             {
                 if (owner.Blocks(category))
                 {
-                    Thread.Sleep(TimeSpan.FromSeconds(3));
+                    owner.Release.Wait();
                     throw new InvalidOperationException("fictional broken log sink");
                 }
 
@@ -460,10 +463,13 @@ public class AspNetCoreTests
             fake: new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task });
         (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
         var client = app.Client;
-        var watch = Stopwatch.StartNew();
-        await app.Host.StopAsync();
-        await app.Host.DisposeAsync();
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
+
+        // The host's 300 ms budget ends shutdown; a regression would wait out the client's 20-second ShutdownTimeout.
+        await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+        {
+            await app.Host.StopAsync();
+            await app.Host.DisposeAsync();
+        });
 
         // The report runs in the background once the host's budget ends.
         Assert.Equal(DropReason.Shutdown, Assert.Single(await Eventually(drops, 1)).Reason);
@@ -536,9 +542,17 @@ public class AspNetCoreTests
             requests: r => r.ResolveTenant = _ => throw new InvalidOperationException("fictional resolver bug"),
             user: User(("sub", "user_1")),
             services: b => b.Logging.AddProvider(logs));
-        var watch = Stopwatch.StartNew();
-        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
+        try
+        {
+            // The Logbird logger stays blocked while the request runs, so a request that waited on it would never finish.
+            await Deadline.Within(TimeSpan.FromSeconds(30), async () => (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode());
+        }
+        finally
+        {
+            // FlushAsync waits for pending callbacks (documented), so the logger is released before flushing.
+            logs.Release.Set();
+        }
+
         var e = Assert.Single(app.Server.Requests.IsEmpty ? await app.FlushedEventsAsync() : app.Server.Requests.SelectMany(r => r.Events).ToArray());
         Assert.False(e.TryGetProperty("tenant", out _));
     }
@@ -784,9 +798,11 @@ public class AspNetCoreTests
     }
 
     [Fact]
-    public async Task R2_a_large_backlog_never_holds_the_host_and_is_reported_in_the_background()
+    public async Task R2_host_shutdown_finishes_within_10_seconds_and_all_backlog_events_are_counted_as_dropped()
     {
         const int Count = 100_000;
+
+        var fake = new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task };
         var app = await App.StartAsync(
             _ => { },
             options: o =>
@@ -795,25 +811,36 @@ public class AspNetCoreTests
                 o.ShutdownTimeout = TimeSpan.FromSeconds(20);
             },
             services: b => b.Services.Configure<HostOptions>(h => h.ShutdownTimeout = TimeSpan.FromMilliseconds(300)),
-            fake: new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task });
+            fake: fake);
         var client = app.Client;
         for (var i = 0; i < Count; i++)
         {
             client.Track(new AuditEvent("backlog.recorded"));
         }
 
-        var watch = Stopwatch.StartNew();
-        await app.Host.StopAsync();
-        var stopped = watch.Elapsed;
-        await app.Host.DisposeAsync();
-        Assert.True(stopped < TimeSpan.FromSeconds(1.5), "StopAsync took " + stopped);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), "the host lifecycle took " + watch.Elapsed);
-        var deadline = DateTime.UtcNow.AddSeconds(20);
-        while (client.Stats.Dropped < Count && DateTime.UtcNow < deadline)
+        // A full batch is sent as soon as the queue reaches the batch size; wait until that request is in flight.
+        await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
         {
-            await Task.Delay(50);
-        }
+            while (fake.Requests.IsEmpty)
+            {
+                await Task.Delay(10);
+            }
+        });
 
+        // The host's 300 ms budget ends shutdown; a regression would wait out the 20-second ShutdownTimeout.
+        await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+        {
+            await app.Host.StopAsync();
+            await app.Host.DisposeAsync();
+        });
+
+        await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+        {
+            while (client.Stats.Dropped < Count)
+            {
+                await Task.Delay(50);
+            }
+        });
         Assert.Equal(Count, client.Stats.Dropped);
         Assert.Equal(Count, client.Stats.Tracked);
     }

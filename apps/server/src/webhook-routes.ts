@@ -61,7 +61,8 @@ const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
     responses: {
       [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } },
       422: {
-        description: 'Invalid endpoint configuration or filter. Filters cannot reference masked fields.',
+        description:
+          'Invalid endpoint configuration or filter (invalid_query). Filters cannot reference masked fields, and regexes must be valid RE2.',
         content: { 'application/json': { schema: resolver(apiErrorSchema) } },
       },
       503: {
@@ -80,7 +81,9 @@ function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
     ...(activeSecretCount > MAX_WEBHOOK_SIGNATURES && { secretOverlapWarning: 'webhook_secret_overlap_limit' }),
     ...(scope === undefined && { scopeWarning: 'webhook_invalid_scope' }),
     ...(endpoint.cursorReviewRequired && { cursorWarning: 'webhook_cursor_review_required' }),
-    ...(endpoint.filterReviewRequired && { filterWarning: 'webhook_filter_review_required' }),
+    ...(endpoint.filterReviewRequired && {
+      filterWarning: endpoint.filterReviewReason === 'invalid_filter' ? 'webhook_filter_invalid' : 'webhook_filter_review_required',
+    }),
     scope: responseScope,
     createdAt: endpoint.createdAt.toISOString(),
     updatedAt: endpoint.updatedAt.toISOString(),
@@ -258,7 +261,7 @@ export const webhookRoutes = new Hono<AppEnv>()
           enabled: input.enabled,
           ...(input.scope !== undefined ? scopeColumns(input.scope) : {}),
           ...(scopeCorrected && { scopeReviewRequired: false }),
-          ...(filterConfirmed && { filterReviewRequired: false }),
+          ...(filterConfirmed && { filterReviewRequired: false, filterReviewReason: null }),
           ...(enabledChanged ? { disabledReason: input.enabled ? null : 'manual', disabledAt: input.enabled ? null : now } : {}),
           ...((input.enabled && enabledChanged) || (url !== undefined && url !== before.url) ? { consecutiveFailures: 0, failingSince: null } : {}),
         },
@@ -392,8 +395,11 @@ export const webhookRoutes = new Hono<AppEnv>()
         // zero overlap retires every earlier secret at once.
         const now = await databaseNow(tx);
         const until = new Date(now.getTime() + overlapSeconds * 1000);
-        // Secrets past their window can never sign again: drop them so rotations don't accumulate rows.
-        await tx.webhookSecret.deleteMany({ where: { endpointId: endpoint.id, expiresAt: { lte: now } } });
+        // Secrets past their window can never sign again: drop them so rotations don't accumulate rows. A zero overlap
+        // deletes every earlier secret, so no clock step back can ever bring one into a signing window again.
+        await tx.webhookSecret.deleteMany({
+          where: { endpointId: endpoint.id, ...(overlapSeconds > 0 && { expiresAt: { lte: now } }) },
+        });
         if (overlapSeconds > 0 && (await tx.webhookSecret.count({ where: { endpointId: endpoint.id } })) >= MAX_WEBHOOK_SIGNATURES)
           throw new ApiError(
             409,

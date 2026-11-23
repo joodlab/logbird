@@ -4,13 +4,21 @@ on:
   pull_request:
     paths:
       - 'sdks/dotnet/**'
+      - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
+      - 'packages/contracts/src/record-selector.ts'
+      - 'packages/contracts/src/api.ts'
+      - 'packages/contracts/src/query.ts'
       - '.github/workflows/dotnet.yml'
   push:
     branches: [master]
     paths:
       - 'sdks/dotnet/**'
+      - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
+      - 'packages/contracts/src/record-selector.ts'
+      - 'packages/contracts/src/api.ts'
+      - 'packages/contracts/src/query.ts'
       - '.github/workflows/dotnet.yml'
 
 permissions:
@@ -76,6 +84,10 @@ jobs:
         with:
           node-version: '22.18.0'
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --filter . --filter @logbird/sdk
+      - run: pnpm install --frozen-lockfile --filter . --filter @logbird/sdk --filter @logbird/contracts
       # Fails when the TypeScript SDK's wire JSON drifts from the golden file the .NET tests compare against.
       - run: pnpm exec tsx sdks/dotnet/tests/cross-sdk/typescript-envelope.ts --check
+      # Fails when the TypeScript trailQuery output drifts from the golden file EventSearch.ForTrail is compared against.
+      - run: pnpm exec tsx sdks/dotnet/tests/cross-sdk/trail-query.ts --check
+      # Fails when the contracts' facet fields drift from the list FacetQuery checks fields against.
+      - run: pnpm exec tsx sdks/dotnet/tests/cross-sdk/facet-fields.ts --check
