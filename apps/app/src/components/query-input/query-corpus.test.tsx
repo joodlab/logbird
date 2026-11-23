@@ -165,6 +165,19 @@ const valid = [...new Set([...literals, ...REVIEWED])]
   .filter((q) => q.trim() && q.length <= 160 && ![...q].some((c) => c.charCodeAt(0) < 0x20) && parses(q))
   .sort();
 // Enter must also keep spaces around a query, and a blank bar as it is.
+/**
+ * CI splits the slow phases across parallel jobs with `LOGBIRD_QUERY_CORPUS_SHARD=i/n`: shard i takes every query whose
+ * index is i-1 modulo n, so the shards together check exactly the whole corpus. Unset, one run checks all of it.
+ */
+const SHARD = (() => {
+  const spec = process.env.LOGBIRD_QUERY_CORPUS_SHARD ?? '1/1';
+  const match = /^(\d+)\/(\d+)$/.exec(spec);
+  const index = Number(match?.[1]);
+  const count = Number(match?.[2]);
+  if (!match || count < 1 || index < 1 || index > count) throw new Error(`LOGBIRD_QUERY_CORPUS_SHARD must be i/n with 1 <= i <= n, not "${spec}"`);
+  return { index, count, mine: <T,>(list: T[]) => list.filter((_, i) => i % count === index - 1) };
+})();
+
 const corpus = [
   ...valid,
   ...valid
@@ -393,7 +406,7 @@ it('the oracle itself refuses a row that removes a neighbour at a boundary two t
 it('every row accepted at any term boundary changes only its own term, and the query still parses', async () => {
   const broken: string[] = [];
   let accepted = 0;
-  for (const q of ['', '  ', ...valid]) {
+  for (const q of SHARD.mine(['', '  ', ...valid])) {
     for (const b of boundaries(q)) {
       setValue(q, b);
       key(' ', { ctrlKey: true });
@@ -444,13 +457,14 @@ it('every row accepted at any term boundary changes only its own term, and the q
     }
   }
   expect(broken).toEqual([]);
-  expect(accepted).toBeGreaterThan(15_000);
+  // About 16,700 rows over the whole corpus; each shard checks its share.
+  expect(accepted).toBeGreaterThan(15_000 / SHARD.count);
 }, 1_800_000);
 
 // After the boundary phase: running each query adds it to the recent queries, whose rows replace the whole query by design.
 it('typed and run with plain Enter, every valid query is submitted exactly as typed', async () => {
   const changed: string[] = [];
-  for (const q of corpus) {
+  for (const q of SHARD.mine(corpus)) {
     setValue('');
     for (let i = 1; i <= q.length; i++) setValue(q.slice(0, i));
     await flush();

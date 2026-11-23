@@ -57,12 +57,12 @@ public class LogbirdReadClientTests
             .Then(_ => FakeServer.Json(HttpStatusCode.OK, $$"""{"event":{{StoredEventJson}},"payload":{"id":"evt_1","action":"invoice.updated"},"parents":[],"childCount":2,"operationSize":5}"""))
             .ThenStatus(HttpStatusCode.NotFound, """{"error":{"code":"not_found","message":"Event not found"}}""");
         using var client = Client(server);
-        var detail = await client.GetAsync("evt/1");
+        var detail = await client.GetEventAsync("evt/1");
         Assert.Equal("evt_1", detail!.Event.Id);
         Assert.Equal("invoice.updated", detail.Payload.GetProperty("action").GetString());
         Assert.Equal(5, detail.OperationSize);
         Assert.EndsWith("/v1/events/evt%2F1", server.Requests.First().Request.RequestUri!.AbsoluteUri);
-        Assert.Null(await client.GetAsync("missing"));
+        Assert.Null(await client.GetEventAsync("missing"));
     }
 
     [Fact]

@@ -157,7 +157,8 @@ public class IngestRoundTripTests(ITestOutputHelper output)
             client.Track(new AuditEvent("rejection.conflict") { Id = conflictId, Context = { OperationId = operation } });
             client.Track(new AuditEvent("rejection.sibling") { Context = { OperationId = operation } }.Target("record", "after"));
             Assert.True(await client.FlushAsync());
-            Assert.Equal(new LogbirdStats(5, 3, 2, 0, 0, 0, 0), client.Stats);
+            var stats = client.Stats;
+            Assert.Equal((5L, 3L, 2L, 0L, 0L, 0L, 0, 0L), (stats.Tracked, stats.Delivered, stats.Rejected, stats.Dropped, stats.Filtered, stats.FailedSends, stats.QueueLength, stats.Warnings));
         }
 
         Assert.Equal(["rejection.bad-id", "rejection.conflict"], drops.Select(d => d.Action).OrderBy(a => a, StringComparer.Ordinal));

@@ -100,23 +100,55 @@ public sealed class DroppedEvent
 }
 
 /// <summary>
-/// A snapshot of a client's counters since it was created. Unlike the event records, its <c>ToString()</c> prints its
-/// values on purpose: they are counts only and carry no event, identity or query data.
+/// A snapshot of a client's counters since it was created, read from <see cref="ILogbirdClient.Stats"/>. Only the SDK
+/// fills one; <c>default(LogbirdStats)</c> is a snapshot with every count zero, for a test double that implements
+/// <see cref="ILogbirdClient"/>. Later versions may add counters. Unlike the event records, its <c>ToString()</c> prints
+/// its values on purpose: they are counts only and carry no event, identity or query data.
 /// </summary>
-/// <param name="Tracked">Events accepted into the queue.</param>
-/// <param name="Delivered">Events the server stored (or already had, for a retry).</param>
-/// <param name="Rejected">Events the server rejected individually.</param>
-/// <param name="Dropped">Events dropped for any other reason (queue full, permanent HTTP error, too large, invalid, shutdown).</param>
-/// <param name="Filtered">Events <see cref="LogbirdOptions.BeforeSend"/> chose to skip.</param>
-/// <param name="FailedSends">Batches that failed after all retries and went back to the queue.</param>
-/// <param name="QueueLength">Events currently waiting, including a batch being sent.</param>
-/// <param name="Warnings">Warnings about events: an identifier a server may index differently from what is sent (surrounding whitespace, longer than the indexed length, a lone surrogate, more than 64 targets; found by the SDK before sending), or a server warning about a stored event such as an adjusted timestamp.</param>
-public readonly record struct LogbirdStats(
-    long Tracked,
-    long Delivered,
-    long Rejected,
-    long Dropped,
-    long Filtered,
-    long FailedSends,
-    int QueueLength,
-    long Warnings = 0);
+public readonly struct LogbirdStats
+{
+    internal LogbirdStats(long tracked, long delivered, long rejected, long dropped, long filtered, long failedSends, int queueLength, long warnings = 0)
+    {
+        Tracked = tracked;
+        Delivered = delivered;
+        Rejected = rejected;
+        Dropped = dropped;
+        Filtered = filtered;
+        FailedSends = failedSends;
+        QueueLength = queueLength;
+        Warnings = warnings;
+    }
+
+    /// <summary>Events accepted into the queue.</summary>
+    public long Tracked { get; }
+
+    /// <summary>Events the server stored (or already had, for a retry).</summary>
+    public long Delivered { get; }
+
+    /// <summary>Events the server rejected individually.</summary>
+    public long Rejected { get; }
+
+    /// <summary>Events dropped for any other reason (queue full, permanent HTTP error, too large, invalid, shutdown).</summary>
+    public long Dropped { get; }
+
+    /// <summary>Events <see cref="LogbirdOptions.BeforeSend"/> chose to skip.</summary>
+    public long Filtered { get; }
+
+    /// <summary>Batches that failed after all retries and went back to the queue.</summary>
+    public long FailedSends { get; }
+
+    /// <summary>Events currently waiting, including a batch being sent.</summary>
+    public int QueueLength { get; }
+
+    /// <summary>
+    /// Warnings about events: an identifier a server may index differently from what is sent (surrounding whitespace,
+    /// longer than the indexed length, a lone surrogate, more than 64 targets; found by the SDK before sending), or a
+    /// server warning about a stored event such as an adjusted timestamp.
+    /// </summary>
+    public long Warnings { get; }
+
+    /// <summary>The counts, for example <c>LogbirdStats { Tracked = 5, Delivered = 3, ... }</c>.</summary>
+    public override string ToString()
+        => FormattableString.Invariant(
+            $"LogbirdStats {{ Tracked = {Tracked}, Delivered = {Delivered}, Rejected = {Rejected}, Dropped = {Dropped}, Filtered = {Filtered}, FailedSends = {FailedSends}, QueueLength = {QueueLength}, Warnings = {Warnings} }}");
+}

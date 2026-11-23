@@ -41,7 +41,7 @@ internal static class LiveServer
         var watch = Stopwatch.StartNew();
         while (true)
         {
-            var detail = await reader.GetAsync(id);
+            var detail = await reader.GetEventAsync(id);
             if (detail is not null)
             {
                 return detail;

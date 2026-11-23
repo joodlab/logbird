@@ -44,7 +44,8 @@ app.MapPut("/invoices/{id}", (string id, IAuditLog audit) =>
 - **Correlation headers**: `X-Logbird-Operation` and `X-Request-Id` (up to 256 characters; a longer value is ignored, never
   cut) and `traceparent`. A request re-executed by an exception handler keeps its first operation id.
 - **Background jobs**: capture `audit.Carrier(parentEventId)` when you enqueue work, store it in the job payload
-  (`AuditCarrierJsonContext` serializes it for trimmed and AOT apps), and record from the worker with
+  (`carrier.ToJson()` and `AuditCarrier.FromJson(json)` work in trimmed and AOT apps, or include `AuditCarrier` in your
+  own source-generated context), and record from the worker with
   `factory.ForJob(carrier, jobId, attempt)`. The worker's events keep the carrier's actor, tenant and operation exactly
   (absent values stay absent; only a missing operation id is generated); without a carrier they get a system actor. A carrier holds the request's context; to carry one event's own actor or
   operation, adjust it with `carrier with { ... }`. Its `ToString()` prints no values, but a structured logger that
