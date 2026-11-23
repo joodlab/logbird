@@ -18,9 +18,9 @@ is still going 15 minutes after its duration. `soak-report/` holds:
 - `metrics.csv`: one row per sample, summed over every client the run created;
 - `stand-in-samples.jsonl`.
 
-## The stand-in
+## Two layers
 
-The SDK talks over a real loopback socket to an in-process HTTP/1.1 stand-in
+**Layer 1: stand-in (CI).** The SDK talks over a real loopback socket to an in-process HTTP/1.1 stand-in
 (`StandIn.cs`). It checks the ingest key and records every event it stores, every id it acknowledges in an answer that
 reached the client, and each id's first-seen content. It injects one fault per request, by weight (`--faults`). The
 first requests of a run go once through every configured fault, so even a short run exercises each:
@@ -38,12 +38,123 @@ first requests of a run go once through every configured fault, so even a short 
 | `reject` | 202 with some not-yet-stored events rejected (`invalid_event`) |
 | `toolarge` | 413 `payload_too_large` |
 
-A second layer, the same runner as a proxy in front of a real local Logbird with a read-back duplicate check, comes in
-its own pull request once it has run against a real server. Its 2-hour run is part of the pre-publication gate.
+**Layer 2: real server (manual, part of the pre-publication gate).** `--upstream <url>` turns the stand-in into a
+proxy in front of a real Logbird. It forwards the original request bytes with every header except the hop-by-hop ones
+(so the server parses and records exactly what the SDK sent), and lets the server decide about the key, the body and
+each event.
+- **Faults that reach the server:**
+  - `latency` delays the server's answer on its way back;
+  - `resetafterstore` forwards the batch, then resets the connection whatever the server answered;
+  - `emptyack` replaces a 202 with `{}`;
+  - `partial` turns a 202 into a 503 `ingest_pending` that lists some stored events as unresolved (never a rejected
+    one, matched by position), keeping the server's other warnings, so the client resends them and the server's
+    deduplication is exercised.
+
+  When the server's own answer is not a 202, `emptyack` and `partial` pass its status, body and `Retry-After` through; the sample marks it as
+  `passthrough`.
+- **Faults that never reach the server:** `reset`, `hang`, `ratelimited`, `unavailable` and `toolarge` answer without
+  forwarding, as a broken network or gateway would. `reject` is not used, and the report shows the weights actually
+  used.
+- **Canary:** before the load, one event goes straight to the server and must be delivered, so a wrong ingest key fails
+  at once.
+  - It goes through the ingest key, so it can only land in that key's own project. Nothing is written to ClickHouse
+    directly, and no load is sent, until the canary has confirmed the project.
+  - The server offers no way to learn an ingest key's project without writing, so an ingest key for another project on
+    the same local server leaves that one fictional event there before the mismatch below stops the run. The event says
+    what it is (action `soak.canary`, source `logbird-soak-canary`, the run tag and a note that it is safe to delete),
+    and the failed check names the project it landed in, when the read key can see it, and that one event was written
+    there.
+  - It is then read back with the read key, and its project must be `LOGBIRD_SOAK_PROJECT_ID`.
+  - It must also be found in the configured ClickHouse database under that project before anything is written there
+    directly.
+- **Self-test:** the duplicate check proves itself with a control no merge can collapse: one event id written at two
+  timestamps a millisecond apart (different sorting keys), which must be reported as one duplicated id.
+- **Completeness:** after the load, the run pages through its events by tag (`metadata.soakRun`). A failed page is
+  retried with the same cursor and the earlier pages are kept. It continues until every id the server acknowledged to
+  the client is there, or a deadline of five minutes plus 100 ms per expected page passes.
+- **Reconciliation:** the run's distinct event ids in the raw ClickHouse rows must all be tracked events, and every
+  event read back must have a raw row. A tracked id present in the raw rows but absent from the read-back (it settled
+  after the last page, or search left it out; the two observations cannot tell which) counts as stored, so the
+  accounting checks cover it; the report gives their number. An id that is not valid UTF-8 counts as never tracked. An
+  empty run passes.
+- **Duplicates:** the run counts its event ids with more than one raw row (no `FINAL`).
+- **Deduplication exercised:** whenever `partial`, `resetafterstore` or `emptyack` is configured, the server must have
+  acknowledged at least one event id again after an earlier answer of its own had already acknowledged it. A resend that
+  never reached the server, or that it refused, does not count.
+- **ClickHouse settings:** every statement sets what it depends on, so no server or user profile changes its meaning,
+  and asks for `FORMAT TabSeparated` explicitly.
+  - Reads send `final=0`, `empty_result_for_aggregation_by_empty_set=0`, `max_rows_to_group_by=0`,
+    `group_by_overflow_mode=throw`, `max_result_rows=0` and `result_overflow_mode=throw`.
+  - Reads also send every other overflow mode as `throw` (`read`, `read_leaf`, `distinct`, `sort`, `set`, `join`,
+    `transfer`, `timeout`, `timeout_leaf`), so a limit a profile sets fails the query instead of returning part of it.
+  - Reads also send `limit=0`, `offset=0`, `additional_table_filters={}`, `additional_result_filter=` (empty) and
+    `use_query_cache=0`: no profile-wide row cap, filter or cached answer. They send `extremes=0`, so no extra rows follow
+    a count.
+  - The self-test insert sends `optimize_on_insert=0`, `async_insert=0`, `insert_deduplicate=0`, `limit=0` and
+    `offset=0`.
+  - Event ids are read as hex, one prefixed line each, so the text format can neither drop nor alter one.
+
+  The report lists them too.
+
+**What the read-back proves, and what it cannot.**
+- **It proves, for the rows of the run that carry its tag and are visible when the run counts them:**
+  - every event the server acknowledged to the client is stored and readable by its id;
+  - no event id has more than one raw row;
+  - every one of those ids is an event the harness tracked.
+
+  Together with the accounting, that shows the SDK's retries, resends after a lost answer and partial resends (counted
+  as "deduplication exercised") did not leave the server with an id stored twice at that moment.
+- **It cannot show:**
+  - **Copies that leave no trace in those rows.** Two rows with the same sorting key (project, timestamp, id) that a
+    background merge collapsed before the count, or an extra copy stored without the run's tag. The count is a
+    snapshot, not a history.
+  - **An event stored twice under two different ids.** Only a copy under an untracked id is caught (as a raw row that
+    was never tracked). A copy re-keyed onto another tracked event's id shows only if both rows survive to the count.
+  - **Content.** It compares ids, not payloads. The stand-in's first-arrival fingerprint covers changed retries on the
+    wire, not what the server keeps.
+  - **Durability across a server restart**, which the run does not perform.
+  - **Hash collisions.** Ids are compared as 64-bit hashes; the chance of a collision is about n² / 2⁶⁵, under one in a
+    million for the 4 million events a run may track.
+  - **Receipt by the SDK.** "Acknowledged to the client" means the proxy finished writing that answer. If the SDK had
+    already abandoned the request, `Stats.Delivered` would come out lower and the counter check would fail spuriously,
+    unless the SDK then reported that event dropped. The check leaves dropped ids out, and that is the documented outcome
+    for an event whose answer was lost: an unconfirmed drop reason, checked by "an event both stored and dropped has an
+    unconfirmed reason". Otherwise the check compares totals, so it could pass wrongly only if an SDK overcount elsewhere
+    exactly offset a missed answer. It has not happened in a run: answers come within the fault's 2 s, well inside the 10 s request timeout.
+
+**Safety.** Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse,
+with no user info, query or fragment. Every HTTP client it uses, the SDK clients included, is given a handler that never
+uses a proxy (environment or system) and never follows a redirect, so keys never leave the machine and a production host
+is refused. Keys and the ClickHouse login come only from the environment:
+
+```bash
+# From the repository root, with the root .env (local services) and a server from master on 127.0.0.1:4741.
+# dotenv -o makes the local .env override inherited values; local-only.mjs then refuses unless DATABASE_URL,
+# CLICKHOUSE_URL and REDIS_URL all point at this machine, before the fixture script writes anything.
+F=/path/outside/the/repo/soak.env
+pnpm exec dotenv -o -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
+  pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts create "$F" http://127.0.0.1:4741
+pnpm exec dotenv -o -e .env -e "$F" -- sh -c '
+  export LOGBIRD_SOAK_INGEST_KEY="$LOGBIRD_IT_INGEST_KEY" LOGBIRD_SOAK_READ_KEY="$LOGBIRD_IT_READ_KEY"
+  export LOGBIRD_SOAK_PROJECT_ID="$LOGBIRD_IT_PROJECT_ID" LOGBIRD_SOAK_CLICKHOUSE_URL="$CLICKHOUSE_URL"
+  export LOGBIRD_SOAK_CLICKHOUSE_USER="$CLICKHOUSE_USER" LOGBIRD_SOAK_CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD"
+  export LOGBIRD_SOAK_CLICKHOUSE_DATABASE="$CLICKHOUSE_DATABASE"
+  cd sdks/dotnet && dotnet run -c Release -f net8.0 --project tests/Logbird.Soak -- --upstream http://127.0.0.1:4741 --duration 2h --rate 50'
+pnpm exec dotenv -o -e .env -- node sdks/dotnet/tests/Logbird.Soak/local-only.mjs &&
+  pnpm exec dotenv -o -e .env -- pnpm exec tsx sdks/dotnet/tests/integration/fixture.ts delete "$F"
+```
+
+The fixture file holds fresh keys with owner-only permissions; keep it outside the repository. `delete` purges the
+project, including the canary and the ClickHouse self-test rows, then the fictional workspace. If a recent insert is
+still settling it fails with `ingest_pending` and keeps the file: run it again a minute later.
+
+Before NuGet publishing is enabled, the gate needs one layer-2 run of at least 2 hours against a local server built from
+master, with its report attached to the gate brief.
 
 ## Checks
 
-- **Exact accounting** (tracked = every id given to `Track`; stored = what the stand-in stored; dropped = each `OnDrop` report):
+- **Exact accounting** (tracked = every id given to `Track`; stored = what the stand-in stored or, in layer 2, what
+  the server returns; dropped = each `OnDrop` report):
   - every tracked event is stored or reported dropped;
   - no event is reported dropped twice;
   - every drop report names a tracked event;
@@ -51,7 +162,7 @@ its own pull request once it has run against a real server. Its 2-hour run is pa
   - no event arrived with content different from its first arrival;
   - an event both stored and dropped has a reason the docs call "not confirmed" (`HttpError`, `Unacknowledged`,
     `Shutdown`).
-- **The client's own counters:**
+- **The client's own counters, in both layers:**
   - the summed `Stats.Delivered` equals the ids acknowledged to the client and not reported dropped;
   - `Rejected + Dropped` equals the drop reports.
 - **Only documented drop reasons.** `TooLarge`, `Invalid` and `InvalidEntityId` also fail, because the harness never
@@ -110,8 +221,8 @@ The `reject` fault rejects valid events on purpose, to exercise the rejection pa
 ## What a 30-minute run can and cannot show
 
 It catches:
-- an event lost or counted twice under any of the faults above (the stand-in stores one entry per id, so it cannot show
-  a server storing an event twice; that is the real-server layer's job);
+- an event lost or counted twice under any of the faults above (layer 1 stores one entry per id, so it cannot show the
+  server storing an event twice; layer 2's raw-row check does);
 - a retry that changes an event;
 - a counter that disagrees with what was acknowledged;
 - an undocumented drop reason;
@@ -128,9 +239,9 @@ measured), or the same share per fault.
 It does not catch:
 - smaller leaks, or memory that grows only after hours, which hide inside the margins and the noise of a full
   collection;
-- problems that only appear with real server latency, real TLS or real storage (the stand-in has none).
+- problems that only appear with real server latency, real TLS or real storage (layer 1 has none).
 
-The long manual run (`workflow_dispatch` with `duration: 2h` or more) and the real-server layer are there for those, and
+The long manual run (`workflow_dispatch` with `duration: 2h` or more) and layer 2 are there for those, and
 `metrics.csv` shows any trend directly.
 
 ## CI

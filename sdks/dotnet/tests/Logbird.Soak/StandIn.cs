@@ -27,35 +27,36 @@ internal enum Fault
     /// <summary>503 ingest_pending whose details settle some events and list the rest as unresolved (indices/eventIds).</summary>
     PartialUnavailable,
 
-    /// <summary>503 ingest_unavailable without details: the whole batch is retried.</summary>
+    /// <summary>503 ingest_unavailable without details, without forwarding: the whole batch is retried.</summary>
     Unavailable,
 
-    /// <summary>429 rate_limited with Retry-After.</summary>
+    /// <summary>429 rate_limited with Retry-After, without forwarding.</summary>
     RateLimited,
 
-    /// <summary>The connection is reset after the request headers, before the body is read.</summary>
+    /// <summary>The connection is reset after the request headers, before the body is read, without forwarding.</summary>
     Reset,
 
-    /// <summary>The events are stored, then the connection is reset before the answer.</summary>
+    /// <summary>The events are stored (or forwarded and stored), then the connection is reset before the answer.</summary>
     ResetAfterStore,
 
-    /// <summary>No answer until after the client's request timeout, then a reset.</summary>
+    /// <summary>No answer until after the client's request timeout, then a reset, without forwarding.</summary>
     Hang,
 
-    /// <summary>202 <c>{}</c> (a proxy answering for the server): nothing is acknowledged. The events are stored first.</summary>
+    /// <summary>202 <c>{}</c> (a proxy answering for the server): nothing is acknowledged. Stored or forwarded first.</summary>
     EmptyAck,
 
-    /// <summary>202 with some not-yet-stored events rejected per event (code invalid_event).</summary>
+    /// <summary>202 with some not-yet-stored events rejected per event (code invalid_event). Stand-in mode only.</summary>
     Reject,
 
-    /// <summary>413 payload_too_large: a permanent HTTP error for the batch.</summary>
+    /// <summary>413 payload_too_large without forwarding: a permanent HTTP error for the batch.</summary>
     TooLarge,
 }
 
 /// <summary>
 /// An in-process Logbird ingest stand-in on a real loopback socket. It answers <c>POST /v1/events</c> the way the server
 /// does (apps/server ingest.ts, immutable-ingest.ts, rate-limit.ts; shapes from packages/contracts), records every event
-/// it stores, every id it acknowledges to the client and each id's first-seen content, and injects faults.
+/// it stores, every id it acknowledges to the client and each id's first-seen content, and injects faults. With an
+/// upstream it forwards to a real Logbird instead of storing, with the same transport faults.
 /// </summary>
 internal sealed class StandIn : IDisposable
 {
@@ -71,10 +72,14 @@ internal sealed class StandIn : IDisposable
     private readonly object _randomGate = new();
     private readonly TimeSpan _hang;
     private readonly string _authorization;
+    private readonly HttpClient? _upstream;
+    private readonly Uri? _upstreamEvents;
     private readonly CancellationTokenSource _stop = new();
     private readonly LongMap _stored;
     private readonly LongMap _firstSeen;
     private readonly LongMap _acknowledged;
+    private readonly LongMap? _upstreamAcknowledged;
+    private long _upstreamResends;
     private readonly ConcurrentDictionary<Fault, long> _faults = new();
     private readonly ConcurrentDictionary<Socket, byte> _sockets = new();
     private readonly Samples _samples;
@@ -86,24 +91,35 @@ internal sealed class StandIn : IDisposable
     private int _inFlight;
     private int _cycled;
 
-    public StandIn(IReadOnlyDictionary<Fault, int> weights, int seed, TimeSpan hang, string ingestKey, Samples samples, long expectedEvents)
+    public StandIn(IReadOnlyDictionary<Fault, int> weights, int seed, TimeSpan hang, string ingestKey, Samples samples, Uri? upstream, long expectedEvents)
     {
         _stored = new LongMap(expectedEvents);
         _firstSeen = new LongMap(expectedEvents);
         _acknowledged = new LongMap(expectedEvents);
+        if (upstream is not null)
+        {
+            _upstreamAcknowledged = new LongMap(expectedEvents);
+        }
         _weights = weights.Where(w => w.Value > 0).Select(w => (w.Key, w.Value)).ToArray();
         _totalWeight = _weights.Sum(w => w.Weight);
         _random = new Random(seed);
         _hang = hang;
         _authorization = "Bearer " + ingestKey;
         _samples = samples;
+        if (upstream is not null)
+        {
+            // No redirects and no proxy: the forwarded requests carry the real ingest key and must stay on this machine.
+            _upstream = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromSeconds(60) };
+            _upstreamEvents = new Uri(upstream, "v1/events");
+        }
+
         _listener = new TcpListener(IPAddress.Loopback, 0);
     }
 
     /// <summary>The endpoint to give the client (http on loopback, which the SDK allows).</summary>
     public Uri Endpoint => new("http://127.0.0.1:" + ((IPEndPoint)_listener.LocalEndpoint).Port.ToString(CultureInfo.InvariantCulture));
 
-    /// <summary>When set, every request is answered with no fault: used to drain at the end.</summary>
+    /// <summary>When set, every request is answered (or forwarded) with no fault: used to drain at the end.</summary>
     public bool Healthy { get; set; }
 
     /// <summary>Id hashes the stand-in stored (stand-in mode only).</summary>
@@ -112,8 +128,17 @@ internal sealed class StandIn : IDisposable
     /// <summary>Id hashes acknowledged to the client in an answer it received (accepted in a 202 or in 503 details).</summary>
     public LongMap Acknowledged => _acknowledged;
 
+    /// <summary>
+    /// Upstream mode: events forwarded again after the server had already acknowledged them (in any answer, whether or not
+    /// it reached the client). Each one exercised the server's deduplication.
+    /// </summary>
+    public long UpstreamResends => Interlocked.Read(ref _upstreamResends);
+
     /// <summary>First-seen fingerprints by id hash.</summary>
     public LongMap FirstSeen => _firstSeen;
+
+    /// <summary>Upstream mode: ids the server itself acknowledged (null in stand-in mode).</summary>
+    public LongMap? UpstreamAcknowledged => _upstreamAcknowledged;
 
     /// <summary>Times an id arrived with content different from its first arrival (the client changed a retried event).</summary>
     public long Conflicts => Interlocked.Read(ref _conflicts);
@@ -133,7 +158,7 @@ internal sealed class StandIn : IDisposable
         _accept = Task.Run(AcceptLoopAsync);
     }
 
-    /// <summary>Waits until no request is being handled, or the limit passes; false on timeout.</summary>
+    /// <summary>Waits until no request is being handled (forwards included), or the limit passes; false on timeout.</summary>
     public async Task<bool> QuiesceAsync(TimeSpan limit)
     {
         var deadline = DateTime.UtcNow + limit;
@@ -174,6 +199,7 @@ internal sealed class StandIn : IDisposable
             }
         }
 
+        _upstream?.Dispose();
         _stop.Dispose();
     }
 
@@ -315,7 +341,15 @@ internal sealed class StandIn : IDisposable
                 return false;
         }
 
-        if (head.ContentLength > MaxBodyBytes)
+        if (_upstream is not null && head.ContentLength > 8L * MaxBodyBytes)
+        {
+            // Far beyond anything the SDK sends: refuse to buffer it rather than forward it.
+            _samples.Add(exchange);
+            Reset(socket);
+            return false;
+        }
+
+        if (_upstream is null && head.ContentLength > MaxBodyBytes)
         {
             // The server's body limit answers without reading the body; the connection cannot be reused after that.
             await WriteAsync(stream, exchange, 413, Error("payload_too_large", "Request exceeds 5 MB."), null, close: true).ConfigureAwait(false);
@@ -346,7 +380,7 @@ internal sealed class StandIn : IDisposable
         }
 
         // Every arrival is fingerprinted as soon as its body is read, whatever the answer will be, so a retry with changed
-        // content is caught, also after a 429, a 503 or a 413.
+        // content is caught in both modes, also after a 429, a 503 or a 413.
         for (var i = 0; i < (events?.Count ?? 0); i++)
         {
             if (Text(events![i] is JsonObject o ? o["id"] : null, out var id, out _) && JsTrim(id!).Length > 0)
@@ -370,12 +404,19 @@ internal sealed class StandIn : IDisposable
             case Fault.TooLarge:
                 await WriteAsync(stream, exchange, 413, Error("payload_too_large", "Request exceeds 5 MB."), null).ConfigureAwait(false);
                 return true;
-            case Fault.Latency:
+            case Fault.Latency when _upstream is null:
                 // 1 to 2,000 ms. The sample records the measured wait, not the request, so a skipped wait shows as 0.
                 var waited = System.Diagnostics.Stopwatch.StartNew();
                 await Task.Delay(NextInt(2000) + 1).ConfigureAwait(false);
                 exchange.DelayMs = (int)waited.ElapsedMilliseconds;
                 break;
+        }
+
+        // Upstream mode forwards the original bytes: the server, not the stand-in, decides about the key, the body and
+        // every event. Fingerprinting above is only an observation.
+        if (_upstream is not null)
+        {
+            return await ForwardAsync(stream, socket, exchange, head, body, events, fault).ConfigureAwait(false);
         }
 
         if (!string.Equals(head.Header("authorization"), _authorization, StringComparison.Ordinal))
@@ -501,6 +542,145 @@ internal sealed class StandIn : IDisposable
 
         await WriteAsync(stream, exchange, 202, result, null).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>Forwards a request to the real server, then applies the faults that need its answer.</summary>
+    private async Task<bool> ForwardAsync(NetworkStream stream, Socket socket, Exchange exchange, RequestHead head, byte[] body, List<JsonNode?>? events, Fault fault)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, _upstreamEvents) { Content = new ByteArrayContent(body) };
+
+        // Every request header goes through except the hop-by-hop ones (RFC 9110 7.6.1: the fixed list plus every field the
+        // Connection header nominates), so the server parses and records exactly what the SDK sent (Content-Encoding,
+        // X-Logbird-SDK, Logbird-Retry, Authorization, User-Agent, ...).
+        var nominated = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var header in head.All)
+        {
+            if (string.Equals(header.Key, "connection", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var token in header.Value.Split((char)44))
+                {
+                    nominated.Add(token.Trim().ToLowerInvariant());
+                }
+            }
+        }
+
+        foreach (var header in head.All)
+        {
+            var name = header.Key.ToLowerInvariant();
+            if (name is "host" or "content-length" or "connection" or "keep-alive" or "transfer-encoding" or "expect" or "te" or "trailer"
+                    or "upgrade" or "proxy-authorization" or "proxy-authenticate" or "proxy-connection"
+                || nominated.Contains(name))
+            {
+                continue;
+            }
+
+            if (name.StartsWith("content-", StringComparison.Ordinal))
+            {
+                message.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+            else
+            {
+                message.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _upstream!.SendAsync(message).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        {
+            _samples.Add(exchange);
+            Reset(socket);
+            return false;
+        }
+
+        using (response)
+        {
+            var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            var status = (int)response.StatusCode;
+            var answer = TryParse(bytes);
+            RecordUpstreamAcknowledgements(status, answer);
+
+            // Latency in upstream mode delays the server's answer on its way back.
+            if (fault == Fault.Latency)
+            {
+                var waited = System.Diagnostics.Stopwatch.StartNew();
+                await Task.Delay(NextInt(2000) + 1).ConfigureAwait(false);
+                exchange.DelayMs = (int)waited.ElapsedMilliseconds;
+            }
+
+            // Forwarded, then the connection is reset whatever the server answered.
+            if (fault == Fault.ResetAfterStore)
+            {
+                _samples.Add(exchange);
+                Reset(socket);
+                return false;
+            }
+
+            if (fault == Fault.EmptyAck && status == 202)
+            {
+                await WriteAsync(stream, exchange, 202, new JsonObject(), null).ConfigureAwait(false);
+                return true;
+            }
+
+            if (fault == Fault.PartialUnavailable && status == 202 && events is not null && answer is JsonObject stored && stored["ids"] is JsonArray storedIds)
+            {
+                // The server stored the batch; report some stored events as unresolved so the client resends them and the
+                // server's own deduplication is exercised. Events are matched by position: a rejected position is never
+                // listed, and each listed position consumes one occurrence of its id from the server's ids.
+                var ids = storedIds.Select(n => n!.GetValue<string>()).ToList();
+                var rejectedIndices = new HashSet<int>((stored["rejected"] as JsonArray ?? []).Select(r => r?["index"]?.GetValue<int>() ?? -1));
+                var unresolved = new List<int>();
+                for (var index = 0; index < events.Count; index++)
+                {
+                    if (rejectedIndices.Contains(index) || !Text(events[index] is JsonObject o ? o["id"] : null, out var raw, out _))
+                    {
+                        continue;
+                    }
+
+                    var id = JsTrim(raw!);
+                    if (ids.Contains(id) && NextInt(2) == 0)
+                    {
+                        unresolved.Add(index);
+                        ids.Remove(id);
+                    }
+                }
+
+                if (unresolved.Count > 0)
+                {
+                    // The server's warnings stay, except for the positions now listed as unresolved.
+                    var warnings = new JsonArray((stored["warnings"] as JsonArray ?? [])
+                        .Where(w => !unresolved.Contains(w?["index"]?.GetValue<int>() ?? -1))
+                        .Select(w => w?.DeepClone())
+                        .ToArray());
+                    var details = new JsonObject
+                    {
+                        ["accepted"] = ids.Count,
+                        ["ids"] = new JsonArray(ids.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray()),
+                        ["rejected"] = stored["rejected"]?.DeepClone() ?? new JsonArray(),
+                        ["warnings"] = warnings,
+                        ["indices"] = new JsonArray(unresolved.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray()),
+                        ["eventIds"] = new JsonArray(unresolved.Select(i => (JsonNode?)JsonValue.Create(JsTrim(((JsonObject)events[i]!)["id"]!.GetValue<string>()))).ToArray()),
+                    };
+                    await WriteAsync(stream, exchange, 503, Error("ingest_pending", "Some events need a retry; listed indices are unresolved.", details), "1").ConfigureAwait(false);
+                    return true;
+                }
+            }
+
+            var retryAfter = response.Headers.TryGetValues("Retry-After", out var values) ? values.FirstOrDefault() : null;
+            exchange.Passthrough = true;
+            exchange.Status = status;
+            exchange.RetryAfter = retryAfter;
+            exchange.Response = answer;
+            _samples.Add(exchange);
+            await WriteRawAsync(stream, status, bytes, retryAfter, close: false).ConfigureAwait(false);
+
+            // Only an answer that reached the client acknowledges anything.
+            Acknowledge(status, answer);
+            return true;
+        }
     }
 
     /// <summary>
@@ -745,6 +925,28 @@ internal sealed class StandIn : IDisposable
         }
     }
 
+    /// <summary>
+    /// Upstream mode: ids the server acknowledged in its own answer, whatever the stand-in then tells the client. An id the
+    /// server acknowledges again, after an earlier answer had already acknowledged it, is a resend its deduplication had to
+    /// absorb; only those are counted, so a resend that never reached the server or was refused counts for nothing.
+    /// </summary>
+    private void RecordUpstreamAcknowledgements(int status, JsonNode? answer)
+    {
+        var ids = answer is not JsonObject root ? null
+            : status == 202 ? root["ids"] as JsonArray
+            : status == 503 && root["error"] is JsonObject error && error["details"] is JsonObject details ? details["ids"] as JsonArray
+            : null;
+        // Each id once per answer: an id listed twice in one answer was not acknowledged by an earlier one.
+        var inThisAnswer = new HashSet<long>();
+        foreach (var id in ids ?? [])
+        {
+            if (id is JsonValue v && v.TryGetValue<string>(out var text) && inThisAnswer.Add(LongMap.Hash(text)) && !_upstreamAcknowledged!.TryAdd(LongMap.Hash(text), 0))
+            {
+                Interlocked.Increment(ref _upstreamResends);
+            }
+        }
+    }
+
     private static JsonNode? TryParse(byte[] bytes)
     {
         try
@@ -864,7 +1066,11 @@ internal sealed class StandIn : IDisposable
             var colon = line.IndexOf(':');
             if (colon > 0)
             {
-                headers[line.Substring(0, colon).Trim()] = line.Substring(colon + 1).Trim();
+                // A field sent on several lines is one comma-separated list (RFC 9110 5.3): no line may overwrite another,
+                // so every Connection line still names its hop-by-hop headers and every repeated field is forwarded whole.
+                var name = line.Substring(0, colon).Trim();
+                var value = line.Substring(colon + 1).Trim();
+                headers[name] = headers.TryGetValue(name, out var earlier) ? earlier + ", " + value : value;
             }
         }
 
@@ -909,6 +1115,8 @@ internal sealed class StandIn : IDisposable
         public long ContentLength { get; } = contentLength;
 
         public string? Header(string name) => headers.TryGetValue(name, out var value) ? value : null;
+
+        public IEnumerable<KeyValuePair<string, string>> All => headers;
     }
 }
 
@@ -930,6 +1138,9 @@ internal sealed class Exchange(Fault fault)
 
     /// <summary>The delay the latency fault applied, in milliseconds.</summary>
     public int? DelayMs { get; set; }
+
+    /// <summary>Upstream mode: the answer is the server's own, forwarded unchanged (the fault did not alter it).</summary>
+    public bool Passthrough { get; set; }
 }
 
 /// <summary>
@@ -960,7 +1171,8 @@ internal sealed class Samples : IDisposable
 
     public void Add(Exchange exchange)
     {
-        var kind = exchange.Fault + ":" + (exchange.Status?.ToString(CultureInfo.InvariantCulture) ?? "none");
+        // Passthrough answers have their own quota, so the server's own answers can never crowd out the injected ones.
+        var kind = exchange.Fault + ":" + (exchange.Status?.ToString(CultureInfo.InvariantCulture) ?? "none") + (exchange.Passthrough ? ":passthrough" : string.Empty);
         if (_counts.AddOrUpdate(kind, 1, (_, n) => n + 1) > PerKind)
         {
             return;
@@ -979,6 +1191,7 @@ internal sealed class Samples : IDisposable
                 ["response"] = exchange.Response?.DeepClone(),
                 ["dispositions"] = new JsonArray(exchange.Dispositions.Select(d => (JsonNode?)JsonValue.Create(d)).ToArray()),
                 ["delayMs"] = exchange.DelayMs,
+                ["passthrough"] = exchange.Passthrough,
             }.ToJsonString();
         }
         catch (InvalidOperationException)
@@ -994,6 +1207,8 @@ internal sealed class Samples : IDisposable
                 ["request"] = null,
                 ["response"] = null,
                 ["dispositions"] = new JsonArray(),
+                ["delayMs"] = exchange.DelayMs,
+                ["passthrough"] = exchange.Passthrough,
                 ["undecodable"] = true,
             }.ToJsonString();
         }

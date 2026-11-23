@@ -33,7 +33,7 @@ export function LogStack({ className, animate = true, limit = rows.length }: { c
           <span className={cn('log-dot', index === 0 ? 'bg-brand' : outcomeColor[row.outcome])} />
           <span className="flex min-w-0 flex-col gap-0.5">
             <Action value={row.action} />
-            <span className="truncate font-sans text-muted-foreground text-xs">
+            <span className="line-clamp-2 font-sans text-muted-foreground text-xs">
               {row.who} <span className="text-[var(--subtle)]">→</span> {row.what}
             </span>
           </span>
