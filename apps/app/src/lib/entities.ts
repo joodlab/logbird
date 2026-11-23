@@ -74,6 +74,29 @@ export function countsMentions(kind: EntityKind, id: string): boolean {
   return kind === 'target' && id.indexOf(':') === id.lastIndexOf(':');
 }
 
+/** The record type to look a record up by: the link's, when it belongs to the id, else the only one a one-colon id has. */
+export function lookupType(kind: EntityKind, id: string, linkedType: string | undefined): string | undefined {
+  if (kind !== 'target') return undefined;
+  if (linkedType !== undefined && id.startsWith(`${linkedType}:`)) return linkedType;
+  return countsMentions(kind, id) ? id.slice(0, id.indexOf(':')) : undefined;
+}
+
+type SeenBounds = { firstSeen: string; lastSeen: string };
+
+/**
+ * The default history window: the union of every source that has answered (the directory's quick first and last seen,
+ * the profile's). The first to answer starts the history at once; a later one can only widen it, so the history never
+ * leaves out an event the page reports (a late-arriving older event, a directory read cached before it). Null until one
+ * answers.
+ */
+export function historyBounds(...sources: (SeenBounds | null | undefined)[]): SeenBounds | null {
+  const known = sources.filter((s): s is SeenBounds => Boolean(s));
+  if (!known.length) return null;
+  const earliest = known.reduce((a, b) => (Date.parse(b.firstSeen) < Date.parse(a.firstSeen) ? b : a));
+  const latest = known.reduce((a, b) => (Date.parse(b.lastSeen) > Date.parse(a.lastSeen) ? b : a));
+  return { firstSeen: earliest.firstSeen, lastSeen: latest.lastSeen };
+}
+
 /**
  * The filter an entity page's history runs under, or '' while it is not known yet. A record's filter needs its type: a
  * link that carries the exact pair (`?targetType=`, consistent with the id) already has it, so the history starts at

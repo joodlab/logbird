@@ -23,7 +23,16 @@ import { current } from '@/lib/api/current';
 import { ApiRequestError } from '@/lib/api/errors';
 import { entityProfileQuery, entitySeenQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
-import { countsMentions, ENTITY_SECTIONS, type EntitySection, entityBaseQuery, splitTargetId, typeIcon } from '@/lib/entities';
+import {
+  countsMentions,
+  ENTITY_SECTIONS,
+  type EntitySection,
+  entityBaseQuery,
+  historyBounds,
+  lookupType,
+  splitTargetId,
+  typeIcon,
+} from '@/lib/entities';
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
@@ -64,14 +73,13 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
   const onWho = (next: WhoFilter) => onTimelineChange({ q: withWhoFilter(timeline.q, next, lang), ev: undefined });
   // The history shows everything this entity did unless the reader picked a range; the charts follow the picker.
   const { explicit: rangeChosen, clearRange } = useRange();
-  // Only this entity's own data may define its history (a placeholder can still hold the previous entity's). The window
-  // comes from the directory's first and last seen, a quick read, so the history never waits for the whole profile; the
-  // profile is the fallback when the directory does not list this id. One source per page load, so the window never
-  // switches (and refetches) when the profile arrives.
+  // Only this entity's own data may define its history (a placeholder can still hold the previous entity's). The window is
+  // the union of the directory's quick first/last seen and the profile's: whichever answers first starts the history, and
+  // the other can only widen it (historyBounds), so the history never waits for the whole profile nor leaves an event out.
   const own = p;
-  const seen = useQuery({ ...entitySeenQuery(projectId, kind, entityId), enabled: !rangeChosen });
-  const seenWindow = seen.data ?? (seen.isSuccess || seen.isError ? (own?.entity ?? null) : null);
-  const timelineRange = rangeChosen ? timeline.range : seenWindow ? historyRange(seenWindow.firstSeen, Date.now(), seenWindow.lastSeen) : undefined;
+  const seen = useQuery({ ...entitySeenQuery(projectId, kind, entityId, lookupType(kind, entityId, targetType)), enabled: !rangeChosen });
+  const bounds = historyBounds(seen.data, own?.entity);
+  const timelineRange = rangeChosen ? timeline.range : bounds ? historyRange(bounds.firstSeen, Date.now(), bounds.lastSeen) : undefined;
   // Out of a full history, links say "all" rather than this entity's computed window, so the next page is not narrowed.
   const linkRange = rangeChosen ? timeline.range : ALL_RANGE;
   // What History shows (the entity plus any filters typed or picked there): the explorer links and Save as view use it.

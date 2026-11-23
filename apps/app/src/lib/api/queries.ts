@@ -233,11 +233,12 @@ export const operationQuery = (projectId: string, operationId: string) =>
  * window is the wider of the two, so it still covers every event of this record. Null when the directory does not list
  * exactly this id. No placeholder: an answer always belongs to this entity.
  */
-export const entitySeenQuery = (projectId: string, kind: EntityKind, entityId: string) =>
+export const entitySeenQuery = (projectId: string, kind: EntityKind, entityId: string, type?: string) =>
   queryOptions({
-    queryKey: [...keys.project(projectId), 'entity-seen', kind, entityId] as const,
+    queryKey: [...keys.project(projectId), 'entity-seen', kind, entityId, type ?? null] as const,
     queryFn: async ({ signal }) => {
-      const page = await api.entities.list(projectId, { kind, q: entityId, limit: 5 }, signal);
+      // The type filter keeps records whose bare id spells this composite id (`t0` + `page:7`) from crowding it out.
+      const page = await api.entities.list(projectId, { kind, q: entityId, type, limit: 20 }, signal);
       const entity = page.data.find((e) => e.id === entityId);
       return entity ? { firstSeen: entity.firstSeen, lastSeen: entity.lastSeen } : null;
     },
