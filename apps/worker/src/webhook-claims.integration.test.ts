@@ -18,7 +18,9 @@ import { deliverWebhooks } from './webhook-delivery';
 
 const ch = createClickHouseClient();
 const runId = randomUUID();
-const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9'].map((name) => `qa-webhook-claims-${name}-${runId}`);
+const projects = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11', 'p12', 'p13', 'p14', 'p15'].map(
+  (name) => `qa-webhook-claims-${name}-${runId}`,
+);
 const secretKey = Buffer.alloc(32, 9);
 const received: { path: string; id: string }[] = [];
 const receiver = createServer(async (req, res) => {
@@ -305,26 +307,26 @@ it("delivers another project within bounded passes while all of one project's ol
   }
 });
 
-it('dispatches the claims of earlier rounds when a refill selection fails', { timeout: 60_000 }, async () => {
+it('dispatches the claims already committed when a later claim fails', { timeout: 60_000 }, async () => {
   const [, , , , , , first = '', second = ''] = projects;
   const { now } = await webhookCursorClock(prisma);
   const claimable = await ping((await endpoint(first, 'refill-claimable')).id, 'refill-claimable', new Date(+now - 120_000));
   const locked = await ping((await endpoint(second, 'refill-locked')).id, 'refill-locked', new Date(+now - 60_000));
   const sent = (id: string) => received.filter((message) => message.id === id).length;
   const unlock = await holdLocked([locked.id]);
-  // Round one claims the first project's row and finds the second project's row locked. Round two's selection fails.
-  const queryRaw = prisma.$queryRaw.bind(prisma);
+  // The first claim takes the first project's row (the second project's row is locked). The next claim fails before it
+  // can pick a row. Each claim is its own transaction, and the pass starts no other transaction before dispatch.
+  const transaction = prisma.$transaction.bind(prisma);
   let selections = 0;
-  const injected = vi.spyOn(prisma, '$queryRaw').mockImplementation(((...args: Parameters<typeof prisma.$queryRaw>) => {
-    if (String((args[0] as { sql?: string }).sql ?? '').includes('PARTITION BY') && ++selections === 2)
-      return Promise.reject(new Error('QA refill selection failure'));
-    return queryRaw(...args);
-  }) as typeof prisma.$queryRaw);
+  const injected = vi.spyOn(prisma, '$transaction').mockImplementation((async (...args: unknown[]) => {
+    if (++selections === 2) throw new Error('QA refill selection failure');
+    return Reflect.apply(transaction, prisma, args);
+  }) as typeof prisma.$transaction);
   const errors = vi.spyOn(console, 'error');
   try {
     await expect(deliverWebhooks(ch, { ...options(), concurrency: 2 }, [first, second])).resolves.toBeUndefined();
-    expect(selections).toBe(2);
-    expect(errors.mock.calls.map(([message]) => String(message))).toContainEqual(expect.stringContaining('webhook.claim_refill_failed'));
+    expect(selections).toBeGreaterThanOrEqual(2);
+    expect(errors.mock.calls.map(([message]) => String(message))).toContainEqual(expect.stringContaining('webhook.claim_failed'));
   } finally {
     injected.mockRestore();
     errors.mockRestore();
@@ -360,4 +362,224 @@ it("claims a project's next endpoint while its oldest due row stays locked", { t
   } finally {
     await unlock();
   }
+});
+
+it('serves another project before the newer work of a project whose oldest row stays locked', { timeout: 60_000 }, async () => {
+  const [, , , , , , , , , busy = '', waiting = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const busyLocked = await endpoint(busy, 'newer-locked');
+  const busyFree = await endpoint(busy, 'newer-free');
+  const oldest = await ping(busyLocked.id, 'newer-oldest', new Date(+now - 120_000));
+  const other = await ping((await endpoint(waiting, 'newer-waiting')).id, 'newer-waiting', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const unlock = await holdLocked([oldest.id]);
+  let passes = 0;
+  try {
+    // Two projects with claimable work and one slot: the bound is ceil(2 / 1) = 2 passes. The busy project gets newer
+    // work before every pass.
+    while (!sent(other.eventId) && passes < 2) {
+      const clock = await webhookCursorClock(prisma);
+      await ping(busyFree.id, `newer-work-${passes}`, clock.now);
+      passes++;
+      await deliverWebhooks(ch, options(), [busy, waiting]);
+    }
+    expect(sent(other.eventId)).toBe(1);
+    expect(sent(oldest.eventId)).toBe(0);
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: oldest.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
+  } finally {
+    await unlock();
+  }
+});
+
+// Deterministic generator for the randomized layouts (mulberry32).
+function seeded(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d_2b_79_f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+// Replay one layout: WEBHOOK_FAIRNESS_SEEDS=1017 pnpm vitest run src/webhook-claims.integration.test.ts -t "seeded layouts"
+// (comma-separate several seeds). A failure names its seed.
+const FAIRNESS_SEEDS = process.env.WEBHOOK_FAIRNESS_SEEDS?.split(',').map(Number) ?? Array.from({ length: 32 }, (_, index) => 1000 + index);
+
+it('claims every project within ceil(P / N) passes and each delivery within r * ceil(P / N) passes across seeded layouts', {
+  timeout: 600_000,
+}, async () => {
+  const perEndpoint = 2;
+  for (const seed of FAIRNESS_SEEDS) {
+    const random = seeded(seed);
+    const pick = (low: number, high: number) => low + Math.floor(random() * (high - low + 1));
+    const ids = Array.from({ length: pick(2, 4) }, (_, index) => `qa-webhook-fair-${runId}-${seed}-${index}`);
+    const slots = pick(1, 3);
+    let unlock: () => Promise<void> = async () => undefined;
+    try {
+      for (const id of ids) {
+        await prisma.organization.create({ data: { id, name: id, slug: id, createdAt: new Date() } });
+        await prisma.project.create({ data: { id, organizationId: id, name: id, slug: id } });
+      }
+      const { now } = await webhookCursorClock(prisma);
+      type Row = { id: string; eventId: string; project: string; endpointId: string; due: Date };
+      const rows: Row[] = [];
+      const endpoints: { id: string; project: string }[] = [];
+      for (const project of ids) {
+        for (let e = pick(1, 3); e > 0; e--) {
+          const hook = await endpoint(project, `fair-${seed}-${endpoints.length}`);
+          endpoints.push({ id: hook.id, project });
+          for (let r = pick(1, 3); r > 0; r--) {
+            const due = new Date(+now - 600_000 + pick(0, 500_000));
+            const row = await ping(hook.id, `fair-${seed}-${rows.length}`, due);
+            rows.push({ id: row.id, eventId: row.eventId, project, endpointId: hook.id, due });
+          }
+        }
+      }
+      // One endpoint with an invalid stored scope (a legacy tenant with surrounding whitespace), not yet flagged.
+      const invalid = endpoints[pick(0, endpoints.length - 1)];
+      if (!invalid) throw new Error('No endpoint');
+      await prisma.webhookEndpoint.update({ where: { id: invalid.id }, data: { scopeTenantId: ' qa-invalid ' } });
+      const locked = rows.filter(() => random() < 0.3);
+      if (locked.length) unlock = await holdLocked(locked.map(({ id }) => id));
+      const claimable = rows
+        .filter((row) => row.endpointId !== invalid.id && !locked.includes(row))
+        .sort((a, b) => +a.due - +b.due || a.id.localeCompare(b.id));
+      // The first project keeps getting newer work between passes, on an endpoint that can take it.
+      const busy = endpoints.find(({ project, id }) => project === ids[0] && id !== invalid.id);
+      const competing = new Set([...claimable.map(({ project }) => project), ...(busy ? [busy.project] : [])]);
+      const bound = Math.ceil(competing.size / slots);
+      const rank = new Map<string, number>();
+      for (const project of competing)
+        for (const [index, row] of claimable.filter((candidate) => candidate.project === project).entries()) rank.set(row.id, index + 1);
+      const maxPasses = Math.max(1, ...[...rank.values()].map((r) => r * bound));
+      const sentAt = new Map<string, number>();
+      const sentCount = (eventId: string) => received.filter(({ id }) => id === eventId).length;
+      const record = (pass: number) => {
+        for (const row of rows) if (!sentAt.has(row.id) && sentCount(row.eventId)) sentAt.set(row.id, pass);
+      };
+      for (let pass = 1; pass <= maxPasses; pass++) {
+        if (busy) await ping(busy.id, `fair-${seed}-newer-${pass}`, (await webhookCursorClock(prisma)).now);
+        await deliverWebhooks(ch, { ...options(), concurrency: slots, perEndpoint }, ids);
+        record(pass);
+      }
+      // A few more passes, without new work, so the invalid endpoint is reached if it holds an unlocked row.
+      for (let pass = maxPasses + 1; pass <= maxPasses + 6; pass++) {
+        await deliverWebhooks(ch, { ...options(), concurrency: slots, perEndpoint }, ids);
+        record(pass);
+      }
+      const layout = `P=${competing.size} N=${slots} A=${perEndpoint} bound=${bound} rows=${rows.length} locked=${locked.length}`;
+      for (const row of claimable) {
+        const limit = (rank.get(row.id) ?? 1) * bound;
+        expect(sentAt.get(row.id), `${layout}: ${row.eventId} (rank ${rank.get(row.id)}) within ${limit} passes`).toBeLessThanOrEqual(limit);
+      }
+      for (const project of new Set(claimable.map(({ project }) => project))) {
+        const first = Math.min(...rows.filter((row) => row.project === project).map((row) => sentAt.get(row.id) ?? Number.POSITIVE_INFINITY));
+        expect(first, `${layout}: project ${project} served within ${bound} passes`).toBeLessThanOrEqual(bound);
+      }
+      for (const row of locked) {
+        expect(sentCount(row.eventId), `${layout}: locked ${row.eventId} not sent`).toBe(0);
+        expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ attemptNumber: 0 });
+      }
+      for (const row of rows) expect(sentCount(row.eventId), `${layout}: ${row.eventId} sent at most once`).toBeLessThanOrEqual(1);
+      const invalidRows = rows.filter((row) => row.endpointId === invalid.id);
+      const wasted = await prisma.webhookAttempt.count({ where: { delivery: { endpointId: invalid.id } } });
+      expect(wasted, `${layout}: slots spent on the invalid-scope endpoint`).toBeLessThanOrEqual(1);
+      for (const row of invalidRows) expect(sentCount(row.eventId)).toBe(0);
+      if (invalidRows.some((row) => !locked.includes(row)))
+        expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: invalid.id } }), `${layout}: invalid scope held`).toMatchObject({
+          scopeReviewRequired: true,
+        });
+    } catch (error) {
+      throw new Error(`Fairness seed ${seed} failed (replay: WEBHOOK_FAIRNESS_SEEDS=${seed}): ${error instanceof Error ? error.message : error}`);
+    } finally {
+      await unlock();
+      await prisma.organization.deleteMany({ where: { id: { in: ids } } });
+    }
+  }
+});
+
+it('claims a project that was never claimed before projects that were, even when their rows are older', { timeout: 60_000 }, async () => {
+  const [, , , , , , , , , , , served = '', fresh = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  // After the upgrade every project lacks a rotation row, which ranks it first. A served project has one.
+  await prisma.webhookClaimRotation.create({ data: { projectId: served, lastClaimedAt: new Date(+now - 3_600_000) } });
+  const older = await ping((await endpoint(served, 'rotation-served')).id, 'rotation-served', new Date(+now - 300_000));
+  const newer = await ping((await endpoint(fresh, 'rotation-fresh')).id, 'rotation-fresh', new Date(+now - 1000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  await deliverWebhooks(ch, options(), [served, fresh]);
+  expect(sent(newer.eventId)).toBe(1);
+  expect(sent(older.eventId)).toBe(0);
+  expect(await prisma.webhookClaimRotation.findUniqueOrThrow({ where: { projectId: fresh } })).toMatchObject({ lastClaimedAt: expect.any(Date) });
+  // Now both have been claimed; the one claimed longer ago goes first.
+  await deliverWebhooks(ch, options(), [served, fresh]);
+  expect(sent(older.eventId)).toBe(1);
+});
+
+it('rolls the fair-phase statement back as a whole when it fails, and claims normally on the next pass', { timeout: 60_000 }, async () => {
+  const [, , , , , , , , , , , , , first = '', second = ''] = projects;
+  const { now } = await webhookCursorClock(prisma);
+  const failing = await ping((await endpoint(first, 'rollback-first')).id, 'rollback-first', new Date(+now - 120_000));
+  const other = await ping((await endpoint(second, 'rollback-second')).id, 'rollback-second', new Date(+now - 60_000));
+  const sent = (id: string) => received.filter((message) => message.id === id).length;
+  const attempts = (deliveryId: string) => prisma.webhookAttempt.count({ where: { deliveryId } });
+  const rotation = (projectId: string) => prisma.webhookClaimRotation.findUnique({ where: { projectId } });
+  const suffix = randomBytes(4).toString('hex');
+  const fn = `qa_fail_fair_${suffix}`;
+  // A forced error inside the statement, on chosen rows only.
+  const failOn = async (ids: string[]) => {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${fn} ON "WebhookDelivery"`);
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER ${fn} BEFORE UPDATE ON "WebhookDelivery" FOR EACH ROW WHEN (OLD.id IN (${ids.map((id) => `'${id}'`).join(', ')})) EXECUTE FUNCTION ${fn}()`,
+    );
+  };
+  await prisma.$executeRawUnsafe(
+    `CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'QA fair statement failure'; END $$`,
+  );
+  const errors = vi.spyOn(console, 'error');
+  try {
+    // Every row of the pass fails: the fair statement and the per-project retry claim nothing at all.
+    await failOn([failing.id, other.id]);
+    await deliverWebhooks(ch, { ...options(), concurrency: 2 }, [first, second]);
+    for (const row of [failing, other]) {
+      expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+        status: 'pending',
+        attemptNumber: 0,
+        leaseUntil: null,
+      });
+      expect(await attempts(row.id)).toBe(0);
+      expect(sent(row.eventId)).toBe(0);
+    }
+    expect(await rotation(first)).toBeNull();
+    expect(await rotation(second)).toBeNull();
+    expect(errors.mock.calls.map(([message]) => String(message))).toContainEqual(expect.stringContaining('webhook.claim_fair_failed'));
+    // Only the first project's row fails. The fair statement claimed the second project's row too, and that write rolled
+    // back with it: the per-project retry claims the second row exactly once.
+    await failOn([failing.id]);
+    await deliverWebhooks(ch, { ...options(), concurrency: 2 }, [first, second]);
+    expect(sent(other.eventId)).toBe(1);
+    expect(await attempts(other.id)).toBe(1);
+    expect(await rotation(second)).not.toBeNull();
+    expect(await rotation(first)).toBeNull();
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: failing.id } })).toMatchObject({ attemptNumber: 0, leaseUntil: null });
+  } finally {
+    errors.mockRestore();
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${fn} ON "WebhookDelivery"`);
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${fn}()`);
+  }
+  // The next pass claims normally.
+  await deliverWebhooks(ch, { ...options(), concurrency: 2 }, [first, second]);
+  expect(sent(failing.eventId)).toBe(1);
+  expect(await rotation(first)).not.toBeNull();
+});
+
+it("removes a project's claim rotation row when the project is deleted", async () => {
+  const id = `qa-webhook-claims-rotation-${runId}`;
+  await prisma.organization.create({ data: { id, name: id, slug: id, createdAt: new Date() } });
+  await prisma.project.create({ data: { id, organizationId: id, name: id, slug: id } });
+  await prisma.webhookClaimRotation.create({ data: { projectId: id, lastClaimedAt: new Date() } });
+  await prisma.project.delete({ where: { id } });
+  expect(await prisma.webhookClaimRotation.findUnique({ where: { projectId: id } })).toBeNull();
+  await prisma.organization.deleteMany({ where: { id } });
 });

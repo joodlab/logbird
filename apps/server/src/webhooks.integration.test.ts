@@ -1464,3 +1464,59 @@ it('sets creator to null when deleted and cascades endpoint secrets on project d
   expect(await prisma.webhookEndpoint.count({ where: { id: endpoint.id } })).toBe(0);
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(0);
 });
+
+it('holds an invalid stored scope found behind a locked row without spending the slot, and shows the scope warning', async () => {
+  const { endpoint: lockedHook } = await create();
+  const { endpoint: invalidHook } = await create();
+  const { endpoint: healthy } = await create();
+  const [{ now }] = await prisma.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+  const expiresAt = new Date(+now + 86_400_000);
+  const row = (endpointId: string, eventId: string, age: number) =>
+    prisma.webhookDelivery.create({ data: { endpointId, eventId, expiresAt, nextAttemptAt: new Date(+now - age) } });
+  // In one project: a locked valid row first, then an unlocked row whose endpoint has an invalid stored scope, then a
+  // healthy sibling.
+  const lockedRow = await row(lockedHook.id, 'qa-scope-locked', 180_000);
+  const invalidRow = await row(invalidHook.id, 'qa-scope-invalid', 120_000);
+  const healthyRow = await row(healthy.id, 'qa-scope-healthy', 60_000);
+  await prisma.webhookEndpoint.update({ where: { id: invalidHook.id }, data: { scopeTenantId: ' qa-invalid ' } });
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((done) => {
+    release = done;
+  });
+  let ready: () => void = () => undefined;
+  const holding = new Promise<void>((done) => {
+    ready = done;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "WebhookDelivery" WHERE id = ${lockedRow.id} FOR UPDATE`;
+      ready();
+      await released;
+    },
+    { timeout: 50_000, maxWait: 5000 },
+  );
+  try {
+    await holding;
+    await withLocalReceiver(healthy.id, async (received) => {
+      let passes = 0;
+      while (!received.length && passes < 2) {
+        passes++;
+        await send();
+      }
+      expect(passes).toBe(1);
+      expect(received.map(({ payload }) => JSON.parse(payload).id)).toEqual([healthyRow.eventId]);
+    });
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: invalidRow.id }, include: { attempts: true } })).toMatchObject({
+      status: 'pending',
+      attemptNumber: 0,
+      leaseUntil: null,
+      attempts: [],
+    });
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: invalidHook.id } })).toMatchObject({ scopeReviewRequired: true });
+    expect(await (await request(`${base()}/${invalidHook.id}`)).json()).toMatchObject({ scopeWarning: 'webhook_invalid_scope' });
+    expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: lockedRow.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
+  } finally {
+    release();
+    await holder;
+  }
+});
