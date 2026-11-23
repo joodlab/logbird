@@ -46,6 +46,8 @@ describe('the id that free text could be', () => {
     for (const id of ['biz_27', 'usr_131', 'article_27_2', 'crm-hourly-biz_7', '7']) expect(idFromFreeText(id), id).toBe(id);
     expect(idFromFreeText('"acme:27"')).toBe('acme:27');
     expect(idFromFreeText('"acme west"')).toBe('acme west');
+    // An escaped quote inside the quotes is part of the id, as the server reads it.
+    expect(idFromFreeText('"acme\\"27"')).toBe('acme"27');
     for (const text of ['', 'tenant:biz_27', 'two words', '"a"b"', 'biz*', '-biz_27', '(biz)', 'AND', 'NOT'])
       expect(idFromFreeText(text), text).toBe('');
   });

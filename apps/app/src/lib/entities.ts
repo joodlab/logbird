@@ -1,4 +1,4 @@
-import { type EntityKind, formatRecordTerm } from '@logbird/contracts';
+import { type EntityKind, formatRecordTerm, parseQueryExpression } from '@logbird/contracts';
 import { Bot, Building2, Cog, type LucideIcon, Package, User } from 'lucide-react';
 import { formatTerm } from './query-language';
 
@@ -138,12 +138,12 @@ export const isExactId = (rank: EntityMatchRank) => rank <= 1;
 
 /**
  * The id that free text could be, or '' when it cannot be one: a single bare word (no field, operator, group or
- * wildcard), or one quoted term (`"acme:27"`, which the query language reads as the literal text).
+ * wildcard), or one quoted term (`"acme:27"`, `"acme\"27"`), read as the server's parser reads it: the literal text,
+ * escapes resolved.
  */
 export function idFromFreeText(text: string): string {
   const t = text.trim();
-  const quoted = /^"([^"\\]+)"$/.exec(t);
-  if (quoted) return quoted[1]?.trim() ?? '';
+  if (t.startsWith('"')) return quotedTerm(t);
   return /^[^\s:()"'*-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
 }
 
@@ -152,6 +152,24 @@ export function idFromFreeText(text: string): string {
  * tenant, not an operation, whatever its prefix. Otherwise the id's shape decides (`op_…` an operation, `evt_…` or a
  * ULID an event), and anything else is searched.
  */
+/** The literal text of `t` when the server reads it as exactly one quoted term, else ''. */
+function quotedTerm(t: string): string {
+  try {
+    const expression = parseQueryExpression(t);
+    const atom = expression.length === 1 && expression[0]?.length === 1 ? expression[0][0]?.atom : undefined;
+    if (atom?.kind !== 'text' || atom.start !== 0 || atom.end !== t.length || atom.token.kind !== 'value') return '';
+    return atom.token.value.trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The palette's search value for an entity row. Every row starts with what was typed, so the palette scores them all
+ * the same and keeps the server's rank order (exact id, id prefix, name prefix, …) instead of re-sorting by kind.
+ */
+export const paletteEntityValue = (search: string, e: { kind: EntityKind; id: string }) => `${search.trim()} ${e.kind}:${e.id}`;
+
 export function resolveJump<E extends { kind?: EntityKind; id: string; name: string; type?: string }>(
   text: string,
   shape: 'operation' | 'event' | null,

@@ -32,7 +32,16 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
-import { ENTITY_SECTIONS, entityMatchRank, entityQuery, exactPerKind, isExactId, resolveJump, sectionForKind } from '@/lib/entities';
+import {
+  ENTITY_SECTIONS,
+  entityMatchRank,
+  entityQuery,
+  exactPerKind,
+  isExactId,
+  paletteEntityValue,
+  resolveJump,
+  sectionForKind,
+} from '@/lib/entities';
 import { formatTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
 
@@ -262,7 +271,8 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                       }),
                     )
                   }
-                  value={`${e.kind} ${e.id} ${e.name} ${debounced}`}
+                  // Every row starts with the typed text, so they score the same and keep the server's rank order.
+                  value={paletteEntityValue(search, e)}
                 >
                   <EntityAvatar icon={e.kind === 'actor' && e.type === 'user' ? undefined : Icon} id={e.id} name={e.name || e.id} size="sm" />
                   <span className="truncate">{e.name || e.id}</span>

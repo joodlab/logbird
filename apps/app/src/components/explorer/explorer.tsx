@@ -341,12 +341,18 @@ function ProjectExplorer({
       ? `${articleFor(idMatch.kind)} ${kindNoun(idMatch.kind)} id`
       : `the id of ${idMatches.map((e) => `${articleFor(e.kind)} ${kindNoun(e.kind)}`).join(' and ')}`;
   const idSettled = !word || idLookup.isSuccess || idLookup.isError;
-  // Whether anything older matches: only then is the range the reason, and only then is widening offered.
+  // Whether anything older matches: only then is the range the reason, and only then is widening offered. In SQL mode
+  // the check runs the reader's predicate over every partition, so it runs only when asked (#239).
+  const [checkSqlAllTime, setCheckSqlAllTime] = useState<string | null>(null);
+  const sqlCheckAsked = lang !== 'sql' || checkSqlAllTime === `${effectiveQ}\u0000${range}`;
+  const widerWanted = showsEmpty && !complete && idSettled && !idMatch;
   const wider = useQuery({
     ...histogramQuery(projectId, ALL_RANGE, effectiveQ, lang),
-    enabled: showsEmpty && !complete && idSettled && !idMatch,
+    enabled: widerWanted && sqlCheckAsked,
   });
   const olderMatches = current(wider)?.buckets.reduce((n, b) => n + b.total, 0);
+  // Until the check answers, no advice: it may yet say the range is the reason (#239).
+  const checking = widerWanted && sqlCheckAsked && !wider.isError && olderMatches === undefined;
   const widen =
     olderMatches && olderMatches > 0 ? (
       <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
@@ -356,13 +362,21 @@ function ProjectExplorer({
       <Button onClick={() => wider.refetch()} size="sm" variant="outline">
         Retry the check
       </Button>
+    ) : widerWanted && !sqlCheckAsked ? (
+      <Button data-testid="check-all-time" onClick={() => setCheckSqlAllTime(`${effectiveQ}\u0000${range}`)} size="sm" variant="outline">
+        Check other dates
+      </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
   const outside = wider.isError
     ? 'Could not check other dates.'
-    : olderMatches
-      ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
-      : 'Remove a filter or change the query.';
+    : checking
+      ? 'Checking other dates…'
+      : olderMatches
+        ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
+        : widerWanted && !sqlCheckAsked
+          ? 'Other dates are checked only when you ask, since that runs the expression over all stored events.'
+          : 'Remove a filter or change the query.';
 
   // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
   // so a search opened straight from a link still gets its offer once they arrive).
