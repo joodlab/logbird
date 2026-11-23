@@ -57,6 +57,20 @@ public class RedactionParityTests
         Assert.Matches(options.Keys, "TAB\tHERE");
         Assert.DoesNotMatch(options.Keys, "tabthere");
 
+        // The added names keep their own rules whatever the current pattern's options: not case-insensitive, and not
+        // swallowed by a trailing comment of a whitespace-ignoring pattern.
+        var caseless = new RedactionOptions { Keys = new Regex("secret", RegexOptions.IgnoreCase) }.AddKeys("état");
+        Assert.Matches(caseless.Keys, "SECRET");
+        Assert.Matches(caseless.Keys, "ÉTAT".ToLowerInvariant());
+        Assert.DoesNotMatch(caseless.Keys, "État");
+        var commented = new RedactionOptions { Keys = new Regex("token # the default would be broader", RegexOptions.IgnorePatternWhitespace) }.AddKeys("email", "two words");
+        Assert.Matches(commented.Keys, "token");
+        Assert.Matches(commented.Keys, "workEmail");
+        Assert.Matches(commented.Keys, "two words");
+        Assert.DoesNotMatch(commented.Keys, "twowords");
+        var ecma = new RedactionOptions { Keys = new Regex("secret", RegexOptions.ECMAScript) }.AddKeys("email");
+        Assert.Matches(ecma.Keys, "Email");
+
         // A name with a letter that has a look-alike: the look-alike is not taken for it.
         var kelvin = new RedactionOptions { Keys = new Regex("^$") }.AddKeys("key");
         Assert.Matches(kelvin.Keys, "KEY");

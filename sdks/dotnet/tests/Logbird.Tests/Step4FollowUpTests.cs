@@ -191,11 +191,13 @@ public class Step4FollowUpTests
         Assert.Null(JsJson.ToUtf8(node, full.Length - 1));
     }
 
-    // ---------------------------------------------------------------- R07: a structured change field is written iteratively
+    // ---------------------------------------------------------------- R07: a structured change field never recurses
 
     [Fact]
-    public void Redact_matches_a_structured_change_field_as_deep_as_the_event_allows()
+    public void A_structured_change_field_as_deep_as_the_event_allows_is_handled_and_never_matched()
     {
+        // Step-4 PR 4 (parity with TypeScript): only a string field is matched, so a structured one is left as it is,
+        // whatever text it holds; reading it never recurses.
         // The field sits at level 4 of the event; 1,003 levels under it make the event 1,007 deep (within 1,008), past
         // System.Text.Json's own writer limit of 1,000.
         JsonNode field = new JsonArray("password");
@@ -212,7 +214,8 @@ public class Step4FollowUpTests
 
         var redacted = new Redactor().Redact(eventJson);
 
-        Assert.Equal("[redacted]", redacted["changes"]![0]!["after"]!.GetValue<string>());
+        Assert.Equal("old-secret", redacted["changes"]![0]!["before"]!.GetValue<string>());
+        Assert.Equal("new-secret", redacted["changes"]![0]!["after"]!.GetValue<string>());
     }
 
     // ---------------------------------------------------------------- R08: a notice that could not be queued is retried

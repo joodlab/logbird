@@ -25,8 +25,15 @@ namespace Logbird;
 /// Identity is never redacted: the top-level <c>id</c> and <c>action</c>, and <see cref="Redactor.IdentifierFields"/>.
 /// A pattern that matches a party's own key (<c>actor</c>, <c>impersonator</c>, <c>executor</c>, <c>tenant</c> or
 /// <c>targets</c>) redacts every other field of that party (its name, email and any extra field) and keeps its
-/// identifier fields; the party is never replaced as a whole. The TypeScript SDK's <c>redact()</c> does the same, checked
-/// against one shared fixture.
+/// identifier fields; the party is never replaced as a whole; so does a pattern matching a target's index. A change's
+/// values are replaced when its <c>field</c> is a string <see cref="ChangeFields"/> matches.
+/// </para>
+/// <para>
+/// The TypeScript SDK's <c>redact()</c> follows the same rules, checked against one shared fixture: with the default
+/// pattern, and names added with <see cref="AddKeys"/>, both redact exactly the same keys. A pattern of your own runs on
+/// each platform's regular-expression engine, which can differ at the edges (in .NET, <c>$</c> also matches before a
+/// final line feed, so use <c>\z</c> for "end of key"; case-insensitive options fold case differently), so keep custom
+/// patterns to what means the same in both. <see cref="Redactor.Redact"/> accepts event JSON up to 1,008 levels deep.
 /// </para>
 /// <para>The default pattern does not cover personal data: add your own keys with <see cref="AddKeys"/>.</para>
 /// </remarks>
@@ -63,8 +70,12 @@ public sealed class RedactionOptions
             return this;
         }
 
+        // The names are isolated from the current pattern: an inline group turns its options off (a case-insensitive or
+        // whitespace-ignoring pattern does not change how they match), and a line break first ends a trailing comment
+        // that a whitespace-ignoring pattern may hold, which would otherwise swallow them.
         var added = string.Join("|", names.Select(Redactor.AsciiCaseless));
-        Keys = new Regex($"{Keys}|{added}", Keys.Options | RegexOptions.CultureInvariant, Keys.MatchTimeout);
+        var separator = (Keys.Options & RegexOptions.IgnorePatternWhitespace) != 0 ? "\n|" : "|";
+        Keys = new Regex($"{Keys}{separator}(?-imnsx:{added})", Keys.Options | RegexOptions.CultureInvariant, Keys.MatchTimeout);
         return this;
     }
 
@@ -158,8 +169,9 @@ public sealed class Redactor
     public static IReadOnlyList<string> IdentifierFields { get; } =
         ["actor.type", "actor.id", "impersonator.id", "executor.type", "executor.id", "executor.jobId", "executor.attempt", "tenant.id", "targets[].type", "targets[].id"];
 
-    // The names of the identifier fields, checked at startup: a pattern matching one is reported once.
-    private static readonly string[] StructuralKeys = ["id", "type", "jobId", "attempt"];
+    // The names of the fields never redacted (identifier fields and the event's action), checked at startup: a pattern
+    // matching one is reported once.
+    private static readonly string[] StructuralKeys = ["id", "action", "type", "jobId", "attempt"];
 
     /// <summary>The identifier-related keys this redactor's patterns would match (they are exempt from redaction).</summary>
     internal List<string> IdentifierFieldsMatched()
@@ -190,7 +202,8 @@ public sealed class Redactor
         {
             foreach (var item in changes)
             {
-                if (item is not JsonObject change || !_changeFields.IsMatch(FieldText(change["field"])))
+                // Only an object entry whose field is a string is matched; any other shape is left to the walk.
+                if (item is not JsonObject change || !IsText(change["field"], out var field) || !_changeFields.IsMatch(field))
                 {
                     continue;
                 }
@@ -294,16 +307,18 @@ public sealed class Redactor
                     break;
                 case JsonArray array:
                     // JavaScript walks arrays by index keys ("0", "1", ...); match them the same way. Target entries are
-                    // parties: never replaced as a whole, and their type and id are kept.
+                    // parties: never replaced as a whole, and their type and id are kept; a pattern matching an entry's
+                    // index (or the targets key) redacts the entry's other fields, and a scalar entry is replaced.
                     for (var i = 0; i < array.Count; i++)
                     {
                         if (level == Level.Targets)
                         {
+                            var entryMatched = whole || _keys.IsMatch(i.ToString(CultureInfo.InvariantCulture));
                             if (array[i] is JsonObject)
                             {
-                                pending.Push((array[i], Level.Target, whole));
+                                pending.Push((array[i], Level.Target, entryMatched));
                             }
-                            else if (whole)
+                            else if (entryMatched)
                             {
                                 array[i] = _replacement;
                             }
@@ -327,13 +342,15 @@ public sealed class Redactor
         }
     }
 
-    // JavaScript's RegExp.test coerces a non-string field to text. A structured field is matched against its JSON, written
-    // by the SDK's iterative writer, so a field as deep as the event allows never reaches System.Text.Json's recursive one.
-    private static string FieldText(JsonNode? field)
-        => field switch
+    private static bool IsText(JsonNode? field, out string text)
+    {
+        if (field is JsonValue value && Internal.JsJson.TryGetString(value, out var found))
         {
-            null => "null",
-            JsonValue value when Internal.JsJson.TryGetString(value, out var text) => text,
-            _ => System.Text.Encoding.UTF8.GetString(Internal.JsJson.ToUtf8(field)),
-        };
+            text = found;
+            return true;
+        }
+
+        text = string.Empty;
+        return false;
+    }
 }

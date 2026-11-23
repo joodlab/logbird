@@ -326,10 +326,15 @@ pseudonymise an id, transform it before recording, for example with a keyed hash
 
 **A pattern that matches a party's own key** (`actor`, `impersonator`, `executor`, `tenant` or `targets`, for example
 `AddKeys("actor")`) redacts every other field of that party, such as its name and email, and keeps its identifier
-fields. A party is never replaced as a whole.
+fields; so does a pattern matching a target's index (`^0$`). A party is never replaced as a whole. A change's before and
+after values are replaced when its `field` is a string that `ChangeFields` matches.
 
 Redaction follows the same rules as the TypeScript SDK's `redact()`: both run one shared fixture of cases
-(`tests/Logbird.Tests/Fixtures/redaction-parity.json`). Set `Redaction.Enabled = false` to turn it off, or replace
+(`tests/Logbird.Tests/Fixtures/redaction-parity.json`). With the default pattern and names added with `AddKeys` (which
+keep their own rules whatever the current pattern's options), both redact exactly the same keys. A `Regex` of your own
+runs on .NET's engine and a TypeScript one on JavaScript's, which differ at the edges: in .NET, `$` also matches before a
+final line feed (use `\z` for the end of a key), and case-insensitive options fold case differently. Keep a pattern you
+share between the SDKs to plain alternatives and `^` anchors. Set `Redaction.Enabled = false` to turn it off, or replace
 `Redaction.Keys` with your own pattern. `BeforeSend` runs before redaction on a copy of each event; return `null`
 to skip an event.
 

@@ -10,7 +10,7 @@ namespace Logbird.IntegrationTests;
 /// Redaction parity against a real Logbird: a pattern matching every party key keeps the parties' identifier fields
 /// (an executor's attempt stays a number, so the server accepts the event) and redacts the rest, in what the server
 /// stores, from either SDK. The TypeScript event comes from tests/cross-sdk/send-redacted-event.ts
-/// (LOGBIRD_IT_TS_REDACTED_ID, with LOGBIRD_IT_TS_EVENT=1).
+/// (LOGBIRD_IT_TS_REDACTED_ID, with LOGBIRD_IT_TS_REDACTED=1).
 /// </summary>
 public class RedactionLiveTests
 {
@@ -56,7 +56,7 @@ public class RedactionLiveTests
         AssertParties("dotnet", await LiveServer.WaitForEventAsync(reader, sent.Id!));
     }
 
-    [LiveFact(requires: "LOGBIRD_IT_TS_EVENT")]
+    [LiveFact(requires: "LOGBIRD_IT_TS_REDACTED")]
     public async Task A_typescript_event_with_the_same_pattern_stores_the_same_parties()
     {
         var id = Environment.GetEnvironmentVariable("LOGBIRD_IT_TS_REDACTED_ID");

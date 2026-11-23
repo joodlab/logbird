@@ -1,5 +1,5 @@
 {
-  "description": "Redaction parity between the TypeScript SDK's redact() and the .NET SDK's Redactor: both run every case and must produce exactly the expected event. keys and changeFields are pattern sources without flags (null: the default pattern; changeFields null: keys); replacement null is [redacted]. Read by packages/sdk/src/redact.test.ts and sdks/dotnet/tests/Logbird.Tests/RedactionParityTests.cs.",
+  "description": "Redaction parity between the TypeScript SDK's redact() and the .NET SDK's Redactor: both run every case and must produce exactly the expected event. keys and changeFields are pattern sources without flags, using only syntax that means the same in both engines (null: the default pattern; changeFields null: keys); replacement null is [redacted]. Read by packages/sdk/src/redact.test.ts and sdks/dotnet/tests/Logbird.Tests/RedactionParityTests.cs.",
   "cases": [
     {
       "name": "the default pattern redacts nested secrets, array entries and change values",
@@ -9,26 +9,49 @@
       "input": {
         "id": "token-id",
         "action": "password.changed",
-        "actor": { "type": "user", "id": "user_1", "token": "secret" },
+        "actor": {
+          "type": "user",
+          "id": "user_1",
+          "token": "secret"
+        },
         "metadata": {
-          "nested": [{ "api_key": "secret", "safe": 1 }],
+          "nested": [
+            {
+              "api_key": "secret",
+              "safe": 1
+            }
+          ],
           "Authorization": "Bearer x"
         },
         "changes": [
           {
             "field": "password",
-            "before": { "value": "secret" },
+            "before": {
+              "value": "secret"
+            },
             "after": "secret"
           },
-          { "field": "name", "after": "safe" }
+          {
+            "field": "name",
+            "after": "safe"
+          }
         ]
       },
       "expected": {
         "id": "token-id",
         "action": "password.changed",
-        "actor": { "type": "user", "id": "user_1", "token": "[redacted]" },
+        "actor": {
+          "type": "user",
+          "id": "user_1",
+          "token": "[redacted]"
+        },
         "metadata": {
-          "nested": [{ "api_key": "[redacted]", "safe": 1 }],
+          "nested": [
+            {
+              "api_key": "[redacted]",
+              "safe": 1
+            }
+          ],
           "Authorization": "[redacted]"
         },
         "changes": [
@@ -37,7 +60,10 @@
             "before": "[redacted]",
             "after": "[redacted]"
           },
-          { "field": "name", "after": "safe" }
+          {
+            "field": "name",
+            "after": "safe"
+          }
         ]
       }
     },
@@ -113,7 +139,10 @@
           "name": "Fictional User",
           "email": "fictional@example.invalid"
         },
-        "impersonator": { "id": "support_1", "name": "Fictional Support" },
+        "impersonator": {
+          "id": "support_1",
+          "name": "Fictional Support"
+        },
         "executor": {
           "type": "worker",
           "id": "billing-worker",
@@ -121,9 +150,21 @@
           "jobId": "job_1",
           "attempt": 2
         },
-        "tenant": { "id": "acct_1", "name": "Fictional Co" },
-        "targets": [{ "type": "invoice", "id": "inv_1", "name": "INV-1" }],
-        "context": { "operationid": "op_1", "traceId": "kept: Id is not id" }
+        "tenant": {
+          "id": "acct_1",
+          "name": "Fictional Co"
+        },
+        "targets": [
+          {
+            "type": "invoice",
+            "id": "inv_1",
+            "name": "INV-1"
+          }
+        ],
+        "context": {
+          "operationid": "op_1",
+          "traceId": "kept: Id is not id"
+        }
       },
       "expected": {
         "id": "evt_1",
@@ -134,7 +175,10 @@
           "name": "[redacted]",
           "email": "[redacted]"
         },
-        "impersonator": { "id": "support_1", "name": "[redacted]" },
+        "impersonator": {
+          "id": "support_1",
+          "name": "[redacted]"
+        },
         "executor": {
           "type": "worker",
           "id": "billing-worker",
@@ -142,8 +186,17 @@
           "jobId": "job_1",
           "attempt": 2
         },
-        "tenant": { "id": "acct_1", "name": "[redacted]" },
-        "targets": [{ "type": "invoice", "id": "inv_1", "name": "[redacted]" }],
+        "tenant": {
+          "id": "acct_1",
+          "name": "[redacted]"
+        },
+        "targets": [
+          {
+            "type": "invoice",
+            "id": "inv_1",
+            "name": "[redacted]"
+          }
+        ],
         "context": {
           "operationid": "[redacted]",
           "traceId": "kept: Id is not id"
@@ -163,9 +216,14 @@
           "id": "user_1",
           "name": "Fictional User",
           "email": "fictional@example.invalid",
-          "profile": { "plan": "pro" }
+          "profile": {
+            "plan": "pro"
+          }
         },
-        "impersonator": { "id": "support_1", "name": "Fictional Support" },
+        "impersonator": {
+          "id": "support_1",
+          "name": "Fictional Support"
+        },
         "executor": {
           "type": "api",
           "id": "web",
@@ -173,12 +231,24 @@
           "jobId": "job_2",
           "attempt": 0
         },
-        "tenant": { "id": "acct_1", "name": "Fictional Co" },
+        "tenant": {
+          "id": "acct_1",
+          "name": "Fictional Co"
+        },
         "targets": [
-          { "type": "session", "id": "s_1", "name": "Chrome" },
+          {
+            "type": "session",
+            "id": "s_1",
+            "name": "Chrome"
+          },
           "loose"
         ],
-        "metadata": { "actor": { "name": "nested copy" }, "kept": "yes" }
+        "metadata": {
+          "actor": {
+            "name": "nested copy"
+          },
+          "kept": "yes"
+        }
       },
       "expected": {
         "id": "evt_2",
@@ -190,7 +260,10 @@
           "email": "[redacted]",
           "profile": "[redacted]"
         },
-        "impersonator": { "id": "support_1", "name": "[redacted]" },
+        "impersonator": {
+          "id": "support_1",
+          "name": "[redacted]"
+        },
         "executor": {
           "type": "api",
           "id": "web",
@@ -198,12 +271,22 @@
           "jobId": "job_2",
           "attempt": 0
         },
-        "tenant": { "id": "acct_1", "name": "[redacted]" },
+        "tenant": {
+          "id": "acct_1",
+          "name": "[redacted]"
+        },
         "targets": [
-          { "type": "session", "id": "s_1", "name": "[redacted]" },
+          {
+            "type": "session",
+            "id": "s_1",
+            "name": "[redacted]"
+          },
           "[redacted]"
         ],
-        "metadata": { "actor": "[redacted]", "kept": "yes" }
+        "metadata": {
+          "actor": "[redacted]",
+          "kept": "yes"
+        }
       }
     },
     {
@@ -232,14 +315,36 @@
       "input": {
         "id": "e",
         "action": "a",
-        "metadata": { "list": ["a", "b", "c"] },
-        "targets": [{ "type": "t", "id": "0" }, { "type": "t", "id": "1" }]
+        "metadata": {
+          "list": ["a", "b", "c"]
+        },
+        "targets": [
+          {
+            "type": "t",
+            "id": "0"
+          },
+          {
+            "type": "t",
+            "id": "1"
+          }
+        ]
       },
       "expected": {
         "id": "e",
         "action": "a",
-        "metadata": { "list": ["a", "[redacted]", "c"] },
-        "targets": [{ "type": "t", "id": "0" }, { "type": "t", "id": "1" }]
+        "metadata": {
+          "list": ["a", "[redacted]", "c"]
+        },
+        "targets": [
+          {
+            "type": "t",
+            "id": "0"
+          },
+          {
+            "type": "t",
+            "id": "1"
+          }
+        ]
       }
     },
     {
@@ -256,17 +361,35 @@
           "email": "fictional@example.invalid"
         },
         "changes": [
-          { "field": "phone", "after": "123" },
-          { "field": "email", "before": "x", "after": "y" }
+          {
+            "field": "phone",
+            "after": "123"
+          },
+          {
+            "field": "email",
+            "before": "x",
+            "after": "y"
+          }
         ]
       },
       "expected": {
         "id": "e",
         "action": "a",
-        "actor": { "type": "user", "id": "u", "email": "hidden" },
+        "actor": {
+          "type": "user",
+          "id": "u",
+          "email": "hidden"
+        },
         "changes": [
-          { "field": "phone", "after": "hidden" },
-          { "field": "email", "before": "x", "after": "y" }
+          {
+            "field": "phone",
+            "after": "hidden"
+          },
+          {
+            "field": "email",
+            "before": "x",
+            "after": "y"
+          }
         ]
       }
     },
@@ -278,7 +401,13 @@
       "input": {
         "id": "e",
         "action": "a",
-        "changes": [{ "field": "status", "before": "draft", "after": "sent" }]
+        "changes": [
+          {
+            "field": "status",
+            "before": "draft",
+            "after": "sent"
+          }
+        ]
       },
       "expected": {
         "id": "e",
@@ -300,9 +429,155 @@
       "input": {
         "id": "e",
         "action": "a",
-        "changes": [{ "field": "status", "before": "draft", "after": "sent" }]
+        "changes": [
+          {
+            "field": "status",
+            "before": "draft",
+            "after": "sent"
+          }
+        ]
       },
-      "expected": { "id": "e", "action": "a", "changes": "[redacted]" }
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "changes": "[redacted]"
+      }
+    },
+    {
+      "name": "a pattern matching a target's index redacts that target's other fields, and replaces a scalar entry",
+      "keys": "^(0|1)$",
+      "changeFields": null,
+      "replacement": null,
+      "input": {
+        "id": "e",
+        "action": "a",
+        "targets": [
+          {
+            "type": "invoice",
+            "id": "inv_0",
+            "name": "INV-0"
+          },
+          "loose",
+          {
+            "type": "invoice",
+            "id": "inv_2",
+            "name": "INV-2"
+          }
+        ]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "targets": [
+          {
+            "type": "invoice",
+            "id": "inv_0",
+            "name": "[redacted]"
+          },
+          "[redacted]",
+          {
+            "type": "invoice",
+            "id": "inv_2",
+            "name": "INV-2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "changes that are not an array are left to the walk",
+      "keys": null,
+      "changeFields": null,
+      "replacement": null,
+      "input": {
+        "id": "e",
+        "action": "a",
+        "changes": {
+          "password": "secret",
+          "field": "password"
+        }
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "changes": {
+          "password": "[redacted]",
+          "field": "password"
+        }
+      }
+    },
+    {
+      "name": "only a change entry that is an object with a string field is matched",
+      "keys": "^never$",
+      "changeFields": "token",
+      "replacement": null,
+      "input": {
+        "id": "e",
+        "action": "a",
+        "changes": [
+          null,
+          ["token"],
+          {
+            "field": ["token"],
+            "after": "array field"
+          },
+          {
+            "field": {
+              "token": 1
+            },
+            "after": "object field"
+          },
+          {
+            "field": null,
+            "after": "null field"
+          },
+          {
+            "after": "no field"
+          },
+          {
+            "field": 7,
+            "after": "number field"
+          },
+          {
+            "field": "token",
+            "before": "b",
+            "after": "a"
+          }
+        ]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "changes": [
+          null,
+          ["token"],
+          {
+            "field": ["token"],
+            "after": "array field"
+          },
+          {
+            "field": {
+              "token": 1
+            },
+            "after": "object field"
+          },
+          {
+            "field": null,
+            "after": "null field"
+          },
+          {
+            "after": "no field"
+          },
+          {
+            "field": 7,
+            "after": "number field"
+          },
+          {
+            "field": "token",
+            "before": "[redacted]",
+            "after": "[redacted]"
+          }
+        ]
+      }
     }
   ]
 }

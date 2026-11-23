@@ -387,9 +387,15 @@ const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'imperson
  * A key matches when the pattern matches any part of it (the default redacts `tokenCount` and `secretary` too); anchor
  * your own pattern (`/^name$/`) to match whole keys. A matching key keeps its name and its value becomes the replacement,
  * at any depth. Identity is never redacted: the top-level `id` and `action`, and {@link IDENTIFIER_FIELDS}. A pattern
- * that matches a party's own key (`actor`, `impersonator`, `executor`, `tenant` or `targets`) redacts every other field of
- * that party and keeps its identifier fields; the party is never replaced as a whole. The .NET SDK's `Redactor` follows
- * the same rules, checked against one shared fixture.
+ * that matches a party's own key (`actor`, `impersonator`, `executor`, `tenant` or `targets`), or a target's index, redacts
+ * every other field of that party and keeps its identifier fields; the party is never replaced as a whole. A change's
+ * values are replaced when its `field` is a string the change pattern matches.
+ *
+ * The .NET SDK's `Redactor` follows the same rules, checked against one shared fixture: with the default pattern (and
+ * names added like the .NET `AddKeys`), both redact exactly the same keys. A pattern of your own runs on each platform's
+ * regular-expression engine, which can differ at the edges (in .NET, `$` also matches before a final line feed; flags
+ * such as `i` fold case differently), so keep custom patterns to plain alternatives and anchors that mean the same in
+ * both. The deep copy uses `structuredClone`, which accepts nesting within the JavaScript engine's limits.
  */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
   const keys = options.keys ?? DEFAULT_SECRET_KEYS;
@@ -401,24 +407,33 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
   };
   return (event) => {
     const copy = structuredClone(event);
-    // Change values first, as the .NET SDK does; the walk below may then replace a matching key holding them.
-    for (const change of copy.changes ?? []) {
-      if (!matches(fields, change.field)) continue;
-      if (Object.hasOwn(change, 'before')) change.before = replacement;
-      if (Object.hasOwn(change, 'after')) change.after = replacement;
+    // Change values first, as the .NET SDK does; the walk below may then replace a matching key holding them. Only an
+    // object entry whose field is a string is matched (any other shape is left to the walk, never thrown on).
+    const changes: unknown = copy.changes;
+    if (Array.isArray(changes)) {
+      for (const change of changes) {
+        if (!change || typeof change !== 'object' || Array.isArray(change)) continue;
+        const entry = change as Record<string, unknown>;
+        if (typeof entry.field !== 'string' || !matches(fields, entry.field)) continue;
+        if (Object.hasOwn(entry, 'before')) entry.before = replacement;
+        if (Object.hasOwn(entry, 'after')) entry.after = replacement;
+      }
     }
-    // Iterative, like the .NET SDK, so any depth is redacted on any stack. Each decision depends only on the node's own
-    // key and level, so the visiting order does not change the result.
+    // Iterative, like the .NET SDK, so the walk itself never recurses (the deep copy is structuredClone's, within the
+    // engine's limits). Each decision depends only on the node's own key and level, so the visiting order does not change
+    // the result.
     const pending: Array<{ node: unknown; level: Level; whole: boolean }> = [{ node: copy, level: 'top', whole: false }];
     while (pending.length > 0) {
       const { node, level, whole } = pending.pop()!;
       if (!node || typeof node !== 'object') continue;
       const record = node as Record<string, unknown>;
       if (Array.isArray(node) && level === 'targets') {
-        // Target entries are parties: never replaced as a whole, and their type and id are kept.
+        // Target entries are parties: never replaced as a whole, and their type and id are kept. A pattern matching an
+        // entry's index (or the targets key) redacts the entry's other fields; a scalar entry is replaced.
         node.forEach((entry, index) => {
-          if (entry && typeof entry === 'object' && !Array.isArray(entry)) pending.push({ node: entry, level: 'target', whole });
-          else if (whole) node[index] = replacement;
+          const matched = whole || matches(keys, String(index));
+          if (entry && typeof entry === 'object' && !Array.isArray(entry)) pending.push({ node: entry, level: 'target', whole: matched });
+          else if (matched) node[index] = replacement;
           else pending.push({ node: entry, level: 'nested', whole: false });
         });
         continue;

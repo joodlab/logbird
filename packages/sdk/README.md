@@ -139,9 +139,14 @@ your own pattern, `/^token$/`, to match whole keys). Identity is never redacted:
 top-level `id` and `action`, and `IDENTIFIER_FIELDS` (the actor's type and id, the
 impersonator's and tenant's id, the executor's type, id, jobId and attempt, and each
 target's type and id). A pattern matching a party's own key (`actor`, `impersonator`,
-`executor`, `tenant` or `targets`) redacts that party's other fields, such as its name and
-email, and keeps its identifier fields; a party is never replaced as a whole. The .NET
-SDK redacts by the same rules, checked against one shared fixture.
+`executor`, `tenant` or `targets`), or a target's index, redacts that party's other
+fields, such as its name and email, and keeps its identifier fields; a party is never
+replaced as a whole. A change's values are replaced when its `field` is a string the
+change pattern matches. The .NET SDK redacts by the same rules, checked against one shared
+fixture: with `DEFAULT_SECRET_KEYS` both redact exactly the same keys. A pattern of your
+own runs on each platform's engine, which differ at the edges (in .NET `$` also matches
+before a final line feed, and flags such as `i` fold case differently), so keep a pattern
+you share between the SDKs to plain alternatives and anchors.
 `DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
 cookies, credentials and private keys. Add email/phone patterns for your PII policy;
 the default secret pattern does not cover all PII. Supplying `keys` replaces the default pattern; combine them to retain secret protection. `changeFields` defaults to the resulting `keys` pattern. Hooks compose:
