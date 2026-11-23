@@ -171,6 +171,8 @@ function FieldsPage() {
                     <XIcon className="size-3.5 shrink-0 text-outcome-denied" />
                   )}
                   <span className="font-mono text-[12px]">{key}</span>
+                  {/* On a phone the hint is hidden: keep what this share measures in view. */}
+                  {key === 'targets' ? <span className="text-muted-foreground text-xs sm:hidden">by id</span> : null}
                   <span className="hidden min-w-0 flex-1 truncate text-muted-foreground text-xs sm:inline">{hint}</span>
                   {MEASURED[key] ? <span className="sr-only">{MEASURED[key]}</span> : null}
                   <span className="ms-auto shrink-0 text-muted-foreground text-xs tabular-nums">

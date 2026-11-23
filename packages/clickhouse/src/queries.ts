@@ -823,17 +823,23 @@ export async function listFields(ch: ClickHouseClient, p: string, q: RangeQuery)
     if ((array && key !== 'target') || key === 'env') continue;
     const value = `toString(${col})`;
     const ids = `arrayFilter(x -> x!='', ${col})`;
+    // Each row's share is over its own query's total (`count()`, as in metrics()), so events arriving between two
+    // queries never push a share past what that query saw.
     const select = array
-      ? `countIf(notEmpty(${ids})) n,uniqArray(${ids}) distinct,groupUniqArrayArray(5)(${ids}) samples,maxOrNullIf(timestamp,notEmpty(${ids})) last`
-      : `countIf(${value}!='') n,uniqIf(${col},${value}!='') distinct,groupUniqArrayIf(5)(${value},${value}!='') samples,maxOrNullIf(timestamp,${value}!='') last`;
+      ? `count() total,countIf(notEmpty(${ids})) n,uniqArray(${ids}) distinct,groupUniqArrayArray(5)(${ids}) samples,maxOrNullIf(timestamp,notEmpty(${ids})) last`
+      : `count() total,countIf(${value}!='') n,uniqIf(${col},${value}!='') distinct,groupUniqArrayIf(5)(${value},${value}!='') samples,maxOrNullIf(timestamp,${value}!='') last`;
     const r = (
-      await read<{ n: number; distinct: number; samples: string[]; last: string | null }>(ch, `SELECT ${select} FROM events WHERE ${w.sql}`, w.params)
+      await read<{ total: number; n: number; distinct: number; samples: string[]; last: string | null }>(
+        ch,
+        `SELECT ${select} FROM events WHERE ${w.sql}`,
+        w.params,
+      )
     )[0];
     if (r)
       data.push({
         key,
         kind: 'core',
-        coverage: Number(r.n) / Math.max(1, m.events),
+        coverage: Number(r.n) / Math.max(1, Number(r.total)),
         distinctApprox: Number(r.distinct),
         samples: r.samples,
         lastSeen: r.last ? iso(r.last) : null,
