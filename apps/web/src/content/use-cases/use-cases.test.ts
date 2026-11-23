@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { compileQuery } from '../../../../../packages/clickhouse/src/query';
 import { trailQuery } from '../../../../../packages/sdk/src/read';
 import { quietHrefWarnings, renderPages } from '../../test/render-pages';
 import { SITE } from '../site';
 import { complianceEvidence } from './compliance-evidence';
 import { authorize as authorizeSample, customerAuditLogsContent } from './customer-audit-logs';
+import { supportInvestigations } from './support-investigations';
 
 /** The use-case pages, as they render: the rules the maintainer set for each, and a sound structure for the shared layout. */
 const plain = (html: string) =>
@@ -117,5 +119,45 @@ describe('the customer page authorize() sample', () => {
     const q = (quoted as { q?: string }).q;
     expect(q).toBe(trailQuery({ tenant: 'a" OR tenant:"b' }).q);
     expect(q).not.toBe('tenant:"a" OR tenant:"b"');
+  });
+});
+
+describe('the support investigations page', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('renders every section, opens its console crops full size, and makes no unmeasured or assurance claim', async () => {
+    quietHrefWarnings();
+    const github = { WEB_GITHUB_URL: 'https://github.com/example-org/logbird' };
+    for (const env of [{ ...github, WEB_GITHUB_PUBLIC: 'true' }, github, { ...github, WEB_APP_URL: 'https://app.example.test' }]) {
+      const [page] = await renderPages(['/use-cases/support-investigations'], env);
+      const html = page?.html ?? '';
+      const text = plain(html);
+      expect(html.match(/<h1[\s>]/g)?.length).toBe(1);
+      const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id);
+      expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([]);
+      for (const section of supportInvestigations.sections) expect(html).toContain(`id="${section.id}-title"`);
+      expect(html).toMatch(/<a aria-label="Open the image full size: Explorer"[^>]*href="\/media\/explorer-/);
+      expect(html).toMatch(/<a aria-label="Open the image full size: Event detail"[^>]*href="\/media\/event-detail-/);
+      // The count is a lower bound when it is cut short; no speed or size claim the docs don't measure.
+      expect(text).toContain('a lower bound');
+      expect(text).not.toMatch(/\b(instant(ly)?|real-time|millisecond|tamper\w*|immutable|certified)\b/i);
+      // Reads are not in workspace activity: the page says so.
+      expect(text).toContain('but not reads');
+    }
+  }, 60_000);
+
+  it('shows only example queries that the query language accepts, each exactly as shown', () => {
+    const points = supportInvestigations.sections.find((section) => section.id === 'search')?.points ?? [];
+    // Each example is one inline code span and nothing else, so what a reader copies is the query alone.
+    const queries = points.map((point) => /^`([^`]+)`$/.exec(point.body)?.[1] ?? '');
+    expect(queries).toHaveLength(4);
+    for (const query of queries) {
+      expect(query, 'one code span').not.toBe('');
+      expect(() => compileQuery(query), query).not.toThrow();
+    }
+    // The page shows no code block whose copy button would copy several queries at once.
+    expect(supportInvestigations.sections.flatMap((section) => section.steps ?? []).filter((step) => step.code)).toEqual([]);
+    // The inline attribute example in the closing table compiles too.
+    expect(() => compileQuery('metadata.channel:whatsapp')).not.toThrow();
   });
 });

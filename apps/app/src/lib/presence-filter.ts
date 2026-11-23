@@ -88,7 +88,8 @@ function unwrapParens(conjunct: string): string {
 
 /** Reads one top-level `col = '…'` / `col != '…'` conjunct (redundant parentheses allowed) back as a presence term. */
 export function parsePresenceSql(conjunct: string, column: string): PresenceTerm | null {
-  const m = new RegExp(`^${escapeRegExp(column)}\\s*(!=|<>|=)\\s*'((?:[^'\\\\]|\\\\.)*)'$`).exec(unwrapParens(conjunct));
+  // The literal as ClickHouse reads it: backslash escapes (newlines included) and doubled apostrophes.
+  const m = new RegExp(`^${escapeRegExp(column)}\\s*(!=|<>|=)\\s*'((?:[^'\\\\]|\\\\[\\s\\S]|'')*)'$`).exec(unwrapParens(conjunct));
   if (!m) return null;
   const notEqual = m[1] !== '=';
   const value = unquoteSql(m[2] ?? '');

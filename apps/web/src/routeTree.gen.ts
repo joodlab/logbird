@@ -32,6 +32,7 @@ import { Route as LegalPrivacyRouteImport } from './routes/legal.privacy'
 import { Route as LegalTermsRouteImport } from './routes/legal.terms'
 import { Route as UseCasesComplianceEvidenceRouteImport } from './routes/use-cases.compliance-evidence'
 import { Route as UseCasesCustomerAuditLogsRouteImport } from './routes/use-cases.customer-audit-logs'
+import { Route as UseCasesSupportInvestigationsRouteImport } from './routes/use-cases.support-investigations'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -150,6 +151,12 @@ const UseCasesCustomerAuditLogsRoute =
     path: '/use-cases/customer-audit-logs',
     getParentRoute: () => rootRouteImport,
   } as any)
+const UseCasesSupportInvestigationsRoute =
+  UseCasesSupportInvestigationsRouteImport.update({
+    id: '/use-cases/support-investigations',
+    path: '/use-cases/support-investigations',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -173,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/legal/terms': typeof LegalTermsRoute
   '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/use-cases/customer-audit-logs': typeof UseCasesCustomerAuditLogsRoute
+  '/use-cases/support-investigations': typeof UseCasesSupportInvestigationsRoute
   '/blog/': typeof BlogIndexRoute
   '/compare/': typeof CompareIndexRoute
 }
@@ -198,6 +206,7 @@ export interface FileRoutesByTo {
   '/legal/terms': typeof LegalTermsRoute
   '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/use-cases/customer-audit-logs': typeof UseCasesCustomerAuditLogsRoute
+  '/use-cases/support-investigations': typeof UseCasesSupportInvestigationsRoute
   '/blog': typeof BlogIndexRoute
   '/compare': typeof CompareIndexRoute
 }
@@ -224,6 +233,7 @@ export interface FileRoutesById {
   '/legal/terms': typeof LegalTermsRoute
   '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/use-cases/customer-audit-logs': typeof UseCasesCustomerAuditLogsRoute
+  '/use-cases/support-investigations': typeof UseCasesSupportInvestigationsRoute
   '/blog/': typeof BlogIndexRoute
   '/compare/': typeof CompareIndexRoute
 }
@@ -251,6 +261,7 @@ export interface FileRouteTypes {
     | '/legal/terms'
     | '/use-cases/compliance-evidence'
     | '/use-cases/customer-audit-logs'
+    | '/use-cases/support-investigations'
     | '/blog/'
     | '/compare/'
   fileRoutesByTo: FileRoutesByTo
@@ -276,6 +287,7 @@ export interface FileRouteTypes {
     | '/legal/terms'
     | '/use-cases/compliance-evidence'
     | '/use-cases/customer-audit-logs'
+    | '/use-cases/support-investigations'
     | '/blog'
     | '/compare'
   id:
@@ -301,6 +313,7 @@ export interface FileRouteTypes {
     | '/legal/terms'
     | '/use-cases/compliance-evidence'
     | '/use-cases/customer-audit-logs'
+    | '/use-cases/support-investigations'
     | '/blog/'
     | '/compare/'
   fileRoutesById: FileRoutesById
@@ -327,6 +340,7 @@ export interface RootRouteChildren {
   LegalTermsRoute: typeof LegalTermsRoute
   UseCasesComplianceEvidenceRoute: typeof UseCasesComplianceEvidenceRoute
   UseCasesCustomerAuditLogsRoute: typeof UseCasesCustomerAuditLogsRoute
+  UseCasesSupportInvestigationsRoute: typeof UseCasesSupportInvestigationsRoute
   BlogIndexRoute: typeof BlogIndexRoute
   CompareIndexRoute: typeof CompareIndexRoute
 }
@@ -494,6 +508,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UseCasesCustomerAuditLogsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/use-cases/support-investigations': {
+      id: '/use-cases/support-investigations'
+      path: '/use-cases/support-investigations'
+      fullPath: '/use-cases/support-investigations'
+      preLoaderRoute: typeof UseCasesSupportInvestigationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -519,6 +540,7 @@ const rootRouteChildren: RootRouteChildren = {
   LegalTermsRoute: LegalTermsRoute,
   UseCasesComplianceEvidenceRoute: UseCasesComplianceEvidenceRoute,
   UseCasesCustomerAuditLogsRoute: UseCasesCustomerAuditLogsRoute,
+  UseCasesSupportInvestigationsRoute: UseCasesSupportInvestigationsRoute,
   BlogIndexRoute: BlogIndexRoute,
   CompareIndexRoute: CompareIndexRoute,
 }
