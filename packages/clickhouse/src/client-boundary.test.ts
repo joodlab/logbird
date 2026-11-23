@@ -14,6 +14,9 @@ const ALLOWED: Record<string, string> = {
   'apps/server/src/project-delete-race.integration.test.ts': 'test: fault injection with its own short-lived client',
   'packages/clickhouse/src/delete-mutation-race.integration.test.ts': 'test: a client whose request deliberately times out',
   'packages/clickhouse/src/event-id-dense.integration.test.ts': 'test: a client whose request deliberately times out',
+  'apps/worker/src/webhook-delivery.integration.test.ts': 'test: a client with a fixed session time zone, to prove delivery times are UTC',
+  'apps/worker/src/webhook-discovery.integration.test.ts': 'test: clients with deliberately small read limits, and an unreachable one',
+  'apps/worker/src/webhook-resilience.integration.test.ts': 'test: clients with deliberately small read limits',
 };
 const SKIP = new Set(['node_modules', 'dist', '.output', '.nitro', 'generated', '.turbo', 'coverage', '.tmp', '.git', 'experiments']);
 
