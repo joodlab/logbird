@@ -21,7 +21,7 @@ import { Timestamp } from '@/components/timestamp';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { eventSentence, personLabel } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
-import { firstEventCopy } from '@/lib/onboarding';
+import { firstEventCopy, firstEventToast } from '@/lib/onboarding';
 import { useCan } from '@/lib/permissions';
 import { formatTerm } from '@/lib/query-language';
 import { curlSnippet, dotnetSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
@@ -80,8 +80,8 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
       setCelebrate(true);
       invalidate();
       // A console test proves the pipeline, not the integration: say so instead of "your integration works".
-      const copy = firstEventCopy(data.ingest.firstEvent?.source);
-      toast.success(copy.toastTitle, { description: copy.toastDescription });
+      const arrived = firstEventToast(data.ingest);
+      toast.success(arrived.title, { description: arrived.description });
     }
   }, [data, invalidate]);
 
