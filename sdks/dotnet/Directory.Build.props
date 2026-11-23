@@ -25,5 +25,11 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!--
+      From the first publication on, set PackageValidationBaselineVersion here to the latest version on nuget.org, for
+      example <PackageValidationBaselineVersion>0.3.0</PackageValidationBaselineVersion>. Package validation then compares
+      every new package with it and fails on a breaking change; the release job fails while it is unset or older than
+      the latest published version (check-validation-baseline.py, CONTRIBUTING.md).
+    -->
   </PropertyGroup>
 </Project>
