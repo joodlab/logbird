@@ -150,3 +150,22 @@ describe('settledIdMatches (#324 A3, A4)', () => {
     expect(idFromFreeText('"ACME\\"27 "')).toBe('ACME"27 ');
   });
 });
+
+describe('idFromFreeText, as the server parses a bare word (#334)', () => {
+  it('takes any single literal word the parser reads, an apostrophe included', () => {
+    expect(idFromFreeText("o'brien")).toBe("o'brien");
+    expect(idFromFreeText('biz_27')).toBe('biz_27');
+    expect(idFromFreeText('  biz_27 ')).toBe('biz_27');
+  });
+  it('never takes a field, a negation, a wildcard, a regex, several words or an operator', () => {
+    for (const t of ['actor:x', '-x', 'foo*', '/x/', 'a b', 'AND', '(x)', '']) expect(idFromFreeText(t)).toBe('');
+  });
+});
+
+describe('idFromFreeText within the directory search limit (#334)', () => {
+  it('never offers a lookup the entity directory would refuse as too long', () => {
+    expect(idFromFreeText(`${'x'.repeat(1023)}'`)).toBe(`${'x'.repeat(1023)}'`);
+    expect(idFromFreeText(`${'x'.repeat(1024)}'`)).toBe('');
+    expect(idFromFreeText(`"${'y'.repeat(1025)}"`)).toBe('');
+  });
+});

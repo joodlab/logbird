@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { allTimeCheckNeedsAsking, otherDatesCheck, otherDatesLine } from './empty-state';
+import { allTimeCheckNeedsAsking, otherDatesAction, otherDatesCheck, otherDatesLine } from './empty-state';
 
 it('checks other dates by itself, except an SQL expression, which runs over every partition (#239)', () => {
   expect(allTimeCheckNeedsAsking('query', 'outcome:failure')).toBe(false);
@@ -46,9 +46,34 @@ it('says a check is running while a retry or a refresh is in flight, and failed 
     checking: false,
     lookingUp: true,
   });
-  expect(otherDatesLine({ failed: false, checking: false, lookingUp: true, olderMatches: undefined, needsAsking: false })).toBe('');
+  // While only the id lookup runs, the line names that (never "Checking other dates…", which has not started) (#334).
+  expect(otherDatesLine({ failed: false, checking: false, lookingUp: true, olderMatches: undefined, needsAsking: false })).toBe(
+    'Looking up whether this is an id…',
+  );
+  expect(otherDatesLine({ failed: false, checking: true, lookingUp: true, olderMatches: undefined, needsAsking: false })).toBe(
+    'Looking up whether this is an id…',
+  );
   // Nothing to check: an id match, a complete answer, or results on screen.
   expect(otherDatesCheck({ ...base, idMatch: true })).toEqual({ failed: false, checking: false, lookingUp: false });
   expect(otherDatesCheck({ ...base, complete: true })).toEqual({ failed: false, checking: false, lookingUp: false });
   expect(otherDatesCheck({ ...base, showsEmpty: false })).toEqual({ failed: false, checking: false, lookingUp: false });
+});
+
+it('never gives confirmed-miss advice after an id lookup that could not finish (#334)', () => {
+  const settled = { failed: false, checking: false, lookingUp: false, olderMatches: 0, needsAsking: false };
+  expect(otherDatesLine({ ...settled, lookupIncomplete: true })).toBe('Could not finish checking whether this is an id. Try the lookup again.');
+  expect(otherDatesLine({ ...settled, olderMatches: undefined, lookupIncomplete: true })).toBe(
+    'Could not finish checking whether this is an id. Try the lookup again.',
+  );
+  // Older matches still say so: the range is a reason whatever the lookup said.
+  expect(otherDatesLine({ ...settled, olderMatches: 3, lookupIncomplete: true })).toBe('3 events match outside this range.');
+  expect(otherDatesLine({ ...settled })).toBe('Remove a filter or change the query.');
+});
+
+it(`offers "Retry the check" after a failed refresh, never a cached count's "Search all time" (#334)`, () => {
+  expect(otherDatesAction({ failed: true, checking: false, olderMatches: 4, needsAsking: false })).toBe('retry');
+  expect(otherDatesAction({ failed: false, checking: false, olderMatches: 4, needsAsking: false })).toBe('search-all-time');
+  expect(otherDatesAction({ failed: false, checking: true, olderMatches: 4, needsAsking: false })).toBeNull();
+  expect(otherDatesAction({ failed: false, checking: false, olderMatches: undefined, needsAsking: true })).toBe('ask');
+  expect(otherDatesAction({ failed: false, checking: false, olderMatches: 0, needsAsking: false })).toBeNull();
 });
