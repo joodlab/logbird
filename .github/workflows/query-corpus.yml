@@ -1,0 +1,76 @@
+name: Query corpus
+
+# The query bar's corpus test (apps/app/src/components/query-input/query-corpus.test.tsx): every valid query from the
+# server parser's tests and the console's query tests, typed into the live bar and completed at every term boundary.
+# It takes about ten minutes, so it runs here, split into shards, only when the query bar or the query language
+# changes, and on every push to master. CI's Quality job leaves it out (LOGBIRD_QUERY_CORPUS=skip).
+on:
+  pull_request:
+    paths:
+      - apps/app/src/components/query-input/**
+      - apps/app/src/lib/query-*.ts
+      # The corpus also reads queries from these tests.
+      - apps/app/src/lib/activity-search.test.ts
+      - apps/app/src/lib/impersonation.test.ts
+      - apps/app/src/lib/sql-language.test.ts
+      - packages/contracts/src/query*.ts
+      - packages/contracts/src/record-selector.ts
+      - packages/clickhouse/src/query*
+      - apps/app/vitest.config.ts
+      - pnpm-lock.yaml
+      - .github/workflows/query-corpus.yml
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shard:
+    name: Query corpus ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      TURBO_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run this shard of the corpus
+        working-directory: apps/app
+        env:
+          LOGBIRD_QUERY_CORPUS: only
+          LOGBIRD_QUERY_CORPUS_SHARD: ${{ matrix.shard }}/4
+        run: pnpm exec vitest run --maxWorkers=1 --reporter=default --reporter=json --outputFile.json=corpus-results.json
+      - name: Check the shard ran the corpus, all of it passing
+        working-directory: apps/app
+        run: |
+          node -e '
+            const r = require("./corpus-results.json");
+            const files = r.testResults.map((t) => t.name);
+            console.log(`${r.numPassedTests}/${r.numTotalTests} tests passed in ${files.join(", ")}`);
+            const corpus = files.length === 1 && files[0].endsWith("query-corpus.test.tsx");
+            if (!corpus || r.numTotalTests < 4 || r.numPassedTests !== r.numTotalTests) process.exit(1);
+          '
+
+  query-corpus:
+    name: Query corpus
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard passed
+        run: test "${{ needs.shard.result }}" = success
