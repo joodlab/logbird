@@ -1,7 +1,8 @@
 import { CheckIcon, ExternalLinkIcon, InfoIcon, LayersIcon } from 'lucide-react';
 import { Fragment, type ReactNode } from 'react';
-import { ACCESS_CTA } from '../../lib/cloud';
-import { type Comparison, type ComparisonSource, longDate, TRADEMARK_LINE } from '../../lib/comparisons';
+import { compareContent } from '../../content/compare';
+import { type Comparison, type ComparisonSource, longDate, TRADEMARK_LINE } from '../../content/comparisons';
+import { shared } from '../../content/shared';
 import { ButtonLink } from './button-link';
 import { Callout } from './callout';
 import { CtaBand } from './cta-band';
@@ -9,6 +10,11 @@ import { Rich } from './rich';
 import { PageHero, Section, SectionHeader } from './section';
 import { SelfHostCta } from './self-host-cta';
 import { StackedTable } from './stacked-table';
+
+const { page } = compareContent;
+
+/** The id of a source's entry in the Sources list, which its footnote markers link to. */
+const sourceAnchor = (id: string) => ['source', id].join('-');
 
 /** Footnote markers, e.g. [S6, S7], each linking to its entry in the page's Sources list. */
 export function SourceRefs({ ids }: { ids: string[] }) {
@@ -21,7 +27,7 @@ export function SourceRefs({ ids }: { ids: string[] }) {
       {ids.map((id, index) => (
         <Fragment key={id}>
           {index > 0 ? ', ' : null}
-          <a aria-label={`Source ${id}`} className="text-link" href={`#source-${id}`}>
+          <a aria-label={page.sources.sourceLabel(id)} className="text-link" href={`#${sourceAnchor(id)}`}>
             {id}
           </a>
         </Fragment>
@@ -53,23 +59,23 @@ function hostAndPath(url: string) {
 
 function SourceItem({ source }: { source: ComparisonSource }) {
   return (
-    <li className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 border-t py-4 first:border-t-0" id={`source-${source.id}`}>
+    <li className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 border-t py-4 first:border-t-0" id={sourceAnchor(source.id)}>
       <span className="pt-0.5 font-mono text-muted-foreground text-sm">{source.id}</span>
       <div className="flex min-w-0 flex-col gap-1">
         <a className="text-link body-copy inline-flex min-h-6 items-start gap-1.5 leading-relaxed" href={source.url} rel="noopener" target="_blank">
           <span>
             <Rich text={source.title} thirdPartyQuotes />
-            <span className="sr-only"> (opens in a new tab)</span>
+            <span className="sr-only">{page.sources.newTab}</span>
           </span>
           <ExternalLinkIcon aria-hidden="true" className="mt-1.5 size-3.5 shrink-0" />
         </a>
         <p className="wrap-anywhere font-mono text-muted-foreground text-xs">{hostAndPath(source.url)}</p>
         {source.also?.map((url) => (
           <p className="wrap-anywhere font-mono text-xs" key={url}>
-            <span className="text-muted-foreground">Also: </span>
+            <span className="text-muted-foreground">{page.sources.also}</span>
             <a className="text-link" href={url} rel="noopener" target="_blank">
               {hostAndPath(url)}
-              <span className="sr-only"> (opens in a new tab)</span>
+              <span className="sr-only">{page.sources.newTab}</span>
             </a>
           </p>
         ))}
@@ -80,7 +86,7 @@ function SourceItem({ source }: { source: ComparisonSource }) {
 
 /**
  * One layout for every /compare/* page: summary → table → when to choose them → when to choose Logbird → sources.
- * Facts live in lib/comparisons.ts; the page adds no claims of its own.
+ * Facts live in content/comparisons.ts and the furniture's words in content/compare.ts; this file is layout only.
  */
 export function ComparisonPage({ comparison, figure }: { comparison: Comparison; figure?: ReactNode }) {
   const { name, note, sources } = comparison;
@@ -96,7 +102,7 @@ export function ComparisonPage({ comparison, figure }: { comparison: Comparison;
             </Callout>
           ) : undefined
         }
-        eyebrow="Compare"
+        eyebrow={page.eyebrow}
         lead={
           <>
             <Rich text={comparison.summary} /> <SourceRefs ids={comparison.summarySourceIds} />
@@ -106,23 +112,23 @@ export function ComparisonPage({ comparison, figure }: { comparison: Comparison;
       />
 
       {figure ? (
-        <section aria-label={`How Logbird and ${name} record history`} className="pt-16 md:pt-20">
+        <section aria-label={page.figureLabel(name)} className="pt-16 md:pt-20">
           <div className="container-site">{figure}</div>
         </section>
       ) : null}
 
       <Section id="table" labelledBy="table-title">
         <SectionHeader
-          eyebrow={sharedDate ? `Checked ${sharedDate}` : 'Checked against official sources'}
+          eyebrow={sharedDate ? page.table.checkedOn(sharedDate) : page.table.checkedFallback}
           id="table-title"
-          lead="Each claim about another product links to its source below. Anything we couldn't verify is left out."
-          title="At a glance"
+          lead={page.table.lead}
+          title={page.table.title}
         />
         <StackedTable
-          caption={`Logbird and ${name} compared, with a source for each claim about ${name}`}
+          caption={page.table.caption(name)}
           className="mt-10"
-          columns={['Logbird', name]}
-          headerLabel={{ text: 'Topic' }}
+          columns={[page.table.logbirdColumn, name]}
+          headerLabel={{ text: page.table.topicHeader }}
           headerWidth="w-[22%]"
           highlightColumn={0}
           rows={comparison.rows.map((row) => ({
@@ -142,19 +148,19 @@ export function ComparisonPage({ comparison, figure }: { comparison: Comparison;
         <div className="grid gap-6 md:grid-cols-2">
           <section aria-labelledby="choose-them-title" className="panel flex flex-col gap-6 p-6 md:p-8">
             <h2 className="font-semibold text-xl tracking-tight" id="choose-them-title">
-              When to choose {name}
+              {page.choose.them(name)}
             </h2>
             <ChooseList items={comparison.chooseThem} />
           </section>
           <section aria-labelledby="choose-logbird-title" className="panel flex flex-col gap-6 p-6 md:p-8">
             <h2 className="font-semibold text-xl tracking-tight" id="choose-logbird-title">
-              When to choose Logbird
+              {page.choose.logbird}
             </h2>
             <ChooseList items={comparison.chooseLogbird} />
             <div className="mt-auto flex flex-wrap gap-3 pt-2">
               <SelfHostCta size="default" />
               <ButtonLink to="/contact" variant="ghost">
-                {ACCESS_CTA}
+                {shared.accessCta}
               </ButtonLink>
             </div>
           </section>
@@ -164,30 +170,27 @@ export function ComparisonPage({ comparison, figure }: { comparison: Comparison;
       <Section id="sources" labelledBy="sources-title">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
           <div className="flex flex-col gap-6">
-            <SectionHeader
-              id="sources-title"
-              lead={sharedDate ? `All accessed ${sharedDate}. If something has changed, tell us and we'll fix it.` : undefined}
-              title="Sources"
-            />
+            <SectionHeader id="sources-title" lead={sharedDate ? page.sources.accessed(sharedDate) : undefined} title={page.sources.title} />
             <div className="flex flex-wrap gap-3">
               <ButtonLink search={{ interest: 'correction' }} to="/contact" variant="outline">
-                Report an outdated fact
+                {page.sources.report}
               </ButtonLink>
               <ButtonLink to="/compare" variant="ghost">
-                All comparisons
+                {page.sources.all}
               </ButtonLink>
             </div>
           </div>
           <div className="flex min-w-0 flex-col gap-10">
-            <ol aria-label={`Sources for the ${name} comparison`} className="panel px-5 md:px-6">
+            <ol aria-label={page.sources.listLabel(name)} className="panel px-5 md:px-6">
               {sources.map((source) => (
                 <SourceItem key={source.id} source={source} />
               ))}
             </ol>
             <div className="flex flex-col gap-2">
-              <h3 className="h3">What we couldn't verify</h3>
+              <h3 className="h3">{page.sources.unverifiedTitle}</h3>
               <p className="body-copy text-muted-foreground leading-relaxed">
-                Left out of the table: <Rich text={comparison.unverified} />
+                {page.sources.unverifiedLead}
+                <Rich text={comparison.unverified} />
               </p>
             </div>
             <p className="text-muted-foreground text-sm">{TRADEMARK_LINE}</p>

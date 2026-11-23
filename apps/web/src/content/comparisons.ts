@@ -7,8 +7,8 @@
  */
 
 import { GITHUB_PUBLIC } from '../env';
-import { CLOUD_OPEN } from './cloud';
-import { firstRelease, latestRelease, NO_RELEASES } from './releases';
+import { CLOUD_OPEN } from '../lib/cloud';
+import { firstRelease, latestRelease, NO_RELEASES } from '../lib/releases';
 
 export const ACCESSED = '2026-11-07';
 

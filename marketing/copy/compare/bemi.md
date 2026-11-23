@@ -27,7 +27,7 @@ path: /compare/bemi
 
 - **id:** `table`
 - **heading:** At a glance
-- **data:** the "At a glance" table is rendered from `apps/web/src/lib/comparisons.ts`, its only source.
+- **data:** the "At a glance" table is rendered from `apps/web/src/content/comparisons.ts`, its only source.
 
 - **visual:** none
 
@@ -60,6 +60,6 @@ path: /compare/bemi
 
 - **id:** `sources`
 - **heading:** Sources
-- **data:** the numbered sources are rendered from `apps/web/src/lib/comparisons.ts`, its only source.
-- **data:** what we couldn't verify is rendered from `apps/web/src/lib/comparisons.ts`, its only source.
+- **data:** the numbered sources are rendered from `apps/web/src/content/comparisons.ts`, its only source.
+- **data:** what we couldn't verify is rendered from `apps/web/src/content/comparisons.ts`, its only source.
 - **visual:** none
