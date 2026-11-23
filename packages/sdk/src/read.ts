@@ -142,7 +142,10 @@ const PLATFORM_CONTAINERS = [
 function hasMethod(value: object, key: string | symbol): boolean {
   for (let object: object | null = value; object !== null; object = Object.getPrototypeOf(object)) {
     const descriptor = Object.getOwnPropertyDescriptor(object, key);
-    if (descriptor) return 'value' in descriptor && typeof descriptor.value === 'function';
+    // An iterator protocol served by an accessor still marks a container (the accessor is not run); any other accessor
+    // (say, a record field named `get`) is not a method.
+    if (descriptor && !('value' in descriptor)) return typeof key === 'symbol';
+    if (descriptor) return typeof descriptor.value === 'function';
   }
   return false;
 }
@@ -299,6 +302,10 @@ function assertSelfContained(q: string) {
  * ever returning a query wider than the caller asked for (#263): a trail needs a target, actor, tenant or non-blank
  * query, and a selector key that is present (own or inherited) must have a value (`tenant: session.tenantId` with no
  * tenant id throws rather than reading the whole project). The input passes the boundary first (`snapshotTrail`).
+ *
+ * Accepted input: an object (plain, null-prototype, a class instance or a Vue reactive object) whose fields are named
+ * properties holding strings, numbers or `Date`s as typed by `TrailQuery`; containers that keep entries elsewhere
+ * (iterables, Map-like stores, streams, promises) are not trail inputs.
  */
 export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
   const trail = snapshotTrail(input);
@@ -322,7 +329,8 @@ export interface ReadOptions {
 }
 /**
  * One page of events for an explicit search query. The query passes the boundary first (`snapshotSearchQuery`): only
- * its known fields are sent, each read once. An explicit `q` (or none) is the way to read a whole project on purpose.
+ * its known fields are sent, each read once. It always needs a non-blank `q`: build it with `trailQuery`, or pass
+ * `q: 'timestamp:*'` to read a whole project on purpose.
  */
 export async function readAuditTrail(options: ReadOptions, query: SearchInput, signal?: AbortSignal): Promise<SearchResponse> {
   if (typeof window !== 'undefined') throw new Error('Logbird read keys are server-only');
@@ -332,6 +340,13 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
     const value = snapshot[field];
     if (value !== undefined) url.searchParams.set(field, String(value));
   }
+  // The last check, on what is about to be sent rather than on what came in (#263): whatever the caller's object was,
+  // a request without a non-blank `q` would read the whole project, so it never leaves.
+  if (!url.searchParams.get('q')?.trim())
+    fail(
+      'readAuditTrail',
+      "the query has no `q`, so it would read the whole project; build it with trailQuery, or pass `q: 'timestamp:*'` to read the whole project on purpose.",
+    );
   const response = await (options.fetch ?? fetch)(url, {
     headers: { Authorization: `Bearer ${options.readKey}` },
     signal: signal ?? AbortSignal.timeout(30_000),

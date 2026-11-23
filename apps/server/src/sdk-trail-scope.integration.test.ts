@@ -35,9 +35,16 @@ it('reads only the asked tenant; an empty query widens to every tenant, which tr
   expect(scoped.data.map((e) => e.id).sort()).toEqual(['acme-1', 'acme-2']);
 
   // What `trailQuery({ tenant: session.tenantId })` returned before the fix when the id was missing: q ''. The server
-  // reads that as every event in the range, so the other customer's history comes back.
-  const widened = await readAuditTrail(options, { ...range, q: '' });
-  expect(widened.data.map((e) => e.id).sort()).toEqual(['acme-1', 'acme-2', 'globex-1', 'globex-2']);
+  // reads that as every event in the range, so the other customer's history comes back (sent here as raw HTTP: the
+  // SDK no longer sends it).
+  const raw = await app.request(`/v1/events?${new URLSearchParams({ ...range, q: '' })}`, { headers: { Authorization: `Bearer ${readSecret}` } });
+  expect(((await raw.json()) as { data: { id: string }[] }).data.map((e) => e.id).sort()).toEqual(['acme-1', 'acme-2', 'globex-1', 'globex-2']);
+  // The SDK's last check refuses that request before it leaves; a whole-project read has to be asked for explicitly.
+  fetch.mockClear();
+  await expect(readAuditTrail(options, { ...range, q: '' })).rejects.toThrow(/the query has no `q`/);
+  expect(fetch).not.toHaveBeenCalled();
+  const everything = await readAuditTrail(options, { ...range, q: 'timestamp:*' });
+  expect(everything.data.map((e) => e.id).sort()).toEqual(['acme-1', 'acme-2', 'globex-1', 'globex-2']);
 
   // After the fix the same call throws before anything is sent.
   const session: { tenantId?: string } = {};

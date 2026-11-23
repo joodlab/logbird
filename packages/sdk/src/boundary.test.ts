@@ -343,6 +343,10 @@ describe('the search query boundary (readAuditTrail, the Vue engine, the Nuxt ro
       })(),
     ],
     ['a Date-like object', { getTime: () => 0, toISOString: () => '' }],
+    [
+      'an entry collection serving its iterator through an accessor',
+      Object.defineProperty({}, Symbol.iterator, { get: () => () => [['q', 'tenant:"acme"']][Symbol.iterator]() }),
+    ],
     // Round 8: async entry sources and never-awaited promises (from any realm) hold no named fields either.
     ['a ReadableStream of entries', new ReadableStream({ start: (controller) => controller.enqueue(['q', 'tenant:"acme"']) })],
     [
@@ -366,6 +370,34 @@ describe('the search query boundary (readAuditTrail, the Vue engine, the Nuxt ro
     ],
   ])('refuses %s before any request', async (_, query) => {
     await expect(sent(query)).rejects.toBeInstanceOf(TrailQueryError);
+  });
+
+  // The owner's ruling: the guarantee does not rest on the container list. An object the container rule does not know
+  // (hand-made, keeping `q` behind its own method) passes as a record with no named `q`, and the last check, on the
+  // outgoing query, refuses the request before it leaves.
+  it('never sends a request without q, whatever the input object was', async () => {
+    const unknownContainer = new (class {
+      readonly entries = { q: 'tenant:"acme"' };
+      field(name: 'q') {
+        return this.entries[name];
+      }
+    })();
+    let calls = 0;
+    const options = {
+      endpoint: 'http://logbird.test',
+      readKey: 'lb_read_fake',
+      fetch: (async () => {
+        calls++;
+        return Response.json({ data: [], nextCursor: null, total: 0, tookMs: 0 });
+      }) as typeof fetch,
+    };
+    for (const query of [unknownContainer, {}, { q: '' }, { q: '   ' }, { limit: 50, order: 'asc' }]) {
+      await expect(readAuditTrail(options, query as SearchInput)).rejects.toThrow(/the query has no `q`, so it would read the whole project/);
+    }
+    expect(calls).toBe(0);
+    // A whole-project read is still possible when asked for explicitly.
+    await readAuditTrail(options, { q: 'timestamp:*' });
+    expect(calls).toBe(1);
   });
 
   it('reads each field once', () => {

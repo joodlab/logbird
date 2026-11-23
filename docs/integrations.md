@@ -21,6 +21,8 @@ reading each property once, and refuses a value of the wrong type (`TrailQueryEr
 are strings, range bounds are a `Date`, whole epoch milliseconds or an ISO 8601 string, and containers are plain objects
 or class instances (an array, `Date` or `Map` is refused, and so is a `range` with neither bound). The server resolves
 an open end (no `to`, or `now` in `q`) for each request, so an ascending trail can gain newer events on later pages.
+Whatever its input, `readAuditTrail` never sends a request without a non-blank `q`; pass `q: 'timestamp:*'` to read a
+whole project on purpose.
 The read helpers require Logbird 0.2.0 or later: against an older server a selector value containing `*` is read as a
 prefix, so it can match more than the named tenant, actor or record.
 

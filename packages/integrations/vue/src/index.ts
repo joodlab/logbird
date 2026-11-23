@@ -132,9 +132,10 @@ function createTrail(source: () => RawRequest) {
       data.value = [...unique.values()];
     } catch (cause) {
       if (current === generation) {
-        // A failed or refused read leaves nothing of this trail on screen.
+        // A failed or refused read leaves nothing of this trail on screen. Clearing can run a synchronous consumer
+        // that switches trails; this read's error is then not shown under the new one.
         clear();
-        error.value = asError(cause);
+        if (current === generation) error.value = asError(cause);
       }
     } finally {
       if (current === generation) loading.value = false;
@@ -159,7 +160,7 @@ function createTrail(source: () => RawRequest) {
     return follow(read);
   };
   /** Resolves when this read, or the read that superseded it, has finished. */
-  const follow = (read: Promise<void>): Promise<void> => read.then(() => (latest === read ? undefined : follow(latest)));
+  const follow = (read: Promise<void>): Promise<void> => read.then(() => (disposed || latest === read ? undefined : follow(latest)));
   // The queued run is scheduled before this continuation, so `latest` is already the winning read when it runs.
   const afterQueued = () => Promise.resolve().then(() => follow(latest));
   const refresh = () => {
