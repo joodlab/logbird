@@ -19,10 +19,40 @@ it('escapes carriage returns in SDK trail selectors', () => {
   expect(trailQuery({ target: { id } }).q).toBe('target:" x\t\n\\r:y\\"\\\\ "');
 });
 
-it('drops a blank query next to a selector and keeps it (for the server to reject) without one', () => {
+it('drops a blank query next to a selector', () => {
   expect(trailQuery({ target: { id: 'inv_1' }, q: '  ' }).q).toBe('target:"inv_1"');
   expect(trailQuery({ actor: 'u', q: '\t' }).q).toBe('actor:"u"');
-  expect(trailQuery({ q: '  ' }).q).toBe('(  )');
+  expect(trailQuery({ q: 'action:invoice.*' }).q).toBe('(action:invoice.*)');
+});
+
+// #263: a trail never widens to the whole project.
+it('throws instead of returning a project-wide query when there is no selector and no query', () => {
+  const empty = /a trail needs a target, actor, tenant or query; an empty trail would be the whole project/;
+  expect(() => trailQuery({})).toThrow(TypeError);
+  expect(() => trailQuery({})).toThrow(empty);
+  expect(() => trailQuery({ q: '' })).toThrow(empty);
+  expect(() => trailQuery({ q: '  \n\t' })).toThrow(empty);
+  expect(() => trailQuery({ range: { from: '2026-01-01T00:00:00Z', to: '2026-02-01T00:00:00Z' }, limit: 50 })).toThrow(empty);
+});
+
+it('throws when a selector key is present without a value, even next to another selector or a query', () => {
+  const session: { tenantId?: string } = {};
+  // The case behind #263: a backend that forgets the null check must not show every customer's history.
+  expect(() => trailQuery({ tenant: session.tenantId })).toThrow(/`tenant` was given but is empty/);
+  expect(() => trailQuery({ target: { id: 'inv_1' }, tenant: session.tenantId })).toThrow(/`tenant` was given but is empty/);
+  expect(() => trailQuery({ q: 'action:x', tenant: '' })).toThrow(/`tenant`/);
+  expect(() => trailQuery({ actor: ' ' })).toThrow(/`actor` was given but is empty/);
+  expect(() => trailQuery({ actor: undefined, tenant: 't1' })).toThrow(/`actor`/);
+  expect(() => trailQuery({ actor: 42 as unknown as string })).toThrow(/`actor`/);
+  expect(() => trailQuery({ target: undefined, actor: 'u' })).toThrow(/`target` was given but is empty/);
+  expect(() => trailQuery({ target: { id: '' } })).toThrow(/`target` needs an id/);
+  expect(() => trailQuery({ target: { type: 'invoice', id: '  ' } })).toThrow(/`target` needs an id/);
+  expect(() => trailQuery({ target: { type: 'invoice' } as unknown as { id: string } })).toThrow(/`target` needs an id/);
+  expect(() => trailQuery({ target: { type: 7, id: 'x' } as unknown as { id: string } })).toThrow(/`target.type`/);
+  expect(() => trailQuery({ q: 7 as unknown as string })).toThrow(/`q` must be a string/);
+  // Present and valid still works, and an absent key is simply absent.
+  expect(trailQuery({ tenant: 't1' }).q).toBe('tenant:"t1"');
+  expect(trailQuery({ target: { type: '', id: 'A2' } }).q).toBe('record:":A2"');
 });
 
 it('escapes every star in exact trail selectors', () => {

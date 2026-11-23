@@ -52,14 +52,44 @@ export interface TrailQuery {
   limit?: number;
   cursor?: string;
 }
+/** Blank means only whitespace, as JavaScript's `trim()` sees it (the .NET builder uses the same rule). */
+const isBlank = (value: string) => value.trim().length === 0;
+/** A present selector must name something: an absent value would silently widen the read (#263). */
+function selector(input: TrailQuery, key: 'actor' | 'tenant'): string | undefined {
+  if (!Object.hasOwn(input, key)) return undefined;
+  const value = input[key];
+  if (typeof value !== 'string' || isBlank(value))
+    throw new TypeError(`trailQuery: \`${key}\` was given but is empty; pass a value or leave the key out (an empty ${key} would widen the read).`);
+  return value;
+}
+/**
+ * The search query for one record's, actor's or tenant's trail. Throws a TypeError instead of ever returning a query
+ * wider than the caller asked for (#263): a trail needs a target, actor, tenant or non-blank query, and a selector key
+ * that is present must have a value (`tenant: session.tenantId` with no tenant id throws rather than reading the
+ * whole project).
+ */
 export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
-  const target = input.target;
+  let target: { type?: string; id: string } | undefined;
+  if (Object.hasOwn(input, 'target')) {
+    const given = input.target as unknown;
+    if (!given || typeof given !== 'object')
+      throw new TypeError('trailQuery: `target` was given but is empty; pass `{ id }` or `{ type, id }`, or leave the key out.');
+    const { id, type } = given as { id?: unknown; type?: unknown };
+    if (typeof id !== 'string' || isBlank(id)) throw new TypeError('trailQuery: `target` needs an id; a target without one would widen the read.');
+    if (type !== undefined && typeof type !== 'string') throw new TypeError('trailQuery: `target.type` must be a string when given.');
+    target = { type, id };
+  }
+  const actor = selector(input, 'actor');
+  const tenant = selector(input, 'tenant');
+  if (input.q !== undefined && typeof input.q !== 'string') throw new TypeError('trailQuery: `q` must be a string when given.');
+  const q = input.q !== undefined && !isBlank(input.q) ? input.q : undefined;
+  if (!target && actor === undefined && tenant === undefined && q === undefined)
+    throw new TypeError('trailQuery: a trail needs a target, actor, tenant or query; an empty trail would be the whole project.');
   const terms = [
-    // A blank q next to a selector is no query; without a selector it is kept, so the server rejects it (never widens).
-    input.q && (input.q.trim() || !(target || input.actor || input.tenant)) ? `(${input.q})` : '',
-    target?.type !== undefined ? formatRecordTerm(target.type, target.id) : target ? `target:${quoteQueryValue(target.id)}` : '',
-    input.actor ? `actor:${quoteQueryValue(input.actor)}` : '',
-    input.tenant ? `tenant:${quoteQueryValue(input.tenant)}` : '',
+    q === undefined ? '' : `(${q})`,
+    target ? (target.type !== undefined ? formatRecordTerm(target.type, target.id) : `target:${quoteQueryValue(target.id)}`) : '',
+    actor === undefined ? '' : `actor:${quoteQueryValue(actor)}`,
+    tenant === undefined ? '' : `tenant:${quoteQueryValue(tenant)}`,
   ].filter(Boolean);
   return { ...input.range, q: terms.join(' AND '), limit: input.limit, cursor: input.cursor };
 }

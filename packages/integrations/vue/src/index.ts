@@ -15,15 +15,24 @@ export function useAuditTrail(options: MaybeRefOrGetter<AuditTrailOptions>) {
     const current = ++generation;
     controller?.abort();
     controller = new AbortController();
-    loading.value = true;
     error.value = undefined;
     if (!append) {
       data.value = [];
       nextCursor.value = null;
     }
+    const input = toValue(options);
+    let query: Partial<SearchQuery>;
     try {
-      const input = toValue(options);
-      const page = await input.fetcher(trailQuery({ ...input, cursor: append ? (nextCursor.value ?? undefined) : undefined }), controller.signal);
+      query = trailQuery({ ...input, cursor: append ? (nextCursor.value ?? undefined) : undefined });
+    } catch (cause) {
+      // An incomplete trail (say, a tenant id not loaded yet) is an error, never a wider read: nothing is fetched (#263).
+      error.value = cause instanceof Error ? cause : new Error(String(cause));
+      loading.value = false;
+      return;
+    }
+    loading.value = true;
+    try {
+      const page = await input.fetcher(query, controller.signal);
       if (current !== generation) return;
       const unique = new Map((append ? data.value : []).map((event) => [event.id, event]));
       for (const event of page.data) unique.set(event.id, event);
@@ -37,7 +46,18 @@ export function useAuditTrail(options: MaybeRefOrGetter<AuditTrailOptions>) {
   }
   const refresh = () => load(false);
   const loadMore = () => (nextCursor.value && !loading.value ? load(true) : Promise.resolve());
-  watch(() => trailQuery(toValue(options)), refresh, { immediate: true, deep: true });
+  // Watches the trail's query, or why it cannot be built; load() then reports that error without fetching.
+  watch(
+    () => {
+      try {
+        return trailQuery(toValue(options));
+      } catch (cause) {
+        return { invalid: cause instanceof Error ? cause.message : String(cause) };
+      }
+    },
+    refresh,
+    { immediate: true, deep: true },
+  );
   onScopeDispose(() => {
     generation++;
     controller?.abort();

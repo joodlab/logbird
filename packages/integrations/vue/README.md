@@ -18,7 +18,8 @@ error, nextCursor; methods: refresh(), loadMore(). Unmount cancels requests; sta
 replace newer selectors. Pagination deduplicates event IDs.
 
 `AuditTimeline` accepts `options` and a default slot receiving the same state. It renders no markup.
-Ingest and read keys stay on your backend. Authenticate the browser request, authorize tenant and
+A trail with no selector, or a selector passed without a value (a tenant id not loaded yet), sets `error` and fetches
+nothing; it never falls back to a wider read. Ingest and read keys stay on your backend. Authenticate the browser request, authorize tenant and
 record, then call `readAuditTrail` from `@logbird/sdk/read` on the server with an enforced query.
 Never trust a browser's tenant or q as authorization. Proxy errors should keep their HTTP failure status.
 See [design](../../../docs/integrations.md) and [example](../../../examples/vue).

@@ -25,6 +25,8 @@ Auto-imported `useAuditTrail({ target: { id: '123' } })` uses the server route
 `/api/_logbird/events`; SSR forwards the application's request cookies. The route denies by default,
 sets private/no-store caching, and only forwards the query returned by authorize. Hooks run on the
 server, not serialized runtime config. Authorize every page/cursor; tenant selectors are not a policy.
+If authorize throws a `TypeError` (from `trailQuery`) or returns a query with no `q`, the route answers 400 and reads
+nothing.
 
 `ModuleOptions`: endpoint, ingestKey, readKey (private runtimeConfig.logbird), hooks (server module path).
 Hook types: authorize(event, query) => false | Partial<SearchQuery> (async supported), optional actor,

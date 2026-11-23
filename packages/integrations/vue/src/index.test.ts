@@ -63,7 +63,7 @@ it('exposes initial read failure and recovers on refresh', async () => {
   let trail!: ReturnType<typeof useAuditTrail>;
   const wrapper = mount({
     setup() {
-      trail = useAuditTrail({ fetcher });
+      trail = useAuditTrail({ fetcher, target: { id: 'inv_1' } });
       return () => h('span', trail.error.value?.message ?? (trail.loading.value ? 'loading' : 'ready'));
     },
   });
@@ -73,5 +73,35 @@ it('exposes initial read failure and recovers on refresh', async () => {
   await expect(trail.refresh()).resolves.toBeUndefined();
   expect(trail.error.value).toBeUndefined();
   expect(trail.data.value[0]?.id).toBe('recovered');
+  wrapper.unmount();
+});
+
+it('never fetches a wider trail when a selector has no value; it reports the error and clears the old rows (#263)', async () => {
+  const tenant = ref<string | undefined>('t1');
+  const fetcher = vi.fn().mockResolvedValue({ data: [{ id: 'mine' }], nextCursor: null });
+  let trail!: ReturnType<typeof useAuditTrail>;
+  const wrapper = mount({
+    setup() {
+      trail = useAuditTrail(() => ({ fetcher, tenant: tenant.value }));
+      return () => h('span', String(trail.data.value.length));
+    },
+  });
+  await flushPromises();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.lastCall?.[0].q).toBe('tenant:"t1"');
+  tenant.value = undefined;
+  await flushPromises();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(trail.error.value).toBeInstanceOf(TypeError);
+  expect(trail.error.value?.message).toMatch(/`tenant` was given but is empty/);
+  expect(trail.data.value).toEqual([]);
+  expect(trail.loading.value).toBe(false);
+  await trail.refresh();
+  await trail.loadMore();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  tenant.value = 't2';
+  await flushPromises();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(trail.error.value).toBeUndefined();
   wrapper.unmount();
 });

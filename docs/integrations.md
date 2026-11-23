@@ -12,6 +12,9 @@ Ingest runs only on servers. Never put an ingest or read key in public runtime c
 components or browser bundles. Vue only calls an application-owned, authenticated backend.
 The backend must authorize the requested tenant/record, including every cursor request.
 A project read key is project-wide; a query filter is not authorization.
+`trailQuery` never widens a read: it throws a `TypeError` for a trail with no target, actor, tenant or query, and for a
+selector key passed without a value (`tenant: session.tenantId` with no tenant id), and the Vue, Nuxt and TanStack
+integrations then report an error instead of fetching.
 
 Actor means who caused the action; executor means the API or worker performing it. Resolve
 actor and tenant from authenticated server state, never directly from untrusted headers.

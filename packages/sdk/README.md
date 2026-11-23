@@ -79,6 +79,8 @@ const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
   dropPolicy: 'oldest', onDrop: () => metrics.increment('audit.dropped') });
 ```
 
+`trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or
+query, and a selector key passed without a value (say `tenant: undefined`) is an error, not an absent filter.
 Read adapters expose failures: Vue `useAuditTrail` sets `error` and clears `loading`;
 render that error before treating an empty `data` array as success. Its `refresh()` resolves
 with the error in reactive state, including SSR; never throw it from `serverPrefetch`.
