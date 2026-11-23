@@ -27,6 +27,8 @@
   -->
   <PropertyGroup>
     <NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
+    <!-- SDK package validation (ApiCompat) at pack time: the targets inside the package must be compatible. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />

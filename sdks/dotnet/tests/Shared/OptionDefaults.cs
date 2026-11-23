@@ -50,8 +50,9 @@ internal static class OptionDefaults
             Assert.False(Environment.GetEnvironmentVariable("CI") == "true", "LOGBIRD_UPDATE_PUBLIC_API must not be set in CI: the defaults file is verified there, never written.");
 #if NET8_0
             File.WriteAllText(path, listing, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-#endif
             return;
+#endif
+            // The other targets never write: they verify the same file below, so an update run cannot pass vacuously there.
         }
 
         Assert.True(File.Exists(path), $"No defaults record at {path}. Run the tests with LOGBIRD_UPDATE_PUBLIC_API=1 and commit the file.");
@@ -129,7 +130,12 @@ internal static class OptionDefaults
             case decimal x:
                 return x.ToString(CultureInfo.InvariantCulture) + "m";
             case IEnumerable items:
-                return "[" + string.Join(", ", items.Cast<object?>().Select(i => Format(i, typeof(object)))) + "]";
+                // Whether a caller can change the collection is part of the default, not only its elements.
+                var mutability = value is IList list ? (list.IsReadOnly ? "read-only " : "mutable ")
+                    : value.GetType().GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICollection<>))
+                        ? ((bool)value.GetType().GetInterfaces().First(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICollection<>)).GetProperty("IsReadOnly")!.GetValue(value)! ? "read-only " : "mutable ")
+                        : string.Empty;
+                return mutability + value.GetType().Name.Split('`')[0] + " [" + string.Join(", ", items.Cast<object?>().Select(i => Format(i, typeof(object)))) + "]";
         }
 
         if (value.GetType().IsPrimitive)
