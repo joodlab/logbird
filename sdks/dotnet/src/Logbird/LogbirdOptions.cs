@@ -68,7 +68,17 @@ public sealed class LogbirdOptions
     /// </summary>
     public int MaxQueueSize { get; set; } = 10_000;
 
-    /// <summary>Which event to drop when the queue is full. Defaults to <see cref="Logbird.QueueFullBehavior.DropOldest"/>.</summary>
+    /// <summary>
+    /// Which event to drop when the queue is full. Defaults to <see cref="Logbird.QueueFullBehavior.DropOldest"/>.
+    /// </summary>
+    /// <remarks>
+    /// When you track an event into a full queue, <see cref="Logbird.QueueFullBehavior.DropOldest"/> evicts the oldest
+    /// queued event (keeping the most recent activity) and <see cref="Logbird.QueueFullBehavior.DropNewest"/> drops the new
+    /// one (keeping what is already queued). When a failed batch goes back to the front of a queue that filled in the
+    /// meantime, the excess is evicted the same way: <c>DropOldest</c> from the front (the returned batch's oldest events
+    /// first), <c>DropNewest</c> from the back (the newest queued events). Every dropped event is counted;
+    /// <see cref="OnDrop"/> receives it with its JSON on a best-effort basis (skipped when the callbacks fall far behind).
+    /// </remarks>
     public QueueFullBehavior QueueFullBehavior { get; set; } = QueueFullBehavior.DropOldest;
 
     /// <summary>
@@ -87,7 +97,7 @@ public sealed class LogbirdOptions
     /// Called once for every event the SDK stops trying to deliver: queue overflow, a server rejection, a permanent HTTP
     /// error, an oversized or invalid event, an unacknowledged event, or shutdown. Such an event may still have been
     /// stored if a request carrying it lost its answer: see <see cref="DroppedEvent.MayBeStored"/>, and resend it with the
-    /// same id when in doubt (the server deduplicates). The <see cref="DroppedEvent.Json"/> lets you save it for replay; do not
+    /// same id when in doubt (the server deduplicates by id while it retains the original). The <see cref="DroppedEvent.Json"/> lets you save it for replay; do not
     /// log it if it may contain personal data. Callbacks run in order on a background thread, never on the thread that
     /// called <c>Track</c>; if they fall more than <see cref="MaxQueueSize"/> (at least 1,000) notifications behind,
     /// further notifications are skipped and counted on the <c>logbird.notifications.lost</c> meter, while
@@ -155,9 +165,12 @@ public sealed class LogbirdOptions
 /// <summary>Which event is dropped when the in-memory queue is full.</summary>
 public enum QueueFullBehavior
 {
-    /// <summary>Drop the oldest queued event to keep the most recent activity.</summary>
+    /// <summary>Evict the oldest queued event to keep the most recent activity (see <see cref="LogbirdOptions.QueueFullBehavior"/>).</summary>
     DropOldest = 0,
 
-    /// <summary>Drop the incoming event to keep the history that is already queued.</summary>
+    /// <summary>
+    /// Drop the incoming event to keep what is already queued; a failed batch returning to a full queue evicts the newest
+    /// queued events (see <see cref="LogbirdOptions.QueueFullBehavior"/>).
+    /// </summary>
     DropNewest = 1,
 }

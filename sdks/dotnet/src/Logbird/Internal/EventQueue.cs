@@ -60,7 +60,10 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
     private bool _mayBeStoredWhenAbandoned;
     private int _dispatches;
 
-    /// <summary>True when the event was put on the wire at least once and no answer settled it, so the server may have stored it.</summary>
+    /// <summary>
+    /// True when a request carrying the event was started and no answer settled it, so the server may have stored it
+    /// (set at dispatch, before anything is known about what reached the server).
+    /// </summary>
     public bool MayBeStored
     {
         get
