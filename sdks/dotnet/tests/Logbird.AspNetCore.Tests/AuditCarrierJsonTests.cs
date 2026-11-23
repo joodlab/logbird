@@ -61,6 +61,27 @@ public class AuditCarrierJsonTests
         => Assert.Throws<JsonException>(() => AuditCarrier.FromJson("{\"operationId\":\"op" + (char)0xD800 + "\"}"));
 
     [Fact]
+    public void A_carrier_that_could_not_be_read_back_is_not_written()
+    {
+        // Built around the constructors' non-null contract, as a lenient deserializer can: refused on write, not in the worker.
+        foreach (var carrier in new[]
+        {
+            new AuditCarrier { Tenant = new AuditTenant(null!) },
+            new AuditCarrier { Actor = new AuditActor("user", null!) },
+            new AuditCarrier { Actor = new AuditActor(null!, "user_42") },
+            new AuditCarrier { Impersonator = new AuditImpersonator(null!) },
+        })
+        {
+            Assert.Throws<InvalidOperationException>(() => carrier.ToJson());
+            Assert.Throws<InvalidOperationException>(() => carrier.ToJsonUtf8Bytes());
+        }
+
+        // And the case found in review: a carrier read leniently from {"Tenant":{}}.
+        var lenient = JsonSerializer.Deserialize<AuditCarrier>("{\"Tenant\":{}}")!;
+        Assert.Throws<InvalidOperationException>(() => lenient.ToJson());
+    }
+
+    [Fact]
     public void An_empty_object_is_an_empty_carrier()
     {
         Assert.Equal(new AuditCarrier(), AuditCarrier.FromJson("{}"));

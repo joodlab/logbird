@@ -13,11 +13,30 @@ namespace Logbird.AspNetCore;
 /// </summary>
 public sealed record AuditCarrier
 {
-    /// <summary>The carrier as JSON (camelCase, absent values left out), safe under trimming and Native AOT.</summary>
-    public string ToJson() => JsonSerializer.Serialize(this, AuditCarrierJsonContext.Default.AuditCarrier);
+    /// <summary>
+    /// The carrier as JSON (camelCase, absent values left out), safe under trimming and Native AOT. Whatever it writes,
+    /// <see cref="FromJson(string)"/> reads back.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The carrier names an actor, impersonator or tenant without its id (or an actor without its type), which
+    /// <see cref="FromJson(string)"/> would refuse. A carrier from <see cref="IAuditLog.Carrier"/> never does.
+    /// </exception>
+    public string ToJson() => JsonSerializer.Serialize(Writable(), AuditCarrierJsonContext.Default.AuditCarrier);
 
     /// <summary>The carrier as UTF-8 JSON bytes, the same JSON as <see cref="ToJson"/>.</summary>
-    public byte[] ToJsonUtf8Bytes() => JsonSerializer.SerializeToUtf8Bytes(this, AuditCarrierJsonContext.Default.AuditCarrier);
+    /// <exception cref="InvalidOperationException">As for <see cref="ToJson"/>.</exception>
+    public byte[] ToJsonUtf8Bytes() => JsonSerializer.SerializeToUtf8Bytes(Writable(), AuditCarrierJsonContext.Default.AuditCarrier);
+
+    /// <summary>This carrier, refused when the JSON it would write could not be read back.</summary>
+    private AuditCarrier Writable()
+        => HasPartyWithoutIdentity(this)
+            ? throw new InvalidOperationException("The carrier names an actor, impersonator or tenant without its id (or an actor without its type); it cannot be read back.")
+            : this;
+
+    private static bool HasPartyWithoutIdentity(AuditCarrier carrier)
+        => (carrier.Actor is { } actor && (actor.Type is null || actor.Id is null))
+            || (carrier.Impersonator is { } impersonator && impersonator.Id is null)
+            || (carrier.Tenant is { } tenant && tenant.Id is null);
 
     /// <summary>
     /// Reads a carrier from the JSON <see cref="ToJson"/> writes. Member names are matched without regard to case, so the
@@ -61,9 +80,7 @@ public sealed record AuditCarrier
             throw new JsonException("The JSON is null, not a carrier.");
         }
 
-        if ((carrier.Actor is { } actor && (actor.Type is null || actor.Id is null))
-            || (carrier.Impersonator is { } impersonator && impersonator.Id is null)
-            || (carrier.Tenant is { } tenant && tenant.Id is null))
+        if (HasPartyWithoutIdentity(carrier))
         {
             throw new JsonException("The carrier names an actor, impersonator or tenant without its id (or an actor without its type).");
         }
