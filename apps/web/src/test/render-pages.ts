@@ -27,8 +27,10 @@ export async function renderPages(paths: string[], env: Record<string, string> =
 export function quietHrefWarnings() {
   const error = console.error;
   vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
-    // React passes the attribute name as a format argument ("…passed to the %s attribute"), not in the message.
-    if (!args.some((arg) => String(arg).includes('href'))) {
+    // Only React's empty-attribute warning for an `href`: it passes the attribute name as a format argument ("An empty
+    // string ("") was passed to the %s attribute"), not in the message. Every other error, href or not, still prints.
+    const emptyHref = String(args[0]).startsWith('An empty string ("") was passed to the %s attribute') && args[1] === 'href';
+    if (!emptyHref) {
       error(...args);
     }
   });

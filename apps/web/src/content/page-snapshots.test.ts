@@ -62,6 +62,9 @@ const prefix = (marks: string[]) => (marks.length ? `[${marks.join(', ')}] ` : '
 const layoutContainer = (element: PageElement) =>
   (element.attrs.class ?? '').split(/\s+/).some((token) => /^(?:[\w-]+:)*(?:inline-)?(?:flex|grid)$/.test(token));
 
+/** Elements whose position carries meaning even when empty: list items, table cells and definition parts. */
+const STRUCTURAL = new Set(['li', 'td', 'th', 'dt', 'dd']);
+
 /** Raw text of a <pre>, its lines kept. */
 const rawText = (node: PageElement | string): string => (typeof node === 'string' ? node : node.children.map(rawText).join(''));
 
@@ -100,8 +103,12 @@ function textLines(root: PageElement, rootMarks: string[] = []): string[] {
         for (const line of lines) out.push(`${prefix(inner)}pre|${line.trimEnd() ? ` ${line.trimEnd()}` : ''}`);
       } else if (items || isBlock(child)) {
         flush(marks);
+        const before = out.length;
         walk(child, inner);
         flush(inner);
+        // A list item, table cell or definition with no text still counts: an added empty item or a cell that shifts
+        // the others one column along must show in the snapshot, not disappear.
+        if (out.length === before && STRUCTURAL.has(child.tag)) out.push(`${prefix(inner)}∅ ${child.tag}`);
       } else if (mark) {
         run += ` [${mark}: `;
         walk(child, inner);

@@ -41,7 +41,12 @@ function indexRows(): Row[] {
       const row = /^\| \[`([^`]+)`\]\(([^)]+)\) \| [^|]+ \| (.+?) \|$/.exec(line.trim());
       if (!row) throw new Error(`Malformed row in marketing/copy/README.md: ${line}`);
       const [, file = '', link = '', routes = ''] = row;
-      return { file, link, route: routes.trim() === '(not a page)' ? undefined : /`([^`]+)`/.exec(routes)?.[1] };
+      if (routes.trim() === '(not a page)') return { file, link, route: undefined };
+      // Any other cell must name a route in backticks (a path, or `*` for the 404 page): an unquoted or unparseable cell
+      // fails instead of being skipped.
+      const route = /`(\/[^`]*|\*)`/.exec(routes)?.[1];
+      if (!route) throw new Error(`Index row for ${file} names no route in backticks: ${routes.trim()}`);
+      return { file, link, route };
     });
 }
 

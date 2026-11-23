@@ -33,7 +33,7 @@ Before this page, `/pricing` was a 404.
 ## How approved pricing arrives (one change, data only)
 
 In `content/pricing.ts`, add the plans with their `figures` and the `dimensions` they differ on, then flip
-`PRICING_APPROVED`. Figures render on the plan cards as soon as a plan has one for a dimension. With `PRICING_APPROVED` on and `WEB_CHECKOUT_URL` set, the Cloud plan's button links to checkout; until then it is the access call to action. `pricing.test.ts` fails if a price, a named plan, a usage unit or a checkout link renders while `PRICING_APPROVED` is off. `/cloud` reads the same words (`pricing.cloud`), including the last sentence of its meta description, and `cloud.md` refers to them with the `<pricing heading>`, `<pricing summary>` and `<pricing status>` placeholders, so the interim copy check passes before and after approval.
+`PRICING_APPROVED`. Figures render on the plan cards as soon as a plan has one for a dimension. With `PRICING_APPROVED` on and `WEB_CHECKOUT_URL` set, the Cloud plan's button links to checkout; until then it is the access call to action. `pricing.test.ts` fails if a price, a named plan, a usage unit or a checkout link renders while `PRICING_APPROVED` is off. `/cloud` reads the same words (`pricing.cloud`), including the last sentence of its meta description, so both pages change together. The page snapshots (`apps/web/src/content/page-snapshots.test.ts`) show every rendered change on /pricing and /cloud when pricing is approved; review that diff with the approval.
 
 ## State variants
 
