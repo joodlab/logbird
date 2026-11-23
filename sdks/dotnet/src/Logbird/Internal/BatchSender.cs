@@ -145,7 +145,7 @@ internal sealed class BatchSender
         var attempt = Enumerable.Range(0, batch.Length).ToArray();
         var body = EventJson.BuildBatchBody(batch, attempt);
         var retries = 0;
-        for (var attemptNumber = 0; ; attemptNumber++)
+        for (long attemptNumber = 0; ; attemptNumber++)
         {
             var remaining = deadline - _elapsed();
             if (remaining <= TimeSpan.Zero)
@@ -386,7 +386,8 @@ internal sealed class BatchSender
 
                 // Progress attempts strictly shrink the body, so there can be at most batch.Length of them. Only
                 // non-progress failures consume MaxRetries; a hard total-attempt bound is kept as well.
-                if ((!progressed && retries >= _maxRetries) || attemptNumber >= batch.Length + _maxRetries - 1)
+                // Wide arithmetic: a very large MaxRetries must not overflow the bound into a negative number.
+                if ((!progressed && retries >= _maxRetries) || attemptNumber >= (long)batch.Length + _maxRetries - 1)
                 {
                     if (unacknowledged)
                     {
@@ -466,7 +467,11 @@ internal sealed class BatchSender
 
         // Dispatch on the thread pool: a handler that blocks before returning its task cannot hold the deadline below.
         var send = Task.Run(() => SendOnceAsync(body, headersStatus, onHeaders, cancellation.Token), CancellationToken.None);
-        var first = await Task.WhenAny(send, Task.Delay(limit, stop)).ConfigureAwait(false);
+        // The deadline timer is cancelled as soon as the attempt finishes, so a fast answer does not leave it running.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        var timer = Task.Delay(limit, deadline.Token);
+        var first = await Task.WhenAny(send, timer).ConfigureAwait(false);
+        deadline.Cancel();
         if (first != send)
         {
             _ = Task.Run(() =>
