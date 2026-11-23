@@ -12,11 +12,14 @@ function ThemePicture({
   sizes,
   className,
   zoomLabel,
+  priority,
 }: {
   entry: ScreenshotEntry;
   theme: 'light' | 'dark';
   sizes: string;
   className?: string;
+  /** The page's largest image above the fold: fetched at high priority. It stays lazy, so the hidden theme is never fetched. */
+  priority?: boolean;
   /** When set, the picture links to its full-size image, so a phone reader can open it and zoom. */
   zoomLabel?: string;
 }) {
@@ -42,7 +45,16 @@ function ThemePicture({
       {FORMATS.map((format) => (
         <source key={format} sizes={sizes} srcSet={srcSet(entry.id, desktopTheme, format, widths)} type={`image/${format}`} />
       ))}
-      <img alt={entry.alt} decoding="async" height={entry.height} loading="lazy" sizes={sizes} src={fullSize} width={entry.width} />
+      <img
+        alt={entry.alt}
+        decoding="async"
+        fetchPriority={priority ? 'high' : undefined}
+        height={entry.height}
+        loading="lazy"
+        sizes={sizes}
+        src={fullSize}
+        width={entry.width}
+      />
     </picture>
   );
   if (!zoomLabel) {
@@ -60,7 +72,7 @@ function ThemePicture({
  * hides the other variant; hidden lazy images are never fetched, so each visitor downloads exactly one image, with no
  * swap after hydration. Below 640px a phone capture replaces the shrunken desktop one when the entry has it.
  */
-export function Screenshot({ id, sizes = '100vw', zoomLabel }: { id: string; sizes?: string; zoomLabel?: string }) {
+export function Screenshot({ id, sizes = '100vw', zoomLabel, priority }: { id: string; sizes?: string; zoomLabel?: string; priority?: boolean }) {
   const entry = screenshots.find((item) => item.id === id);
   if (!entry) {
     throw new Error(`Unknown screenshot: ${id}`);
@@ -70,11 +82,11 @@ export function Screenshot({ id, sizes = '100vw', zoomLabel }: { id: string; siz
     <div className="screenshot">
       {themed ? (
         <>
-          <ThemePicture className="theme-light" entry={entry} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
-          <ThemePicture className="theme-dark" entry={entry} sizes={sizes} theme="dark" zoomLabel={zoomLabel} />
+          <ThemePicture className="theme-light" entry={entry} priority={priority} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
+          <ThemePicture className="theme-dark" entry={entry} priority={priority} sizes={sizes} theme="dark" zoomLabel={zoomLabel} />
         </>
       ) : (
-        <ThemePicture entry={entry} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
+        <ThemePicture entry={entry} priority={priority} sizes={sizes} theme="light" zoomLabel={zoomLabel} />
       )}
     </div>
   );
