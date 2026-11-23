@@ -347,37 +347,58 @@ describe('scoped read limits', () => {
       .replaceAll('&quot;', '"');
   const shown = (value: string) => value.replaceAll('`', '');
 
-  it('the landing page shows the first sentence and links to /security § Scoped reads, which shows all three', async () => {
+  // The approved wording, pinned here rather than read from the module under test (maintainer, #270 and #286), so an
+  // edit to scoped-read-limits.ts fails this test until the copy is re-approved.
+  const APPROVED = {
+    scope: 'One customer account per scope, matched on the id Logbird stored.',
+    layers:
+      "Logbird's query builders always apply the scope. ClickHouse checks the customer account as well once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade, and a source installation runs create-query-user once.",
+    origins: 'A web page on another origin can read with a token only if that origin is listed on the key.',
+  };
+
+  it('the module holds the approved wording', () => {
+    expect(shown(scopedReadLimits.scope)).toBe(APPROVED.scope);
+    expect(shown(scopedReadLimits.layers)).toBe(APPROVED.layers);
+    expect(shown(scopedReadLimits.origins)).toBe(APPROVED.origins);
+    expect(shown(scopedReadLimitText)).toBe(`${APPROVED.scope} ${APPROVED.layers} ${APPROVED.origins}`);
+    expect(scopedReadLimits.enforced).toEqual({ label: 'How it is enforced', to: '/security', hash: 'scoped-reads' });
+  });
+
+  it('with scoped read access on, the landing page shows the first sentence and the link; /security § Scoped reads shows all three', async () => {
     const scoped = homeContent({ ...SITE, scopedReadLive: true }).customers.scoped;
-    expect(scoped.limit).toBe(scopedReadLimits.scope);
-    expect(scoped.limitLink).toEqual(scopedReadLimits.enforced);
-    if (!SITE.scopedReadLive) return;
+    expect(scoped.limit).toBe(APPROVED.scope);
+    expect(homeContent({ ...SITE, scopedReadLive: false }).customers.access.limitLink).toBeUndefined();
+    expect(SITE.scopedReadLive).toBe(true);
     const pages = await renderPages(['/', '/security', '/use-cases/customer-audit-logs']);
     const page = (path: string) => pages.find((entry) => entry.path === path)?.html ?? '';
-    // Landing: the scope sentence and the link, not the layers or origins sentences.
-    expect(text(page('/'))).toContain(scopedReadLimits.scope);
-    expect(page('/')).toMatch(/<a[^>]*href="\/security#scoped-reads"[^>]*>How it is enforced<\/a>/);
-    expect(text(page('/'))).not.toContain(shown(scopedReadLimits.layers));
-    // /security: the anchor and all three sentences.
-    expect(page('/security')).toContain('id="scoped-reads"');
-    for (const sentence of [scopedReadLimits.scope, scopedReadLimits.layers, scopedReadLimits.origins]) {
-      expect(text(page('/security'))).toContain(shown(sentence));
-    }
+    // Landing: exactly the scope sentence and the link in the limit box, not the layers or origins sentences.
+    const box = /<strong[^>]*>The limit<\/strong>([\s\S]*?)<\/p>/.exec(page('/'))?.[1] ?? '';
+    expect(text(box).replace(/\s+/g, ' ').trim()).toBe(`: ${APPROVED.scope} How it is enforced`);
+    expect(box).toMatch(/<a[^>]*href="\/security#scoped-reads"[^>]*>How it is enforced<\/a>/);
+    expect(text(page('/'))).not.toContain(APPROVED.layers);
+    // /security: the anchored block holds exactly the three sentences, under their titles.
+    const block = /<section[^>]*id="scoped-reads"[^>]*>([\s\S]*?)<\/section>/.exec(page('/security'))?.[1] ?? '';
+    for (const sentence of Object.values(APPROVED)) expect(text(block)).toContain(sentence);
     // The customer page: the whole limit, in order.
-    expect(text(page('/use-cases/customer-audit-logs'))).toContain(shown(scopedReadLimitText));
+    expect(text(page('/use-cases/customer-audit-logs'))).toContain(`${APPROVED.scope} ${APPROVED.layers} ${APPROVED.origins}`);
   }, 60_000);
 
-  it('a code block that scrolls sideways is a titled keyboard stop; its copy button sits outside the scroll area', async () => {
+  it('each code block that scrolls sideways is a titled keyboard stop, with its own copy button before the scroll area', async () => {
     const [page] = await renderPages(['/use-cases/compliance-evidence']);
     const html = page?.html ?? '';
-    const blocks = [...html.matchAll(/<pre([^>]*)>/g)].map(([, attributes]) => attributes ?? '');
-    expect(blocks.length).toBeGreaterThan(0);
-    for (const attributes of blocks) {
-      expect(attributes).toMatch(/tabindex="0"/i);
-      expect(attributes).toMatch(/title="[^"]+ code"/);
-      expect(attributes).not.toContain('whitespace-pre-wrap');
+    // One match per block: its title bar (with the copy button) and then its <pre>.
+    const blocks = [...html.matchAll(/<div class="site-code[^"]*">([\s\S]*?)<\/pre>/g)].map(([, inner]) => inner ?? '');
+    expect(blocks.length).toBe(2);
+    for (const block of blocks) {
+      const copyAt = block.indexOf('aria-label="Copy code"');
+      const preAt = block.indexOf('<pre');
+      expect(copyAt, 'copy button in this block').toBeGreaterThan(-1);
+      expect(preAt).toBeGreaterThan(copyAt);
+      const pre = /<pre([^>]*)>/.exec(block)?.[1] ?? '';
+      expect(pre).toMatch(/tabindex="0"/i);
+      expect(pre).toMatch(/title="[^"]+ code"/);
+      expect(pre).toContain('overflow-x-auto');
+      expect(pre).not.toContain('whitespace-pre-wrap');
     }
-    // The copy button is in the block's title bar, before the scroll area.
-    expect(html).toMatch(/aria-label="Copy code"[\s\S]*?<\/button>[\s\S]*?<\/div><pre/);
   }, 60_000);
 });

@@ -23,6 +23,7 @@
     "check:source-state": "tsx scripts/check-source-state.ts",
     "csp": "tsx scripts/csp.ts",
     "check:live": "tsx scripts/check-live.ts",
+    "check:code-keyboard": "node scripts/check-code-keyboard.mjs",
     "waitlist:forget": "pnpm with-env node waitlist/admin.mjs forget"
   },
   "dependencies": {

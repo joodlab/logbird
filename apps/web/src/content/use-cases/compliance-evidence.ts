@@ -96,7 +96,7 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
             body: 'Set `file` to the name of the file you downloaded, compute its SHA-256 and size, and compare them with the export’s completed record.',
             code: {
               title: 'Linux and macOS',
-              code: '# The file you downloaded\nfile="logbird-events-EXPORT_ID-evidence.jsonl"\n\n# SHA-256 on Linux, or on macOS\nsha256sum "$file"\nshasum -a 256 "$file"\n\n# Size in bytes\nwc -c < "$file"',
+              code: '# The file you downloaded\nfile="logbird-events-EXPORT_ID-evidence.jsonl"\n\n# SHA-256 on Linux\nsha256sum "$file"\n\n# SHA-256 on macOS\nshasum -a 256 "$file"\n\n# Size in bytes\nwc -c < "$file"',
               language: 'bash',
             },
           },
