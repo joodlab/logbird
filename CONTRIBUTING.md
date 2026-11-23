@@ -46,6 +46,7 @@ Maintainers with existing services can use those instead of Compose. Use an isol
 | `pnpm check` / `pnpm fix` | Check / apply Biome and Ultracite formatting |
 | `pnpm test` | Unit and service integration tests |
 | `pnpm build` | Build all packages and applications |
+| `pnpm openapi:export` / `pnpm openapi:check` | Regenerate `openapi/` from the running code / fail if the committed files differ |
 | `pnpm release:check` | Full checks plus API export drift verification |
 
 Before handoff, run `pnpm install`, `pnpm typecheck`, `pnpm check`, `pnpm test` and `pnpm build`. Exercise service-dependent behavior against real Postgres, ClickHouse and Redis with isolated fictional fixtures. Never reset a shared database or flush a shared cache. ClickHouse tests expect a migrated database; run `pnpm ch:migrate` separately. `CLICKHOUSE_TEST_MIGRATE=1` explicitly opts integration tests into migration execution against their configured database.
@@ -55,7 +56,9 @@ Before handoff, run `pnpm install`, `pnpm typecheck`, `pnpm check`, `pnpm test` 
 ## CI and service-dependent tests
 
 The required `Quality` job uses Node 22 and the pinned pnpm version to install with
-`--frozen-lockfile`, typecheck, run Biome, and run `pnpm test:unit`. PR titles must
+`--frozen-lockfile`, typecheck, run Biome, run `pnpm test:unit`, and run `pnpm openapi:check`. That last step exports
+the API in-process with placeholder settings (no services) and fails if the committed `openapi/` files differ. When it
+fails, run `pnpm openapi:export` and commit the result. PR titles must
 follow Conventional Commits; Gitleaks scans Git history on PRs and pushes.
 The Docker workflow builds the images on PRs that touch Dockerfiles or Compose files; only the tag-driven release workflow publishes them.
 The query bar's corpus test (`apps/app/src/components/query-input/query-corpus.test.tsx`, about ten minutes) runs in

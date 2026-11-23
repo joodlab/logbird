@@ -58,3 +58,11 @@ export function routeDoc(summary: string, options: DescribeRouteOptions = {}, se
 
 export const doc = (summary: string, schema: z.ZodType, status = 200, security = 'session') =>
   routeDoc(summary, { responses: { [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } } }, security);
+
+/**
+ * The committed export in `openapi/` names the documented local default instead of this instance's `APP_URL`, so the
+ * files depend only on the code and CI can check them for drift. The document the server serves at `/openapi.json`
+ * (and the API reference built from it) keeps `APP_URL` (`app.ts`).
+ */
+export const EXPORT_SERVERS = [{ url: 'http://localhost:4600', description: 'This Logbird instance' }];
+export const committedOpenApiDocument = <T extends object>(served: T) => ({ ...served, servers: EXPORT_SERVERS });
