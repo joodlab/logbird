@@ -92,7 +92,7 @@ describe('the customer page authorize() sample', () => {
       .replace('} satisfies LogbirdHooks;', '};');
     return new Function('trailQuery', 'getSession', body)(trailQuery, async () => session) as Hooks;
   };
-  const browser = { q: 'tenant:"someone-else"', cursor: 'next-page' };
+  const browser = { q: 'tenant:"someone-else"', cursor: 'next-page', order: 'asc' };
 
   it('refuses a request without a session, without permission, or without a non-empty tenant id', async () => {
     for (const session of [
@@ -111,7 +111,7 @@ describe('the customer page authorize() sample', () => {
 
   it("forwards only the signed-in account's tenant term, quoted, with the cursor, ignoring the browser's filter", async () => {
     const trusted = await load({ canViewHistory: true, tenantId: 'biz_7' }).authorize({}, browser);
-    expect(trusted).toMatchObject({ q: 'tenant:"biz_7"', cursor: 'next-page' });
+    expect(trusted).toStrictEqual(trailQuery({ tenant: 'biz_7', cursor: 'next-page' }));
     const quoted = await load({ canViewHistory: true, tenantId: 'a" OR tenant:"b' }).authorize({}, {});
     expect(quoted).not.toBe(false);
     const q = (quoted as { q?: string }).q;
