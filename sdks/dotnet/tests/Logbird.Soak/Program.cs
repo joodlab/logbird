@@ -108,6 +108,9 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
     private readonly List<double> _flushSeconds = [];
     private readonly List<LogbirdClient> _clients = [];
 
+    // Upstream mode: the HttpClient given to each SDK client, disposed when that client is retired.
+    private readonly ConcurrentDictionary<LogbirdClient, System.Net.Http.HttpClient> _httpClients = new();
+
     // Producers hold the read lock around Track; a restart swaps the client under the write lock, so once the swap returns
     // no Track can still be running on the old client and its counters are final when it is retired.
     private readonly ReaderWriterLockSlim _swap = new(LockRecursionPolicy.NoRecursion);
@@ -127,16 +130,26 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
     private long _sent;
     private LogbirdClient? _client;
     private double _loadSeconds;
+    private IReadOnlyDictionary<Fault, int> _weights = new Dictionary<Fault, int>();
 
     public void Dispose() => _swap.Dispose();
 
     public async Task<JsonObject> ExecuteAsync()
     {
-        var weights = options.Faults;
-        using var samples = new Samples(weights, "stand-in", Path.Combine(options.ReportDirectory, "stand-in-samples.jsonl"));
-        using var standIn = new StandIn(weights, options.Seed, options.RequestTimeout + TimeSpan.FromSeconds(3), options.IngestKey, samples, options.ExpectedEvents);
+        var weights = options.Upstream is null ? options.Faults : options.Faults.Where(f => f.Key != Fault.Reject).ToDictionary(f => f.Key, f => f.Value);
+        _weights = weights;
+        using var samples = new Samples(weights, options.Upstream is null ? "stand-in" : "upstream", Path.Combine(options.ReportDirectory, "stand-in-samples.jsonl"));
+        using var standIn = new StandIn(weights, options.Seed, options.RequestTimeout + TimeSpan.FromSeconds(3), options.IngestKey, samples, options.Upstream, options.ExpectedEvents);
         standIn.Start();
-        Console.WriteLine($"soak {_runId}: {options.Duration} at {options.Rate} events/s on {Program.Runtime()}, stand-in at {standIn.Endpoint}");
+        Console.WriteLine($"soak {_runId}: {options.Duration} at {options.Rate} events/s on {Program.Runtime()}, {(options.Upstream is null ? "stand-in" : "proxy to " + options.Upstream)} at {standIn.Endpoint}");
+        var started = DateTimeOffset.UtcNow;
+
+        using var clickHouse = options.Upstream is null ? null : new ClickHouseCheck(options.ClickHouseUrl!, options.ClickHouseUser!, options.ClickHousePassword!, options.ClickHouseDatabase!, options.ProjectId!);
+        var preflight = new JsonArray();
+        if (options.Upstream is not null && !await PreflightAsync(clickHouse!, started, preflight).ConfigureAwait(false))
+        {
+            return new JsonObject { ["run"] = _runId, ["runtime"] = Program.Runtime(), ["mode"] = "upstream", ["checks"] = preflight };
+        }
 
         var clock = Stopwatch.StartNew();
         using var stop = new CancellationTokenSource(options.Duration);
@@ -174,11 +187,130 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
         WriteSample(csv, clock);
 
-        return Report(standIn, standIn.Stored, drained, drainSeconds, disposed, quiet, clock.Elapsed);
+        LongMap stored;
+        var upstreamChecks = new JsonArray();
+        if (options.Upstream is null)
+        {
+            stored = standIn.Stored;
+        }
+        else
+        {
+            stored = await ReadBackAsync(started, standIn.Acknowledged, clickHouse!, upstreamChecks).ConfigureAwait(false);
+
+            // Partial answers, resets after forwarding and empty acknowledgements make the client resend events the server
+            // already stored; the server must have acknowledged at least one id again for its deduplication to be exercised.
+            var resendFaults = weights.Where(w => w.Value > 0 && w.Key is Fault.PartialUnavailable or Fault.ResetAfterStore or Fault.EmptyAck).Select(w => w.Key).ToArray();
+            upstreamChecks.Add(Program.Check("the server's deduplication was exercised", resendFaults.Length == 0 || standIn.UpstreamResends > 0, $"{standIn.UpstreamResends} event ids acknowledged by the server again after an earlier answer had acknowledged them"));
+        }
+
+        return Report(standIn, stored, drained, drainSeconds, disposed, quiet, clock.Elapsed, preflight, upstreamChecks);
     }
+
+    /// <summary>Layer 2 only: the server must accept a canary event and the duplicate check must prove itself.</summary>
+    private async Task<bool> PreflightAsync(ClickHouseCheck clickHouse, DateTimeOffset started, JsonArray checks)
+    {
+        // The canary goes through the ingest key, so it can only land in the project that key belongs to; nothing is written
+        // to ClickHouse directly, and no load is sent, until that project is confirmed below. If the key belongs to another
+        // project on the same local server, this one event is the whole cost, so it says plainly what it is.
+        using var canaryHttp = NoProxyHttp()!;
+        var canary = new LogbirdClient(new LogbirdOptions { Endpoint = options.Upstream, IngestKey = options.IngestKey, AllowInsecureHttp = true, Environment = "soak" }, canaryHttp);
+        var canaryId = LogbirdClient.NewEventId();
+        canary.Track(new AuditEvent("soak.canary") { Id = canaryId, Source = "logbird-soak-canary" }
+            .WithMetadata("soakRun", _runId + "-canary")
+            .WithMetadata("note", "Logbird.Soak preflight canary (fictional, one per run); safe to delete"));
+        var flushed = await Program.WithinAsync(canary.FlushAsync(), TimeSpan.FromSeconds(60)).ConfigureAwait(false) == true;
+        var delivered = canary.Stats.Delivered;
+        await canary.DisposeAsync().ConfigureAwait(false);
+        checks.Add(Program.Check("the server accepted a canary event with the ingest key", flushed && delivered == 1, $"flushed {flushed}, delivered {delivered}"));
+        if (!flushed || delivered != 1)
+        {
+            return false;
+        }
+
+        // The ClickHouse self-test writes rows under LOGBIRD_SOAK_PROJECT_ID: confirm first that this is the project the
+        // ingest and read keys belong to, by reading the canary back.
+        string? project = null;
+        using (var readerHttp = NoProxyHttp()!)
+        using (var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = options.Upstream, ReadKey = options.ReadKey, AllowInsecureHttp = true }, readerHttp))
+        {
+            for (var attempt = 0; attempt < 30 && project is null; attempt++)
+            {
+                try
+                {
+                    project = (await reader.GetAsync(canaryId).ConfigureAwait(false))?.Event.ProjectId;
+                }
+                catch (LogbirdApiException)
+                {
+                }
+
+                if (project is null)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                }
+            }
+        }
+
+        var sameProject = string.Equals(project, options.ProjectId, StringComparison.Ordinal);
+        var canaryText = $"one canary event (action soak.canary, source logbird-soak-canary, id {canaryId}, metadata.soakRun {_runId}-canary)";
+        checks.Add(Program.Check(
+            "LOGBIRD_SOAK_PROJECT_ID is the keys' project",
+            sameProject,
+            project is null
+                ? $"the canary could not be read back with the read key; the ingest key may belong to another project, where {canaryText} was written; nothing else was written and no load was sent"
+                : sameProject
+                    ? "the canary was stored in that project"
+                    : $"the canary was stored in project {project}, not LOGBIRD_SOAK_PROJECT_ID: {canaryText} was written there; nothing else was written, nothing went to ClickHouse directly and no load was sent"));
+        if (!sameProject)
+        {
+            return false;
+        }
+
+        // The control rows go into the configured ClickHouse database: confirm first that it is the one this server writes
+        // to, by finding the canary there under that project.
+        long canaryRows = 0;
+        bool detected;
+        try
+        {
+            for (var attempt = 0; attempt < 30 && canaryRows == 0; attempt++)
+            {
+                canaryRows = await clickHouse.RowsOfAsync(canaryId).ConfigureAwait(false);
+                if (canaryRows == 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                }
+            }
+
+            checks.Add(Program.Check("the canary is in the configured ClickHouse database", canaryRows > 0, canaryRows > 0 ? "found under LOGBIRD_SOAK_PROJECT_ID" : "not found within 30 s; nothing is written to ClickHouse"));
+            if (canaryRows == 0)
+            {
+                return false;
+            }
+
+            detected = await clickHouse.SelfTestAsync(_runId + "-selftest", started).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException)
+        {
+            checks.Add(Program.Check("the raw-row duplicate check detects a duplicated id", false, e.Message));
+            return false;
+        }
+
+        checks.Add(Program.Check("the raw-row duplicate check detects a duplicated id", detected, detected ? "one id written at two timestamps (no merge can collapse it) was reported as duplicated" : "the control was not reported"));
+        return detected;
+    }
+
+    /// <summary>
+    /// Upstream mode: an HttpClient that never uses a proxy (environment or system) and never follows a redirect, for every
+    /// SDK client the run creates, so the real keys only ever reach the loopback stand-in or server. Stand-in mode keeps the
+    /// SDK's own HttpClient (its keys are fictional).
+    /// </summary>
+    private System.Net.Http.HttpClient? NoProxyHttp()
+        => options.Upstream is null
+            ? null
+            : new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { UseProxy = false, AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
 
     private LogbirdClient NewClient(Uri endpoint)
     {
+        var http = NoProxyHttp();
         var client = new LogbirdClient(new LogbirdOptions
         {
             Endpoint = endpoint,
@@ -190,7 +322,12 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
             Source = "logbird-soak",
             OnDrop = OnDrop,
             OnError = e => _errors.AddOrUpdate(e.GetType().Name, 1, (_, n) => n + 1),
-        });
+        }, http);
+        if (http is not null)
+        {
+            _httpClients[client] = http;
+        }
+
         lock (_clients)
         {
             _clients.Add(client);
@@ -454,6 +591,11 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
             }
         }
 
+        if (_httpClients.TryRemove(client, out var http))
+        {
+            http.Dispose();
+        }
+
     }
 
     private void WriteSample(StreamWriter csv, Stopwatch clock)
@@ -476,9 +618,142 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         }
     }
 
-    private int Growths(StandIn standIn) => _tracked.Growths + _dropped.Growths + standIn.Stored.Growths + standIn.Acknowledged.Growths + standIn.FirstSeen.Growths;
+    /// <summary>
+    /// Layer 2: what the real server stored. Pages through the run's events by tag, retrying a failed page with the same
+    /// cursor (progress is kept), until every id the server acknowledged to the client is there or the deadline passes
+    /// (five minutes plus 100 ms per expected page). Then reconciles the run's distinct raw ids in ClickHouse with what was
+    /// tracked and read back, and counts ids with more than one raw row.
+    /// </summary>
+    private async Task<LongMap> ReadBackAsync(DateTimeOffset started, LongMap acknowledged, ClickHouseCheck clickHouse, JsonArray checks)
+    {
+        using var readerHttp = NoProxyHttp()!;
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = options.Upstream, ReadKey = options.ReadKey, AllowInsecureHttp = true }, readerHttp);
+        var expected = acknowledged.Entries().Select(e => e.Key).ToArray();
+        var budget = TimeSpan.FromMinutes(5) + TimeSpan.FromMilliseconds(100.0 * (expected.Length / 200 + 1));
+        using var deadline = new CancellationTokenSource(budget);
+        var stored = new LongMap(options.ExpectedEvents);
+        var missing = expected.Length;
+        string? lastError = null;
+        while (true)
+        {
+            var found = new LongMap(options.ExpectedEvents);
+            var search = new EventSearch { Query = "metadata.soakRun:" + (char)34 + _runId + (char)34, From = started.AddMinutes(-5), Limit = 200 };
+            var complete = false;
+            lastError = null;
+            while (!deadline.IsCancellationRequested)
+            {
+                EventPage page;
+                try
+                {
+                    page = await reader.SearchAsync(search, deadline.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (LogbirdApiException e)
+                {
+                    // Transient (rate limit, unavailable): the same page is asked for again; earlier pages are kept.
+                    lastError = e.Code;
+                    if (!await DelayUntil(TimeSpan.FromSeconds(2), deadline.Token).ConfigureAwait(false))
+                    {
+                        break;
+                    }
 
-    private JsonObject Report(StandIn standIn, LongMap stored, bool drained, double drainSeconds, bool disposed, bool quiet, TimeSpan elapsed)
+                    continue;
+                }
+
+                // The deadline may have passed while the page was being read: it never counts then.
+                if (deadline.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                foreach (var e in page.Events)
+                {
+                    found.TryAdd(LongMap.Hash(e.Id), 0);
+                }
+
+                if (string.IsNullOrEmpty(page.NextCursor))
+                {
+                    complete = true;
+                    break;
+                }
+
+                search = search with { Cursor = page.NextCursor };
+            }
+
+            if (complete)
+            {
+                stored = found;
+                missing = expected.Count(id => !stored.Contains(id));
+                lastError = null;
+            }
+
+            if ((complete && missing == 0) || deadline.IsCancellationRequested || !await DelayUntil(TimeSpan.FromSeconds(10), deadline.Token).ConfigureAwait(false))
+            {
+                if (!complete)
+                {
+                    lastError ??= "deadline";
+                }
+
+                break;
+            }
+        }
+
+        checks.Add(Program.Check("every event the server acknowledged is read back", missing == 0 && lastError is null, $"{missing} of {expected.Length} acknowledged ids missing{(lastError is null ? string.Empty : ", last read error " + lastError)} (deadline {budget.TotalMinutes:F0} min)"));
+        try
+        {
+            var (rawMap, invalid) = await clickHouse.DistinctIdsAsync(_runId, options.ExpectedEvents).ConfigureAwait(false);
+            var raw = (Ids: rawMap, Invalid: invalid);
+            var rawIds = raw.Ids.Entries().Select(e => e.Key).ToArray();
+            // An id that is not valid UTF-8 can never be one the harness tracked: it counts as never tracked.
+            var rawStrangers = rawIds.Count(id => !_tracked.Contains(id)) + raw.Invalid;
+            var readNotRaw = stored.Entries().Count(e => !raw.Ids.Contains(e.Key));
+
+            // A tracked id present in the raw rows but absent from the read-back (it settled after the last page, or search
+            // left it out) is still stored: it joins the stored set, so the accounting below (stored or dropped, stored and
+            // dropped with an unconfirmed reason) covers it.
+            var late = 0;
+            foreach (var id in rawIds)
+            {
+                if (_tracked.Contains(id) && stored.TryAdd(id, 0))
+                {
+                    late++;
+                }
+            }
+
+            checks.Add(Program.Check("every raw row of the run is a tracked event, and every event read back has a raw row", rawStrangers == 0 && readNotRaw == 0, $"{rawIds.Length + raw.Invalid} distinct raw ids: {rawStrangers} never tracked ({raw.Invalid} not valid UTF-8); {readNotRaw} read-back ids without a raw row; {late} tracked raw ids absent from the read-back, counted as stored"));
+            var duplicated = await clickHouse.DuplicatedIdsAsync(_runId).ConfigureAwait(false);
+            checks.Add(Program.Check("no event id has more than one raw row (no FINAL)", duplicated == 0, $"{duplicated} event ids with more than one raw row at the time of the count"));
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException)
+        {
+            checks.Add(Program.Check("no event id has more than one raw row (no FINAL)", false, e.Message));
+        }
+
+        return stored;
+    }
+
+    /// <summary>Waits, unless the deadline comes first; returns false when it did.</summary>
+    private static async Task<bool> DelayUntil(TimeSpan delay, CancellationToken deadline)
+    {
+        try
+        {
+            await Task.Delay(delay, deadline).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    private int Growths(StandIn standIn)
+        => _tracked.Growths + _dropped.Growths + standIn.Stored.Growths + standIn.Acknowledged.Growths + standIn.FirstSeen.Growths
+            + (standIn.UpstreamAcknowledged?.Growths ?? 0);
+
+    private JsonObject Report(StandIn standIn, LongMap stored, bool drained, double drainSeconds, bool disposed, bool quiet, TimeSpan elapsed, JsonArray preflight, JsonArray upstreamChecks)
     {
         var tracked = _tracked.Entries().Select(e => e.Key).ToArray();
         var dropped = _dropped.Entries().ToDictionary(e => e.Key, e => (DropReason)e.Value);
@@ -505,6 +780,10 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         var slow = _trackLatency.OverThreshold;
         var calls = _trackLatency.Count;
         var checks = new JsonArray();
+        foreach (var c in preflight)
+        {
+            checks.Add(c!.DeepClone());
+        }
 
         foreach (var c in new[]
         {
@@ -534,6 +813,11 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
             checks.Add(c);
         }
 
+        foreach (var c in upstreamChecks)
+        {
+            checks.Add(c!.DeepClone());
+        }
+
         var faults = new JsonObject();
         foreach (var f in standIn.Faults.OrderBy(f => f.Key))
         {
@@ -556,8 +840,9 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
         {
             ["run"] = _runId,
             ["runtime"] = Program.Runtime(),
-            ["mode"] = "stand-in",
-            ["config"] = options.ToJson(),
+            ["mode"] = options.Upstream is null ? "stand-in" : "upstream",
+            ["config"] = options.ToJson(_weights),
+            ["clickHouseSettings"] = options.Upstream is null ? null : ClickHouseCheck.SettingsSummary,
             ["elapsedSeconds"] = Math.Round(elapsed.TotalSeconds),
             ["achievedRate"] = Math.Round(achieved, 1),
             ["totals"] = new JsonObject
@@ -574,7 +859,7 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
                 ["restarts"] = Interlocked.Read(ref _restarts),
                 ["requests"] = standIn.Requests,
                 ["connections"] = standIn.Connections,
-                ["resendsAfterStore"] = standIn.Resends,
+                ["resendsAfterStore"] = options.Upstream is null ? standIn.Resends : standIn.UpstreamResends,
                 ["bookkeepingTableGrowths"] = Growths(standIn),
             },
             ["faults"] = faults,

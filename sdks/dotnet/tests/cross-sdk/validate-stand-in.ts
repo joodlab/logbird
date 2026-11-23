@@ -35,6 +35,7 @@ type Exchange = {
   dispositions: string[];
   undecodable?: boolean;
   delayMs?: number | null;
+  passthrough?: boolean;
 };
 
 const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
@@ -58,7 +59,8 @@ const exchanges = lines.slice(1).map((line, index) => {
     Array.isArray(x.dispositions) &&
     x.dispositions.every((d) => dispositionValues.has(d)) &&
     (x.undecodable === undefined || typeof x.undecodable === 'boolean') &&
-    (x.delayMs === undefined || x.delayMs === null || typeof x.delayMs === 'number');
+    (x.delayMs === undefined || x.delayMs === null || typeof x.delayMs === 'number') &&
+    (x.passthrough === undefined || typeof x.passthrough === 'boolean');
   if (!shaped) throw new Error(`line ${index + 2} is not an exchange record`);
   return x;
 });
@@ -159,8 +161,14 @@ for (const [number, x] of exchanges.entries()) {
       rejected.some((r) => r?.code === 'invalid_event' && typeof r.reason === 'string' && r.reason.endsWith('(fault injection)')),
     Latency: typeof x.delayMs === 'number' && x.delayMs > 0,
   };
-  if (covers[x.fault] === true) seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
-  if (legal[x.fault] !== true && !wholeRequest && !(x.status === 413 && code === 'payload_too_large'))
+  // Upstream mode: a passthrough answer is the server's own (status, body and Retry-After), forwarded because the fault
+  // did not apply (for example a 429 from the server during emptyack). It is legal for any fault and validated as a
+  // server answer below, but it earns no fault-specific coverage.
+  // Only the proxy passes the server's answers through; a stand-in sample claiming it would dodge the checks below.
+  if (x.passthrough && config.mode !== 'upstream') fail('a passthrough exchange outside upstream mode');
+  if (covers[x.fault] === true && (!x.passthrough || x.fault === 'Ok' || x.fault === 'Latency'))
+    seenFaults.set(x.fault, (seenFaults.get(x.fault) ?? 0) + 1);
+  if (!x.passthrough && legal[x.fault] !== true && !wholeRequest && !(x.status === 413 && code === 'payload_too_large'))
     fail(`the ${x.fault} fault answered ${x.status ?? 'nothing'} ${code ?? ''}`.trim());
 
   // A request .NET could not re-encode (a lone surrogate) is sampled without its body: only its status and code, above.
