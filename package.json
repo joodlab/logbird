@@ -30,7 +30,7 @@
     "demo:clean": "node --env-file=.env --import tsx scripts/demo-clean.ts",
     "e2e": "node --env-file=.env --import tsx scripts/e2e-smoke.ts",
     "openapi:export": "node --env-file=.env --import tsx scripts/export-openapi.ts",
-    "openapi:check": "node --env-file-if-exists=.env --import tsx scripts/export-openapi.ts && git diff --exit-code -- openapi",
+    "openapi:check": "node --env-file-if-exists=.env --import tsx scripts/export-openapi.ts --check",
     "sdk:generate": "pnpm openapi:export && node --import tsx experiments/hey-api/generate.ts",
     "sdk:verify": "node --env-file=.env --import tsx scripts/verify-sdk.ts",
     "release:check": "pnpm release:version && pnpm typecheck && pnpm check && pnpm test && pnpm build && pnpm openapi:check",

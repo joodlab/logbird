@@ -36,8 +36,10 @@ jobs:
           # The query bar's corpus test runs in its own job (query-corpus.yml), only when query code changes.
           LOGBIRD_QUERY_CORPUS: skip
       - name: OpenAPI export matches the contracts
-        # The export runs the API in-process and only reads its OpenAPI route. Nothing below is contacted: the server and
-        # worker modules need valid settings to load, and Redis refusals at shutdown are expected noise.
+        # The export runs the API in-process and only reads its OpenAPI route. No service needs to run: the server and worker
+        # modules need valid settings to load, and their Redis clients try to connect to the placeholder address, so the log
+        # shows connection refusals. On drift the script prints the diff and the regeneration instruction as an annotation;
+        # an export that fails for another reason fails the step with its own error.
         env:
           REDIS_URL: redis://127.0.0.1:1
           APP_URL: http://localhost:4600
@@ -46,8 +48,4 @@ jobs:
           CLICKHOUSE_DATABASE: logbird
           CLICKHOUSE_USER: default
           CLICKHOUSE_PASSWORD: ci
-        run: |
-          if ! pnpm openapi:check; then
-            echo "::error title=openapi/ is out of date::The exported API differs from the committed openapi/ files. Run \`pnpm openapi:export\` and commit the result."
-            exit 1
-          fi
+        run: pnpm openapi:check

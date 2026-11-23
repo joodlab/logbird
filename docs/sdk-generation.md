@@ -25,13 +25,16 @@ Nothing under `experiments/` is a workspace package or imported by production co
 application data endpoints. It needs valid settings, the generated Prisma client and installed dependencies,
 because importing the app loads its environment, database and queue modules. No backing service has to be running.
 `pnpm openapi:export` reads `.env`. `pnpm openapi:check` uses `.env` if present (CI passes placeholder settings
-instead), exports, and fails if `openapi/` changed; CI runs it in the Quality job. The script closes its clients in
+instead), exports, and fails if `git status` shows any change under `openapi/`: a changed file, a deleted file the
+export recreated, a new export never committed, or a staged change. CI runs it in the Quality job. With placeholder
+settings the Redis clients try to connect and log refusals; nothing needs to be running. The script closes its clients in
 `finally`. The committed files name the documented local default (`http://localhost:4600`) as their server instead
 of the instance's `APP_URL`, so they depend only on the code.
 
-Committed outputs: `openapi/openapi.json` (34 implemented operations as of the setup endpoints) and `openapi/public.json` (3 operations:
-search, detail and ingest). Objects are recursively sorted, arrays retain their semantic order, JSON is indented
-with a terminal newline. Two consecutive exports were byte-identical. The exporter rejects duplicate IDs and
+Committed outputs: `openapi/openapi.json` (every implemented operation; 62 at the time of writing) and
+`openapi/public.json` (the `/v1/` operations; 6 at the time of writing). Object keys are recursively sorted in UTF-16
+code-unit order (independent of locale), arrays retain their semantic order, JSON is indented with a terminal
+newline. The exporter rejects duplicate IDs and
 missing summaries, tags, security or responses.
 
 Server changes are metadata only: shared doc helpers provide IDs, public/v1 vs console tags, session/bearer
@@ -190,10 +193,10 @@ stable exported schema names, package exports and a documented Node/edge matrix.
 Split read-only output from ingest or clearly document that generated ingest is low-level only. Lock operation
 IDs independently of display summaries before publishing the first version.
 
-In this CI-less repo, maintainers run setup, `pnpm sdk:generate`, inspect the spec/client diff, typecheck,
-tests and real-server smoke test locally, then commit generated output with the source contract change.
-Publish `@logbird/client` only in a separately authorized release with semver/change notes and registry
-credentials. Do not add PR Docker builds. Add drift detection and release automation if CI arrives later.
+Maintainers run setup, `pnpm sdk:generate`, inspect the spec/client diff, typecheck, tests and real-server smoke
+test locally, then commit generated output with the source contract change. CI's Quality job now checks the
+committed spec for drift (`pnpm openapi:check`); generated client output is not checked. Publish
+`@logbird/client` only in a separately authorized release with semver/change notes and registry credentials.
 
 Estimate: 1–2 engineering days for packaging, auth examples, named response models, smoke fixtures and Node 22/
 edge compatibility validation; additional scope for generated Zod validation, cookie sessions or automatic
