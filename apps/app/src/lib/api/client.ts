@@ -31,6 +31,7 @@ import {
   projectSchema,
   projectSetupSchema,
   type QueryLang,
+  queuedWebhookDeliverySchema,
   retentionStatusSchema,
   type rollApiKeySchema,
   rotateWebhookSecretResponseSchema,
@@ -47,6 +48,7 @@ import {
 } from '@logbird/contracts';
 import { z } from 'zod';
 import { issuedKeyResponseSchema, issuedKeySchema } from '@/lib/api-keys';
+import { lenientDeliveriesSchema } from '@/lib/webhooks';
 import { timeoutError, toApiError } from './errors';
 
 type Query = Record<string, string | number | boolean | null | undefined>;
@@ -214,6 +216,14 @@ export const api = {
     update: (projectId: string, id: string, body: z.input<typeof updateWebhookSchema>) =>
       request(webhookEndpointSchema, 'PATCH', pathFor(routes.webhooks.update.path, { projectId, id }), { body }),
     remove: (projectId: string, id: string) => request(ok, 'DELETE', pathFor(routes.webhooks.remove.path, { projectId, id })),
+    /** Queue a test ping (202). 409 while the endpoint is off or held. */
+    test: (projectId: string, id: string) => request(queuedWebhookDeliverySchema, 'POST', pathFor(routes.webhooks.test.path, { projectId, id })),
+    /** Recent deliveries, 20 per page, newest first; kept 30 days. */
+    deliveries: (projectId: string, id: string, query: { status?: string; cursor?: string }, signal?: AbortSignal) =>
+      request(lenientDeliveriesSchema, 'GET', pathFor(routes.webhooks.deliveries.path, { projectId, id }), { query, signal }),
+    /** Queue a delivery again (202). 409 while it is already pending, or while the endpoint is off or held. */
+    resend: (projectId: string, id: string, deliveryId: string) =>
+      request(queuedWebhookDeliverySchema, 'POST', pathFor(routes.webhooks.resend.path, { projectId, id, deliveryId })),
     rotateSecret: (projectId: string, id: string, overlapSeconds: number) =>
       request(rotateWebhookSecretResponseSchema, 'POST', pathFor(routes.webhooks.rotateSecret.path, { projectId, id }), { body: { overlapSeconds } }),
   },

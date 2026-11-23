@@ -600,7 +600,7 @@ function ProjectExplorer({
                 <CircleAlertIcon className="mt-px size-3.5 shrink-0 sm:mt-0" />
                 {/* Phones wrap: the actionable half of the sentence must not hide behind a hover-only title. */}
                 <span className="min-w-0 sm:truncate" data-testid="query-problem" title={queryProblemText(problem, q)}>
-                  <span className="font-medium">{reasonTitle(problem.details, problem.code)}</span>
+                  <span className="font-medium">{reasonTitle(problem.details, problem.code, problem.message)}</span>
                   {' · '}
                   {queryProblemText(problem, q)}
                 </span>

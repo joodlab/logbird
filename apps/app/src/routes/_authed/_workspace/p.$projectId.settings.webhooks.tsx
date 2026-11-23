@@ -1,8 +1,9 @@
-import type { WebhookEndpoint } from '@logbird/contracts';
+import { SCOPE_MASKS, type WebhookEndpoint } from '@logbird/contracts';
 import { TypePill } from '@logbird/ui/components/badges';
 import { CopyButton } from '@logbird/ui/components/copy-button';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
+import { Checkbox } from '@logbird/ui/components/ui/checkbox';
 import { useConfirm } from '@logbird/ui/components/ui/confirm';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@logbird/ui/components/ui/dialog';
 import { Label } from '@logbird/ui/components/ui/label';
@@ -19,9 +20,12 @@ import { CloseWithoutCopying, useSecretCloseGuard } from '@/components/one-time-
 import { SettingsSection } from '@/components/settings-section';
 import { TextField } from '@/components/text-field';
 import { Timestamp } from '@/components/timestamp';
+import { DeliveryLog } from '@/components/webhooks/delivery-log';
+import { EndpointStates } from '@/components/webhooks/endpoint-states';
 import { api } from '@/lib/api/client';
 import { ApiRequestError } from '@/lib/api/errors';
 import { keys as queryKeys, webhooksQuery } from '@/lib/api/queries';
+import { MASK_HINT, MASK_LABEL } from '@/lib/api-keys';
 import { creatorLabel } from '@/lib/events';
 import { useOrganization } from '@/lib/organization';
 import { useCan } from '@/lib/permissions';
@@ -29,15 +33,19 @@ import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import {
   disabledCopy,
   displayUrl,
+  endpointPatch,
+  endpointStates,
   type Form,
   type FormErrors,
   fieldErrorsFromValidation,
   formFrom,
+  isHoldRefusal,
   isWebhookBusy,
   MAX_WEBHOOK_ENDPOINTS,
   OVERLAP_CHOICES,
   scopeOf,
   scopeSummary,
+  sendBlockedCopy,
   validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
@@ -45,6 +53,7 @@ import {
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/webhooks')({
   head: () => ({ meta: [{ title: 'Webhooks · Logbird' }] }),
+  staticData: { crumb: 'Webhooks' },
   component: WebhooksSettings,
 });
 
@@ -55,6 +64,13 @@ function WebhooksSettings() {
   const can = useCan();
   const list = useQuery({ ...webhooksQuery(projectId), enabled: can.isAdmin });
   const [editing, setEditing] = useState<WebhookEndpoint | 'new' | null>(null);
+  // The server's explanation of a filter it rejected, carried into the editor so it stays beside the filter.
+  const [editFilterError, setEditFilterError] = useState<string | null>(null);
+  // A new endpoint never inherits another endpoint's filter explanation.
+  const addEndpoint = () => {
+    setEditFilterError(null);
+    setEditing('new');
+  };
   const [rotating, setRotating] = useState<WebhookEndpoint | null>(null);
   // Every issued secret waits its turn: one finishing while another is on screen never replaces it.
   const [issued, setIssued] = useState<(Issued & { n: number })[]>([]);
@@ -84,7 +100,7 @@ function WebhooksSettings() {
           list.data ? (
             <Button
               disabled={full}
-              onClick={() => setEditing('new')}
+              onClick={addEndpoint}
               size="sm"
               title={full ? `A project can have at most ${MAX_WEBHOOK_ENDPOINTS} endpoints.` : undefined}
             >
@@ -109,7 +125,7 @@ function WebhooksSettings() {
             size="sm"
             title="No endpoints yet"
           >
-            <Button onClick={() => setEditing('new')} size="sm">
+            <Button onClick={addEndpoint} size="sm">
               <PlusIcon />
               Add endpoint
             </Button>
@@ -120,7 +136,10 @@ function WebhooksSettings() {
               <EndpointCard
                 endpoint={endpoint}
                 key={endpoint.id}
-                onEdit={() => setEditing(endpoint)}
+                onEdit={(filterError) => {
+                  setEditFilterError(filterError ?? null);
+                  setEditing(endpoint);
+                }}
                 onRotate={() => setRotating(endpoint)}
                 projectId={projectId}
               />
@@ -130,7 +149,11 @@ function WebhooksSettings() {
       </SettingsSection>
       <EndpointDialog
         endpoint={editing === 'new' ? null : editing}
-        onClose={() => setEditing(null)}
+        filterError={editFilterError}
+        onClose={() => {
+          setEditing(null);
+          setEditFilterError(null);
+        }}
         onSecret={enqueue}
         open={editing !== null}
         projectId={projectId}
@@ -144,7 +167,15 @@ function WebhooksSettings() {
 function useEndpointMutations(projectId: string) {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks'] });
-  return { refresh };
+  /**
+   * The endpoint the server returned replaces the listed one at once, before the list is read again: an Edit opened
+   * in between sees the saved values (never the previous filter or its rejection).
+   */
+  const apply = (updated: WebhookEndpoint) => {
+    queryClient.setQueryData(webhooksQuery(projectId).queryKey, (list) => list?.map((e) => (e.id === updated.id ? updated : e)));
+    refresh();
+  };
+  return { refresh, apply };
 }
 
 function EndpointCard({
@@ -155,10 +186,12 @@ function EndpointCard({
 }: {
   projectId: string;
   endpoint: WebhookEndpoint;
-  onEdit: () => void;
+  /** Open the editor, optionally with the server's explanation of a rejected filter. */
+  onEdit: (filterError?: string) => void;
   onRotate: () => void;
 }) {
-  const { refresh } = useEndpointMutations(projectId);
+  const { refresh, apply } = useEndpointMutations(projectId);
+  const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { org } = useOrganization();
   const creator = org.data?.members.find((m) => m.userId === endpoint.createdById)?.user;
@@ -166,9 +199,9 @@ function EndpointCard({
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => api.webhooks.update(projectId, endpoint.id, { enabled }),
     ...webhookRetry,
-    onSuccess: (_, enabled) => {
+    onSuccess: (updated, enabled) => {
       toast.success(enabled ? 'Endpoint turned on' : 'Endpoint turned off');
-      refresh();
+      apply(updated);
     },
     onError: (error) => toast.error('Could not change the endpoint', { description: webhookErrorCopy(error) }),
   });
@@ -181,20 +214,70 @@ function EndpointCard({
     },
     onError: (error) => toast.error('Could not delete the endpoint', { description: webhookErrorCopy(error) }),
   });
+  // Confirming the stored filter as it is: a PATCH that includes filterQuery, unchanged, lifts the hold.
+  // The server's rejection of a filter belongs to that filter text, and only while the filter hold lasts: once the
+  // filter is changed or confirmed, it is gone.
+  const [rejected, setRejected] = useState<{ query: string; message: string } | null>(null);
+  const filterError = rejected && endpoint.filterWarning && rejected.query === endpoint.filterQuery ? rejected.message : null;
+  const confirmFilter = useMutation({
+    mutationFn: () => api.webhooks.update(projectId, endpoint.id, { filterQuery: endpoint.filterQuery }),
+    ...webhookRetry,
+    onSuccess: (updated) => {
+      setRejected(null);
+      apply(updated);
+      // Say what the returned endpoint says: another hold (a scope, an operator review) can still keep it paused.
+      const still = endpointStates(updated).filter((s) => s.kind === 'hold');
+      if (still.length)
+        toast.warning('Filter confirmed, still paused', {
+          description: `It also needs: ${still.map((s) => s.badge.replace(/^Held: /, '')).join(', ')}.`,
+        });
+      else if (!updated.enabled) toast.success('Filter confirmed', { description: 'The endpoint is off: turn it on to resume delivery.' });
+      else toast.success('Filter confirmed', { description: 'Delivery resumes where it paused.' });
+    },
+    onError: (error) => {
+      const problem = queryProblem(error, 'query');
+      if (problem)
+        setRejected({
+          query: endpoint.filterQuery,
+          message: `${reasonTitle(problem.details, problem.code, problem.message)}: ${queryProblemText(problem, endpoint.filterQuery)}`,
+        });
+      else toast.error('Could not confirm the filter', { description: webhookErrorCopy(error) });
+    },
+  });
+  const test = useMutation({
+    mutationFn: () => api.webhooks.test(projectId, endpoint.id),
+    ...webhookRetry,
+    onSuccess: () => {
+      toast.success('Test ping queued', { description: 'It is sent within seconds and shows up in the delivery log.' });
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'deliveries'] });
+    },
+    onError: (error) => {
+      toast.error('Could not send a test ping', { description: webhookErrorCopy(error, endpoint) });
+      // A hold newer than this page: refresh the endpoint so its card shows it.
+      if (isHoldRefusal(error)) refresh();
+    },
+  });
+  const [logOpen, setLogOpen] = useState(false);
   const off = !endpoint.enabled;
   const reason = disabledCopy(endpoint.disabledReason);
-  const busy = (toggle.isPending && toggle.failureCount > 0) || (remove.isPending && remove.failureCount > 0);
+  const states = endpointStates(endpoint);
+  const held = states.find((s) => s.kind === 'hold');
+  // The API refuses a test ping while the endpoint is off or held for its filter or scope; cursor review allows it.
+  const testBlocked = sendBlockedCopy(endpoint, 'send a test ping');
+  const busy = [toggle, remove, confirmFilter, test].some((m) => m.isPending && m.failureCount > 0);
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-lg border p-4" data-testid="webhook-endpoint">
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-0.5">
+      {/* On a phone the state badge goes under the address, which then keeps the whole width. */}
+      <div className="flex min-w-0 items-start justify-between gap-3 max-sm:flex-col max-sm:gap-1.5">
+        {/* max-w-full: stacked, the address column may not grow past the card, so the address truncates instead. */}
+        <div className="flex min-w-0 max-w-full flex-col gap-0.5">
           <p className="truncate font-mono text-sm">
             {host}
             <span className="text-muted-foreground">{path}</span>
           </p>
           {endpoint.description ? <p className="text-muted-foreground text-sm">{endpoint.description}</p> : null}
         </div>
-        <TypePill tone={off ? 'warning' : 'brand'}>{off ? 'Off' : 'On'}</TypePill>
+        <TypePill tone={off || held ? 'warning' : 'brand'}>{off ? 'Off' : held ? held.badge : 'On'}</TypePill>
       </div>
       {off ? (
         <div className="flex items-start gap-2 rounded-md border border-outcome-denied/30 bg-outcome-denied/[0.06] p-3 text-sm" role="status">
@@ -213,6 +296,14 @@ function EndpointCard({
           </span>
         </div>
       ) : null}
+      <EndpointStates
+        confirming={confirmFilter.isPending}
+        endpoint={endpoint}
+        filterError={filterError}
+        onConfirmFilter={() => confirmFilter.mutate()}
+        onEdit={() => onEdit(filterError ?? undefined)}
+        onRotate={onRotate}
+      />
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
         <dt className="text-muted-foreground">Sends</dt>
         <dd className="min-w-0">
@@ -227,11 +318,25 @@ function EndpointCard({
         </dd>
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={onEdit} size="sm" variant="outline">
+        {/* No edit while a filter confirmation is in flight: it sends the filter it started with and would overwrite it. */}
+        <Button disabled={confirmFilter.isPending} onClick={() => onEdit(filterError ?? undefined)} size="sm" variant="outline">
           Edit
         </Button>
         <Button onClick={onRotate} size="sm" variant="outline">
           Rotate secret
+        </Button>
+        <Button onClick={() => setLogOpen(true)} size="sm" variant="outline">
+          Delivery log
+        </Button>
+        <Button
+          disabled={test.isPending || testBlocked !== null}
+          onClick={() => test.mutate()}
+          size="sm"
+          title={testBlocked ?? undefined}
+          variant="outline"
+        >
+          {test.isPending ? <Loader2Icon className="animate-spin" /> : null}
+          Send test ping
         </Button>
         <Button disabled={toggle.isPending} onClick={() => toggle.mutate(off)} size="sm" variant="outline">
           {toggle.isPending ? <Loader2Icon className="animate-spin" /> : null}
@@ -259,6 +364,13 @@ function EndpointCard({
           </span>
         ) : null}
       </div>
+      <DeliveryLog
+        endpoint={endpoint}
+        onOpenChange={setLogOpen}
+        open={logOpen}
+        projectId={projectId}
+        sendBlocked={sendBlockedCopy(endpoint, 'send a delivery again')}
+      />
     </li>
   );
 }
@@ -269,18 +381,21 @@ class SaveAbandoned extends Error {}
 function EndpointDialog({
   projectId,
   endpoint,
+  filterError,
   open,
   onClose,
   onSecret,
 }: {
   projectId: string;
   endpoint: WebhookEndpoint | null;
+  /** The server's explanation of a rejected filter, shown on the filter field when the editor opens. */
+  filterError?: string | null;
   open: boolean;
   onClose: () => void;
   /** A created endpoint's secret, handed straight to the one-time dialog (never kept in mutation state). */
   onSecret: (issued: Issued) => void;
 }) {
-  const { refresh } = useEndpointMutations(projectId);
+  const { refresh, apply } = useEndpointMutations(projectId);
   const ids = useId();
   const [form, setForm] = useState<Form>(() => formFrom(endpoint));
   const [wasOpen, setWasOpen] = useState(false);
@@ -291,7 +406,7 @@ function EndpointDialog({
     setWasOpen(open);
     if (open) {
       setForm(formFrom(endpoint));
-      setErrors({});
+      setErrors(filterError ? { filter: filterError } : {});
       setNarrowOpen(Boolean(endpoint?.scope));
     }
   }
@@ -320,20 +435,14 @@ function EndpointDialog({
         onSecretRef.current({ endpoint: result.endpoint, secret: result.secret, overlapSeconds: null });
         return { created: result.endpoint };
       }
-      const before = formFrom(target);
-      const body: Record<string, unknown> = {};
-      // Only what changed: a changed URL is checked again (DNS); an unchanged one is not.
-      if (f.url.trim() !== before.url) body.url = f.url.trim();
-      if (f.description.trim() !== before.description) body.description = f.description.trim() || null;
-      if (f.filter.trim() !== before.filter) body.filterQuery = f.filter.trim();
-      if (JSON.stringify(scope) !== JSON.stringify(scopeOf(before))) body.scope = scope;
-      if (f.enabled !== before.enabled) body.enabled = f.enabled;
+      const body = endpointPatch(target, f, scope);
       if (!Object.keys(body).length) return null;
       return api.webhooks.update(projectId, target.id, body);
     },
     ...webhookRetry,
     onSuccess: (result, { at }) => {
-      refresh();
+      if (result && !('created' in result)) apply(result);
+      else refresh();
       if (at !== session.current) return;
       if (!(result && 'created' in result)) toast.success(result ? 'Endpoint saved' : 'Nothing to save');
       onClose();
@@ -341,13 +450,13 @@ function EndpointDialog({
     onError: (error, { f, at }) => {
       if (error instanceof SaveAbandoned || at !== session.current) return;
       const problem = queryProblem(error, 'query');
-      if (problem) setErrors({ filter: `${reasonTitle(problem.details, problem.code)}: ${queryProblemText(problem, f.filter)}` });
+      if (problem) setErrors({ filter: `${reasonTitle(problem.details, problem.code, problem.message)}: ${queryProblemText(problem, f.filter)}` });
       else if (error instanceof ApiRequestError && error.code === 'webhook_url_not_allowed') setErrors({ url: webhookErrorCopy(error) });
       else {
         // A body the contract rejects names its field: put the message there.
         const onField = fieldErrorsFromValidation(error);
         setErrors(Object.keys(onField).length ? onField : { form: webhookErrorCopy(error) });
-        if (onField.tenantId || onField.targetType || onField.targetId) setNarrowOpen(true);
+        if (onField.tenantId || onField.targetType || onField.targetId || onField.masks) setNarrowOpen(true);
       }
     },
   });
@@ -355,13 +464,13 @@ function EndpointDialog({
     const next = validateWebhookForm(form);
     setErrors(next);
     if (Object.keys(next).length) {
-      if (next.tenantId || next.targetType || next.targetId) setNarrowOpen(true);
+      if (next.tenantId || next.targetType || next.targetId || next.masks) setNarrowOpen(true);
       return;
     }
     save.mutate({ f: form, target: endpoint, at: session.current });
   };
   const retrying = save.isPending && save.failureCount > 0 && isWebhookBusy(save.failureReason);
-  const scopeInvalid = Boolean(errors.tenantId || errors.targetType || errors.targetId);
+  const scopeInvalid = Boolean(errors.tenantId || errors.targetType || errors.targetId || errors.masks);
   const narrowShown = narrowOpen || scopeInvalid;
   return (
     <Dialog onOpenChange={(next) => (next ? undefined : onClose())} open={open}>
@@ -407,7 +516,7 @@ function EndpointDialog({
             error={errors.filter}
             id={`${ids}-filter`}
             label="Filter"
-            limits="The query language you use in the explorer, up to 4,096 characters. It is checked when you save, and it cannot use a field the endpoint’s scope hides."
+            limits="The query language you use in the explorer, up to 4,096 characters. It is checked when you save, and it cannot use a field the endpoint’s scope hides. In a filter, now (occurredAt:>now-1h) means the time each event arrived."
             multiline
             onChange={(filter) => set({ filter })}
             optional
@@ -427,7 +536,7 @@ function EndpointDialog({
                 className={narrowShown ? 'mt-0.5 size-4 shrink-0 text-muted-foreground' : '-rotate-90 mt-0.5 size-4 shrink-0 text-muted-foreground'}
               />
               <span>
-                Only part of the project <span className="font-normal text-muted-foreground">· one tenant or one record</span>
+                Only part of the project <span className="font-normal text-muted-foreground">· one tenant or record, hidden fields</span>
               </span>
             </button>
             <div className="flex min-w-0 flex-col gap-3" hidden={!narrowShown} id={`${ids}-narrow`}>
@@ -465,6 +574,31 @@ function EndpointDialog({
                   value={form.targetId}
                 />
               </div>
+              <fieldset
+                aria-describedby={`${ids}-masks-hint`}
+                aria-invalid={Boolean(errors.masks) || undefined}
+                className="flex min-w-0 flex-col gap-2"
+              >
+                <legend className="font-medium text-sm">
+                  Hide fields <span className="font-normal text-muted-foreground">· optional</span>
+                </legend>
+                {SCOPE_MASKS.map((mask) => (
+                  // biome-ignore lint/a11y/noLabelWithoutControl: the Base UI checkbox inside is the control.
+                  <label className="flex items-start gap-2 text-sm" key={mask}>
+                    <Checkbox
+                      checked={form.masks.includes(mask)}
+                      onCheckedChange={(checked) => set({ masks: checked ? [...form.masks, mask] : form.masks.filter((m) => m !== mask) })}
+                    />
+                    <span>
+                      {MASK_LABEL[mask]} <span className="text-muted-foreground text-xs">· {MASK_HINT[mask]}</span>
+                    </span>
+                  </label>
+                ))}
+                <p className={errors.masks ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'} id={`${ids}-masks-hint`}>
+                  {errors.masks ??
+                    'Each delivery, retry and test ping hides the chosen fields as described above (emptied, or a stable hash for actor email), and the filter cannot use them.'}
+                </p>
+              </fieldset>
             </div>
           </div>
           {endpoint ? (
@@ -510,6 +644,7 @@ function RotateDialog({
   onSecret: (issued: Issued) => void;
 }) {
   const ids = useId();
+  const queryClient = useQueryClient();
   const [overlap, setOverlap] = useState<number>(86_400);
   // Each endpoint starts at the recommended overlap, not at the last one picked for another.
   const [shownFor, setShownFor] = useState<WebhookEndpoint | null>(null);
@@ -536,6 +671,8 @@ function RotateDialog({
     ...webhookRetry,
     // Close only the opening that asked, never one opened since (for this endpoint or another).
     onSuccess: (_id, { at }) => {
+      // The endpoint's signing warning can clear after a rotation with no overlap.
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks'] });
       if (at === session.current) onClose();
     },
     onError: (error, { at }) => {
