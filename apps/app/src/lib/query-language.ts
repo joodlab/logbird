@@ -116,6 +116,33 @@ function joinColons(input: string, from: number, limit: number): number {
   return j;
 }
 
+/** The server's field term whose key starts at `keyStart`, when the query parses. */
+function serverFieldAt(q: string, keyStart: number): Extract<QueryAtom, { kind: 'field' }> | undefined {
+  let found: Extract<QueryAtom, { kind: 'field' }> | undefined;
+  const visit = (node: QueryAtom) => {
+    if (found) return;
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else if (node.kind === 'field' && node.start === keyStart) found = node;
+  };
+  for (const branch of editableExpression(q) ?? []) for (const part of branch) visit(part.atom);
+  return found;
+}
+const serverFieldAtom = serverFieldAt;
+
+/** The server's field term whose text holds `caret` (key or value), when the query parses. */
+function serverFieldContaining(q: string, caret: number): Extract<QueryAtom, { kind: 'field' }> | undefined {
+  let found: Extract<QueryAtom, { kind: 'field' }> | undefined;
+  const visit = (node: QueryAtom) => {
+    if (found) return;
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else if (node.kind === 'field' && caret > node.start && caret <= node.end) found = node;
+  };
+  for (const branch of editableExpression(q) ?? []) for (const part of branch) visit(part.atom);
+  return found;
+}
+
 /** The decoded value of a quoted value joined with colon parts (`"auth":other` is `auth:other` to the server). */
 function readJoinedValue(raw: string): { value: string; wildcard: boolean } {
   let value = '';
@@ -482,7 +509,10 @@ export function hasTerm(q: string, field: string, value: string, negated?: boole
   );
 }
 
-/** Remove every term for `field` (optionally only one value / polarity). */
+/**
+ * Remove every term for `field` (optionally only one value / polarity). Naming a value or a polarity is a facet's own
+ * operation: it never reaches a term inside `NOT (a b)`, which has no polarity of its own. Removing the whole field does.
+ */
 export function removeTerm(q: string, field: string, value?: string, negated?: boolean): string {
   const f = canonicalField(field);
   return removeTokens(
@@ -490,7 +520,7 @@ export function removeTerm(q: string, field: string, value?: string, negated?: b
     (t) =>
       t.kind === 'field' &&
       canonicalField(t.field ?? '') === f &&
-      (value === undefined || (isSimple(t) && !t.wildcard && t.value === value)) &&
+      (value === undefined || (isSimple(t) && !t.wildcard && t.value === value && !t.unpolarized)) &&
       (negated === undefined || (!t.unpolarized && t.negated === negated)),
   );
 }
@@ -765,6 +795,41 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
     quoted: false,
     ...extra,
   });
+  // When the query parses, a completion replaces exactly what the server reads as the value or group member (joined
+  // colons, quotes inside bare words and all); the console's own scan is only the fallback while it does not parse.
+  // The server's term at the caret: the console's token can disagree with it (a quote inside a bare group member makes
+  // the console read on into the next term), and then the server's own term decides.
+  const own = serverFieldAtom(q, keyStart);
+  const atom = own && caret <= own.end ? own : serverFieldContaining(q, caret);
+  if (atom && atom !== own) {
+    const colon = q.indexOf(':', atom.key.end);
+    if (caret <= colon) return key(atom.start, colon + 1);
+  }
+  if (atom && (atom.value.kind === 'value' || atom.value.kind === 'group')) {
+    const atField = atom.field;
+    const at = (prefix: string, from: number, to: number, extra: Partial<Extract<QueryCompletion, { kind: 'value' }>> = {}): QueryCompletion => ({
+      ...(value(prefix, from, to, extra) as Extract<QueryCompletion, { kind: 'value' }>),
+      field: atField,
+    });
+    const members = atom.value.kind === 'value' ? [atom.value.token] : atom.value.members;
+    const inGroup = atom.value.kind === 'group';
+    if (inGroup && caret <= atom.valueStart) return at('', atom.valueStart, atom.end);
+    const member = members.find((m) => caret >= m.start && caret <= m.end);
+    if (!member) {
+      if (!inGroup) return { kind: 'none' };
+      // On the group's own `OR`: nothing to complete.
+      const around = /\S*$/.exec(q.slice(atom.valueStart, caret))?.[0] + (/^\S*/.exec(q.slice(caret))?.[0] ?? '');
+      if (around === 'OR') return { kind: 'none' };
+      const before = q.slice(atom.valueStart + 1, caret).trimEnd();
+      return at('', caret, caret, { inGroup, afterMember: before.length > 0 && !/(^|\s)OR$/.test(before) });
+    }
+    if (member.kind === 'regex' && caret > member.start) return { kind: 'regex', field: atField };
+    const quoted = q[member.start] === '"';
+    const prefix = readJoinedValue(q.slice(member.start, caret)).value;
+    const before = q.slice(atom.valueStart + 1, member.start).trimEnd();
+    const afterMember = inGroup && before.length > 0 && !/(^|\s)OR$/.test(before);
+    return at(prefix, member.start, member.end, { quoted, ...(inGroup ? { inGroup, afterMember } : {}) });
+  }
   switch (t.valueKind) {
     case 'regex':
       return caret <= valueStart ? value('', valueStart, t.end) : { kind: 'regex', field };

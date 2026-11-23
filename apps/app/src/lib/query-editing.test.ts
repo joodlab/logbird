@@ -10,7 +10,7 @@ import { activityChip, activityFreeText } from './activity-search';
 import { whoFilter } from './impersonation';
 import { presenceTerms } from './presence-filter';
 import { attributeQueryKey } from './query-catalog';
-import { fieldTerms, formatTerm, highlightQuery, queryCompletionAt, removeTerm, tokenize } from './query-language';
+import { excludeTerm, fieldTerms, formatTerm, highlightQuery, includeTerm, queryCompletionAt, removeTerm, tokenize } from './query-language';
 import { lintQuery } from './query-lint';
 import { translateQueryToSql } from './query-translate';
 import { nameableTerms } from './views';
@@ -172,5 +172,31 @@ describe('#283 round 2', () => {
     expect(attributeQueryKey('_exists_')).toBe('attr._exists_');
     expect(compileQuery('"attr.attr.ticket status":open').params).toMatchObject({ q0: 'attr.ticket status' });
     expect(compileQuery('attr._exists_:*').params).toMatchObject({ q0: '_exists_' });
+  });
+});
+
+describe('#283 round 3', () => {
+  it('replaces exactly the value the server reads, never an OR or a neighbour', () => {
+    const joinedOr = 'action:"book":OR tenant:west';
+    expect(queryCompletionAt(joinedOr, joinedOr.indexOf('book') + 2)).toMatchObject({ kind: 'value', from: 7, to: joinedOr.indexOf('OR') });
+    const joinedQuote = 'action:book:"two words"';
+    expect(queryCompletionAt(joinedQuote, 9)).toMatchObject({ kind: 'value', from: 7, to: joinedQuote.length });
+    const quoteInMember = 'action:(ab"cd OR next) tenant:west';
+    expect(queryCompletionAt(quoteInMember, quoteInMember.indexOf('tenant') + 1)).toMatchObject({ kind: 'key' });
+    expect(queryCompletionAt(quoteInMember, quoteInMember.indexOf('next') + 2)).toMatchObject({
+      kind: 'value',
+      from: quoteInMember.indexOf('next'),
+      to: quoteInMember.indexOf(')'),
+    });
+  });
+
+  it('never includes or excludes a facet value by removing a term from inside NOT (a b)', () => {
+    expect(excludeTerm('NOT (outcome:failure action:booked)', 'outcome', 'failure')).toBe('NOT (outcome:failure action:booked) -outcome:failure');
+    expect(includeTerm('NOT (outcome:failure action:booked)', 'outcome', 'success')).toBe('NOT (outcome:failure action:booked) outcome:success');
+  });
+
+  it('reads no who-split from a term in one OR branch', () => {
+    expect(whoFilter('NOT (impersonator:*) OR outcome:failure')).toBe('all');
+    expect(whoFilter('-impersonator:* outcome:failure')).toBe('self');
   });
 });

@@ -1,7 +1,7 @@
 import type { AuditEvent, QueryLang } from '@logbird/contracts';
 import { personLabel } from '@/lib/events';
 import { presenceTerms, setPresence } from '@/lib/presence-filter';
-import { formatTerm } from '@/lib/query-language';
+import { formatTerm, hasTopLevelOr } from '@/lib/query-language';
 
 /**
  * Support impersonation, in plain words. When `impersonator` is set, the actor is the customer it was done *as*
@@ -28,6 +28,9 @@ export const SUPPORT_TERM = 'impersonator:*';
  * is "self"; works in both query languages.
  */
 export function whoFilter(q: string, lang: QueryLang = 'query'): WhoFilter {
+  // Only a restriction on the whole query is a split: a term in one OR branch (`NOT (impersonator:*) OR outcome:failure`)
+  // limits that branch alone. (SQL conjuncts are already top-level ANDs only.)
+  if (lang === 'query' && hasTopLevelOr(q)) return 'all';
   const terms = presenceTerms(q, 'impersonator', lang);
   if (terms.some((t) => !t.negated)) return 'support';
   if (terms.some((t) => t.negated && t.value === null)) return 'self';
