@@ -149,8 +149,11 @@ export const isExactId = (rank: EntityMatchRank) => rank <= 1;
 export function idFromFreeText(text: string): string {
   const t = text.trim();
   if (t.startsWith('"')) return quotedTerm(t);
-  // A leading `/` starts a regex to the server (`/x/`), never a bare id.
-  return /^[^\s:()"'*/-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
+  // A leading `/` starts a regex to the server (`/x/`), never a bare id; boolean words are operators.
+  if (!t || t.startsWith('/') || /^(AND|OR|NOT)$/.test(t)) return '';
+  // A bare word is read by the server's own parser too, so whatever it takes as one literal word is a possible id —
+  // `o'brien` included (#334). A wildcard (`foo*`) is a prefix search, never an exact id.
+  return singleTerm(t, { wildcard: false });
 }
 
 /**
@@ -160,11 +163,20 @@ export function idFromFreeText(text: string): string {
  */
 /** The literal text of `t` when the server reads it as exactly one quoted term, else ''. */
 function quotedTerm(t: string): string {
+  return singleTerm(t, { wildcard: true });
+}
+
+/**
+ * The literal the server's parser reads `t` as when it is exactly one free-text term, else ''. Exactly as the server
+ * reads it: `" a\"b "` is ` a"b ` (an id is sent exactly), never trimmed into another id. `wildcard: false` refuses a
+ * term the parser marks as a wildcard (quoted terms never are).
+ */
+function singleTerm(t: string, { wildcard }: { wildcard: boolean }): string {
   try {
     const expression = parseQueryExpression(t);
     const atom = expression.length === 1 && expression[0]?.length === 1 ? expression[0][0]?.atom : undefined;
     if (atom?.kind !== 'text' || atom.start !== 0 || atom.end !== t.length || atom.token.kind !== 'value') return '';
-    // Exactly as the server reads it: `" a\"b "` is ` a"b ` (an id is sent exactly), never trimmed into another id.
+    if (!wildcard && atom.token.wildcard) return '';
     return atom.token.value.trim() ? atom.token.value : '';
   } catch {
     return '';

@@ -17,7 +17,7 @@ import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histogramQuery } from '@/lib/api/queries';
-import { allTimeCheckNeedsAsking, otherDatesCheck, otherDatesLine } from '@/lib/empty-state';
+import { allTimeCheckNeedsAsking, otherDatesAction, otherDatesCheck, otherDatesLine } from '@/lib/empty-state';
 import { ENTITY_SECTIONS, entityQuery, idFromFreeText, sectionForKind, settledIdMatches } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
@@ -374,22 +374,32 @@ function ProjectExplorer({
     isError: wider.isError,
     isFetching: wider.isFetching,
   });
+  const action = otherDatesAction({ failed: checkFailed, checking, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
   const widen =
-    olderMatches && olderMatches > 0 && !checking ? (
-      <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
-        Search all time
-      </Button>
-    ) : checkFailed ? (
+    action === 'retry' ? (
       <Button onClick={() => wider.refetch()} size="sm" variant="outline">
         Retry the check
       </Button>
-    ) : widerWanted && !sqlCheckAsked ? (
+    ) : action === 'search-all-time' ? (
+      <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
+        Search all time
+      </Button>
+    ) : action === 'ask' ? (
       <Button data-testid="check-all-time" onClick={() => setChecksAsked((asked) => new Set(asked).add(checkKey))} size="sm" variant="outline">
         Check other dates
       </Button>
     ) : null;
   // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
-  const outside = otherDatesLine({ failed: checkFailed, checking, lookingUp, olderMatches, needsAsking: widerWanted && !sqlCheckAsked });
+  // The lookup settled without a full answer: it failed, or some entity kinds could not be searched.
+  const lookupIncomplete = Boolean(word) && idSettled && !idMatch && (idLookup.isError || Boolean(idLookup.data?.partial));
+  const outside = otherDatesLine({
+    failed: checkFailed,
+    checking,
+    lookingUp,
+    lookupIncomplete,
+    olderMatches,
+    needsAsking: widerWanted && !sqlCheckAsked,
+  });
 
   // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
   // so a search opened straight from a link still gets its offer once they arrive).
@@ -455,6 +465,11 @@ function ProjectExplorer({
         </Button>
       ) : null}
       {widen}
+      {lookupIncomplete ? (
+        <Button onClick={() => idLookup.refetch()} size="sm" variant="outline">
+          Try the lookup again
+        </Button>
+      ) : null}
     </EmptyState>
   );
 
