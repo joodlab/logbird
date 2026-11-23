@@ -141,17 +141,19 @@ var options = new LogbirdOptions
 {
     // ...
     MaxQueueSize = 10_000,                        // events kept in memory while Logbird is unreachable
-    QueueFullBehavior = QueueFullBehavior.DropOldest, // when full: drop the oldest queued event (DropNewest keeps the
-                                                      // queued history and drops the incoming event instead)
+    QueueFullBehavior = QueueFullBehavior.DropOldest, // when full: evict the oldest queued event (DropNewest drops
+                                                      // the incoming event instead; see below)
     OnError = error => logger.LogWarning("Audit delivery problem: {Message}", error.Message),
     OnDrop = dropped => outbox.Save(dropped.Id, dropped.JsonText),   // optional: keep it for replay
 };
 ```
 
-- **When the queue is full**, `QueueFullBehavior` decides which event goes: `DropOldest` (the default) keeps the most
-  recent activity, the events closest to an outage's end, at the cost of the oldest queued ones; `DropNewest` keeps
-  what is already queued and drops each new event while the queue stays full. Either way the dropped event is
-  counted and passed to `OnDrop` with its JSON, so you can replay it from your own record.
+- **When the queue is full**, `QueueFullBehavior` decides which event goes. When you track an event: `DropOldest` (the
+  default) evicts the oldest queued event, keeping the most recent activity; `DropNewest` drops the new event, keeping
+  what is already queued. When a failed batch goes back to the front of a queue that filled in the meantime, the
+  excess is evicted the same way: `DropOldest` from the front (the returned batch's oldest events first), `DropNewest`
+  from the back (the newest queued events). Every dropped event is counted; `OnDrop` receives it with its JSON on a
+  best-effort basis (skipped when the callbacks fall far behind), so keep your own record for replay.
 - Network errors, 429 and 5xx are retried with exponential backoff and `Retry-After`, up to `MaxRetries` (5) and
   five minutes per batch. Each request is limited by `RequestTimeout` (30 seconds), even if a custom HTTP handler
   ignores cancellation. If a batch still fails, it goes back to the front of the queue and is tried again later.
@@ -191,8 +193,8 @@ var options = new LogbirdOptions
 - Disposing sends what is queued, waiting at most `ShutdownTimeout` (10 seconds). Events not yet delivered
   afterwards, including a batch whose request has not returned, go to `OnDrop` once each with `DropReason.Shutdown`
   (`MayBeStored` is true for that batch). A late
-  response is then ignored. If that event did reach the server, replaying it from `OnDrop` is still safe, because
-  its id is the same.
+  response is then ignored. If that event did reach the server, replaying it from `OnDrop` is still safe while the
+  server retains it, because its id is the same.
 
 ### What a dropped event means
 
@@ -204,8 +206,8 @@ audit log. A request can reach the server and store the event while its answer i
   started, before anything is known about what reached the server, so it is conservative (it can be true for a request
   that failed before any byte left the process), and it stays true unless an answer settled the event. The server may
   have stored it.
-- **`false`**: no request carrying the event was ever started, or every answer the server gave for it said it was not
-  stored.
+- **`false`**: no request carrying the event was ever started, or every request carrying it was answered "not
+  stored" (a 4xx). One request without such an answer keeps it `true`, whatever later requests are told.
 
 `MayBeStored` follows what happened to the event's requests, not the reason. These are the values each reason can have:
 
@@ -220,20 +222,23 @@ met the same rejection.
 | `Rejected` | The server rejected this event (see `Code` and `Detail`) | `false`, except `true` for `stored_event_unreadable` or `unverified_after_parse_failure` when an earlier request carrying it had an unresolved outcome |
 | `TooLarge` | The event as sent (after `BeforeSend` and redaction) is larger than 256 KB of UTF-8 JSON; or its data measures more than 1 MiB before redaction (one byte per character of text, plus punctuation and parsed numbers' digits), in which case it is refused without being copied, whatever redaction would have removed (a memory guard) | always `false` |
 | `Invalid` | The event could not be prepared, for example `BeforeSend` threw; or its metadata or a change value nests JSON deeper than 1,000 levels as given, before `BeforeSend` and redaction (tested on a 256 KB thread stack; see "Size and depth" under [The contract with your code](#the-contract-with-your-code)) | always `false` |
-| `QueueFull` | Evicted from a full queue | `false` if it was never sent, or every answer said it was not stored; `true` if a request carrying it had an unresolved outcome |
-| `HttpError` | A 4xx other than 429, or a redirect | `false` if every answer said it was not stored; `true` if an earlier request had an unresolved outcome, or the final answer was a redirect |
-| `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if it was never sent, or every answer said it was not stored; `true` if it was in flight without a "not stored" answer, or an earlier request had an unresolved outcome |
+| `QueueFull` | Evicted from a full queue | `false` if no request carrying it was started, or every request carrying it was answered "not stored"; `true` if a request carrying it had an unresolved outcome |
+| `HttpError` | A 4xx other than 429, or a redirect | `false` if every request carrying it was answered "not stored"; `true` if an earlier request had an unresolved outcome, or the final answer was a redirect |
+| `Shutdown` | The client shut down before delivery was confirmed (its `ShutdownTimeout` or the host's budget ran out, or the event was tracked after shutdown began) | `false` if no request carrying it was started, or every request carrying it was answered "not stored"; `true` if it was in flight without a "not stored" answer, or an earlier request had an unresolved outcome |
 | `Unacknowledged` | A success response never acknowledged it | always `true` |
 
-**Resending is safe.** The server deduplicates by event id: the same event sent again (`DroppedEvent.Json`, byte for
-byte, with its id and timestamp) is stored at most once. A resend is still an ordinary delivery that can fail, so it is
+**Resending is safe while the server retains the original.** The server deduplicates by event id: the same event sent
+again (`DroppedEvent.Json`, byte for byte, with its id and timestamp) is stored at most once, until the project's
+retention period deletes it (a resend after that stores it again). A resend is still an ordinary delivery that can fail, so it is
 not confirmed until it is acknowledged.
 
 **If your application must not lose events:**
 
 - Keep your own record of the event (an outbox row, see below) until you have confirmed that the server holds this
-  event: `LogbirdReadClient.GetEventAsync(id)` returns it, and its stored payload (`EventDetail.Payload`) matches your record.
-  The id alone is not enough, because a different event can be stored under the same id. Neither is a `FlushAsync`
+  event: find it by id with `LogbirdReadClient.GetEventAsync(id)`, and check that its stored payload
+  (`EventDetail.Payload`, not null) matches the event as sent, that is your record after `BeforeSend` and redaction
+  (`DroppedEvent.Json` when you have it). The id alone is not enough, because a different event can be stored under the
+  same id, and a read through a masked viewer token or scope returns no payload. Neither is a `FlushAsync`
   that returned `true`: it means every event it covered was settled, and a settled event can be a rejection whose
   `OnDrop` notification was skipped because the notification queue was full.
 - When `MayBeStored` is `true`, resend the same bytes later. A lookup that misses right after the drop proves nothing,
@@ -248,13 +253,14 @@ not confirmed until it is acknowledged.
 - `DroppedEvent.Json` is empty when the event was never serialized: a `TooLarge` event, an event dropped as `Invalid`
   before serialization, or one tracked after shutdown began. Rebuild those from your own record.
 
-The drop counters (`Stats.Dropped`, `Stats.Rejected` and the `logbird.events.dropped` meter by `reason`) count every
-dropped event either way. `MayBeStored` is reported per event, on the `DroppedEvent` passed to `OnDrop`.
+The drop counters count every dropped event either way: `Stats.Dropped` and the `logbird.events.dropped` meter (by
+`reason`) for every reason but `Rejected`, and `Stats.Rejected` and the `logbird.events.rejected` meter for rejections. `MayBeStored` is reported per event, on the `DroppedEvent` passed to `OnDrop`.
 
 The queue lives in memory, so a crash loses events that were not yet sent. If an event must survive a crash, save
 it in your database in the same transaction as the change (an outbox) with its `Id` (`LogbirdClient.NewEventId()`)
-**and** its `OccurredAt`, and track it from there with both set. Sending it twice is then safe; a resend with a new
-timestamp would be a different event and is rejected as `duplicate_id_conflict`.
+**and** its `OccurredAt`, and track it from there with both set. Sending it twice is then safe while the server
+retains the original; a resend with a new timestamp would be a different event and is rejected as
+`duplicate_id_conflict`.
 
 Logbird's own HTTP calls, log messages and callbacks never record events. If your host audits all outgoing HTTP
 or forwards logs to Logbird, there is no feedback loop.

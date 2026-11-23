@@ -154,10 +154,11 @@ Audit logging never takes your application down with it:
 - **`Record` never throws and never waits for the network.** It queues the event in memory and returns. A background
   loop sends batches every second.
 - **Failures are retried** with backoff (network errors, 429, 5xx). Each retried event keeps its exact bytes and id, so
-  the server never stores an event twice.
+  the server stores it once (it deduplicates by id while it retains the event).
 - **The queue is bounded** (`MaxQueueSize`, 10,000 events by default, counting the events waiting to be sent; the batch
   being sent comes on top, and `Stats.QueueLength` counts both). If Logbird stays unreachable long enough to fill
-  it, the oldest events are dropped and each drop is reported.
+  it, events are dropped by `QueueFullBehavior`: by default (`DropOldest`) the oldest queued ones. Each drop is
+  counted, and reported to `OnDrop` on a best-effort basis (below).
 - **Every event the running client gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`,
   `Rejected`, `Shutdown`, …): rejections by the server on the `logbird.events.rejected` counter, everything else on
   `logbird.events.dropped`. These are process totals: they keep every client's counts after it is disposed (only the
@@ -187,19 +188,20 @@ builder.Services.AddLogbird(
 
 The queue lives in memory, so a crash loses what is queued. For events that must survive a crash, write them to your
 own database in the same transaction as the change (an outbox), with their id, their `OccurredAt` and their content,
-and send them from there exactly as stored on every attempt. A resend is then always an exact retry; an event rebuilt
-with a new timestamp would conflict with the copy the server already has. If you use a `BeforeSend` hook, make sure it
-changes an outbox event the same way on every attempt (or leaves it alone) and keeps its id, so each resend carries
-the same id and content and you can confirm it by the id you stored.
+and send them from there exactly as stored on every attempt. A resend is then an exact retry while the server retains
+the original; an event rebuilt with a new timestamp would conflict with the copy the server already has. If you use a
+`BeforeSend` hook, make sure it changes an outbox event the same way on every attempt (or leaves it alone) and keeps its
+id, so each resend carries the same id and content.
 
 The example logs the reason and code, not the event's id or action: those can name a customer or a record, so log
 them only where your policy allows (keep them in your outbox instead).
 
 `Track` only queues an event, and a successful `FlushAsync` means each event was stored *or* given up on, so neither
-proves an event was stored. Keep each outbox row until you have confirmed its event: read it back with
-`LogbirdReadClient.GetEventAsync(id)` and compare the stored payload (`EventDetail.Payload`) with the row. The id alone
-does not confirm it, because after a `duplicate_id_conflict` a different event owns that id; and a read through a masked
-viewer token or scope cannot confirm it either, because it returns no payload. Resend the row, exactly as stored,
+proves an event was stored. Keep each outbox row until you have confirmed its event: find it by id with
+`LogbirdReadClient.GetEventAsync(id)` and check that its stored payload (`EventDetail.Payload`, not null) matches the
+event as sent, that is the row after your `BeforeSend` and redaction. The id alone does not confirm it, because after a
+`duplicate_id_conflict` a different event owns that id; and a read through a masked viewer token or scope cannot confirm
+it either, because it returns no payload. Resend the row, exactly as stored,
 until it is confirmed. Resending an event the server
 still holds is always safe (an exact retry), but do not resend rows older than the project's retention period: once
 retention has deleted an event, a resend would store it again. Decide yourself what happens to a row that is never

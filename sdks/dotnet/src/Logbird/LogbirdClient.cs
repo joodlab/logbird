@@ -40,7 +40,7 @@ public interface ILogbirdClient
 /// <para><see cref="Track"/> serializes the event on the calling thread and queues it in memory. A single background
 /// loop sends batches of up to <see cref="LogbirdOptions.BatchSize"/> events, at least every
 /// <see cref="LogbirdOptions.FlushInterval"/>. Network errors, 429 and 5xx are retried with backoff, resending the
-/// identical bytes so the server never stores an event twice.</para>
+/// identical bytes so the server stores each event once (it deduplicates by id while it retains the event).</para>
 /// <para>Nothing Logbird does can throw into your code: problems go to <see cref="LogbirdOptions.OnError"/>,
 /// <see cref="LogbirdOptions.OnDrop"/>, the logger and the <c>Logbird</c> meter.</para>
 /// <para>Threading contract: <c>Track</c> runs your <see cref="LogbirdOptions.BeforeSend"/> hook and redaction patterns

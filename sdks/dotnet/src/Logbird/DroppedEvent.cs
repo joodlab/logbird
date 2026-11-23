@@ -191,10 +191,13 @@ public sealed class DroppedEvent
     /// what reached the server, so it is conservative: it can be true for a request that failed before any byte left the
     /// process. It stays true when no answer settled the event: a request ended without an answer, or with a 5xx, or with
     /// a success that did not acknowledge it, or it was still in flight at shutdown. False when no request carrying the
-    /// event was ever started, or every answer for it said it was not stored. <see cref="DropReason.TooLarge"/> and <see cref="DropReason.Invalid"/> are
-    /// always false; <see cref="DropReason.Rejected"/> is false too, except for the codes <c>stored_event_unreadable</c>
-    /// and <c>unverified_after_parse_failure</c>, which keep an earlier unresolved outcome. A "dropped" event is not necessarily absent: when this is true,
-    /// resend <see cref="Json"/> (the server deduplicates by id) or look the id up before treating the event as lost.
+    /// event was ever started, or every request carrying it was answered "not stored" (a 4xx): once one request carrying
+    /// it had no such answer, a later "not stored" cannot clear it. <see cref="DropReason.TooLarge"/> and
+    /// <see cref="DropReason.Invalid"/> are always false; <see cref="DropReason.Rejected"/> is false too, a rejection of the
+    /// event's own content settling it, except for the codes <c>stored_event_unreadable</c> and
+    /// <c>unverified_after_parse_failure</c>, which keep an earlier unresolved outcome. A "dropped" event is not necessarily
+    /// absent: when this is true, resend <see cref="Json"/> (the server deduplicates by id while it retains the original),
+    /// or find it by id and compare its stored payload with the event as sent before treating it as lost.
     /// </summary>
     public bool MayBeStored { get; }
 
