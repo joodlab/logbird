@@ -48,7 +48,9 @@ public sealed record AuditCarrier
     /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
     /// <exception cref="JsonException">
     /// The text is not valid JSON or not a carrier: <c>null</c>, not an object, a member a carrier does not have, or an
-    /// actor, impersonator or tenant without its id (or an actor without its type).
+    /// actor, impersonator or tenant without its id (or an actor without its type). The exception is the SDK's own, with a
+    /// fixed message, no position and no inner exception: a carrier arrives from outside, and the serializer's messages
+    /// quote the input (an unknown member's name, for one).
     /// </exception>
     public static AuditCarrier FromJson(string json)
     {
@@ -58,10 +60,10 @@ public sealed record AuditCarrier
         {
             carrier = JsonSerializer.Deserialize(json, AuditCarrierJsonContext.Default.AuditCarrier);
         }
-        catch (ArgumentException e)
+        catch (Exception e) when (e is JsonException or ArgumentException or NotSupportedException or InvalidOperationException)
         {
-            // The text cannot be transcoded to UTF-8 (a lone surrogate): it is not JSON.
-            throw new JsonException("The text is not valid JSON.", e);
+            // ArgumentException: the text cannot be transcoded to UTF-8 (a lone surrogate), so it is not JSON either.
+            throw NotACarrier();
         }
 
         return Checked(carrier);
@@ -71,7 +73,22 @@ public sealed record AuditCarrier
     /// <param name="utf8Json">The UTF-8 JSON bytes.</param>
     /// <exception cref="JsonException">The bytes are not valid JSON or not a carrier, as for <see cref="FromJson(string)"/>.</exception>
     public static AuditCarrier FromJson(ReadOnlySpan<byte> utf8Json)
-        => Checked(JsonSerializer.Deserialize(utf8Json, AuditCarrierJsonContext.Default.AuditCarrier));
+    {
+        AuditCarrier? carrier;
+        try
+        {
+            carrier = JsonSerializer.Deserialize(utf8Json, AuditCarrierJsonContext.Default.AuditCarrier);
+        }
+        catch (Exception e) when (e is JsonException or ArgumentException or NotSupportedException or InvalidOperationException)
+        {
+            throw NotACarrier();
+        }
+
+        return Checked(carrier);
+    }
+
+    /// <summary>The SDK's own refusal: a fixed message that never quotes the input, and no inner exception.</summary>
+    private static JsonException NotACarrier() => new("The text is not valid JSON or not a carrier: it is not an object with only a carrier's members.");
 
     /// <summary>A carrier read from JSON, refused when it is null or names a party without its identity.</summary>
     private static AuditCarrier Checked(AuditCarrier? carrier)

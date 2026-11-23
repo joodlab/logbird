@@ -57,7 +57,8 @@ public sealed class LogbirdReadOptions
 /// </para>
 /// <para>
 /// Each HTTP request ends within <see cref="LogbirdReadOptions.Timeout"/> (<c>unreachable</c> past it; for an export, the
-/// limit covers only the wait for its headers, not the download), and every call ends when your token is cancelled
+/// limit covers only the wait for its headers, not the download; at most 4 requests abandoned at the limit are kept running,
+/// and while 4 are, a new call fails at once with <c>unreachable</c>), and every call ends when your token is cancelled
 /// (<see cref="OperationCanceledException"/>). An export's download ends on cancellation when the response body fails or
 /// ends a pending read once disposed, as <c>HttpClient</c>'s own streams do; a body from a custom handler that does
 /// neither, or a write to your destination stream that ignores the token, holds the export until that read or write
@@ -83,6 +84,11 @@ public sealed class LogbirdReadClient : IDisposable
     private Lazy<Task<ServerVersion?>>? _serverVersion;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
+
+    /// <summary>Reads abandoned at their timeout whose attempt has not finished yet; at the limit, new reads fail at once.</summary>
+    internal const int MaxAbandonedReads = 4;
+
+    private int _abandonedReads;
     private readonly int? _maxPages;
 
     /// <summary>The largest response read (200 events with their attributes fit easily); a larger one fails the read.</summary>
@@ -122,9 +128,15 @@ public sealed class LogbirdReadClient : IDisposable
         _authorization = new AuthenticationHeaderValue("Bearer", options.ReadKey);
         _timeout = options.Timeout;
         _ownsHttp = httpClient is null;
-        // An owned client never follows redirects: a redirect could carry the read key's results to another origin.
-        _http = httpClient ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        _http = httpClient ?? new HttpClient(CreateHandler()) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
     }
+
+    /// <summary>
+    /// The handler of a client this SDK creates. It never follows redirects (a redirect could carry the read key's results
+    /// to another origin) and never uses a proxy (a system or environment proxy would receive the read key, in clear text
+    /// for an HTTP endpoint). To read through a proxy, pass your own <see cref="HttpClient"/>.
+    /// </summary>
+    internal static HttpMessageHandler CreateHandler() => new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false };
 
     /// <summary>Searches stored events and returns one page.</summary>
     /// <param name="search">The search; <see langword="null"/> returns the newest events in the default range.</param>
@@ -241,7 +253,7 @@ public sealed class LogbirdReadClient : IDisposable
         {
             (response, body) = await SendBoundedAsync(request, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException or System.IO.InvalidDataException or TimeoutException or TooLargeResponseException)
+        catch (Exception e) when (IsTransportFailure(e))
         {
             throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached to read its version: " + e.GetType().Name);
         }
@@ -474,7 +486,7 @@ public sealed class LogbirdReadClient : IDisposable
         {
             throw;
         }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException or System.IO.InvalidDataException or TimeoutException)
+        catch (Exception e) when (IsTransportFailure(e))
         {
             throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached: " + e.GetType().Name);
         }
@@ -593,11 +605,18 @@ public sealed class LogbirdReadClient : IDisposable
     }
 
     /// <summary>
-    /// A failure reading the download from Logbird: the transport, a body stream that was disposed or timed out, or a
-    /// response decoder that met corrupt data.
+    /// A failure reading the download from Logbird: the transport, a body stream that was disposed or timed out, a
+    /// response decoder that met corrupt data, or anything else a handler or body stream throws.
     /// </summary>
-    private static bool IsDownloadFailure(Exception e)
-        => e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException or System.IO.InvalidDataException or TimeoutException;
+    private static bool IsDownloadFailure(Exception e) => IsTransportFailure(e);
+
+    /// <summary>
+    /// Whatever the transport throws, including an unexpected exception from a custom handler or a response body (an
+    /// <see cref="InvalidOperationException"/>, for one): reported as <c>unreachable</c>, naming only its type, because a
+    /// handler's message can carry request or response data. Not the SDK's own read exceptions, and not a failure of the
+    /// caller's export destination, which is reported unchanged; a cancellation by the caller is handled before this.
+    /// </summary>
+    private static bool IsTransportFailure(Exception e) => e is not (LogbirdApiException or DestinationWriteException);
 
     private static void DisposeQuietly(IDisposable disposable)
     {
@@ -765,6 +784,14 @@ public sealed class LogbirdReadClient : IDisposable
     {
         // A caller that already cancelled sends nothing (a viewer token must not be minted for a caller that never gets it).
         cancellationToken.ThrowIfCancellationRequested();
+
+        // Like the ingest sender: a handler that never completes holds one slot per abandoned read, never more than the
+        // limit, and while they are all held a read fails at once instead of adding another.
+        if (Volatile.Read(ref _abandonedReads) >= MaxAbandonedReads)
+        {
+            throw new TimeoutException("Logbird has not answered earlier reads that timed out; no new read was sent.");
+        }
+
         var transport = new CancellationTokenSource();
 
         // On the thread pool: a handler that blocks before returning its task cannot hold the limit below.
@@ -785,7 +812,8 @@ public sealed class LogbirdReadClient : IDisposable
         }
 
         // Abandoned: cancel the transport apart from this call (a callback registered on it may block or throw), and
-        // dispose whatever the attempt still produces.
+        // dispose whatever the attempt still produces. The attempt holds a slot until it and its cancellation are done.
+        Interlocked.Increment(ref _abandonedReads);
         var cancelled = Task.Run(
             () =>
             {
@@ -819,6 +847,7 @@ public sealed class LogbirdReadClient : IDisposable
             {
                 _ = all.Exception;
                 transport.Dispose();
+                Interlocked.Decrement(ref _abandonedReads);
             },
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
@@ -878,7 +907,7 @@ public sealed class LogbirdReadClient : IDisposable
         {
             throw new LogbirdApiException(null, "response_too_large", "The Logbird response was larger than the read client accepts.");
         }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException or TimeoutException)
+        catch (Exception e) when (IsTransportFailure(e))
         {
             throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached: " + e.GetType().Name);
         }

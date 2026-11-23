@@ -679,18 +679,20 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     internal static bool IsInsideDelivery => InsideLogbird.Value;
 
-    private static HttpClient CreateHttpClient()
-    {
-#if NET8_0_OR_GREATER
-        var handler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false };
-#else
-        var handler = new HttpClientHandler { AllowAutoRedirect = false };
-#endif
+    private static HttpClient CreateHttpClient() => new(CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
 
-        // Never follow redirects: a redirect would forward the audit body to another origin. A 3xx is reported as a
-        // permanent HTTP error instead.
-        return new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-    }
+    /// <summary>
+    /// The handler of a client this SDK creates. It never follows redirects (a redirect would forward the audit body to
+    /// another origin; a 3xx is reported as a permanent HTTP error instead) and never uses a proxy (a system or environment
+    /// proxy would receive the ingest key, in clear text for an HTTP endpoint). To send through a proxy, pass your own
+    /// <see cref="HttpClient"/>.
+    /// </summary>
+    internal static HttpMessageHandler CreateHandler()
+#if NET8_0_OR_GREATER
+        => new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false, UseProxy = false };
+#else
+        => new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false };
+#endif
 
     private static string ReadVersion()
     {

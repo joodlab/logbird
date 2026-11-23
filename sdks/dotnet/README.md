@@ -157,8 +157,13 @@ var options = new LogbirdOptions
   front of Logbird answers 2xx without acknowledging events, they are retried with the same bytes and, once the retry
   budget is spent, dropped with `DropReason.Unacknowledged`; they are never counted as delivered.
 - A 4xx other than 429 (for example a revoked key) drops the batch (`DropReason.HttpError`) and reports it. So does
-  a redirect: the client never follows one, because that would send audit data to another address. If you pass your
-  own `HttpClient`, configure its handler with `AllowAutoRedirect = false` as well.
+  a redirect: the client never follows one, because that would send audit data to another address.
+- **Proxies and your own transport.** The HTTP clients the SDK creates (for `LogbirdClient`, `LogbirdReadClient` and the
+  ASP.NET Core package's named client) never use a proxy, not even the system or environment one: a proxy would receive
+  the ingest or read key, in clear text for an HTTP endpoint. To go through a proxy, pass your own `HttpClient` (or, with
+  ASP.NET Core, configure the `Logbird` named client's primary handler). A transport you supply is yours to secure:
+  disable automatic redirects (`AllowAutoRedirect = false`), use only a proxy you trust with the key, and keep request
+  and header logging off, since the `Authorization` header carries the key.
 - `OnDrop`, `OnError` and log messages run in order on a background thread, never on the thread that called `Track`
   and never on the shutdown path, so a slow callback cannot slow your requests. If the callbacks fall more than
   `MaxQueueSize` (at least 1,000) notifications behind, further notifications are skipped and counted on the
@@ -337,7 +342,11 @@ EventDetail? detail = await reader.GetEventAsync(eventId);   // null when it doe
 
 Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
 cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. For an export, the limit covers only
-the wait for its headers, not the download. The limit is per request, not per
+the wait for its headers, not the download. A request abandoned at its limit keeps running until the handler returns; at
+most 4 such requests are kept, and while 4 are still running a new call fails at once with `unreachable` instead of
+adding another. Any other failure of the transport or a response body, including an unexpected exception from a custom
+handler, is reported as `unreachable` with only the exception's type, never its message; a failure of your own export
+destination reaches you unchanged. The limit is per request, not per
 call: a first call that also reads the server's version, or a `SearchAllAsync` iteration, makes several requests, each
 with its own limit. Cancelling your token throws `OperationCanceledException`, and a call whose token is already
 cancelled sends nothing. A search, detail or facet answer is checked against the server's contract before it is read:
