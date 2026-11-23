@@ -73,7 +73,15 @@ function lintTokens(q: string, isField: (name: string) => boolean): QueryFix[] {
     const next = solid[i + 1];
 
     // Lucene `_exists_:field` / `NOT _exists_:field` → `field:*` / `-field:*`.
-    if (t.kind === 'field' && t.field === '_exists_' && t.valueKind === 'plain' && t.value && /^[A-Za-z_][\w.$@-]*$/.test(t.value)) {
+    // (Not for a field literally named `_exists_`: `_exists_:*` would ask about another field.)
+    if (
+      t.kind === 'field' &&
+      t.field === '_exists_' &&
+      t.valueKind === 'plain' &&
+      t.value &&
+      t.value !== '_exists_' &&
+      /^[A-Za-z_][\w.$@-]*$/.test(t.value)
+    ) {
       fixes.push({
         start: t.start,
         end: t.end,

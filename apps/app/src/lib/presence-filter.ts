@@ -48,7 +48,8 @@ function queryAdapter(field: string): Adapter {
   });
   return {
     terms: (q) => own(q).map(term),
-    remove: (q, test) => removeTokens(q, (t) => isOwn(t) && test(term(t))),
+    // A term without a polarity of its own (inside `NOT (a b)`) is never one of the group's states.
+    remove: (q, test) => removeTokens(q, (t) => isOwn(t) && !t.unpolarized && test(term(t))),
     add: (q, t) => andQuery(q, t.value === null ? presenceTerm(field, t.negated) : formatTerm(field, t.value, t.negated)),
   };
 }

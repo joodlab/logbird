@@ -40,6 +40,11 @@ export interface QueryToken {
   op?: string;
   /** End of the field name as written, after any quotes (`field` is the decoded name) and before the `:`. */
   keyEnd?: number;
+  /**
+   * Inside a negated group that ANDs terms (`NOT (a b)`): the term has no polarity of its own in the whole query, so
+   * `negated` says nothing there. Removing every term of a field still takes it; asking for one polarity never does.
+   */
+  unpolarized?: boolean;
 }
 
 const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*)\s*:/;
@@ -100,9 +105,17 @@ function scanPlain(input: string, i: number): number {
 }
 
 /** End of a bare group member starting at `i` (stops at whitespace or a bracket), never past `limit`. */
-function scanPlainMember(input: string, i: number, limit: number): number {
+function scanPlainMember(input: string, i: number, limit: number, record = false): number {
+  if (input[i] === '"' || (input[i] === '/' && !record)) return Math.min(limit, scanDelimited(input, i, input[i] as string));
+  if (record) return Math.min(limit, scanBareRecordValue(input, i));
   let j = i;
-  while (j < limit && !/[\s()]/.test(input[j] ?? '')) j += 1;
+  while (j < limit && !/[\s():[\]{}<>]/.test(input[j] ?? '')) j += 1;
+  // As the server does, an adjacent `:` joins the value right after it (`tag:"two words"` is one member).
+  while (j < limit && input[j] === ':') {
+    j += 1;
+    if (input[j] === '"') j = Math.min(limit, scanDelimited(input, j, '"'));
+    else while (j < limit && !/[\s():[\]{}<>"/]/.test(input[j] ?? '')) j += 1;
+  }
   return j;
 }
 
@@ -332,6 +345,14 @@ function fieldToken(q: string, node: Extract<QueryAtom, { kind: 'field' }>, star
   };
 }
 
+/**
+ * Whether negating this group negates each of its terms on its own: true for one term or an OR of single terms
+ * (`NOT (a OR b)` is `NOT a AND NOT b`), false once a branch ANDs two terms (`NOT (a b)` is `NOT a OR NOT b`).
+ */
+function singleTerm(expression: QueryExpression): boolean {
+  return expression.every((branch) => branch.length === 1);
+}
+
 function unwrapNot(atom: QueryAtom) {
   let node = atom;
   let negated = false;
@@ -345,15 +366,16 @@ function unwrapNot(atom: QueryAtom) {
 /** Drop matched operands with their unary operators, and omit Boolean branches emptied by the edit. */
 export function removeTokens(q: string, test: (t: QueryToken) => boolean): string {
   let removed = false;
-  // `outer`: whether an enclosing group is negated, so a term is tested with the polarity it has in the whole query.
-  function rewriteAtom(atom: QueryAtom, outer: boolean): string {
+  // `outer`: whether an enclosing group is negated, so a term is tested with the polarity it has in the whole query;
+  // `unpolarized`: inside a negated group that ANDs terms, where no term has a polarity of its own.
+  function rewriteAtom(atom: QueryAtom, outer: boolean, unpolarized: boolean): string {
     const { node, negated } = unwrapNot(atom);
     const prefix = q.slice(atom.start, node.start);
     if (node.kind === 'group') {
-      const inner = rewrite(node.expression, outer !== negated);
+      const inner = rewrite(node.expression, outer !== negated, unpolarized || (negated && !singleTerm(node.expression)));
       return inner ? `${prefix}(${inner})` : '';
     }
-    if (node.kind === 'field' && test(fieldToken(q, node, atom.start, outer !== negated))) {
+    if (node.kind === 'field' && test({ ...fieldToken(q, node, atom.start, outer !== negated), ...(unpolarized ? { unpolarized } : {}) })) {
       removed = true;
       return '';
     }
@@ -363,13 +385,13 @@ export function removeTokens(q: string, test: (t: QueryToken) => boolean): strin
     return q.slice(atom.start, atom.end);
   }
 
-  function rewrite(expression: QueryExpression, outer: boolean): string {
+  function rewrite(expression: QueryExpression, outer: boolean, unpolarized: boolean): string {
     return expression
       .map((branch) => {
         let text = '';
         let previousEnd: number | undefined;
         for (const { atom, explicitAnd } of branch) {
-          const term = rewriteAtom(atom, outer);
+          const term = rewriteAtom(atom, outer, unpolarized);
           if (!term) continue;
           if (text) {
             // An inserted separator must also avoid forming a foreign-dialect "key = value".
@@ -386,7 +408,7 @@ export function removeTokens(q: string, test: (t: QueryToken) => boolean): strin
   }
 
   const expression = editableExpression(q);
-  const edited = expression && rewrite(expression, false);
+  const edited = expression && rewrite(expression, false, false);
   return removed && edited !== null ? edited : q.trim();
 }
 
@@ -398,13 +420,15 @@ export function fieldTermsWithPolarity(q: string): { token: QueryToken; negated:
 
 export function fieldTerms(q: string, topLevelOnly = false): QueryToken[] {
   const fields: QueryToken[] = [];
-  // A negated group negates every term inside it: `NOT (record:page:7)` excludes that record, it never names it.
+  // A negated group of one term, or of terms ORed, negates each: `NOT (record:page:7)` excludes that record, it never
+  // names it. A negated group that ANDs terms (`NOT (impersonator:* outcome:failure)`) says nothing about any one of them
+  // alone, so its terms are not reported: no chip, facet or control may read them as the whole query's.
   function visit(expression: QueryExpression, outer: boolean) {
     for (const branch of expression) {
       for (const { atom } of branch) {
         const { node, negated } = unwrapNot(atom);
         if (node.kind === 'field') fields.push(fieldToken(q, node, atom.start, outer !== negated));
-        else if (node.kind === 'group' && !topLevelOnly) visit(node.expression, outer !== negated);
+        else if (node.kind === 'group' && !topLevelOnly && (!negated || singleTerm(node.expression))) visit(node.expression, outer !== negated);
       }
     }
   }
@@ -431,7 +455,7 @@ export function removeTerm(q: string, field: string, value?: string, negated?: b
       t.kind === 'field' &&
       canonicalField(t.field ?? '') === f &&
       (value === undefined || (isSimple(t) && !t.wildcard && t.value === value)) &&
-      (negated === undefined || t.negated === negated),
+      (negated === undefined || (!t.unpolarized && t.negated === negated)),
   );
 }
 
@@ -731,7 +755,7 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
           i += 1;
           continue;
         }
-        const end = q[i] === '"' ? Math.min(t.end, scanDelimited(q, i, '"')) : scanPlainMember(q, i, t.end);
+        const end = scanPlainMember(q, i, t.end, field === 'record');
         if (caret >= i && caret <= end) {
           s = i;
           e = end;

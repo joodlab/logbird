@@ -5,7 +5,9 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/api/client', () => ({ api: {} }));
 
 import { editorQuery } from '@/components/query-input/query-input';
+import { keyItem } from '@/components/query-input/use-completions';
 import { activityChip, activityFreeText } from './activity-search';
+import { whoFilter } from './impersonation';
 import { presenceTerms } from './presence-filter';
 import { fieldTerms, formatTerm, highlightQuery, queryCompletionAt, removeTerm, tokenize } from './query-language';
 import { lintQuery } from './query-lint';
@@ -21,7 +23,9 @@ describe('a negated group negates every term inside it (item 11)', () => {
       ['outcome', false],
     ]);
     expect(fieldTerms('NOT -(actor:a)').map((t) => t.negated)).toEqual([false]);
-    expect(fieldTerms('NOT (actor:a -tenant:b)').map((t) => t.negated)).toEqual([true, false]);
+    // NOT (a AND b) is NOT a OR NOT b: neither term has a polarity of its own, so neither is reported.
+    expect(fieldTerms('NOT (actor:a -tenant:b)')).toEqual([]);
+    expect(fieldTerms('NOT (actor:a OR tenant:b)').map((t) => t.negated)).toEqual([true, true]);
   });
 
   it('never names an excluded record, and reads NOT (impersonator:*) as hiding support activity', () => {
@@ -89,5 +93,42 @@ describe('a quoted key is kept as written by every reader (item 12)', () => {
     ]);
     const colonInside = '"attr.a:b":x';
     expect(queryCompletionAt(colonInside, colonInside.length)).toMatchObject({ kind: 'value', field: 'attr.a:b', from: colonInside.indexOf('x') });
+  });
+});
+
+describe('#283 round 1: every reader agrees with the server', () => {
+  it('never rewrites a field literally named _exists_ into a question about another field', () => {
+    expect(lintQuery('"_exists_":_exists_', () => true)).toEqual([]);
+    expect(lintQuery('_exists_:_exists_', () => true)).toEqual([]);
+    expect(lintQuery('_exists_:tenant', () => true)).toEqual([expect.objectContaining({ replacement: 'tenant:*' })]);
+  });
+
+  it('takes no chip from a value the server joins with a colon', () => {
+    const q = '"category":"auth":other';
+    expect(activityChip(q)).toBeUndefined();
+    expect(activityFreeText(q)).toBe(q);
+    expect(activityChip('revoked AND "category":auth')).toBe('auth');
+  });
+
+  it('reads no support split from a term inside NOT (a AND b)', () => {
+    expect(whoFilter('NOT (impersonator:* outcome:failure)')).toBe('all');
+    expect(whoFilter('NOT (impersonator:*)')).toBe('self');
+    expect(whoFilter('NOT (impersonator:* OR impersonator:qa-agent-1)')).toBe('self');
+    // Removing every outcome term still reaches inside such a group; asking for one polarity never does.
+    expect(removeTerm('NOT (outcome:failure action:x)', 'outcome', 'failure', true)).toBe('NOT (outcome:failure action:x)');
+    expect(removeTerm('NOT (outcome:failure action:x)', 'outcome')).toBe('NOT (action:x)');
+  });
+
+  it('completes a whole group member as the server lexes it', () => {
+    const regex = 'action:(/booking updated/ OR cancel)';
+    expect(queryCompletionAt(regex, regex.indexOf('updated') + 2)).toMatchObject({ from: regex.indexOf('/'), to: regex.indexOf(' OR') });
+    const joined = 'action:(tag:"two words" OR ok)';
+    expect(queryCompletionAt(joined, joined.indexOf('words') + 2)).toMatchObject({ from: joined.indexOf('tag'), to: joined.indexOf(' OR') });
+  });
+
+  it('quotes a discovered attribute key that is not a plain name when completing it', () => {
+    const spec = { id: 'k', kind: 'attr', badge: 'attr', group: 'Attributes' } as const;
+    expect(keyItem('ticket status', spec, { from: 0, to: 0 }).insert).toBe('"ticket status":');
+    expect(keyItem('plan', spec, { from: 0, to: 0 }).insert).toBe('plan:');
   });
 });
