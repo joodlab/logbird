@@ -200,3 +200,32 @@ describe('#283 round 3', () => {
     expect(whoFilter('-impersonator:* outcome:failure')).toBe('self');
   });
 });
+
+describe('#283 verification', () => {
+  it('reads a quote inside a bare value as the server does, so Enter offers nothing that rewrites it', () => {
+    const q = 'action:ab"cd';
+    expect(queryCompletionAt(q, q.length)).toMatchObject({ kind: 'value', field: 'action', prefix: 'ab"cd', from: 7, to: q.length });
+  });
+
+  it("completes inside a quoted value's spaces as that value, never as a new field", () => {
+    const q = 'action:book:"two tenant"';
+    expect(queryCompletionAt(q, q.indexOf('tenant') + 3)).toMatchObject({ kind: 'value', field: 'action', from: 7, to: q.length });
+    const after = 'action:(ab"cd OR next) attempt:>2';
+    expect(queryCompletionAt(after, after.length)).toMatchObject({ kind: 'value', field: 'attempt', op: '>', from: after.length - 1 });
+  });
+
+  it('reads a who-split only from what every OR branch restricts, whatever the brackets', () => {
+    expect(whoFilter('impersonator:amy OR impersonator:bea')).toBe('support');
+    expect(whoFilter('(NOT (impersonator:*) OR outcome:failure)')).toBe('all');
+    expect(whoFilter('((-impersonator:* outcome:failure))')).toBe('self');
+    expect(whoFilter('-impersonator:* OR (NOT impersonator:* action:x)')).toBe('self');
+    expect(whoFilter('NOT (impersonator:* OR impersonator:qa-agent-1)')).toBe('self');
+    expect(whoFilter('(impersonator:* OR outcome:failure) action:x')).toBe('all');
+    // Redundant brackets, the _exists_ spelling of presence, and a regex that also matches self activity.
+    expect(whoFilter('(impersonator:amy OR impersonator:bea)')).toBe('support');
+    expect(whoFilter('NOT _exists_:impersonator')).toBe('self');
+    expect(whoFilter('_exists_:impersonator')).toBe('support');
+    expect(whoFilter('impersonator:/.*/')).toBe('all');
+    expect(whoFilter('impersonator:(amy OR bea)')).toBe('support');
+  });
+});
