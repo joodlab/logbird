@@ -219,6 +219,15 @@ public class Step4ApiShapeTests
         Assert.Equal("205022e3428b7c8276cf247b36e4e512db5651e5cb3472c253d9ee893a8ac750", DroppedEvent.Fingerprint(((char)0xD800).ToString()));
         Assert.Equal("15cc44da5e294721a0fc16c8fb952382d4dc51dbaa28950d9903acfbac0ccee5", DroppedEvent.Fingerprint("\uFFFD"));
         Assert.Throws<ArgumentNullException>(() => DroppedEvent.Fingerprint(null!));
+
+        // Longer than the hashing chunk (2,048 code units), with a pair across no boundary in particular.
+        var repeated = new System.Text.StringBuilder();
+        for (var i = 0; i < 5000; i++)
+        {
+            repeated.Append("ab");
+        }
+
+        Assert.Equal("88c347e42f858392f7243d095a8e04dda43e0d830925399400602aa382cbb61a", DroppedEvent.Fingerprint(repeated.Append("😀").ToString()));
     }
 
     [Fact]

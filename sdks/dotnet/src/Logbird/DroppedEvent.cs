@@ -140,19 +140,24 @@ public sealed class DroppedEvent
     public static string Fingerprint(string id)
     {
         Internal.Guard.NotNull(id, nameof(id));
-        var bytes = new byte[id.Length * 2];
-        for (var i = 0; i < id.Length; i++)
+
+        // Hashed in fixed-size chunks, so fingerprinting an oversized id never copies it whole.
+        using var sha = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        var chunk = new byte[4096];
+        var filled = 0;
+        foreach (var c in id)
         {
-            bytes[2 * i] = (byte)id[i];
-            bytes[(2 * i) + 1] = (byte)(id[i] >> 8);
+            chunk[filled++] = (byte)c;
+            chunk[filled++] = (byte)(c >> 8);
+            if (filled == chunk.Length)
+            {
+                sha.AppendData(chunk, 0, filled);
+                filled = 0;
+            }
         }
 
-#if NET8_0_OR_GREATER
-        var hash = System.Security.Cryptography.SHA256.HashData(bytes);
-#else
-        using var sha = System.Security.Cryptography.SHA256.Create();
-        var hash = sha.ComputeHash(bytes);
-#endif
+        sha.AppendData(chunk, 0, filled);
+        var hash = sha.GetHashAndReset();
         var text = new StringBuilder(hash.Length * 2);
         foreach (var b in hash)
         {
