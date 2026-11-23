@@ -7,8 +7,12 @@ import { ClipFrame, ScreenshotFrame } from '../components/marketing/frame';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { roadmap } from '../content/roadmap';
+import { shared } from '../content/shared';
 import { ACCESS_CTA } from '../lib/cloud';
 import { pageHead } from '../lib/seo';
+
+/** A console capture opens full size on tap, so a phone reader can zoom; the link is named after the frame label. */
+const zoom = (label: string) => `${shared.openFullSize}: ${label}`;
 
 export const Route = createFileRoute('/product')({ head: () => pageHead('/product'), component: ProductPage });
 
@@ -70,6 +74,8 @@ function ProductPage() {
             caption="The overview: events by outcome, the most frequent actions, and a setup checklist until your integration is complete."
             id="overview"
             label="Overview"
+            priority
+            zoomLabel={zoom('Overview')}
           />
           <nav aria-label="On this page" className="flex flex-wrap gap-2">
             {toc.map(([id, label]) => (
@@ -122,6 +128,7 @@ function ProductPage() {
               caption="Value suggestions with counts, and the operators that fit the field."
               id="query-suggestions"
               label="Search"
+              zoomLabel={zoom('Search')}
               sizes={sideSizes}
             />
           </div>
@@ -144,7 +151,13 @@ function ProductPage() {
               of the statement.
             </p>
           </div>
-          <ScreenshotFrame caption="A subquery, rejected inline before anything runs." id="sql-rejected" label="SQL mode" sizes={sideSizes} />
+          <ScreenshotFrame
+            caption="A subquery, rejected inline before anything runs."
+            id="sql-rejected"
+            label="SQL mode"
+            zoomLabel={zoom('SQL mode')}
+            sizes={sideSizes}
+          />
         </div>
         <ol className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[
@@ -189,9 +202,10 @@ function ProductPage() {
         title="A page for each actor, tenant, worker and record."
         visual={
           <ScreenshotFrame
-            caption="A tenant's page: activity, top actions, outcomes, related entities and its timeline."
+            caption="A tenant's page: event counts, what support did while signed in as the customer, and its history with a chart and every event."
             id="tenant"
             label="Tenant"
+            zoomLabel={zoom('Tenant')}
             sizes={sideSizes}
           />
         }
@@ -211,6 +225,7 @@ function ProductPage() {
             caption="An operation tree: a scheduler request, the jobs it started, failed attempts and the retries that worked."
             id="operation"
             label="Operation"
+            zoomLabel={zoom('Operation')}
             sizes={sideSizes}
           />
         }
@@ -235,6 +250,7 @@ function ProductPage() {
             caption="An event in detail: actor and executor, tenant, targets, the status change and the causation chain."
             id="event-sheet"
             label="Event detail"
+            zoomLabel={zoom('Event detail')}
             sizes={sideSizes}
           />
         }
@@ -287,6 +303,7 @@ function ProductPage() {
             caption="The setup page checks each part of the integration against the events it has received."
             id="setup"
             label="Setup"
+            zoomLabel={zoom('Setup')}
             sizes={sideSizes}
           />
         }
@@ -304,9 +321,10 @@ function ProductPage() {
         title="Keep events as long as you decide, then delete them."
         visual={
           <ScreenshotFrame
-            caption="Lowering retention: the preview shows what will be deleted, and you confirm by typing the project's slug."
+            caption="A project's retention settings: the current window, the policies you can choose, and when the purge last ran."
             id="retention"
             label="Retention"
+            zoomLabel={zoom('Retention')}
             sizes={sideSizes}
           />
         }

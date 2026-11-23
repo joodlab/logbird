@@ -63,7 +63,7 @@ function UseCaseBlock({ section, sunken }: { section: UseCaseSection; sunken: bo
                 <p className="text-muted-foreground text-sm leading-relaxed">
                   <Rich text={step.body} />
                 </p>
-                {step.code ? <SiteCode code={step.code.code} language={step.code.language} title={step.code.title} wrap /> : null}
+                {step.code ? <SiteCode code={step.code.code} language={step.code.language} title={step.code.title} /> : null}
               </div>
             </li>
           ))}

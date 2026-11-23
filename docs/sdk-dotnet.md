@@ -153,7 +153,8 @@ Audit logging never takes your application down with it:
   loop sends batches every second.
 - **Failures are retried** with backoff (network errors, 429, 5xx). Each retried event keeps its exact bytes and id, so
   the server never stores an event twice.
-- **The queue is bounded** (`MaxQueueSize`, 10,000 events by default). If Logbird stays unreachable long enough to fill
+- **The queue is bounded** (`MaxQueueSize`, 10,000 events by default, counting the events waiting to be sent; the batch
+  being sent comes on top, and `Stats.QueueLength` counts both). If Logbird stays unreachable long enough to fill
   it, the oldest events are dropped and each drop is reported.
 - **Every event the running client gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`,
   `Rejected`, `Shutdown`, …): rejections by the server on the `logbird.events.rejected` counter, everything else on
