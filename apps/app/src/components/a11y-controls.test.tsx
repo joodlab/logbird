@@ -98,6 +98,18 @@ describe('RetentionPicker (PHONE-08)', () => {
     for (const b of shortcuts?.querySelectorAll('button') ?? []) expect(b.getAttribute('tabindex')).toBe('-1');
   });
 
+  it('leaves the shortcut cards out on a phone, so the same choice never shows twice there', () => {
+    const el = mount(<Harness />);
+    const shortcuts = el.querySelector('[data-testid="retention-shortcuts"]') as Element;
+    expect(tokens(shortcuts)).toContain('max-sm:hidden');
+    // The chips stay at every size: they are the one control there.
+    expect(tokens(el.querySelector('[role="radiogroup"]') as Element)).not.toContain('max-sm:hidden');
+    // The cards' hints move onto the chips on a phone (visible there, read out everywhere).
+    const recommended = [...el.querySelectorAll('[role="radio"] span')].find((s) => s.textContent?.endsWith('recommended')) as Element;
+    expect(tokens(recommended)).toContain('sm:sr-only');
+    expect(tokens(recommended)).not.toContain('sr-only');
+  });
+
   it('moves the selection with the arrow keys', async () => {
     const onChange = vi.fn();
     const el = mount(<Harness onChange={onChange} />);
