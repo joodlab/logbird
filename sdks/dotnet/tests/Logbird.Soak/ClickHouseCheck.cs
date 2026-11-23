@@ -14,6 +14,13 @@ namespace Logbird.Soak;
 /// background merge of the ReplacingMergeTree collapses them. The check counts, without FINAL, the event ids of the run
 /// that have more than one row. It proves itself first: two identical rows inserted under a self-test tag in the same
 /// fictional project must be reported as one duplicated id.
+/// <para>
+/// Every statement sets the ClickHouse settings it depends on, so a server or user profile cannot change its meaning:
+/// the two counts send <c>final=0</c> (a profile with <c>final=1</c> would apply FINAL and hide duplicates); the
+/// self-test insert sends <c>optimize_on_insert=0</c> (otherwise identical rows of this ReplacingMergeTree collapse
+/// inside the inserted block), <c>async_insert=0</c> (its rows must be visible to the count that follows) and
+/// <c>insert_deduplicate=0</c> (no block-level deduplication of the control rows).
+/// </para>
 /// </summary>
 internal sealed class ClickHouseCheck : IDisposable
 {
@@ -37,13 +44,13 @@ internal sealed class ClickHouseCheck : IDisposable
     public async Task<long> RowsAsync(string runTag)
         => Count(await QueryAsync(
             "SELECT count() FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String}",
-            ("p", _projectId), ("r", runTag)).ConfigureAwait(false));
+            ("p", _projectId), ("r", runTag), ("!final", "0")).ConfigureAwait(false));
 
     /// <summary>Event ids of the run with more than one raw row.</summary>
     public async Task<long> DuplicatedIdsAsync(string runTag)
         => Count(await QueryAsync(
             "SELECT count() FROM (SELECT event_id FROM events WHERE project_id = {p:String} AND attributes['metadata.soakRun'] = {r:String} GROUP BY event_id HAVING count() > 1)",
-            ("p", _projectId), ("r", runTag)).ConfigureAwait(false));
+            ("p", _projectId), ("r", runTag), ("!final", "0")).ConfigureAwait(false));
 
     private static long Count(string text)
         => long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var n)
@@ -65,7 +72,7 @@ internal sealed class ClickHouseCheck : IDisposable
             var id = "soak-selftest-" + Guid.NewGuid().ToString("N");
             await QueryAsync(
                 "INSERT INTO events (project_id, event_id, timestamp, received_at, action, attributes) SELECT {p:String}, {id:String}, toDateTime64({t:String}, 3, 'UTC'), toDateTime64({t:String}, 3, 'UTC'), 'soak.selftest', map('metadata.soakRun', {r:String}) FROM numbers(2)",
-                ("p", _projectId), ("id", id), ("t", when), ("r", tag), ("!optimize_on_insert", "0")).ConfigureAwait(false);
+                ("p", _projectId), ("id", id), ("t", when), ("r", tag), ("!optimize_on_insert", "0"), ("!async_insert", "0"), ("!insert_deduplicate", "0")).ConfigureAwait(false);
             if (await DuplicatedIdsAsync(tag).ConfigureAwait(false) == 1)
             {
                 return true;

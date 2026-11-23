@@ -57,6 +57,9 @@ proxy in front of a real Logbird.
   case a background merge collapses them first).
   A background merge can collapse duplicates before the count, so a pass is evidence, not proof; a fail is a real
   duplicate.
+- **ClickHouse settings:** every statement sets what it depends on, so no server or user profile changes its meaning.
+  The raw-row counts send `final=0`. The self-test insert sends `optimize_on_insert=0`, `async_insert=0` and
+  `insert_deduplicate=0`.
 
 Layer 2 accepts only loopback addresses (`127.0.0.1`, `::1`, `localhost`) for the server and ClickHouse, with no user
 info, query or fragment, and its HTTP clients never follow a redirect, so keys never leave the machine and a production
