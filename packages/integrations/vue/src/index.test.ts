@@ -415,22 +415,90 @@ it('runs loadMore for a changed trail even while the old trail is loading or has
   wrapper.unmount();
 });
 
-it('calls the fetcher with the options (or the request) as this', async () => {
-  const receivers: unknown[] = [];
-  const options = {
-    tenant: 'acme',
-    fetcher(this: unknown) {
-      receivers.push(this);
-      return Promise.resolve(page([]));
-    },
-  };
-  const request = { query: { q: 'a' }, fetcher: options.fetcher };
-  const first = mountTrail(() => useAuditTrail(() => options));
-  const second = mountTrail(() => useAuditTrailRequests(() => request));
+// Round 4: two client instances sharing one prototype method must not share pagination through `this`.
+it('calls the fetcher as a plain function, so a shared prototype method cannot carry a cursor across clients', async () => {
+  class Client {
+    constructor(readonly project: string) {}
+    read(this: Client | undefined) {
+      return Promise.resolve(page([`${this?.project ?? 'no-receiver'}-1`], 'next'));
+    }
+  }
+  const a = new Client('a');
+  const b = new Client('b');
+  expect(a.read).toBe(b.read);
+  const client = ref(a);
+  const { trail, wrapper } = mountTrail(() => useAuditTrail(() => ({ tenant: 'acme', fetcher: client.value.read })));
   await flushPromises();
-  expect(receivers).toEqual([options, request]);
-  first.wrapper.unmount();
-  second.wrapper.unmount();
+  // No receiver reaches the method: it cannot read one client's scope, and it cannot differ between the two.
+  expect(trail.data.value.map((e) => e.id)).toEqual(['no-receiver-1']);
+  wrapper.unmount();
+});
+
+it('reads nothing of the options beyond what the snapshot reads (no deep traversal)', async () => {
+  const fetcher = vi.fn().mockResolvedValue(page([]));
+  const profile = reactive({ loaded: false });
+  const options = reactive({
+    fetcher,
+    tenant: 'acme',
+    get avatar(): string {
+      // Unrelated application state that throws while a profile loads.
+      if (!profile.loaded) throw new Error('profile not loaded');
+      return 'x';
+    },
+  });
+  const { trail, wrapper } = mountTrail(() => useAuditTrail(options as unknown as AuditTrailOptions));
+  await flushPromises();
+  expect(trail.error.value).toBeUndefined();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  wrapper.unmount();
+});
+
+it('invalidates synchronously on a session change: no old row, cursor or in-flight result is visible afterwards', async () => {
+  const session = ref('user-a');
+  let resolveA!: (value: Awaited<ReturnType<AuditFetcher>>) => void;
+  const signals: AbortSignal[] = [];
+  const fetcher = vi.fn((query: Record<string, unknown>, signal?: AbortSignal) => {
+    signals.push(signal as AbortSignal);
+    if (fetcher.mock.calls.length === 1) return Promise.resolve(page(['a-1'], 'a-next'));
+    if (query.cursor)
+      return new Promise<Awaited<ReturnType<AuditFetcher>>>((resolve) => {
+        resolveA = resolve;
+      });
+    return Promise.resolve(page(['b-1']));
+  });
+  const { trail, wrapper } = mountTrail(() => useAuditTrailRequests(() => ({ query: { q: 'scope:server' }, fetcher, session: session.value })));
+  await flushPromises();
+  const more = trail.loadMore();
+  session.value = 'user-b';
+  // Before any tick: the old rows, the cursor and the read in flight are gone.
+  expect(trail.data.value).toEqual([]);
+  expect(trail.nextCursor.value).toBeNull();
+  expect(signals[1]?.aborted).toBe(true);
+  // A's page arriving now is never published.
+  resolveA(page(['a-2'], 'a-next-2'));
+  await more;
+  expect(trail.data.value.map((e) => e.id)).not.toContain('a-2');
+  await flushPromises();
+  expect(trail.data.value.map((e) => e.id)).toEqual(['b-1']);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  wrapper.unmount();
+});
+
+it('starts nothing after disposal, even from an abort listener that re-enters', async () => {
+  let trail!: ReturnType<typeof useAuditTrail>;
+  const fetcher = vi.fn((_query: Record<string, unknown>, signal?: AbortSignal) => {
+    signal?.addEventListener('abort', () => {
+      void trail.refresh();
+      void trail.loadMore();
+    });
+    return new Promise<Awaited<ReturnType<AuditFetcher>>>(() => undefined);
+  });
+  const mounted = mountTrail(() => useAuditTrail(() => ({ fetcher, tenant: 'acme' })));
+  trail = mounted.trail;
+  await flushPromises();
+  mounted.wrapper.unmount();
+  await flushPromises();
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
 it('stays consistent when an abort listener re-enters the composable synchronously', async () => {

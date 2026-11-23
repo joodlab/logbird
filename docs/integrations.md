@@ -18,7 +18,9 @@ then report an error instead of fetching. The one exception is the Nuxt composab
 whose `authorize` decides the scope on the server, so `useAuditTrail({})` sends an empty trail there; the route refuses
 a trusted query without `q`. Every read helper first copies its input into a frozen snapshot of strings and numbers,
 reading each property once, and refuses a value of the wrong type (`TrailQueryError`, a `TypeError`): selectors and `q`
-are strings, range bounds are a `Date`, epoch milliseconds or an ISO 8601 string.
+are strings, range bounds are a `Date`, whole epoch milliseconds or an ISO 8601 string, and containers are plain objects
+or class instances (an array, `Date` or `Map` is refused, and so is a `range` with neither bound). The server resolves
+an open end (no `to`, or `now` in `q`) for each request, so an ascending trail can gain newer events on later pages.
 The read helpers require Logbird 0.2.0 or later: against an older server a selector value containing `*` is read as a
 prefix, so it can match more than the named tenant, actor or record.
 

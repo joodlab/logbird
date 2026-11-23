@@ -146,6 +146,15 @@ describe('the trail boundary refuses a value that is not the primitive its field
     ['a lone surrogate in the cursor', { tenant: 'acme', cursor: '\uDC00' }],
     ['a lone surrogate in a range bound', { tenant: 'acme', range: { from: `${ISO}\uD800` } }],
     ['a non-string target type', { target: { type: 1, id: 'x' } }],
+    // Round 4: containers without the named fields would silently drop every bound or selector.
+    ['a date picker array as the range', { tenant: 'acme', range: [new Date(ISO), new Date(ISO_TO)] }],
+    ['a Date as the range', { tenant: 'acme', range: new Date(ISO) }],
+    ['a Map as the range', { tenant: 'acme', range: new Map([['from', ISO]]) }],
+    ['a range with neither bound', { tenant: 'acme', range: {} }],
+    ['a range with other names', { tenant: 'acme', range: { start: ISO, end: ISO_TO } }],
+    ['an array as the target', { target: [{ id: 'x' }] }],
+    ['an array as the options', [{ tenant: 'acme' }]],
+    ['fractional epoch milliseconds', { tenant: 'acme', range: { from: Date.parse(ISO) + 0.5 } }],
     ['a target that is a string', { target: 'inv_1' }],
     ['no options object', 'tenant:acme'],
   ];
@@ -228,6 +237,10 @@ describe('the search query boundary (readAuditTrail, the Vue engine, the Nuxt ro
     ['an unknown lang', { q: 'a', lang: 'graphql' }],
     ['an object bound', { q: 'a', from: { toJSON: () => ISO } }],
     ['no query object', 'q=a'],
+    ['an array of queries', [{ q: 'tenant:"acme"' }]],
+    ['a Map as the query', new Map([['q', 'tenant:"acme"']])],
+    ['a Date as the query', new Date(ISO)],
+    ['fractional epoch milliseconds', { q: 'a', from: Date.parse(ISO) + 0.5 }],
   ])('refuses %s before any request', async (_, query) => {
     await expect(sent(query)).rejects.toBeInstanceOf(TrailQueryError);
   });

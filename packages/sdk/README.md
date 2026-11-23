@@ -85,7 +85,9 @@ parse as one complete Logbird query on its own; it is ANDed with the selectors.
 `trailQuery` and `readAuditTrail` first copy their input into a frozen snapshot of strings and numbers, reading each
 property once (getters, inherited and non-enumerable properties included), and throw a `TrailQueryError` (a `TypeError`;
 test with `isTrailQueryError`) for a value of the wrong type. Selectors, `q` and `cursor` are strings; a range bound is
-a `Date`, epoch milliseconds or an ISO 8601 string; `limit` is an integer. `readAuditTrail` sends only the known search
+a `Date`, whole epoch milliseconds or an ISO 8601 string (checked by the server); a `range` needs at least one bound;
+`limit` is an integer or its decimal digits; the options, `target`, `range` and query are plain objects or class
+instances, never arrays, `Date`s or `Map`s. `readAuditTrail` sends only the known search
 fields (`q`, `lang`, `from`, `to`, `limit`, `cursor`, `order`).
 The read helpers require Logbird 0.2.0 or later: against an older server a selector value containing `*` is read as a
 prefix, so it can match more than the named tenant, actor or record.

@@ -41,10 +41,10 @@ function sessionKey(value: unknown): AuditSession | null {
   if (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) return value;
   throw new TypeError('useAuditTrail: `session` must be a string or a number.');
 }
-/** A request as read from the caller, each property once; `receiver` is the `this` the fetcher is called with. */
-type RawRequest = { query: unknown; fetcher: unknown; session: unknown; receiver: unknown };
+/** A request as read from the caller, each property once. */
+type RawRequest = { query: unknown; fetcher: unknown; session: unknown };
 /** A request after the boundary: the query is a frozen snapshot of primitives, and `key` is its canonical form. */
-type Read = { key: string; query: SearchSnapshot; fetcher: AuditFetcher; receiver: unknown };
+type Read = { key: string; query: SearchSnapshot; fetcher: AuditFetcher };
 type State = Read | { error: Error };
 
 function createTrail(source: () => RawRequest) {
@@ -53,6 +53,7 @@ function createTrail(source: () => RawRequest) {
   const error = shallowRef<Error>();
   const nextCursor = shallowRef<string | null>(null);
   let generation = 0;
+  let disposed = false;
   let controller: AbortController | undefined;
   /** What the shown rows and cursor belong to; a different trail, session or fetcher never continues them. */
   let owner: { key: string; fetcher: AuditFetcher } | undefined;
@@ -64,12 +65,7 @@ function createTrail(source: () => RawRequest) {
       // The boundary: from here on only this snapshot is used. Page one never carries a cursor, not even the caller's.
       const { cursor: _cursor, ...query } = snapshotSearchQuery(request.query as SearchInput, 'useAuditTrail');
       const session = sessionKey(request.session);
-      return {
-        key: JSON.stringify([searchKey(query), session]),
-        query: Object.freeze(query),
-        fetcher: fetcher as AuditFetcher,
-        receiver: request.receiver,
-      };
+      return { key: JSON.stringify([searchKey(query), session]), query: Object.freeze(query), fetcher: fetcher as AuditFetcher };
     } catch (cause) {
       return { error: asError(cause) };
     }
@@ -80,14 +76,23 @@ function createTrail(source: () => RawRequest) {
     owner = undefined;
   };
   const owns = (state: State) => !('error' in state) && owner !== undefined && owner.key === state.key && owner.fetcher === state.fetcher;
+  /** Nothing in flight may publish any more, and nothing on screen belongs to the current trail. */
+  const invalidate = () => {
+    generation++;
+    const previous = controller;
+    controller = undefined;
+    clear();
+    previous?.abort();
+  };
   async function run(state: State, append: boolean) {
+    if (disposed) return;
     const current = ++generation;
     const previous = controller;
     const mine = new AbortController();
     controller = mine;
     previous?.abort();
-    // An abort listener may have started a newer run synchronously: that run owns the state now.
-    if (current !== generation) return;
+    // An abort listener may have started a newer run (or disposed the scope) synchronously: that wins.
+    if (current !== generation || disposed) return;
     error.value = undefined;
     if ('error' in state) {
       // An incomplete trail (a tenant id not loaded yet) or failing options: an error, never a wider read (#263).
@@ -102,7 +107,9 @@ function createTrail(source: () => RawRequest) {
     const query = cursor ? Object.freeze({ ...state.query, cursor }) : state.query;
     loading.value = true;
     try {
-      const page: SearchResponse = await Reflect.apply(state.fetcher, state.receiver, [query, mine.signal]);
+      // A plain call: the fetcher cannot read a different scope through `this`.
+      const fetcher = state.fetcher;
+      const page = await fetcher(query, mine.signal);
       if (current !== generation) return;
       const unique = new Map((cursor ? data.value : []).map((event) => [event.id, event]));
       for (const event of page.data) unique.set(event.id, event);
@@ -120,15 +127,42 @@ function createTrail(source: () => RawRequest) {
   }
   const refresh = () => run(snapshot(), false);
   const loadMore = () => {
+    if (disposed) return Promise.resolve();
     const state = snapshot();
     // Nothing more to load for the trail on screen. A changed trail, session or fetcher (or an invalid one) always runs,
     // restarting at page one or showing the error.
     if (owns(state) && (!nextCursor.value || loading.value)) return Promise.resolve();
     return run(state, true);
   };
-  // The callback runs exactly the snapshot the watcher validated (never a second read of the options).
-  watch(snapshot, (state) => run(state, false), { immediate: true, deep: true });
+  // The watcher reads only what the snapshot reads (no deep traversal of the caller's options). It runs synchronously
+  // on every change: a changed trail, session or fetcher invalidates at once (rows, cursor and the read in flight go
+  // before any other code can see them), and the new read is batched to one request per tick.
+  let pending: State | undefined;
+  let first = true;
+  watch(
+    snapshot,
+    (state) => {
+      if (first) {
+        first = false;
+        void run(state, false);
+        return;
+      }
+      if (disposed || owns(state)) return;
+      invalidate();
+      loading.value = !('error' in state);
+      const batched = pending === undefined;
+      pending = state;
+      if (batched)
+        queueMicrotask(() => {
+          const next = pending as State;
+          pending = undefined;
+          void run(next, false);
+        });
+    },
+    { immediate: true, flush: 'sync' },
+  );
   onScopeDispose(() => {
+    disposed = true;
     generation++;
     controller?.abort();
   });
@@ -139,23 +173,23 @@ function createTrail(source: () => RawRequest) {
  * The composable's engine, for callers that build the query themselves: `source` returns the complete query and the
  * fetcher for it. It applies no selector checks of its own, exactly like calling the fetcher yourself; the Nuxt
  * integration uses it because its fixed read route decides the scope on the server. Use `useAuditTrail` otherwise.
- * The fetcher is called with the returned request object as `this`.
+ * The fetcher is called as a plain function (no `this`).
  */
 export function useAuditTrailRequests(source: () => AuditTrailRequest) {
   return createTrail(() => {
     const request = source();
-    return { query: request.query, fetcher: request.fetcher, session: request.session, receiver: request };
+    return { query: request.query, fetcher: request.fetcher, session: request.session };
   });
 }
 
 /**
  * A record's, actor's or tenant's trail. The query is built by `trailQuery`, so it never reads wider than asked (#263).
- * The fetcher is called with the options object as `this`.
+ * The fetcher is called as a plain function (no `this`): pass a function, or a method bound once.
  */
 export function useAuditTrail(options: MaybeRefOrGetter<AuditTrailOptions>) {
   return createTrail(() => {
     const input = toValue(options);
-    return { query: trailQuery(input), fetcher: input.fetcher, session: input.session, receiver: input };
+    return { query: trailQuery(input), fetcher: input.fetcher, session: input.session };
   });
 }
 export const AuditTimeline = defineComponent({

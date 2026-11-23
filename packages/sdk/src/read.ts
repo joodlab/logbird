@@ -97,6 +97,13 @@ const fail = (where: string, message: string): never => {
   throw new TrailQueryError(`${where}: ${message}`);
 };
 const isObject = (value: unknown): value is object => value !== null && typeof value === 'object';
+/**
+ * A container the boundary reads fields from: a plain object or an ordinary class instance (Vue reactive ones too).
+ * An array, Date, Map or other built-in is refused: it has none of the named fields, so reading it would silently drop
+ * every bound or selector (a date picker's `[start, end]` would become the server's default window).
+ */
+const isRecord = (value: unknown): value is object =>
+  isObject(value) && !Array.isArray(value) && Object.prototype.toString.call(value) === '[object Object]';
 /** Blank means only whitespace, as JavaScript's `trim()` sees it (the .NET builder uses the same rule). */
 const isBlank = (value: string) => value.trim().length === 0;
 /**
@@ -123,13 +130,16 @@ function selector(where: string, field: string, value: unknown): string {
 const BOUND_TYPES = 'must be a Date, epoch milliseconds or an ISO 8601 string.';
 /**
  * A range bound becomes an ISO 8601 string. A `Date` is read through its internal time value (never its own toJSON or
- * toISOString); a number is epoch milliseconds; a string is passed as is for the server to validate.
+ * toISOString); a number is whole epoch milliseconds (a fraction would round the bound and widen it); a string is
+ * passed as is for the server to validate.
  */
 function rangeBound(where: string, field: string, value: unknown): string | undefined {
   if (value === undefined || typeof value === 'string') return optionalText(where, field, value);
   let time = Number.NaN;
-  if (typeof value === 'number') time = value;
-  else if (isObject(value)) {
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) return fail(where, `\`${field}\` must be whole epoch milliseconds.`);
+    time = value;
+  } else if (isObject(value)) {
     try {
       time = Date.prototype.getTime.call(value);
     } catch {
@@ -161,12 +171,12 @@ function frozen<T extends object>(fields: T): Readonly<T> {
 
 /** The trail input boundary: the caller's trail as a plain frozen snapshot of primitives, each property read once. */
 export function snapshotTrail(input: TrailQuery, where = 'trailQuery'): TrailSnapshot {
-  if (!isObject(input)) return fail(where, 'expects an options object.');
+  if (!isRecord(input)) return fail(where, 'expects an options object.');
   let target: TrailSnapshot['target'];
   const givenTarget = readOnce(input, 'target');
   if (givenTarget.present) {
     const given = givenTarget.value;
-    if (!isObject(given)) return fail(where, '`target` was given but is empty; pass `{ id }` or `{ type, id }`, or leave the key out.');
+    if (!isRecord(given)) return fail(where, '`target` was given but is empty; pass `{ id }` or `{ type, id }`, or leave the key out.');
     const id = selector(where, 'target.id', (given as { id?: unknown }).id);
     const givenType = readOnce(given, 'type');
     // An empty type is a real record type; an undefined one would drop the type and widen to every type with this id.
@@ -182,11 +192,12 @@ export function snapshotTrail(input: TrailQuery, where = 'trailQuery'): TrailSna
   const givenRange: unknown = (input as { range?: unknown }).range;
   let range: TrailSnapshot['range'];
   if (givenRange !== undefined) {
-    if (!isObject(givenRange)) return fail(where, '`range` must be an object with `from` and/or `to`.');
-    range = frozen({
-      from: rangeBound(where, 'range.from', (givenRange as { from?: unknown }).from),
-      to: rangeBound(where, 'range.to', (givenRange as { to?: unknown }).to),
-    });
+    if (!isRecord(givenRange)) return fail(where, '`range` must be an object with `from` and/or `to`.');
+    const from = rangeBound(where, 'range.from', (givenRange as { from?: unknown }).from);
+    const to = rangeBound(where, 'range.to', (givenRange as { to?: unknown }).to);
+    // A range with neither bound (say `{ start, end }`) would fall back to the server's default window.
+    if (from === undefined && to === undefined) return fail(where, '`range` was given without `from` or `to`; pass a bound or leave the key out.');
+    range = frozen({ from, to });
   }
   const limit = optionalLimit(where, (input as { limit?: unknown }).limit);
   const cursor = optionalText(where, 'cursor', (input as { cursor?: unknown }).cursor);
@@ -204,7 +215,7 @@ export function snapshotTrail(input: TrailQuery, where = 'trailQuery'): TrailSna
 const SEARCH_FIELDS = ['q', 'lang', 'from', 'to', 'limit', 'cursor', 'order'] as const;
 /** The search query boundary: a plain frozen snapshot of the known search fields, each read once; others are dropped. */
 export function snapshotSearchQuery(query: SearchInput, where = 'readAuditTrail'): SearchSnapshot {
-  if (!isObject(query)) return fail(where, 'expects a query object.');
+  if (!isRecord(query)) return fail(where, 'expects a query object.');
   const input = query as Record<string, unknown>;
   // One read per key, in the canonical order.
   const q = optionalText(where, 'q', input.q);
