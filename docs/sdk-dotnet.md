@@ -191,7 +191,7 @@ the same id and content and you can confirm it by the id you stored.
 
 `Track` only queues an event, and a successful `FlushAsync` means each event was stored *or* given up on, so neither
 proves an event was stored. Keep each outbox row until you have confirmed its event, for example by reading it back by
-id with `LogbirdReadClient.GetAsync`, and resend it, exactly as stored, until then. Resending an event the server
+id with `LogbirdReadClient.GetEventAsync`, and resend it, exactly as stored, until then. Resending an event the server
 still holds is always safe (an exact retry), but do not resend rows older than the project's retention period: once
 retention has deleted an event, a resend would store it again. Decide yourself what happens to a row that is never
 confirmed (for example alert and keep it); Logbird cannot make that choice for you.

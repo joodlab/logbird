@@ -716,7 +716,7 @@ public sealed class LogbirdReadClient : IDisposable
     /// something this SDK cannot read (<c>invalid_response</c>).
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    public Task<EventDetail?> GetAsync(string eventId, CancellationToken cancellationToken = default)
+    public Task<EventDetail?> GetEventAsync(string eventId, CancellationToken cancellationToken = default)
     {
         Guard.NotBlank(eventId, nameof(eventId));
         if (eventId is "." or "..")

@@ -106,12 +106,12 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
         Assert.Empty((await scoped.SearchAsync(new EventSearch { From = from, Query = "tenant:" + other })).Events);
 
         // Detail: masked, with no payload; neither control can be read by id.
-        var detail = await scoped.GetAsync(inScope[0]);
+        var detail = await scoped.GetEventAsync(inScope[0]);
         Assert.NotNull(detail);
         AssertMasked(detail!.Event);
         Assert.Equal(JsonValueKind.Null, detail.Payload.ValueKind);
-        Assert.Null(await scoped.GetAsync(sameTenantOtherSite));
-        Assert.Null(await scoped.GetAsync(otherTenantSameSite));
+        Assert.Null(await scoped.GetEventAsync(sameTenantOtherSite));
+        Assert.Null(await scoped.GetEventAsync(otherTenantSameSite));
 
         // Facets count the in-scope action only: a control's action would appear as its own value.
         var facets = await scoped.FacetsAsync(new FacetQuery("action") { From = from });
@@ -272,9 +272,9 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
         var from = DateTimeOffset.UtcNow.AddHours(-1);
 
         // The key reads its tenant's event and never the other tenant's, by id or by search.
-        Assert.NotNull(await scoped.GetAsync(inside));
-        Assert.Null(await scoped.GetAsync(outside));
-        Assert.NotNull(await scoped.GetAsync(otherSite));
+        Assert.NotNull(await scoped.GetEventAsync(inside));
+        Assert.Null(await scoped.GetEventAsync(outside));
+        Assert.NotNull(await scoped.GetEventAsync(otherSite));
         var bySite = await scoped.SearchAsync(EventSearch.ForTrail(targetId: site, targetType: "website", from: from));
         Assert.Equal([inside], bySite.Events.Select(e => e.Id));
 
