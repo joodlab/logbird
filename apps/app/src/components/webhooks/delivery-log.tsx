@@ -26,6 +26,13 @@ import {
   webhookRetry,
 } from '@/lib/webhooks';
 
+/**
+ * How many pages (20 each) of pending deliveries the resend watcher reads per check. Past that, a resend missing from
+ * them is not known to be settled and stays watched: an endpoint with over a hundred deliveries waiting is busy enough
+ * that a full scan every few seconds would cost more than the log reloading a little later.
+ */
+const PENDING_WATCH_PAGES = 5;
+
 type Delivery = Awaited<ReturnType<typeof api.webhooks.deliveries>>['data'][number];
 const FILTERS = [
   { value: '', label: 'All' },
@@ -73,20 +80,25 @@ export function DeliveryLog({
   const watch = useQuery({
     queryKey: [...deliveriesKey(projectId, endpoint.id, 'pending'), 'resend-watch'],
     // The time the read started, not when it answered: a read already in flight when a resend is queued may not list it.
+    // Every page of pending deliveries, up to PENDING_WATCH_PAGES: a resend is only known settled from a complete read.
     queryFn: async ({ signal }) => {
       const startedAt = Date.now();
-      return { ...(await api.webhooks.deliveries(projectId, endpoint.id, { status: 'pending' }, signal)), startedAt };
+      const ids: string[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < PENDING_WATCH_PAGES; page++) {
+        const read = await api.webhooks.deliveries(projectId, endpoint.id, { status: 'pending', cursor }, signal);
+        ids.push(...read.data.map((d) => d.id));
+        cursor = read.nextCursor ?? undefined;
+        if (!cursor) break;
+      }
+      return { ids, complete: !cursor, startedAt };
     },
     enabled: open && watching.size > 0,
     refetchInterval: 3000,
   });
   useEffect(() => {
     if (!watch.data || watch.isFetching) return;
-    const settled = settledResends(watching, {
-      ids: watch.data.data.map((d) => d.id),
-      complete: !watch.data.nextCursor,
-      startedAt: watch.data.startedAt,
-    });
+    const settled = settledResends(watching, watch.data);
     if (settled.length === 0) return;
     setWatching((current) => new Map([...current].filter(([id]) => !settled.includes(id))));
     queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'deliveries'] });

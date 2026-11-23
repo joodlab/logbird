@@ -30,11 +30,16 @@ vi.mock('@/lib/api/client', () => ({
 
 import { DeliveryLog } from './delivery-log';
 
-deliveries.mockImplementation(async (_p: string, _e: string, query: { status?: string }) =>
-  query.status === 'pending'
-    ? { data: pendingIds.current.map((id) => ({ ...failedPing, id, status: 'pending' })), nextCursor: null }
-    : { data: [failedPing], nextCursor: null },
-);
+// The pending list answers in pages of 20, like the API: a cursor is the index of the next page's first row.
+deliveries.mockImplementation(async (_p: string, _e: string, query: { status?: string; cursor?: string }) => {
+  if (query.status !== 'pending') return { data: [failedPing], nextCursor: null };
+  const from = Number(query.cursor ?? 0);
+  const page = pendingIds.current.slice(from, from + 20);
+  return {
+    data: page.map((id) => ({ ...failedPing, id, status: 'pending' })),
+    nextCursor: from + 20 < pendingIds.current.length ? String(from + 20) : null,
+  };
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
@@ -137,6 +142,26 @@ it('keeps following a resend until it is no longer pending, even when no loaded 
   const before = allReads();
   // It settles (no longer pending): within the next poll the log reloads to show how it ended.
   pendingIds.current = [];
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 3400));
+  });
+  expect(allReads()).toBeGreaterThan(before);
+}, 10_000);
+
+it('settles a resend from a pending list longer than one page, reading every page', async () => {
+  const others = Array.from({ length: 45 }, (_, i) => `qa-other-${i}`);
+  const again = await open(null);
+  // The resend sits on the third page of pending deliveries.
+  pendingIds.current = [...others, 'qa-delivery-1'];
+  const allReads = () => deliveries.mock.calls.filter(([, , q]) => !(q as { status?: string }).status).length;
+  await act(async () => {
+    again.click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+  expect(deliveries.mock.calls.some(([, , q]) => (q as { cursor?: string }).cursor === '40')).toBe(true);
+  const before = allReads();
+  // It settles while 45 others are still pending: three pages to read, and the log reloads.
+  pendingIds.current = others;
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 3400));
   });
