@@ -198,7 +198,7 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
             stored = await ReadBackAsync(started, standIn.Acknowledged, clickHouse!, upstreamChecks).ConfigureAwait(false);
 
             // Partial answers, resets after forwarding and empty acknowledgements make the client resend events the server
-            // already stored; at least one such resend must have reached the server for its deduplication to be exercised.
+            // already stored; the server must have acknowledged at least one id again for its deduplication to be exercised.
             var resendFaults = weights.Where(w => w.Value > 0 && w.Key is Fault.PartialUnavailable or Fault.ResetAfterStore or Fault.EmptyAck).Select(w => w.Key).ToArray();
             upstreamChecks.Add(Program.Check("the server's deduplication was exercised", resendFaults.Length == 0 || standIn.UpstreamResends > 0, $"{standIn.UpstreamResends} event ids acknowledged by the server again after an earlier answer had acknowledged them"));
         }
@@ -691,7 +691,19 @@ internal sealed class SoakRun(SoakOptions options) : IDisposable
             var rawIds = raw.Entries().Select(e => e.Key).ToArray();
             var rawStrangers = rawIds.Count(id => !_tracked.Contains(id));
             var readNotRaw = stored.Entries().Count(e => !raw.Contains(e.Key));
-            checks.Add(Program.Check("every raw row of the run is a tracked event, and every event read back has a raw row", rawStrangers == 0 && readNotRaw == 0, $"{rawIds.Length} distinct raw ids: {rawStrangers} never tracked; {readNotRaw} of {stored.Count} read-back ids without a raw row"));
+
+            // A tracked raw id the read-back did not return (it settled after the last page) is still stored: it joins the
+            // stored set, so the accounting below (stored or dropped, stored and dropped with an unconfirmed reason) covers it.
+            var late = 0;
+            foreach (var id in rawIds)
+            {
+                if (_tracked.Contains(id) && stored.TryAdd(id, 0))
+                {
+                    late++;
+                }
+            }
+
+            checks.Add(Program.Check("every raw row of the run is a tracked event, and every event read back has a raw row", rawStrangers == 0 && readNotRaw == 0, $"{rawIds.Length} distinct raw ids: {rawStrangers} never tracked; {readNotRaw} read-back ids without a raw row; {late} raw ids not read back, counted as stored"));
             var duplicated = await clickHouse.DuplicatedIdsAsync(_runId).ConfigureAwait(false);
             checks.Add(Program.Check("no event id has more than one raw row (no FINAL)", duplicated == 0, $"{duplicated} event ids with more than one raw row at the time of the count"));
         }

@@ -69,7 +69,8 @@ each event.
   retried with the same cursor and the earlier pages are kept. It continues until every id the server acknowledged to
   the client is there, or a deadline of five minutes plus 100 ms per expected page passes.
 - **Reconciliation:** the run's distinct event ids in the raw ClickHouse rows must all be tracked events, and every
-  event read back must have a raw row. An empty run passes.
+  event read back must have a raw row. A tracked raw id the read-back did not return (it settled after the last page)
+  counts as stored, so the accounting checks cover it; the report gives their number. An empty run passes.
 - **Duplicates:** the run counts its event ids with more than one raw row (no `FINAL`).
 - **Deduplication exercised:** whenever `partial`, `resetafterstore` or `emptyack` is configured, the server must have
   acknowledged at least one event id again after an earlier answer of its own had already acknowledged it. A resend that
