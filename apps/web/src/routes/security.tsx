@@ -6,19 +6,24 @@ import {
   BanIcon,
   Building2Icon,
   GaugeIcon,
+  GlobeIcon,
   HashIcon,
   KeyRoundIcon,
   MailIcon,
   ShieldAlertIcon,
+  ShieldIcon,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ButtonLink } from '../components/marketing/button-link';
 import { Callout } from '../components/marketing/callout';
 import { SiteCode } from '../components/marketing/code';
 import { CtaBand } from '../components/marketing/cta-band';
+import { Rich } from '../components/marketing/rich';
 import { Feature, PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SecurityContact } from '../components/marketing/security-contact';
 import { Steps } from '../components/marketing/steps';
+import { scopedReadLimits } from '../content/scoped-read-limits';
+import { SITE } from '../content/site';
 import { GITHUB_PUBLIC, SECURITY_EMAIL } from '../env';
 import { pageHead } from '../lib/seo';
 
@@ -184,6 +189,24 @@ function SecurityPage() {
             and reveals nothing about it.
           </Feature>
         </div>
+        {SITE.scopedReadLive ? (
+          <section aria-labelledby="scoped-reads-title" className="mt-16 flex scroll-mt-24 flex-col gap-6" id="scoped-reads">
+            <h3 className="font-semibold text-xl tracking-tight" id="scoped-reads-title">
+              Scoped reads: one customer account per key or token.
+            </h3>
+            <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
+              <Feature icon={<Building2Icon className="size-4" />} title="One account per scope">
+                <Rich text={scopedReadLimits.scope} />
+              </Feature>
+              <Feature icon={<ShieldIcon className="size-4" />} title="Two layers">
+                <Rich text={scopedReadLimits.layers} />
+              </Feature>
+              <Feature icon={<GlobeIcon className="size-4" />} title="Browser origins">
+                <Rich text={scopedReadLimits.origins} />
+              </Feature>
+            </div>
+          </section>
+        ) : null}
       </Section>
 
       <Section id="sql-guard" labelledBy="sql-guard-title" tone="sunken">

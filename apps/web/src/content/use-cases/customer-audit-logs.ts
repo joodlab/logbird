@@ -1,4 +1,5 @@
 import { homeContent } from '../home';
+import { scopedReadLimitText } from '../scoped-read-limits';
 import { SITE, type SiteState } from '../site';
 import type { UseCase } from './types';
 
@@ -151,7 +152,7 @@ export function customerAuditLogsContent(site: SiteState): UseCase {
               title: 'Scoped keys and viewer tokens.',
               lead: 'Instead of building the query in your backend, give a scoped key or a viewer token one customer account. Logbird applies that scope to every read.',
               points: scoped.points,
-              limit: { label: 'The limit', text: scoped.limit },
+              limit: { label: 'The limit', text: scopedReadLimitText },
             },
           ]
         : []),

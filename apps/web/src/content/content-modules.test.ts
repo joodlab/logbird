@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { renderPages } from '../test/render-pages';
 import { evidenceLimits } from './evidence-limits';
 import { homeContent, homeMetaFor } from './home';
+import { scopedReadLimits, scopedReadLimitText } from './scoped-read-limits';
 import { SITE, type SiteState } from './site';
 import { complianceEvidenceContent } from './use-cases/compliance-evidence';
 
@@ -334,5 +335,48 @@ describe('evidence limits', () => {
       expect(text, path).toContain(evidenceLimits.shortenRetention);
       expect(text, path).toContain(evidenceLimits.exportMatch);
     }
+  }, 60_000);
+});
+
+describe('scoped read limits', () => {
+  const text = (html: string) =>
+    html
+      .replace(/<[^>]+>/g, '')
+      .replaceAll('&#x27;', "'")
+      .replaceAll('&quot;', '"');
+  const shown = (value: string) => value.replaceAll('`', '');
+
+  it('the landing page shows the first sentence and links to /security § Scoped reads, which shows all three', async () => {
+    const scoped = homeContent({ ...SITE, scopedReadLive: true }).customers.scoped;
+    expect(scoped.limit).toBe(scopedReadLimits.scope);
+    expect(scoped.limitLink).toEqual(scopedReadLimits.enforced);
+    if (!SITE.scopedReadLive) return;
+    const pages = await renderPages(['/', '/security', '/use-cases/customer-audit-logs']);
+    const page = (path: string) => pages.find((entry) => entry.path === path)?.html ?? '';
+    // Landing: the scope sentence and the link, not the layers or origins sentences.
+    expect(text(page('/'))).toContain(scopedReadLimits.scope);
+    expect(page('/')).toMatch(/<a[^>]*href="\/security#scoped-reads"[^>]*>How it is enforced<\/a>/);
+    expect(text(page('/'))).not.toContain(shown(scopedReadLimits.layers));
+    // /security: the anchor and all three sentences.
+    expect(page('/security')).toContain('id="scoped-reads"');
+    for (const sentence of [scopedReadLimits.scope, scopedReadLimits.layers, scopedReadLimits.origins]) {
+      expect(text(page('/security'))).toContain(shown(sentence));
+    }
+    // The customer page: the whole limit, in order.
+    expect(text(page('/use-cases/customer-audit-logs'))).toContain(shown(scopedReadLimitText));
+  }, 60_000);
+
+  it('a code block that scrolls sideways is a titled keyboard stop; its copy button sits outside the scroll area', async () => {
+    const [page] = await renderPages(['/use-cases/compliance-evidence']);
+    const html = page?.html ?? '';
+    const blocks = [...html.matchAll(/<pre([^>]*)>/g)].map(([, attributes]) => attributes ?? '');
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const attributes of blocks) {
+      expect(attributes).toMatch(/tabindex="0"/i);
+      expect(attributes).toMatch(/title="[^"]+ code"/);
+      expect(attributes).not.toContain('whitespace-pre-wrap');
+    }
+    // The copy button is in the block's title bar, before the scroll area.
+    expect(html).toMatch(/aria-label="Copy code"[\s\S]*?<\/button>[\s\S]*?<\/div><pre/);
   }, 60_000);
 });

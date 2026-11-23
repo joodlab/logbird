@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { BoxesIcon, GitBranchIcon, SearchIcon, ShieldCheckIcon } from 'lucide-react';
 import { ButtonLink } from '../components/marketing/button-link';
 import { SiteCode, SiteCodeTabs } from '../components/marketing/code';
@@ -72,6 +72,18 @@ function HomePage() {
               <span className="text-muted-foreground">
                 {': '}
                 <Rich text={access.limit} />
+                {access.limitLink ? (
+                  <>
+                    {' '}
+                    <Link
+                      className="font-medium text-foreground underline decoration-brand/60 hover:decoration-brand"
+                      hash={access.limitLink.hash}
+                      to={access.limitLink.to}
+                    >
+                      {access.limitLink.label}
+                    </Link>
+                  </>
+                ) : null}
               </span>
             </p>
             <div>
