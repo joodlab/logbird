@@ -271,6 +271,23 @@ describe('attempt explanations keep every fact', () => {
   });
 });
 
+describe('cursor review on an endpoint that is off', () => {
+  it('never says sends still go out while the endpoint is off', () => {
+    const [cursor] = endpointStates({ enabled: false, cursorWarning: 'webhook_cursor_review_required' } as never);
+    expect(cursor?.lost).toMatch(/Nothing is sent while the endpoint is off/);
+    expect(cursor?.lost).not.toMatch(/still go out/);
+    const both = endpointStates({
+      enabled: false,
+      cursorWarning: 'webhook_cursor_review_required',
+      filterWarning: 'webhook_filter_review_required',
+    } as never);
+    expect(both.find((s) => s.key === 'cursor')?.lost).toMatch(/off and the hold above lasts/);
+    // On, with only the cursor review: sends do go out.
+    const [on] = endpointStates({ enabled: true, cursorWarning: 'webhook_cursor_review_required' } as never);
+    expect(on?.lost).toMatch(/still go out/);
+  });
+});
+
 describe('combined holds', () => {
   it('never tells the reader that test pings go out while a filter or scope hold stops them', () => {
     for (const extra of [{ filterWarning: 'webhook_filter_review_required' }, { scopeWarning: 'webhook_invalid_scope' }]) {

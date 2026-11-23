@@ -318,7 +318,8 @@ function EndpointCard({
         </dd>
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => onEdit(filterError ?? undefined)} size="sm" variant="outline">
+        {/* No edit while a filter confirmation is in flight: it sends the filter it started with and would overwrite it. */}
+        <Button disabled={confirmFilter.isPending} onClick={() => onEdit(filterError ?? undefined)} size="sm" variant="outline">
           Edit
         </Button>
         <Button onClick={onRotate} size="sm" variant="outline">

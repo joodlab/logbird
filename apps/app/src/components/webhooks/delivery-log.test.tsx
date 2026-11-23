@@ -95,3 +95,22 @@ it('a hold newer than the page refreshes the endpoint and says so without guessi
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects', 'qa-project', 'webhooks'] });
   error.mockRestore();
 });
+
+it('shows every status again after a resend, so a Failed filter never hides the pending resend', async () => {
+  const again = await open(null);
+  const failedFilter = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Failed');
+  if (!failedFilter) throw new Error('Failed filter missing');
+  await act(async () => {
+    failedFilter.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(failedFilter.getAttribute('aria-pressed')).toBe('true');
+  const sendAgain = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Send again')) ?? again;
+  await act(async () => {
+    sendAgain.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(resend).toHaveBeenCalled();
+  const all = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'All');
+  expect(all?.getAttribute('aria-pressed')).toBe('true');
+});

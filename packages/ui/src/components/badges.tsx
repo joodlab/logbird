@@ -60,7 +60,7 @@ export function TypePill({
 }: {
   children: React.ReactNode;
   className?: string;
-  tone?: 'neutral' | 'brand' | 'warning' | 'support';
+  tone?: 'neutral' | 'brand' | 'warning' | 'failure' | 'support';
 }) {
   return (
     <span
@@ -69,6 +69,8 @@ export function TypePill({
         tone === 'neutral' && 'bg-muted text-muted-foreground ring-border',
         tone === 'brand' && 'bg-brand/10 text-brand ring-brand/20',
         tone === 'warning' && 'bg-outcome-denied/10 text-outcome-denied-foreground ring-outcome-denied/25',
+        // Failure is red, as outcome failure is everywhere; warning (amber) is denied's colour.
+        tone === 'failure' && 'bg-outcome-failure/10 text-outcome-failure-foreground ring-outcome-failure/25',
         tone === 'support' && 'bg-support/10 text-support-foreground ring-support/30',
         className,
       )}

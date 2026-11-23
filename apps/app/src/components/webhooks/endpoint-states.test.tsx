@@ -11,7 +11,7 @@ let root: Root | undefined;
 const endpoint = (filterWarning: WebhookEndpoint['filterWarning']) =>
   ({ id: 'qa-endpoint-1', url: 'https://example.com/qa-hook', enabled: true, filterQuery: 'action:/(?=x)/', filterWarning }) as WebhookEndpoint;
 
-function render(e: WebhookEndpoint) {
+function render(e: WebhookEndpoint, confirming = false) {
   const host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -19,11 +19,12 @@ function render(e: WebhookEndpoint) {
   const onEdit = vi.fn();
   act(() =>
     root?.render(
-      <EndpointStates confirming={false} endpoint={e} filterError={null} onConfirmFilter={onConfirmFilter} onEdit={onEdit} onRotate={vi.fn()} />,
+      <EndpointStates confirming={confirming} endpoint={e} filterError={null} onConfirmFilter={onConfirmFilter} onEdit={onEdit} onRotate={vi.fn()} />,
     ),
   );
   const buttons = [...host.querySelectorAll('button')].map((b) => b.textContent?.trim());
-  return { host, buttons, onEdit };
+  const disabled = Object.fromEntries([...host.querySelectorAll('button')].map((b) => [b.textContent?.trim(), b.disabled]));
+  return { host, buttons, onEdit, disabled };
 }
 
 afterEach(() => {
@@ -43,4 +44,11 @@ it('a filter that cannot run is explained as its own hold and offers only an edi
 it('a filter waiting for review still offers confirm and edit', () => {
   const { buttons } = render(endpoint('webhook_filter_review_required'));
   expect(buttons).toEqual(['Confirm this filter', 'Edit the filter']);
+});
+
+it('offers no edit while a filter confirmation is in flight, which would overwrite it', () => {
+  expect(render(endpoint('webhook_filter_review_required'), true).disabled).toEqual({ 'Confirm this filter': true, 'Edit the filter': true });
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  expect(render(endpoint('webhook_filter_review_required'), false).disabled['Edit the filter']).toBe(false);
 });

@@ -106,7 +106,16 @@ export function DeliveryLog({
           ) : (
             <ul aria-busy={log.isFetchingNextPage || undefined} className="flex flex-col gap-2" data-testid="webhook-deliveries">
               {rows.map((d) => (
-                <DeliveryRow blocked={Boolean(sendBlocked)} delivery={d} endpoint={endpoint} key={d.id} projectId={projectId} />
+                <DeliveryRow
+                  blocked={Boolean(sendBlocked)}
+                  delivery={d}
+                  endpoint={endpoint}
+                  key={d.id}
+                  // A resend is pending until it settles: a filter that hides pending deliveries (Failed, Delivered) would
+                  // hide it and stop the log from following it, so show every status again.
+                  onResent={() => setStatus('')}
+                  projectId={projectId}
+                />
               ))}
             </ul>
           )}
@@ -122,8 +131,8 @@ export function DeliveryLog({
   );
 }
 
-function statusTone(status: string): 'brand' | 'neutral' | 'warning' {
-  return status === 'failed' ? 'warning' : status === 'succeeded' ? 'brand' : 'neutral';
+function statusTone(status: string): 'brand' | 'neutral' | 'failure' {
+  return status === 'failed' ? 'failure' : status === 'succeeded' ? 'brand' : 'neutral';
 }
 
 function DeliveryRow({
@@ -131,11 +140,14 @@ function DeliveryRow({
   endpoint,
   delivery,
   blocked,
+  onResent,
 }: {
   projectId: string;
   endpoint: Pick<WebhookEndpoint, 'id' | 'filterWarning'>;
   delivery: Delivery;
   blocked: boolean;
+  /** Called once a resend is queued, so the log can show it while it is pending. */
+  onResent?: () => void;
 }) {
   const endpointId = endpoint.id;
   const ids = useId();
@@ -146,6 +158,7 @@ function DeliveryRow({
     ...webhookRetry,
     onSuccess: () => {
       toast.success('Queued again', { description: 'It is sent within seconds; this log updates when it is.' });
+      onResent?.();
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpointId, 'deliveries'] });
     },
     onError: (error) => {

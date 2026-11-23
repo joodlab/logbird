@@ -46,7 +46,7 @@ export function EndpointStates({
               ) : null}
               {endpoint.filterWarning === 'webhook_filter_invalid' ? (
                 // A filter that cannot run cannot be confirmed as it is: only an edit lifts this hold.
-                <Button className="self-start" onClick={onEdit} size="sm">
+                <Button className="self-start" disabled={confirming} onClick={onEdit} size="sm">
                   Edit the filter
                 </Button>
               ) : (
@@ -55,7 +55,8 @@ export function EndpointStates({
                     {confirming ? <Loader2Icon className="animate-spin" /> : null}
                     Confirm this filter
                   </Button>
-                  <Button onClick={onEdit} size="sm" variant="outline">
+                  {/* A confirmation sends the filter it started with: an edit saved meanwhile could be overwritten. */}
+                  <Button disabled={confirming} onClick={onEdit} size="sm" variant="outline">
                     Edit the filter
                   </Button>
                 </div>
