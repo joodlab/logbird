@@ -29,6 +29,7 @@ import { DeliveryLog } from './delivery-log';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
+let lastClient: QueryClient | undefined;
 const endpoint = { id: 'qa-endpoint-1', url: 'https://example.com/qa-hook' } as WebhookEndpoint;
 
 async function open(sendBlocked: string | null) {
@@ -36,6 +37,7 @@ async function open(sendBlocked: string | null) {
   document.body.append(host);
   root = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  lastClient = client;
   act(() =>
     root?.render(
       <QueryClientProvider client={client}>
@@ -74,4 +76,22 @@ it('offers "Send again" when nothing holds the endpoint', async () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
   expect(resend).toHaveBeenCalledWith('qa-project', 'qa-endpoint-1', 'qa-delivery-1');
+});
+
+it('a hold newer than the page refreshes the endpoint and says so without guessing which hold', async () => {
+  const { ApiRequestError } = await import('@/lib/api/errors');
+  const { toast } = await import('sonner');
+  const error = vi.spyOn(toast, 'error').mockImplementation(() => 'held');
+  resend.mockRejectedValueOnce(new ApiRequestError(409, 'webhook_filter_review_required', 'held'));
+  const again = await open(null);
+  const invalidate = vi.spyOn(lastClient as QueryClient, 'invalidateQueries');
+  await act(async () => {
+    again.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(error).toHaveBeenCalledWith('Could not send it again', {
+    description: 'This endpoint was just paused because of its filter. Its card now says what to do.',
+  });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects', 'qa-project', 'webhooks'] });
+  error.mockRestore();
 });

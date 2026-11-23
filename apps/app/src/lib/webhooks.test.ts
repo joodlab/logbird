@@ -13,6 +13,7 @@ import {
   type Form,
   fieldErrorsFromValidation,
   formFrom,
+  isHoldRefusal,
   isWebhookBusy,
   lenientDeliveriesSchema,
   scopeOf,
@@ -169,7 +170,7 @@ describe('webhooks after delivery (#179)', () => {
     expect(state?.what).toMatch(/cannot be run/);
     expect(state?.what).toMatch(/RE2/);
     expect(state?.lost).toMatch(/Nothing is sent while it is held/);
-    expect(state?.todo).toMatch(/^Edit the filter/);
+    expect(state?.todo).toBe('Edit the filter so it can run. Saving a working filter clears this hold.');
     expect(state?.todo).not.toMatch(/confirm/i);
     expect(sendBlockedCopy({ enabled: true, filterWarning: 'webhook_filter_invalid', scopeWarning: undefined }, 'send a test ping')).toBe(
       'To send a test ping, fix its filter.',
@@ -178,6 +179,12 @@ describe('webhooks after delivery (#179)', () => {
     const refused = new ApiRequestError(409, 'webhook_filter_review_required', 'held');
     expect(webhookErrorCopy(refused, held)).toBe('This endpoint is held because its filter cannot run. Edit the filter first.');
     expect(webhookErrorCopy(refused, endpoint({ filterWarning: 'webhook_filter_review_required' }))).toMatch(/until its filter is confirmed/);
+    // A hold newer than the page: the endpoint on screen shows none, so the copy does not guess which, and the caller
+    // refreshes the endpoint.
+    expect(webhookErrorCopy(refused, endpoint({}))).toBe('This endpoint was just paused because of its filter. Its card now says what to do.');
+    expect(isHoldRefusal(refused)).toBe(true);
+    expect(isHoldRefusal(new ApiRequestError(409, 'webhook_disabled', 'off'))).toBe(true);
+    expect(isHoldRefusal(new ApiRequestError(409, 'webhook_delivery_pending', 'pending'))).toBe(false);
   });
   it('renders an attempt error this console does not know as a generic error with its code', () => {
     expect(attemptErrorCopy('timeout')).toMatch(/did not answer in time/);

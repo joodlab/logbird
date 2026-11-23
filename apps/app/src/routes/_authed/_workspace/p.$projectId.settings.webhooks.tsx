@@ -39,6 +39,7 @@ import {
   type FormErrors,
   fieldErrorsFromValidation,
   formFrom,
+  isHoldRefusal,
   isWebhookBusy,
   MAX_WEBHOOK_ENDPOINTS,
   OVERLAP_CHOICES,
@@ -249,7 +250,11 @@ function EndpointCard({
       toast.success('Test ping queued', { description: 'It is sent within seconds and shows up in the delivery log.' });
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'deliveries'] });
     },
-    onError: (error) => toast.error('Could not send a test ping', { description: webhookErrorCopy(error, endpoint) }),
+    onError: (error) => {
+      toast.error('Could not send a test ping', { description: webhookErrorCopy(error, endpoint) });
+      // A hold newer than this page: refresh the endpoint so its card shows it.
+      if (isHoldRefusal(error)) refresh();
+    },
   });
   const [logOpen, setLogOpen] = useState(false);
   const off = !endpoint.enabled;

@@ -15,7 +15,7 @@ import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { keys as queryKeys } from '@/lib/api/queries';
 import { formatTerm } from '@/lib/query-language';
-import { ATTEMPT_STATUS_LABEL, attemptWhy, DELIVERY_STATUS_LABEL, displayUrl, webhookErrorCopy, webhookRetry } from '@/lib/webhooks';
+import { ATTEMPT_STATUS_LABEL, attemptWhy, DELIVERY_STATUS_LABEL, displayUrl, isHoldRefusal, webhookErrorCopy, webhookRetry } from '@/lib/webhooks';
 
 type Delivery = Awaited<ReturnType<typeof api.webhooks.deliveries>>['data'][number];
 const FILTERS = [
@@ -148,7 +148,11 @@ function DeliveryRow({
       toast.success('Queued again', { description: 'It is sent within seconds; this log updates when it is.' });
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpointId, 'deliveries'] });
     },
-    onError: (error) => toast.error('Could not send it again', { description: webhookErrorCopy(error, endpoint) }),
+    onError: (error) => {
+      toast.error('Could not send it again', { description: webhookErrorCopy(error, endpoint) });
+      // A hold newer than this page: refresh the endpoint so its card (and this log's notice) shows it.
+      if (isHoldRefusal(error)) queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks'] });
+    },
   });
   const last = delivery.attempts.at(-1);
   const why = last ? attemptWhy(last, delivery.status === 'pending') : null;

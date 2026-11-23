@@ -89,11 +89,13 @@ export function webhookErrorCopy(error: unknown, endpoint?: Pick<WebhookEndpoint
       return 'This endpoint is off. Turn it on first.';
     case 'webhook_invalid_scope':
       return 'This endpoint is held until its scope is corrected. Edit the scope first.';
-    // One code for both filter holds: the endpoint says which.
+    // One code for both filter holds: the endpoint says which. When the endpoint on screen shows no filter hold yet,
+    // the hold is newer than the page: say so without guessing which one (the card refreshes and shows it).
     case 'webhook_filter_review_required':
-      return endpoint?.filterWarning === 'webhook_filter_invalid'
-        ? 'This endpoint is held because its filter cannot run. Edit the filter first.'
-        : 'This endpoint is held until its filter is confirmed. Confirm or edit the filter first.';
+      if (endpoint?.filterWarning === 'webhook_filter_invalid') return 'This endpoint is held because its filter cannot run. Edit the filter first.';
+      if (endpoint?.filterWarning === 'webhook_filter_review_required')
+        return 'This endpoint is held until its filter is confirmed. Confirm or edit the filter first.';
+      return 'This endpoint was just paused because of its filter. Its card now says what to do.';
     case 'webhook_delivery_pending':
       return 'This delivery is already waiting to be sent.';
     default:
@@ -208,6 +210,17 @@ export const scopeOf = (f: Form) => {
 /* ---------------- held and warning states ---------------- */
 
 /** Where the operator procedure lives (self-hosting docs, on GitHub). */
+/**
+ * Whether the API refused a test ping or a resend because of a hold or the endpoint being off. The endpoint on screen
+ * may be older than that state, so the caller refreshes it: the card then shows the hold and what to do.
+ */
+export function isHoldRefusal(error: unknown): boolean {
+  return (
+    error instanceof ApiRequestError &&
+    (error.code === 'webhook_filter_review_required' || error.code === 'webhook_invalid_scope' || error.code === 'webhook_disabled')
+  );
+}
+
 export const CURSOR_REVIEW_DOCS = 'https://github.com/joodlab/logbird/blob/master/docs/self-hosting.md#reconcile-a-webhook-discovery-cursor';
 
 /**
@@ -255,7 +268,7 @@ export function endpointStates(e: WebhookEndpoint): EndpointState[] {
       title: 'Paused because its filter cannot run',
       what: 'The stored filter cannot be run, for example because it has a /regular expression/ the search engine does not support (patterns follow RE2: no lookarounds or backreferences). Rather than skip events or send ones it cannot check, Logbird paused the endpoint.',
       lost: kept,
-      todo: 'Edit the filter so it can run. Saving a working filter resumes delivery where it paused.',
+      todo: 'Edit the filter so it can run. Saving a working filter clears this hold.',
     });
   } else if (e.filterWarning) {
     states.push({
