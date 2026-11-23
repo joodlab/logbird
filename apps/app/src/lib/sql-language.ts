@@ -248,17 +248,45 @@ export type SqlCompletion =
   | { kind: 'operand'; column: string }
   | { kind: 'none' };
 
-/** ClickHouse's backslash escapes for control characters; any other escaped character stands for itself. */
-const SQL_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', 0: '\0', b: '\b', f: '\f', a: '\x07', v: '\v' };
+/** ClickHouse's single-character escapes (`parseEscapeSequence`); any other character stands for itself. */
+const SQL_ESCAPES: Record<string, string> = { a: '\x07', b: '\b', e: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', 0: '\0' };
+/** Escaped characters ClickHouse writes without their backslash; for any other printable one it keeps it (`\z`, `\%`). */
+const SQL_BARE_ESCAPES = new Set(['\\', "'", '"', '`', '/']);
+const utf8 = new TextEncoder();
+const utf8Text = new TextDecoder();
 
 /**
- * The text of a single-quoted literal's body, decoded in one pass: `\'` and `''` are each one apostrophe, so
- * `a\'\'b` (two apostrophes, as `sqlString` writes them) never collapses to one.
+ * The text of a single-quoted literal's body, decoded in one pass as ClickHouse decodes it: `\'` and `''` are each one
+ * apostrophe (so `a\'\'b`, as `sqlString` writes two, never collapses to one), `\xHH` are bytes read as UTF-8 together
+ * with the text around them (`\xC3\xA9` is é), and an unknown escape such as `\z` keeps its backslash.
  */
 export function unquoteSql(raw: string): string {
-  return raw.replace(/\\x([0-9A-Fa-f]{2})|\\([\s\S])|''/g, (_, hex: string | undefined, escaped: string | undefined) =>
-    hex !== undefined ? String.fromCharCode(Number.parseInt(hex, 16)) : escaped === undefined ? "'" : (SQL_ESCAPES[escaped] ?? escaped),
-  );
+  const bytes: number[] = [];
+  const text = (s: string) => bytes.push(...utf8.encode(s));
+  for (let i = 0; i < raw.length; ) {
+    const ch = raw[i] as string;
+    if (ch === "'" && raw[i + 1] === "'") {
+      text("'");
+      i += 2;
+    } else if (ch === '\\' && i + 1 < raw.length) {
+      const hex = /^x([0-9A-Fa-f]{2})/.exec(raw.slice(i + 1, i + 4));
+      if (hex) {
+        bytes.push(Number.parseInt(hex[1] as string, 16));
+        i += 4;
+        continue;
+      }
+      const next = String.fromCodePoint(raw.codePointAt(i + 1) as number);
+      const decoded = SQL_ESCAPES[next] ?? next;
+      const control = decoded.length === 1 && (decoded.charCodeAt(0) < 0x20 || decoded.charCodeAt(0) === 0x7f);
+      text(SQL_BARE_ESCAPES.has(decoded) || control ? decoded : `\\${decoded}`);
+      i += 1 + next.length;
+    } else {
+      const cp = String.fromCodePoint(raw.codePointAt(i) as number);
+      text(cp);
+      i += cp.length;
+    }
+  }
+  return utf8Text.decode(new Uint8Array(bytes));
 }
 
 /** A column reference ending at solid index `k`: an allowed identifier or `attributes['key']`. */

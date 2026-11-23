@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { sqlSuggestions } from '@/components/query-input/use-completions';
 import { parsePresenceSql } from './presence-filter';
 import { sqlColumn } from './query-catalog';
-import { tokenize } from './query-language';
+import { queryCompletionAt, tokenize } from './query-language';
 import { translateQueryToSql } from './query-translate';
 import {
   appendSqlPredicate,
@@ -543,5 +543,48 @@ describe("the tokenizer reads a dash that cannot negate as the server's bare wor
       ['action', 'x'],
       ['category', 'auth'],
     ]);
+  });
+});
+
+describe('translation follows the server parse, value by value (#220, round 2)', () => {
+  it('never changes how the server joins a value with an adjacent colon', () => {
+    expect(translateQueryToSql('action:x:OR category:auth')).toBeNull();
+    expect(translateQueryToSql('attr.url:https://demo.invalid')).toBeNull();
+    expect(translateQueryToSql('occurredAt:>2026-01-01T10:00:00Z')).toBe(
+      "timestamp > parseDateTime64BestEffortOrNull('2026-01-01T10:00:00.000Z', 3, 'UTC')",
+    );
+  });
+
+  it('compares numbers as the Float64 the server binds, and keeps rounded dates inside what toStartOfDay holds', () => {
+    expect(translateQueryToSql('attr.x:>1000000000000000100')).toBe("toFloat64OrNull(attributes['x']) > 1.0000000000000001e+18");
+    expect(translateQueryToSql('attr.expires:>now+40000d/d')).toBeNull();
+  });
+
+  it('refuses what the server reads differently or rejects', () => {
+    expect(translateQueryToSql('attempt:/2/')).toBeNull();
+    expect(translateQueryToSql('attr.x:[-3 TO -1]')).toBeNull();
+    expect(translateQueryToSql('attr.x:[-3 TO "-1"]')).toBe("(toFloat64OrNull(attributes['x']) >= -3 AND toFloat64OrNull(attributes['x']) <= -1)");
+    expect(translateQueryToSql('(action:x)-test&&category:auth')).toBeNull();
+    const group = (n: number) => `attempt:(${Array.from({ length: n }, (_, i) => i + 1).join(' OR ')})`;
+    expect(() => compileQuery(group(65))).toThrow();
+    expect(translateQueryToSql(group(65))).toBeNull();
+    expect(translateQueryToSql(group(64))).not.toBeNull();
+  });
+
+  it('decodes hex escapes as UTF-8 bytes and keeps the backslash of an unknown escape, as ClickHouse does', () => {
+    expect(unquoteSql(String.raw`\xC3\xA9`)).toBe('é');
+    expect(unquoteSql(String.raw`a\zb`)).toBe(String.raw`a\zb`);
+    expect(unquoteSql(String.raw`100\%`)).toBe(String.raw`100\%`);
+    expect(parsePresenceSql(String.raw`impersonator_id = '\xC3\xA9'`, 'impersonator_id')).toEqual({ value: 'é', negated: false });
+  });
+
+  it('keeps the field after a quoted run that follows `)-`', () => {
+    const q = '(action:x)-"two category:auth tail" tenant:t';
+    expect(
+      tokenize(q)
+        .filter((t) => t.kind === 'field')
+        .map((t) => t.field),
+    ).toEqual(['action', 'category', 'tenant']);
+    expect(queryCompletionAt(q, q.length)).toMatchObject({ kind: 'value', field: 'tenant' });
   });
 });
