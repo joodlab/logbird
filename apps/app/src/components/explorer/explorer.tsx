@@ -6,7 +6,7 @@ import { Sheet, SheetContent, SheetTitle } from '@logbird/ui/components/ui/sheet
 import { Switch } from '@logbird/ui/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { cn } from '@logbird/ui/lib/utils';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { ArrowUpIcon, ChevronDownIcon, CircleAlertIcon, FilterIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchXIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -120,7 +120,6 @@ function ProjectExplorer({
   const rangeName = rangeLabelOverride ?? rangeLabel(range);
   const complete = rangeComplete || range === ALL_RANGE;
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
-  const queryClient = useQueryClient();
   // The base filter (an entity or support agent) must constrain all of `q`: `scopedQuery` combines it only when `q`
   // parses, as one group. A `q` that does not parse is never sent (`blocked`); the bar shows its parse error.
   const scoped = scopedQuery(baseQuery ?? '', q);
@@ -365,8 +364,10 @@ function ProjectExplorer({
       ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
       : 'Remove a filter or change the query.';
 
-  // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys.
-  const knownKeys = new Set((queryClient.getQueryData(fieldsQuery(projectId, range).queryKey)?.data ?? []).map((f) => f.key));
+  // The same fields the bar knows: core fields, explicit attributes, and this project's attribute keys (loaded here too,
+  // so a search opened straight from a link still gets its offer once they arrive).
+  const projectFields = useQuery({ ...fieldsQuery(projectId, range), enabled: lang === 'query' && Boolean(q) });
+  const knownKeys = new Set((current(projectFields)?.data ?? []).map((f) => f.key));
   const conversion =
     lang === 'query' && q
       ? suggestedConversion(

@@ -521,7 +521,10 @@ function querySuggestions(input: CompletionInput): Suggestion[] {
     const operators = OPERATOR_ROWS.filter((o) => (context.afterTerm || o.op === 'NOT' || o.op === '-' || o.op === '( )') && !replacesColon)
       .filter((o) => (p ? /^[A-Z]+$/.test(o.op) && o.op.startsWith(p.toUpperCase()) && o.op !== p : true))
       .map((o): Suggestion => {
-        const text = o.insert ?? o.op;
+        // After a term that ends right here (`action:(booked)|`) an operator needs a space before it: a `-` glued to `)`
+        // starts a word, never a NOT.
+        const lead = context.from > 0 && context.from === context.to && !/[\s(]/.test(draft[context.from - 1] ?? '') ? ' ' : '';
+        const text = lead + (o.insert ?? o.op);
         const space = o.insert || /^\s/.test(after(context.to)) ? '' : ' ';
         return {
           id: `op:${o.op}`,
@@ -599,7 +602,8 @@ function queryValueItems(input: CompletionInput, context: Extract<QueryCompletio
   const pl = p.toLowerCase();
   const core = coreField(context.field);
   const type = core?.type ?? 'attr';
-  const bare = !context.op && !context.quoted && !context.inGroup && p === '';
+  // Operators and templates only where no value is typed yet: `attempt:|2` keeps its 2 (`>` there would leave `attempt:>`).
+  const bare = !context.op && !context.quoted && !context.inGroup && p === '' && context.to === context.from;
   const trailing = (keepOpen?: boolean) => (keepOpen || context.inGroup || /^[\s)]/.test(after) ? '' : ' ');
   const valuesGroup = `Values for ${context.field}`;
   const items: Suggestion[] = [];

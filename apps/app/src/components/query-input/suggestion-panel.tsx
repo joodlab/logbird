@@ -105,6 +105,7 @@ export function SuggestionPanel({
                   aria-selected={i === active}
                   data-from={s.from}
                   data-insert={s.insert}
+                  data-keep-open={s.keepOpen ? '' : undefined}
                   data-kind={s.kind}
                   data-to={s.to}
                   className={cn(

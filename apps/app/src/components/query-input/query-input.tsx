@@ -16,7 +16,7 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { SearchIcon, XIcon } from 'lucide-react';
-import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { suggestQuery, viewsQuery } from '@/lib/api/queries';
 import { coreField, sqlColumn } from '@/lib/query-catalog';
@@ -164,11 +164,8 @@ export function QueryInput({
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  /** The user moved through the list (arrows / hover), so Enter means "pick this". */
+  /** The reader moved to the highlighted row with the arrows, so Enter means "pick this" (hovering does not count). */
   const [navigated, setNavigated] = useState(false);
-  /** A filter offered for the text search that just ran (`action=booked` → `action:booked`), shown until the text changes. */
-  const [offer, setOffer] = useState<{ q: string; text: string } | null>(null);
-  const offerShown = Boolean(offer) && lang === 'query' && draft === offer?.q;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const listId = `qi-list-${lang}`;
@@ -191,6 +188,15 @@ export function QueryInput({
     recent: recent.items,
     views: showViews ? views.data : undefined,
   });
+  // A filter offered for the text search that just ran (`action=booked` → `action:booked`), shown until the text changes.
+  // Worked out live, so it appears once the project's field names arrive even when they arrive after the run.
+  const [offerFor, setOfferFor] = useState<string | null>(null);
+  const offer = useMemo(() => {
+    if (offerFor === null || lang !== 'query' || draft !== offerFor) return null;
+    const text = suggestedConversion(draft, completions.fixes);
+    return text ? { q: draft, text } : null;
+  }, [offerFor, lang, draft, completions.fixes]);
+  const offerShown = offer !== null;
   const { suggestions, hint } = completions;
   const showPanel = open && (suggestions.length > 0 || Boolean(hint?.parts.length));
   const showList = showPanel && suggestions.length > 0;
@@ -239,14 +245,14 @@ export function QueryInput({
 
   const submit = (q = draft, nextLang = lang) => {
     setOpen(false);
-    // Exactly what was typed: only a blank draft submits as empty.
-    let text = q.trim() ? q : '';
-    let offered: string | null = null;
+    // Exactly what was typed, spaces included.
+    let text = q;
+    let ran: string | null = null;
     // Familiar Lucene / KQL spellings are converted when the query runs only when the server would reject them as
     // typed. A query it accepts runs exactly as typed; a KQL-looking one gets the filter offered beside the bar instead.
     if (nextLang === 'query' && q === draft) {
       const fixes = fixesOnSubmit(draft, completions.fixes);
-      offered = fixes.length ? null : suggestedConversion(draft, completions.fixes);
+      ran = fixes.length ? null : draft;
       if (fixes.length) {
         const original = text;
         text = applyFixes(draft, fixes);
@@ -257,8 +263,8 @@ export function QueryInput({
         });
       }
     }
-    setOffer(offered ? { q: text, text: offered } : null);
-    if (text) recent.add(text, nextLang);
+    setOfferFor(ran);
+    if (text.trim()) recent.add(text, nextLang);
     onSubmit(text, nextLang);
   };
 
@@ -267,7 +273,7 @@ export function QueryInput({
     if (!offer) return;
     const original = offer.q;
     setText(offer.text, offer.text.length);
-    setOffer(null);
+    setOfferFor(null);
     recent.add(offer.text, 'query');
     onSubmit(offer.text, 'query');
     toast('Converted to Logbird syntax', { description: offer.text, action: { label: 'Undo', onClick: () => onSubmit(original, 'query') } });
@@ -335,6 +341,8 @@ export function QueryInput({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Confirming an IME candidate is never a command: not running, not choosing a row, not applying the offer.
+    if (e.key === 'Enter' && (e.nativeEvent.isComposing || e.keyCode === 229)) return;
     if (e.key === 'Enter' && e.altKey && offerShown) {
       e.preventDefault();
       applyOffer();
@@ -358,31 +366,20 @@ export function QueryInput({
       return;
     }
     // Tab is left alone: a keyboard user leaving the bar must never rewrite the query (WCAG 3.2.2). Blur closes the panel.
-    const prefix = completions.prefix.toLowerCase();
-    const partial =
-      Boolean(prefix) &&
-      activeSuggestion !== undefined &&
-      activeSuggestion.kind !== 'recent' &&
-      activeSuggestion.kind !== 'fix' &&
-      // A fully typed name (`impersonator` for `impersonator:*`) is not partial: Enter runs.
-      activeSuggestion.label.toLowerCase().replace(/:\*?$/, '') !== prefix &&
-      activeSuggestion.insert.trim().toLowerCase().replace(/:\*?$/, '') !== prefix;
     if (e.key === 'ArrowRight' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && activeSuggestion && activeSuggestion.id !== 'loading') {
-      // → completes like a shell or an address bar: only from the end of the text (or right after a fix), so moving the
+      // → completes like a shell or an address bar: the highlighted row, only from the end of the text, so moving the
       // caret through the query still works.
       const el = e.currentTarget;
       const at = el.selectionStart;
       const collapsed = at === el.selectionEnd;
       const atEnd = at === draft.length;
-      if (collapsed && atEnd && (navigated || partial || activeSuggestion.kind === 'fix')) {
+      if (collapsed && atEnd) {
         e.preventDefault();
         accept(activeSuggestion);
         return;
       }
     }
     if (e.key === 'Enter') {
-      // Confirming an IME candidate is not running the query.
-      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       if (e.shiftKey && lang === 'sql' && !(showList && navigated)) return; // newline
       e.preventDefault();
       // Plain Enter runs what the reader typed. Only a suggestion the reader moved to with the arrows is accepted: the
@@ -559,8 +556,12 @@ export function QueryInput({
           stale={completions.stale}
           onAccept={accept}
           onHover={(i) => {
-            // Hovering only highlights a row: Enter never takes it as chosen (a click or the arrows do).
-            if (i !== activeIndex) setActive(i);
+            // Hovering only highlights a row: Enter never takes it as chosen (a click or the arrows do), so a row the reader
+            // moved to with the arrows stops being chosen once the pointer highlights another.
+            if (i !== activeIndex) {
+              setActive(i);
+              setNavigated(false);
+            }
           }}
           onRemoveRecent={(r) => recent.remove(r.q, r.lang)}
           suggestions={suggestions}

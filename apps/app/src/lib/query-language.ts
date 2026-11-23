@@ -146,7 +146,7 @@ export function termsOutside(q: string, from: number, to: number): string | null
 }
 
 /** Endings that finish a query someone is still typing (`attempt:`, `(a`, `"ab`), tried in order to check it. */
-const UNFINISHED = ['', 'x', ' x', 'x)', ' x)', '"', 'x"'];
+const UNFINISHED = ['', ' x', 'x', ' x)', 'x)', '"', 'x"'];
 
 /**
  * The query after inserting `insert` over `[from, to)`, as the reader will finish it: when it does not parse yet (a key
@@ -156,17 +156,51 @@ const UNFINISHED = ['', 'x', ' x', 'x)', ' x)', '"', 'x"'];
  */
 export function completedForCheck(q: string, from: number, to: number, insert: string, caretOffset = insert.length) {
   const at = Math.min(caretOffset, insert.length);
-  const forms = [insert, `${insert.slice(0, at)} x${insert.slice(at)}`, insert.replace(/([[{])\s*TO\s*([\]}])/, '$1x TO x$2')];
+  const typed = `${insert.slice(0, at)} x${insert.slice(at)}`;
+  // As it stands first: a query that already parses runs like that if the reader presses Enter now.
+  const forms = [insert, typed, insert.replace(/([[{])\s*TO\s*([\]}])/, '$1x TO x$2')];
   const build = (form: string) => ({ text: q.slice(0, from) + form + q.slice(to), from, to: from + form.length });
-  return forms.map(build).find((c) => editableExpression(c.text)) ?? build(forms[1] as string);
+  return forms.map(build).find((c) => editableExpression(c.text)) ?? build(typed);
+}
+
+/**
+ * Which characters of `text` outside `[from, to)` the server reads as part of a term (1) or as an operator, a bracket or
+ * space between terms (0). Two queries with the same map read every outside character the same way: no completion
+ * glued an operator into a term (`one AND` + `impersonator:*` is the field `ANDimpersonator`) or split a term apart.
+ */
+function readingOutside(text: string, from: number, to: number): string | null {
+  const expression = editableExpression(text);
+  if (!expression) return null;
+  const covered = new Uint8Array(text.length);
+  const visit = (node: QueryAtom) => {
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else covered.fill(1, node.start, node.end);
+  };
+  for (const branch of expression) for (const part of branch) visit(part.atom);
+  return `${covered.slice(0, from).join('')}|${covered.slice(to).join('')}`;
+}
+
+/** The text `q` up to a cut at or after `to` that some ending finishes, with that ending; null when none does. */
+function finishable(q: string, to: number): { base: string; ending: string } | null {
+  for (let cut = q.length; cut >= to; cut--) {
+    // Whole terms only: cut at the end of the text or before a space.
+    if (cut < q.length && !/\s/.test(q[cut] ?? '')) continue;
+    const base = q.slice(0, cut);
+    const ending = UNFINISHED.find((end) => editableExpression(base + end));
+    if (ending !== undefined) return { base, ending };
+  }
+  return null;
 }
 
 /**
  * What to insert so that accepting a completion changes only the term it completes: the insertion as built, else
- * without its trailing space, else (a plain value only, where quotes mean the same) quoted, whichever first leaves every
- * other term of the server's parse unchanged (a space before `-tenant:west` would turn the attribute `-tenant` into NOT
- * tenant). Null when none does: the completion is not applied. A query still being typed elsewhere (`… attempt:`) is
- * checked as finished with a placeholder; one that cannot be finished that way takes the insertion as built.
+ * without its trailing space, else (a plain value only, where quotes mean the same) quoted, else after a space when it
+ * would otherwise glue onto the text before it, whichever first leaves every other term of the server's parse unchanged
+ * and every character outside the span read the same way (a space before `-tenant:west` would turn the attribute
+ * `-tenant` into NOT tenant). Null when none does: the completion is not applied. A query still being typed (`… attempt:`)
+ * is checked as finished with a placeholder; when the rest cannot be finished that way (`… attempt:[`), the text up to
+ * the last point that can is checked, so the neighbours of the completed term always are.
  * `structural` false is for an operator the reader chose (`OR`): it may change the OR branches, never another term.
  */
 export function neighbourSafeInsert(
@@ -178,21 +212,25 @@ export function neighbourSafeInsert(
   quotable = false,
   structural = true,
 ): string | null {
-  const ending = UNFINISHED.find((end) => editableExpression(q + end));
-  if (ending === undefined) return insert;
-  const terms = (text: string, a: number, b: number) => {
-    const out = termsOutside(text + ending, a, b);
-    return out === null || structural ? out : out.replace(/(^|\|)\["[^"]*/g, '$1["');
-  };
-  const before = terms(q, from, to);
+  const finished = finishable(q, to);
+  if (!finished) return insert;
+  const { base, ending } = finished;
+  const shape = (out: string | null) => (out === null || structural ? out : out.replace(/(^|\|)\["[^"]*/g, '$1["'));
+  // At the end of the text the placeholder ending stands for what the reader types next, so it is no neighbour.
+  const atEnd = to === base.length;
+  const before = shape(termsOutside(base + ending, from, atEnd ? base.length + ending.length : to));
+  const reading = readingOutside(base + ending, from, atEnd ? base.length + ending.length : to);
   const bare = insert.trimEnd();
   const candidates = [insert, bare];
   const plain = readQueryValue(bare);
   if (quotable && bare && !/^["/(]/.test(bare) && !plain.wildcard) candidates.push(quoteQueryValue(plain.value));
+  if (!quotable && from > 0 && !/[\s(]/.test(q[from - 1] ?? '') && !/^\s/.test(insert)) candidates.push(` ${insert}`, ` ${bare}`);
   for (const candidate of candidates) {
-    const check = completedForCheck(q + ending, from, to, candidate, Math.min(caretOffset, candidate.length));
-    const after = termsOutside(check.text, check.from, check.to);
-    if (after !== null && (structural ? after : after.replace(/(^|\|)\["[^"]*/g, '$1["')) === before) return candidate;
+    const shift = candidate.length - candidate.trimStart().length - (insert.length - insert.trimStart().length);
+    const check = completedForCheck(base + ending, from, to, candidate, Math.min(caretOffset + shift, candidate.length));
+    const end = atEnd ? check.text.length : check.to;
+    const after = shape(termsOutside(check.text, check.from, end));
+    if (after !== null && after === before && readingOutside(check.text, check.from, end) === reading) return candidate;
   }
   return null;
 }
@@ -488,7 +526,7 @@ export function scopedQuery(base: string, user: string): ScopedQuery {
   const locked = base.trim();
   if (!user.trim()) return { q: locked, offset: 0, problem: null };
   // No locked filter: the reader's query alone, exactly as before (the server reports its own syntax errors).
-  if (!locked) return { q: user.trim(), offset: user.trimStart().length - user.length, problem: null };
+  if (!locked) return { q: user, offset: 0, problem: null };
   try {
     parseQueryExpression(user);
   } catch (error) {
@@ -904,7 +942,8 @@ export function queryCompletionAt(q: string, caret: number): QueryCompletion {
       const colon = q.indexOf(':', atCaret.key.end);
       if (caret <= colon) return key(atCaret.start, colon + 1);
       const completion = serverValueCompletion(q, caret, atCaret);
-      if (completion === 'after') return key(caret, caret);
+      // Right after a closed value group (`action:(booked)`) a term has ended: OR and AND may come next.
+      if (completion === 'after') return { kind: 'key', prefix: '', from: caret, to: caret, afterTerm: true };
       if (completion) return completion;
     } else {
       // Free text, a phrase or a regex the server reads as one word: complete that word, never into a neighbour.

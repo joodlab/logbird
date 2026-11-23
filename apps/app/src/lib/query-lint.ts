@@ -45,7 +45,41 @@ export function lintQuery(q: string, isField: (name: string) => boolean): QueryF
   // Never from inside a value the server reads as one: text in `@meta:"please !tenant:t here"` is data, not syntax to
   // fix, even when the proposed span runs on past the value's end (`"meta":"please !tenant:t"tail`).
   const values = serverValueSpans(q);
-  return lintTokens(q, isField).filter((f) => !values.some((v) => f.start >= v.start && f.start < v.end));
+  const fixes = lintTokens(q, isField).filter((f) => !values.some((v) => f.start >= v.start && f.start < v.end));
+  const terms = serverTermSpans(q);
+  if (!terms) return fixes;
+  // A query the server accepts: a fix respells whole server terms, one term or the words of a comparison (`tenant =`),
+  // never a span the console's tokenizer read differently (`action: (ab"cd OR next) tenant:west` is two field terms),
+  // and only when the result still parses (`action=OR` has no filter form).
+  return fixes.filter((f) => {
+    const starts = (t: { start: number }) => f.start === t.start || (f.start === t.start - 1 && /[-!]/.test(q[f.start] ?? ''));
+    const covered = terms.filter((t) => t.start < f.end && t.end > f.start);
+    const whole =
+      covered.length > 0 &&
+      covered.every((t) => t.start >= f.start - 1 && t.end <= f.end) &&
+      covered.some(starts) &&
+      covered.some((t) => t.end === f.end) &&
+      (covered.length === 1 || covered.every((t) => t.kind === 'text'));
+    const fixed = q.slice(0, f.start) + f.replacement + q.slice(f.end);
+    return whole && (serverAccepts(fixed) || (f.incomplete === true && serverAccepts(`${fixed}x`)));
+  });
+}
+
+/** The spans of the server's terms (fields and words, at any depth); null when `q` does not parse. */
+function serverTermSpans(q: string): { start: number; end: number; kind: string }[] | null {
+  const spans: { start: number; end: number; kind: string }[] = [];
+  const visit = (node: QueryAtom) => {
+    if (node.kind === 'not') visit(node.operand);
+    else if (node.kind === 'group') for (const branch of node.expression) for (const part of branch) visit(part.atom);
+    else spans.push({ start: node.start, end: node.end, kind: node.kind });
+  };
+  try {
+    for (const branch of parseQueryExpression(q)) for (const part of branch) visit(part.atom);
+  } catch (error) {
+    if (error instanceof QueryError) return null;
+    throw error;
+  }
+  return spans;
 }
 
 /** Where the server's parse has field values (none when it does not parse: then every fix is a candidate). */
