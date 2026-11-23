@@ -191,11 +191,13 @@ public class Step4FollowUpTests
         Assert.Null(JsJson.ToUtf8(node, full.Length - 1));
     }
 
-    // ---------------------------------------------------------------- R07: a structured change field is written iteratively
+    // ---------------------------------------------------------------- R07: a structured change field never recurses
 
     [Fact]
-    public void Redact_matches_a_structured_change_field_as_deep_as_the_event_allows()
+    public void A_structured_change_field_as_deep_as_the_event_allows_is_handled_and_never_matched()
     {
+        // Step-4 PR 4 (parity with TypeScript): only a string field is matched, so a structured one is left as it is,
+        // whatever text it holds; reading it never recurses.
         // The field sits at level 4 of the event; 1,003 levels under it make the event 1,007 deep (within 1,008), past
         // System.Text.Json's own writer limit of 1,000.
         JsonNode field = new JsonArray("password");
@@ -212,7 +214,8 @@ public class Step4FollowUpTests
 
         var redacted = new Redactor().Redact(eventJson);
 
-        Assert.Equal("[redacted]", redacted["changes"]![0]!["after"]!.GetValue<string>());
+        Assert.Equal("old-secret", redacted["changes"]![0]!["before"]!.GetValue<string>());
+        Assert.Equal("new-secret", redacted["changes"]![0]!["after"]!.GetValue<string>());
     }
 
     // ---------------------------------------------------------------- R08: a notice that could not be queued is retried
@@ -295,12 +298,17 @@ public class Step4FollowUpTests
     [Fact]
     public async Task Identifier_warnings_skipped_together_count_one_lost_notification_each()
     {
-        // Warnings are queued for accepted events, one entry per event; the first OnError blocks the notifications.
+        // Track posts an event's identifier warnings as one notification; the first OnError blocks the notifications.
         var errorGate = new ManualResetEventSlim();
+        var blocked = new ManualResetEventSlim();
         await using var live = Client(Options(o =>
         {
             o.MaxQueueSize = 1_000;
-            o.OnError = _ => errorGate.Wait();
+            o.OnError = _ =>
+            {
+                blocked.Set();
+                errorGate.Wait();
+            };
 
             // One event per batch, so every event drains whatever the sender's timing (no partial batch waits an hour).
             o.BatchSize = 1;
@@ -308,13 +316,19 @@ public class Step4FollowUpTests
         try
         {
             var longId = new string('a', 300);
+
+            // The notification thread takes the first warning and blocks in OnError before the rest are posted, so the
+            // queue it leaves behind stays full (taking the first one later would free a slot for the event below).
+            live.Track(new AuditEvent("filler") { Actor = AuditActor.User(longId) });
+            Assert.True(blocked.Wait(TimeSpan.FromSeconds(10)));
             for (var i = 0; i < 1_100; i++)
             {
                 live.Track(new AuditEvent("filler") { Actor = AuditActor.User(longId) });
             }
 
             // The notification queue is now full of one-warning entries behind the blocked first one; an event with two
-            // warnings is skipped as one entry and counts two. The event queue is drained first, so tracking it evicts nothing.
+            // warnings is skipped as one entry and counts two, on the thread calling Track. The event queue is drained
+            // first, so tracking it evicts nothing.
             await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
             {
                 while (live.Stats.QueueLength > 0)

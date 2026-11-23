@@ -336,6 +336,7 @@ Logbird.QueueFullBehavior
 Logbird.QueueFullBehavior.DropNewest = 1 -> Logbird.QueueFullBehavior
 Logbird.QueueFullBehavior.DropOldest = 0 -> Logbird.QueueFullBehavior
 Logbird.RedactionOptions
+Logbird.RedactionOptions.AddedKeys.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Logbird.RedactionOptions.AddKeys(params string![]! names) -> Logbird.RedactionOptions!
 Logbird.RedactionOptions.ChangeFields.get -> System.Text.RegularExpressions.Regex?
 Logbird.RedactionOptions.ChangeFields.set -> void

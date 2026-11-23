@@ -348,7 +348,69 @@ export class Logbird {
 }
 
 export const DEFAULT_SECRET_KEYS = /passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key/i;
-/** Redact a deep copy; combine this hook with application-specific filtering as needed. */
+/**
+ * The parties' identifier and classification fields: never redacted, whatever the pattern. A redacted id would merge
+ * every identity into one, and an executor's attempt must stay a number. To pseudonymise an id, transform it before
+ * recording. The .NET SDK's `Redactor.IdentifierFields` lists the same fields.
+ */
+export const IDENTIFIER_FIELDS: readonly string[] = Object.freeze([
+  'actor.type',
+  'actor.id',
+  'impersonator.id',
+  'executor.type',
+  'executor.id',
+  'executor.jobId',
+  'executor.attempt',
+  'tenant.id',
+  'targets[].type',
+  'targets[].id',
+]);
+
+type Level = 'nested' | 'top' | 'actor' | 'impersonator' | 'executor' | 'tenant' | 'targets' | 'target' | 'changes' | 'change' | 'plain';
+
+const IDENTITY: Record<Level, readonly string[]> = {
+  nested: [],
+  top: ['id', 'action'],
+  actor: ['id', 'type'],
+  impersonator: ['id'],
+  executor: ['id', 'type', 'jobId', 'attempt'],
+  tenant: ['id'],
+  targets: [],
+  target: ['id', 'type'],
+  changes: [],
+  change: [],
+  plain: [],
+};
+
+const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'impersonator', executor: 'executor', tenant: 'tenant', targets: 'targets' };
+
+/**
+ * Redact a deep copy; combine this hook with application-specific filtering as needed.
+ *
+ * A key matches when the pattern matches any part of it (the default redacts `tokenCount` and `secretary` too); anchor
+ * your own pattern (`/^name$/`) to match whole keys. A matching key keeps its name and its value becomes the replacement,
+ * at any depth. Identity is never redacted: the top-level `id` and `action`, and {@link IDENTIFIER_FIELDS}. A pattern
+ * that matches a party's own key (`actor`, `impersonator`, `executor`, `tenant` or `targets`), or a target's index, redacts
+ * every other field of that party and keeps its identifier fields; a party object is never replaced as a whole (one that
+ * is not an object is replaced like any other value). A change's
+ * values are replaced when its `field` is a string the change pattern matches.
+ *
+ * The .NET SDK's `Redactor` follows the same rules, checked against one shared fixture: with the default pattern (and
+ * names added like the .NET `AddKeys`), both redact exactly the same keys. A pattern of your own runs on each platform's
+ * regular-expression engine, which can differ at the edges (in .NET, `$` also matches before a final line feed; flags
+ * such as `i` fold case differently), so keep custom patterns to plain alternatives and anchors that mean the same in
+ * both. It returns the event as JSON will send it: redaction runs inside `JSON.stringify` itself (as its replacer), so
+ * every value is read, and every `toJSON` applied, exactly as sending the event reads them, and a matched value is
+ * replaced before it is serialized (a value JSON cannot hold, such as a `BigInt` under a secret key, never stops the
+ * event). An object reached twice becomes two copies, and an event with a cycle throws a `TypeError`, as sending it would.
+ *
+ * The contract: `redact()` is exact for JSON data, which is what `EventInput` types: plain objects, arrays, primitives,
+ * and `toJSON` values (such as `Date`) without side effects on other parts of the event. Getters or `toJSON` with side
+ * effects on other parts of the event, or anything that changes the event while it is serialized, are outside it. A
+ * change whose `field` is a getter, an inherited or non-enumerable property, or a value (an object or a function) with a
+ * `toJSON` has its `before` and `after` redacted, whatever the pattern; any other non-string `field`, or none, is not
+ * matched.
+ */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
   const keys = options.keys ?? DEFAULT_SECRET_KEYS;
   const fields = options.changeFields ?? keys;
@@ -358,21 +420,87 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
     return pattern.test(key);
   };
   return (event) => {
-    const copy = structuredClone(event);
-    function walk(value: unknown, top = false): void {
-      if (!value || typeof value !== 'object') return;
-      for (const [key, child] of Object.entries(value)) {
-        if (top && (key === 'id' || key === 'action')) continue;
-        if (matches(keys, key)) (value as Record<string, unknown>)[key] = replacement;
-        else walk(child);
+    // Redaction runs as JSON.stringify's replacer, so the event is read exactly as sending it reads it (each getter once,
+    // in order; toJSON applied first; boxed primitives unwrapped; a cycle throws a TypeError). The replacer sees each
+    // value after toJSON and before it is serialized: a matched value is replaced without being serialized. Each object
+    // it lets through is recorded with the rules for its own children; serialization is depth-first, so an object reached
+    // twice is finished in its first place before its second. The result is the event as JSON will send it, which is also
+    // the tree the .NET SDK redacts.
+    type Context = { level: Level; whole: boolean; changed: boolean };
+    const contexts = new WeakMap<object, Context>();
+    const omitted = (value: unknown) => value === undefined || typeof value === 'function' || typeof value === 'symbol';
+    // A boxed primitive as JSON.stringify tells one, by its internal slot (any realm), not by its prototype: only a real
+    // Number, String, Boolean or BigInt object is serialized as its primitive.
+    const brands: Array<(this: unknown) => unknown> = [
+      Number.prototype.valueOf,
+      String.prototype.valueOf,
+      Boolean.prototype.valueOf,
+      BigInt.prototype.valueOf,
+    ];
+    const boxed = (value: object) =>
+      brands.some((unbox) => {
+        try {
+          unbox.call(value);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    const isObject = (value: unknown): value is Record<string, unknown> =>
+      !!value && typeof value === 'object' && !Array.isArray(value) && !boxed(value);
+    const keep = (value: unknown, context: Context) => {
+      if (value && typeof value === 'object') contexts.set(value, context);
+      return value;
+    };
+    const plain: Context = { level: 'plain', whole: false, changed: false };
+    const nested: Context = { level: 'nested', whole: false, changed: false };
+    // A change's values are decided from its field's property descriptor, before anything is serialized and without
+    // reading the field. An own, enumerable string data property is matched against the change pattern. A field whose
+    // value JSON cannot tell this way (a getter, an inherited or non-enumerable property, or a value with a toJSON) fails
+    // closed: the entry's before and after are redacted. Any other JSON value, or no field, is not matched, as in .NET.
+    const changeEntry = (entry: Record<string, unknown>) => {
+      const own = Object.getOwnPropertyDescriptor(entry, 'field');
+      let changed: boolean;
+      if (own === undefined) changed = 'field' in entry;
+      else if (!('value' in own) || !own.enumerable) changed = true;
+      else if (typeof own.value === 'string') changed = matches(fields, own.value);
+      else
+        changed =
+          !!own.value &&
+          (typeof own.value === 'object' || typeof own.value === 'function') &&
+          typeof (own.value as { toJSON?: unknown }).toJSON === 'function';
+      return keep(entry, { level: 'change', whole: false, changed });
+    };
+    function replacer(this: unknown, key: string, value: unknown): unknown {
+      const holder = this && typeof this === 'object' ? contexts.get(this) : undefined;
+      if (!holder) return keep(value, { level: 'top', whole: false, changed: false });
+      const { level, whole, changed } = holder;
+      if (level === 'plain') return keep(value, plain);
+      if (Array.isArray(this)) {
+        if (level === 'targets') {
+          // Target entries are parties: never replaced as a whole, and their type and id are kept. A pattern matching
+          // an entry's index (or the targets key) redacts the entry's other fields; a scalar entry is replaced.
+          const matched = whole || matches(keys, key);
+          if (isObject(value)) return keep(value, { level: 'target', whole: matched, changed: false });
+          return matched ? replacement : keep(value, nested);
+        }
+        // Array entries are matched by their index ("0", "1", ...), as Object.entries gives them.
+        if (matches(keys, key)) return replacement;
+        // Change values are decided on the field as recorded; only an object entry with a string field is matched.
+        if (level === 'changes' && isObject(value)) return changeEntry(value);
+        return keep(value, nested);
       }
+      if (IDENTITY[level].includes(key)) return keep(value, plain);
+      if (whole || (changed && (key === 'before' || key === 'after'))) return omitted(value) ? undefined : replacement;
+      const party = level === 'top' && Object.hasOwn(PARTIES, key) ? PARTIES[key]! : 'nested';
+      const matched = matches(keys, key);
+      if (party !== 'nested' && (party === 'targets' ? Array.isArray(value) : isObject(value))) {
+        // A party is never replaced as a whole; a match redacts everything but its identity.
+        return keep(value, { level: party, whole: matched, changed: false });
+      }
+      if (matched) return omitted(value) ? undefined : replacement;
+      return keep(value, level === 'top' && key === 'changes' && Array.isArray(value) ? { level: 'changes', whole: false, changed: false } : nested);
     }
-    for (const change of copy.changes ?? []) {
-      if (!matches(fields, change.field)) continue;
-      if (Object.hasOwn(change, 'before')) change.before = replacement;
-      if (Object.hasOwn(change, 'after')) change.after = replacement;
-    }
-    walk(copy, true);
-    return copy;
+    return JSON.parse(JSON.stringify(event, replacer)) as EventInput;
   };
 }
