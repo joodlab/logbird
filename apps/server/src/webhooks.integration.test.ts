@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fieldMaskKey, insertEvents, normalizeEvent } from '@logbird/clickhouse';
 import {
   createWebhookResponseSchema,
+  DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS,
   listWebhooksResponseSchema,
   MAX_WEBHOOK_ENDPOINTS,
   SCOPE_MASKS,
@@ -210,6 +211,42 @@ it('creates, lists, reads, patches and deletes configuration; exposes the encryp
   expect((await request(`${base()}/${endpoint.id}`, 'DELETE')).status).toBe(204);
   expect((await request(`${base()}/${endpoint.id}`)).status).toBe(404);
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(0);
+});
+
+it('stores the delivery window: 7 days by default, whole hours or null, and stamps a change', async () => {
+  const path = (id: string) => `${base()}/${id}`;
+  const patch = async (id: string, body: unknown) => (await request(path(id), 'PATCH', body)).json();
+  const stored = (id: string) => prisma.webhookEndpoint.findUniqueOrThrow({ where: { id } });
+  const defaulted = (await create('owner', { url: receiver })).endpoint;
+  expect(DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS).toBe(604_800);
+  expect(defaulted).toMatchObject({ deliveryWindowSeconds: DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS, lateEvents: { count: 0 } });
+  expect((await stored(defaulted.id)).deliveryWindowChangedAt.toISOString()).toBe(defaulted.createdAt);
+  expect(defaulted.lateEvents.since).toBe(defaulted.createdAt);
+  const hourly = (await create('owner', { url: receiver, deliveryWindowSeconds: 3600 })).endpoint;
+  const unlimited = (await create('owner', { url: receiver, deliveryWindowSeconds: null })).endpoint;
+  expect(hourly.deliveryWindowSeconds).toBe(3600);
+  expect(unlimited.deliveryWindowSeconds).toBeNull();
+  // Whole hours from 1 hour to 3,650 days; anything else is refused before it is stored.
+  for (const deliveryWindowSeconds of [0, 1800, 3599, 5400, 315_363_600, -3600, 3600.5, '3600']) {
+    const response = await request(base(), 'POST', { url: receiver, deliveryWindowSeconds });
+    expect(response.status, String(deliveryWindowSeconds)).toBe(422);
+    expect((await response.json()).error.code).toBe('validation_error');
+  }
+  expect((await request(path(hourly.id), 'PATCH', { deliveryWindowSeconds: 1800 })).status).toBe(422);
+  // PATCH: omitted keeps it, the same value keeps the change time, a new value or null stamps it.
+  const before = await stored(hourly.id);
+  expect(await patch(hourly.id, { description: 'QA window' })).toMatchObject({ deliveryWindowSeconds: 3600 });
+  await patch(hourly.id, { deliveryWindowSeconds: 3600 });
+  expect((await stored(hourly.id)).deliveryWindowChangedAt).toEqual(before.deliveryWindowChangedAt);
+  const widened = await patch(hourly.id, { deliveryWindowSeconds: 86_400 });
+  expect(widened).toMatchObject({ deliveryWindowSeconds: 86_400 });
+  const changed = await stored(hourly.id);
+  expect(+changed.deliveryWindowChangedAt).toBeGreaterThan(+before.deliveryWindowChangedAt);
+  expect(widened.lateEvents.since).toBe(changed.deliveryWindowChangedAt.toISOString());
+  expect(await patch(hourly.id, { deliveryWindowSeconds: null })).toMatchObject({ deliveryWindowSeconds: null, lateEvents: { count: 0 } });
+  // The window applies to events discovered after the save: the cursor does not move.
+  expect((await stored(hourly.id)).cursorReceivedAt).toEqual(before.cursorReceivedAt);
+  for (const id of [defaulted.id, hourly.id, unlimited.id]) expect((await request(path(id), 'DELETE')).status).toBe(204);
 });
 
 it('returns a retryable 503 for PATCH, disable and rotation during a locked dispatch', async () => {
