@@ -298,6 +298,35 @@ it('reports the same late count on create and on an immediate read, even after a
   }
 });
 
+it('saves a PATCH and reports an unknown late count while the lateness read fails; GET still fails closed', async () => {
+  const hook = (await create('owner', { url: receiver, deliveryWindowSeconds: 3600 })).endpoint;
+  const query = clickhouse.query.bind(clickhouse);
+  const failing = vi.spyOn(clickhouse, 'query').mockImplementation(async (params) => {
+    if (params.query.includes('events_lateness_by_hour')) throw Object.assign(new Error('Connection refused'), { code: 'ECONNREFUSED' });
+    return query(params);
+  });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    // Disabling succeeds with count null: the pre-read failed, and the save does not depend on it.
+    const disabled = await request(`${base()}/${hook.id}`, 'PATCH', { enabled: false });
+    expect(disabled.status).toBe(200);
+    expect(webhookEndpointSchema.parse(await disabled.json())).toMatchObject({ enabled: false, lateEvents: { count: null } });
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).toMatchObject({ enabled: false, disabledReason: 'manual' });
+    const renamed = await request(`${base()}/${hook.id}`, 'PATCH', { description: 'QA unknown late count' });
+    expect(webhookEndpointSchema.parse(await renamed.json()).lateEvents.count).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"event":"webhook.late_events_unavailable"'));
+    // A changed window counts 0 without any read.
+    const rewindowed = webhookEndpointSchema.parse(await (await request(`${base()}/${hook.id}`, 'PATCH', { deliveryWindowSeconds: 7200 })).json());
+    expect(rewindowed.lateEvents.count).toBe(0);
+    // Reads keep failing closed: they have no save to protect.
+    expect((await request(`${base()}/${hook.id}`)).status).toBeGreaterThanOrEqual(500);
+  } finally {
+    failing.mockRestore();
+    warn.mockRestore();
+    await request(`${base()}/${hook.id}`, 'DELETE');
+  }
+});
+
 it('returns a retryable 503 for PATCH, disable and rotation during a locked dispatch', async () => {
   const { endpoint } = await create();
   const path = `${base()}/${endpoint.id}`;

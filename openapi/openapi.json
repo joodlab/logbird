@@ -10186,12 +10186,19 @@
                             "type": "string"
                           },
                           "lateEvents": {
-                            "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use it for reconciliation. 0 when the window is null.",
+                            "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use it for reconciliation. 0 when the window is null. null only in a PATCH response when the count could not be read: the settings were saved regardless; read the endpoint again for the count.",
                             "properties": {
                               "count": {
-                                "maximum": 9007199254740991,
-                                "minimum": 0,
-                                "type": "integer"
+                                "anyOf": [
+                                  {
+                                    "maximum": 9007199254740991,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "since": {
                                 "format": "date-time",
@@ -10640,12 +10647,19 @@
                           "type": "string"
                         },
                         "lateEvents": {
-                          "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use it for reconciliation. 0 when the window is null.",
+                          "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use it for reconciliation. 0 when the window is null. null only in a PATCH response when the count could not be read: the settings were saved regardless; read the endpoint again for the count.",
                           "properties": {
                             "count": {
-                              "maximum": 9007199254740991,
-                              "minimum": 0,
-                              "type": "integer"
+                              "anyOf": [
+                                {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "since": {
                               "format": "date-time",
@@ -11274,12 +11288,19 @@
                       "type": "string"
                     },
                     "lateEvents": {
-                      "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use it for reconciliation. 0 when the window is null.",
+                      "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use it for reconciliation. 0 when the window is null. null only in a PATCH response when the count could not be read: the settings were saved regardless; read the endpoint again for the count.",
                       "properties": {
                         "count": {
-                          "maximum": 9007199254740991,
-                          "minimum": 0,
-                          "type": "integer"
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "since": {
                           "format": "date-time",
@@ -11723,12 +11744,19 @@
                       "type": "string"
                     },
                     "lateEvents": {
-                      "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use it for reconciliation. 0 when the window is null.",
+                      "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use it for reconciliation. 0 when the window is null. null only in a PATCH response when the count could not be read: the settings were saved regardless; read the endpoint again for the count.",
                       "properties": {
                         "count": {
-                          "maximum": 9007199254740991,
-                          "minimum": 0,
-                          "type": "integer"
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "since": {
                           "format": "date-time",

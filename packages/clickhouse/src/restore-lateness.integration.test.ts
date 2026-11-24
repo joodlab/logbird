@@ -88,10 +88,12 @@ it.runIf(scratch)(
     );
     if (!normalized.ok) throw new Error(normalized.reason);
     await insertEvents(ch, [normalized.row]);
-    // An arrival whose raw event has since expired: counted in the rollup, absent from events.
+    // An arrival whose raw event has since expired: counted in the rollup, absent from events. A week before this run, so
+    // the 32-day TTL can never drop it mid-test (a fixed date would start expiring once the calendar passed it).
+    const expiredRawHour = new Date(Math.floor((+receivedAt - 7 * 24 * hour) / hour) * hour).toISOString().replace('T', ' ').slice(0, 19);
     await ch.insert({
       table: 'events_lateness_by_hour',
-      values: [{ project_id: projectId, received_hour: '2026-11-01 10:00:00', late_hours: 5, events: 1 }],
+      values: [{ project_id: projectId, received_hour: expiredRawHour, late_hours: 5, events: 1 }],
       format: 'JSONEachRow',
     });
     const before = await lateTotals();
@@ -137,4 +139,57 @@ it.runIf(scratch)(
     expect(await viewPresent()).toBe(true);
   },
   180_000,
+);
+
+it.runIf(scratch)(
+  'restore normalization tolerates TTL dropping an expired part mid-run but still fails when an unexpired row changes',
+  async () => {
+    const ttlProject = `qa-restore-ttl-${randomUUID()}`;
+    const toHour = (ms: number) => new Date(Math.floor(ms / hour) * hour).toISOString().replace('T', ' ').slice(0, 19);
+    const expired = toHour(Date.now() - 40 * 24 * hour);
+    const live = toHour(Date.now() - 7 * 24 * hour);
+    const remove = (receivedHour: string) =>
+      ch.command({
+        query: 'ALTER TABLE events_lateness_by_hour DELETE WHERE project_id = {p:String} AND received_hour = {h:DateTime}',
+        query_params: { p: ttlProject, h: receivedHour },
+        clickhouse_settings: { mutations_sync: '2' },
+      });
+    // Hold real TTL merges, so the expired row is dropped exactly where this test drops it.
+    await ch.command({ query: 'SYSTEM STOP TTL MERGES events_lateness_by_hour' });
+    try {
+      for (const [dropped, outcome] of [
+        [expired, 'passes'],
+        [live, 'fails'],
+      ] as const) {
+        await ch.insert({
+          table: 'events_lateness_by_hour',
+          values: [
+            { project_id: ttlProject, received_hour: expired, late_hours: 5, events: 1 },
+            { project_id: ttlProject, received_hour: live, late_hours: 5, events: 1 },
+          ],
+          format: 'JSONEachRow',
+        });
+        await mutationsSettled();
+        const statements = await normalizationStatements();
+        const compare = statements.findIndex((statement) => statement.includes('Lateness rollup changed'));
+        expect(compare).toBeGreaterThan(0);
+        for (const query of statements.slice(0, compare)) await ch.command({ query });
+        // Between the snapshot and the comparison: TTL drops the expired part (expected), or an unexpired row changes.
+        await remove(dropped);
+        const rest = (async () => {
+          for (const query of statements.slice(compare)) await ch.command({ query });
+        })();
+        if (outcome === 'passes') await rest;
+        else await expect(rest).rejects.toThrow(/Lateness rollup changed during replay/);
+        await ch.command({ query: 'DROP TABLE IF EXISTS events_restore_staging' });
+        await ch.command({ query: 'DROP TABLE IF EXISTS lateness_restore_check' });
+        await remove(expired);
+        await remove(live);
+      }
+    } finally {
+      await ch.command({ query: 'SYSTEM START TTL MERGES events_lateness_by_hour' });
+      await purgeProject(ch, ttlProject);
+    }
+  },
+  300_000,
 );
