@@ -5,27 +5,68 @@ export function ingestOrigin(): string {
   return typeof window === 'undefined' ? 'http://localhost:4600' : window.location.origin;
 }
 
-export const SDK_INSTALL = 'pnpm add @logbird/sdk';
+/**
+ * Whether `@logbird/sdk` is on npm. Until it is, the TypeScript tab installs it the way packages/sdk/README.md does
+ * (linked from a Logbird checkout): `pnpm add @logbird/sdk` answers 404 today. When the package is published, flip this
+ * one value (T4 holds the publication-state PRs) and every install line follows.
+ */
+export const SDK_PUBLISHED = false;
 
 /**
- * Snippets are meant to be pasted and run as-is. With a freshly created secret they embed it;
- * without one they read the key from the environment instead of showing a fake placeholder.
+ * The SDK install for either publication state, one line each, shown as comments above the TypeScript snippet. The
+ * linked source package is TypeScript, so it also says how to run the snippet (the published one ships JavaScript).
+ */
+export const sdkInstall = (published: boolean) =>
+  published
+    ? 'pnpm add @logbird/sdk'
+    : `@logbird/sdk is not on npm yet. Link it from a Logbird checkout
+(packages/sdk/README.md):
+git clone https://github.com/joodlab/logbird.git ../logbird
+pnpm -C ../logbird install
+pnpm add @logbird/sdk@link:../logbird/packages/sdk
+It is TypeScript source: save this as first-event.mts and run
+pnpm dlx tsx first-event.mts`;
+export const SDK_INSTALL = sdkInstall(SDK_PUBLISHED);
+
+/** SDK_INSTALL as comment lines for the top of the TypeScript snippet. */
+export const sdkInstallComment = () =>
+  SDK_INSTALL.split('\n')
+    .map((line) => `// ${line}`)
+    .join('\n');
+
+/**
+ * Snippets are meant to be pasted and run as-is. With a freshly created secret they embed it, for a first run; without
+ * one they read the key from the environment instead of showing a fake placeholder. Either way they say the key belongs
+ * in an environment variable, never in committed code. Lines stay short enough for the console's code panel.
  */
 const INGEST_ENV = 'LOGBIRD_INGEST_KEY';
 const READ_ENV = 'LOGBIRD_READ_KEY';
 
+/** The site's sentences (apps/web/src/content/developers.ts), so the console and the site read as one product. */
+const OWN_ID = ['Send your own string id: a retry with it is the same event.'];
+const ACK = ['A 202 lists stored IDs in `ids` and rejected ones in `rejected`.'];
+const comment = (prefix: string, lines: readonly string[]) => lines.map((line) => `${prefix} ${line}`).join('\n');
+/** Where the pasted first-run key should live in the person's own code. */
+const keyNote = (prefix: string, indent = '') =>
+  `${indent}${prefix} For this first run only. In your app, read ${INGEST_ENV}\n${indent}${prefix} from the environment; never commit a key.`;
+
 /** `@logbird/sdk`: `new Logbird({ apiKey, endpoint })`, `track()` queues, `flush()`/`shutdown()` deliver. */
 export function sdkSnippet(key?: string): string {
-  const apiKey = key ? `'${key}'` : `process.env.${INGEST_ENV}!`;
+  const apiKey = key
+    ? `${keyNote('//', '  ')}\n  apiKey: '${key}',`
+    : `  // Keep the key in the environment; never commit it.\n  apiKey: process.env.${INGEST_ENV}!,`;
   return `import { Logbird } from '@logbird/sdk';
 
 const logbird = new Logbird({
-  apiKey: ${apiKey},
+  // Your Logbird origin. In your app: process.env.LOGBIRD_ENDPOINT.
   endpoint: '${ingestOrigin()}',
+${apiKey}
+  // Errors, events the server rejects, failed background flushes.
   onError: (error) => console.error('[logbird]', error.message),
 });
 
-// track() never throws: it queues the event and sends it in batches.
+// track() never throws. It gives the event an id, queues it and
+// sends it in batches; a retry reuses the id.
 logbird.track({
   action: 'hotel.policy.updated',
   outcome: 'success',
@@ -36,15 +77,26 @@ logbird.track({
   changes: [{ field: 'cancellationHours', before: 24, after: 48 }],
 });
 
-// Deliver everything queued before the process exits.
-await logbird.shutdown();`;
+// On exit: deliver what is queued. It can reject, for example
+// when the server stays unreachable.
+await logbird
+  .shutdown()
+  .catch((error) => console.error('[logbird] undelivered', error));`;
 }
 
 export function curlSnippet(key?: string): string {
-  return `curl -X POST "${ingestOrigin()}/v1/events" \\
+  return `${comment('#', OWN_ID)}
+${comment(
+  '#',
+  [...ACK, 'An empty "rejected" means it was stored:'].map((l) => l.replace(/`/g, '"')),
+)}
+#   {"accepted":1,"ids":["evt_hotel_123_policy_1"],"rejected":[],
+#    "warnings":[]}
+curl -X POST "${ingestOrigin()}/v1/events" \\
   -H "Authorization: Bearer ${key ?? `$${INGEST_ENV}`}" \\
   -H "Content-Type: application/json" \\
   -d '{
+    "id": "evt_hotel_123_policy_1",
     "action": "hotel.policy.updated",
     "outcome": "success",
     "description": "Lina changed the cancellation policy of Hotel Sunrise",
@@ -60,14 +112,19 @@ export function curlSnippet(key?: string): string {
  * command and no package name here; this works today.
  */
 export function dotnetSnippet(key?: string): string {
-  const apiKey = key ? `"${key}"` : `Environment.GetEnvironmentVariable("${INGEST_ENV}")`;
+  const auth = key
+    ? `${keyNote('//')}\nhttp.DefaultRequestHeaders.Authorization = new("Bearer", "${key}");`
+    : `http.DefaultRequestHeaders.Authorization =\n    new("Bearer", Environment.GetEnvironmentVariable("${INGEST_ENV}"));`;
   return `using System.Net.Http.Json;
 
 using var http = new HttpClient();
-http.DefaultRequestHeaders.Authorization = new("Bearer", ${apiKey});
+${auth}
 
+${comment('//', [...OWN_ID, 'Keep it for retries.'])}
+var id = Guid.NewGuid().ToString();
 var response = await http.PostAsJsonAsync("${ingestOrigin()}/v1/events", new
 {
+    id,
     action = "hotel.policy.updated",
     outcome = "success",
     description = "Lina changed the cancellation policy of Hotel Sunrise",
@@ -77,25 +134,52 @@ var response = await http.PostAsJsonAsync("${ingestOrigin()}/v1/events", new
     changes = new[] { new { field = "cancellationHours", before = 24, after = 48 } },
 });
 if (response.StatusCode != System.Net.HttpStatusCode.Accepted)
-    throw new Exception(await response.Content.ReadAsStringAsync());`;
+    throw new Exception($"Logbird answered {(int)response.StatusCode}: " +
+        await response.Content.ReadAsStringAsync());
+${comment('//', ACK)}
+var result = await response.Content.ReadFromJsonAsync<IngestResult>();
+if (result!.rejected.Length > 0)
+    throw new Exception("Logbird rejected the event: " +
+        string.Join("; ", result.rejected.Select(r => r.reason)));
+Console.WriteLine($"Stored {string.Join(", ", result.ids)}");
+
+record IngestResult(string[] ids, Rejection[] rejected);
+record Rejection(int index, string code, string reason);`;
 }
 
 /** Plain `fetch` (Node 18+, Deno, Bun, edge runtimes): no dependency at all. */
 export function fetchSnippet(key?: string): string {
-  const auth = key ? `'Bearer ${key}'` : `\`Bearer \${process.env.${INGEST_ENV}}\``;
-  return `const response = await fetch('${ingestOrigin()}/v1/events', {
+  const auth = key ? `${keyNote('//', '    ')}\n    Authorization: 'Bearer ${key}',` : `    Authorization: \`Bearer \${process.env.${INGEST_ENV}}\`,`;
+  return `${comment('//', [...OWN_ID, 'Keep it for retries.'])}
+// Node 18 has no global crypto without a flag; node:crypto covers it.
+// (A variable, so bundlers for browsers and edge workers leave it alone.)
+const nodeCrypto = 'node:crypto';
+const uuid = globalThis.crypto ?? (await import(nodeCrypto));
+const id = uuid.randomUUID();
+const response = await fetch('${ingestOrigin()}/v1/events', {
   method: 'POST',
-  headers: { Authorization: ${auth}, 'Content-Type': 'application/json' },
+  headers: {
+${auth}
+    'Content-Type': 'application/json',
+  },
   body: JSON.stringify({
+    id,
     action: 'hotel.policy.updated',
     outcome: 'success',
     description: 'Lina changed the cancellation policy of Hotel Sunrise',
     actor: { type: 'user', id: 'usr_42', name: 'Lina Haddad' },
     tenant: { id: 'biz_7', name: 'Azure Hotels' },
     targets: [{ type: 'hotel', id: 'hotel_123', name: 'Hotel Sunrise' }],
+    changes: [{ field: 'cancellationHours', before: 24, after: 48 }],
   }),
 });
-if (response.status !== 202) throw new Error(await response.text());`;
+if (response.status !== 202)
+  throw new Error(\`Logbird answered \${response.status}: \${await response.text()}\`);
+${comment('//', ACK)}
+const { ids, rejected } = await response.json();
+if (rejected.length)
+  throw new Error(\`Logbird rejected the event: \${rejected.map((r) => r.reason).join('; ')}\`);
+console.log('Stored', ids);`;
 }
 
 /** Read the audit trail from a product backend (read keys only). */
