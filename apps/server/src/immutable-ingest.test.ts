@@ -6,7 +6,7 @@ import {
   insertEvents,
   normalizeEvent,
 } from '@logbird/clickhouse';
-import { claimIngestReceipts, confirmIngestReceipts, findIngestReceipts, prisma } from '@logbird/database';
+import { claimIngestReceipts, confirmIngestReceipts, findIngestReceipts, prisma, takeOverIngestReceipts } from '@logbird/database';
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { afterEach, expect, it, vi } from 'vitest';
 import { insertImmutableEvents, UNVERIFIED_PARSE_REJECTION, uncheckedIngestPolicy } from './immutable-ingest';
@@ -260,4 +260,34 @@ it.each(['ambiguous', 'held-claim conflict'])('legacy identical retries reach 20
     ],
   });
   expect(isolate.mock.calls[1]![0].map((row) => row.event_id)).toEqual(['bad', 'unchecked']);
+});
+
+// #296 round 1, finding 2: a ready receipt writes its row with the original receive clock, which a staged retention
+// run has not counted. Only the exclusive replay (which cancels staged retention first) may take it over.
+it.each([
+  [false, 0],
+  [true, 1],
+])('takes over a ready receipt only on the exclusive replay path (exclusive: %s)', async (exclusive, takeOvers) => {
+  const receivedAt = new Date(Date.now() - 60_000);
+  const input = { id: 'ready-1', action: 'qa296.ready' };
+  const normalized = normalizeEvent(input, { projectId: 'qa296-unit', receivedAt });
+  if (!normalized.ok) throw new Error(normalized.reason);
+  const ready = {
+    projectId: 'qa296-unit',
+    organizationId: 'qa296-org',
+    eventId: 'ready-1',
+    fingerprint: eventFingerprint(normalized.row),
+    receivedAt,
+    eventAt: new Date(normalized.row.timestamp),
+    confirmedAt: null,
+    claimedAt: null,
+    expiresAt: new Date(Date.now() + 300_000),
+  };
+  vi.mocked(findIngestReceipts).mockResolvedValue([ready] as never);
+  vi.mocked(claimIngestReceipts).mockResolvedValue([]);
+  const candidates = [{ index: 0, input, row: { ...normalized.row } }];
+  const result = await insertImmutableEvents('qa296-unit', 'qa296-org', candidates, false, undefined, exclusive).catch((error: unknown) => error);
+  expect(vi.mocked(takeOverIngestReceipts).mock.calls).toEqual(takeOvers ? [['qa296-unit', ['ready-1']]] : []);
+  // Not taken over (or nothing returned by the takeover): the id stays pending, so its retry replays it exclusively.
+  expect(result).toMatchObject({ status: 503, code: 'ingest_pending' });
 });

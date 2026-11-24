@@ -125,10 +125,11 @@ async function claimEvents(
   organizationId: string,
   candidates: IngestCandidate[],
   fingerprint: (row: EventRow) => string,
-  onWarningChange?: AcceptanceWarning,
+  onWarningChange: AcceptanceWarning | undefined,
+  exclusiveReplay: boolean,
 ) {
   try {
-    return await claimPhase(projectId, organizationId, candidates, fingerprint, onWarningChange);
+    return await claimPhase(projectId, organizationId, candidates, fingerprint, onWarningChange, exclusiveReplay);
   } catch (error) {
     if (!(error instanceof ApiError)) logReceiptPhaseFailure('claim', error);
     if (!(error instanceof ApiError) && isDatabaseFailure(error))
@@ -160,7 +161,8 @@ async function claimPhase(
   organizationId: string,
   candidates: IngestCandidate[],
   fingerprint: (row: EventRow) => string,
-  onWarningChange?: AcceptanceWarning,
+  onWarningChange: AcceptanceWarning | undefined,
+  exclusiveReplay: boolean,
 ) {
   const unique = new Map<string, IngestCandidate>();
   for (const candidate of candidates) if (!unique.has(candidate.row.event_id)) unique.set(candidate.row.event_id, candidate);
@@ -206,7 +208,10 @@ async function claimPhase(
       return claimIngestReceipts(projectId, organizationId, values, tx);
     });
     for (const receipt of inserted) owned.set(receipt.eventId, receipt);
-    await takeOverReadyClaims(projectId, prior, candidates, owned);
+    // A ready receipt writes its row with the original receive clock, which a retention run staged after that clock
+    // has not counted. Only the exclusive replay (recoverProjectIngest), which cancels staged retention under the
+    // exclusive lock first, may take one over; on the shared path the id stays pending and its retry replays it.
+    if (exclusiveReplay) await takeOverReadyClaims(projectId, prior, candidates, owned);
     const rechecked = await recheckAfterPause(projectId, owned, stored, lookupAt);
     // RETURNING already supplies this attempt's receipts. Only competitors (or a paused recheck)
     // can have changed the remaining identities while the shared project lock is held.
@@ -385,6 +390,8 @@ export async function insertImmutableEvents(
   candidates: IngestCandidate[],
   supportsSubsetRetry = false,
   onWarningChange?: AcceptanceWarning,
+  /** True only inside recoverProjectIngest's replay: the exclusive lock is held and staged retention was canceled. */
+  exclusiveReplay = false,
 ) {
   if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string; code: string }[] };
   // The wire payload and normalized rows are immutable within this attempt; hash each row once.
@@ -397,7 +404,7 @@ export async function insertImmutableEvents(
     }
     return value;
   };
-  const { owned, receipts } = await claimEvents(projectId, organizationId, candidates, fingerprint, onWarningChange);
+  const { owned, receipts } = await claimEvents(projectId, organizationId, candidates, fingerprint, onWarningChange, exclusiveReplay);
   let result: ReturnType<typeof classifyCandidates>;
   try {
     result = classifyCandidates(projectId, candidates, receipts, owned, fingerprint);

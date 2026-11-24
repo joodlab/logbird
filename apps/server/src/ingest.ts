@@ -60,7 +60,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
       rejected.push({ index, reason: normalized.reason.startsWith(`${code}:`) ? normalized.reason : `${code}: ${normalized.reason}`, code });
     }
   }
-  const store = async (tx: import('@logbird/database').Prisma.TransactionClient) => {
+  const store = async (tx: import('@logbird/database').Prisma.TransactionClient, exclusiveReplay = false) => {
     const project = projectId.startsWith('ws:') ? null : await tx.project.findUnique({ where: { id: projectId }, select: { organizationId: true } });
     if (!projectId.startsWith('ws:') && !project) throw new ApiError(404, 'not_found', 'Project not found.');
     await requireRetentionReady(tx, projectId);
@@ -74,6 +74,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
         if (warning >= 0) warnings.splice(warning, 1);
         if (reason) warnings.push({ index, reason });
       },
+      exclusiveReplay,
     );
     ids.push(...result.ids);
     rejected.push(...result.rejected);
@@ -86,7 +87,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
       eventIds: candidates.map((c) => c.row.event_id),
       replay: () => {
         replayStarted = true;
-        return store(prisma);
+        return store(prisma, true);
       },
       candidates: candidates.map((c) => ({ input: c.input, eventId: c.row.event_id })),
     });
