@@ -453,3 +453,28 @@ it('holds an endpoint whose stored regex RE2 cannot compile after one scan, but 
   await discoverWebhookDeliveries(ch, corrected, scanClock(from));
   expect(await queuedIds(hook.id)).toEqual(['re2-size-event']);
 });
+
+it('discovers only events that arrived within the delivery window after they occurred; null delivers them all', async () => {
+  const from = new Date(Date.now() - 60_000);
+  const receivedAt = new Date(+from + 1000);
+  const hour = 3_600_000;
+  // Lateness = receivedAt - occurredAt. The window is inclusive: exactly one hour late is still delivered.
+  const lateness = { 'window-on-time': 30 * 60_000, 'window-boundary': hour, 'window-just-late': hour + 1, 'window-late': 2 * hour };
+  for (const [name, window] of [
+    ['windowed', 3600],
+    ['unlimited', null],
+  ] as const) {
+    const { hook, row } = await fixture(from, name);
+    await prisma.webhookEndpoint.update({ where: { id: hook.id }, data: { deliveryWindowSeconds: window } });
+    await insertEvents(
+      ch,
+      Object.entries(lateness).map(([id, late]) => row(`${name}-${id}`, receivedAt, new Date(+receivedAt - late))),
+    );
+    await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
+    const expected = window === null ? Object.keys(lateness) : ['window-boundary', 'window-on-time'];
+    expect(await queuedIds(hook.id)).toEqual(expected.map((id) => `${name}-${id}`).sort());
+    // The cursor moved past the skipped events, so a later scan does not pick them up either.
+    await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
+    expect(await queuedIds(hook.id)).toEqual(expected.map((id) => `${name}-${id}`).sort());
+  }
+});
