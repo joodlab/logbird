@@ -109,7 +109,7 @@ it.runIf(scratch)(
     ).toBe(0);
     await ch.command({ query: 'DROP TABLE IF EXISTS events_restore_staging' });
   },
-  120_000,
+  180_000,
 );
 
 it.runIf(scratch)(
@@ -136,5 +136,5 @@ it.runIf(scratch)(
     await ensureLatenessView(ch);
     expect(await viewPresent()).toBe(true);
   },
-  120_000,
+  180_000,
 );

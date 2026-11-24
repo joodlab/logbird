@@ -117,7 +117,8 @@ for (const endpoints of [1, 10, 100])
     const tag = `bench-discovery-${randomUUID()}`;
     const scanner = tagged(ch, tag);
     const clock = await webhookCursorClock(prisma);
-    const started = performance.now();
+    // Only discovery itself is timed: the benchmark's own cursor checks stay outside the measured interval.
+    let passMs = 0;
     let passes = 0;
     for (const hook of hooks) {
       // Each endpoint scans, as passes would, until its cursor is past the import, and at least once. A scan that never
@@ -131,12 +132,13 @@ for (const endpoints of [1, 10, 100])
           throw new Error(`Endpoint ${hook.id} was scanned by something else`);
         if (pass > 0 && +current.cursorReceivedAt > +lastReceivedAt) break;
         if (pass === 100) throw new Error(`Endpoint ${hook.id} did not scan past the import in 100 passes`);
+        const started = performance.now();
         await discoverWebhookDeliveries(scanner, current, { now: clock.now, rollout: new Date(+start - 1) });
+        passMs += performance.now() - started;
         passes++;
         expected = (await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).cursorReceivedAt;
       }
     }
-    const passMs = performance.now() - started;
     await ch.command({ query: 'SYSTEM FLUSH LOGS' });
     const [usage] = await read<{ queries: string; rows: string; bytes: string }>(
       ch,
