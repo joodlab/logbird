@@ -2,6 +2,19 @@
   "name": "@logbird/hono",
   "version": "0.2.1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joodlab/logbird.git",
+    "directory": "packages/integrations/hono"
+  },
+  "homepage": "https://github.com/joodlab/logbird/tree/master/packages/integrations/hono#readme",
+  "bugs": {
+    "url": "https://github.com/joodlab/logbird/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -10,6 +23,8 @@
     "dist"
   ],
   "publishConfig": {
+    "access": "public",
+    "provenance": true,
     "exports": {
       ".": {
         "types": "./dist/index.d.mts",
@@ -26,7 +41,7 @@
     "@logbird/sdk": "workspace:*"
   },
   "peerDependencies": {
-    "hono": "4.13.5"
+    "hono": "^4.0.0"
   },
   "devDependencies": {
     "hono": "4.13.5",
