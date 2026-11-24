@@ -2,6 +2,26 @@ import { z } from 'zod';
 import { readScopeSchema } from './api';
 
 export const MAX_WEBHOOK_ENDPOINTS = 10;
+/**
+ * The delivery window a new endpoint gets: 7 days. The single source for create, the docs and the migration that gave
+ * existing endpoints this value (a test checks the migration against it).
+ */
+export const DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS = 604_800;
+export const MIN_WEBHOOK_DELIVERY_WINDOW_SECONDS = 3600;
+/** 3,650 days: the oldest occurrence time ingest accepts. */
+export const MAX_WEBHOOK_DELIVERY_WINDOW_SECONDS = 315_360_000;
+export const webhookDeliveryWindowSchema = z
+  .number()
+  .int()
+  .min(MIN_WEBHOOK_DELIVERY_WINDOW_SECONDS)
+  .max(MAX_WEBHOOK_DELIVERY_WINDOW_SECONDS)
+  .multipleOf(3600)
+  .nullable()
+  .describe(
+    'Deliver an event only if it arrived no later than this many seconds after it occurred (receivedAt − occurredAt). ' +
+      'A whole number of hours, from 1 hour to 3,650 days; null means no limit. Later events stay stored and searchable but ' +
+      'are not delivered. Resends and test pings ignore the window. A change applies to events discovered after the save.',
+  );
 export const webhookScopeSchema = z
   .object({
     tenantId: readScopeSchema.shape.tenantId.optional(),
@@ -52,6 +72,8 @@ const webhookFields = {
     ),
   scope: webhookScopeSchema.nullable().optional(),
   enabled: z.boolean().optional(),
+  /** On create, omitted means the 7-day default. On PATCH, omitted means unchanged and null removes the limit. */
+  deliveryWindowSeconds: webhookDeliveryWindowSchema.optional(),
 };
 export const createWebhookSchema = z.object(webhookFields).strict();
 /** scope replaces the entire scope; null clears it. Omission preserves it. */
@@ -84,6 +106,17 @@ export const webhookEndpointSchema = z.object({
   disabledAt: z.iso.datetime().nullable(),
   filterQuery: z.string(),
   scope: webhookScopeResponseSchema.nullable(),
+  deliveryWindowSeconds: webhookDeliveryWindowSchema,
+  lateEvents: z
+    .object({
+      count: z.number().int().nonnegative(),
+      since: z.iso.datetime(),
+    })
+    .describe(
+      "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are " +
+        "applied. Counted from `since`: the later of the endpoint's last window change and 30 days ago (the delivery log " +
+        'retention). 0 when the window is null.',
+    ),
   createdById: z.string().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),

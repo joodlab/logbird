@@ -4,6 +4,7 @@ import {
   apiErrorSchema,
   createWebhookResponseSchema,
   createWebhookSchema,
+  DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS,
   listWebhookDeliveriesQuerySchema,
   listWebhookDeliveriesResponseSchema,
   listWebhooksResponseSchema,
@@ -73,7 +74,18 @@ const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
     },
   });
 const updateWebhookDoc = webhookUrlDoc('Update webhook endpoint', webhookEndpointSchema);
-function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
+/** The late-event count starts at the later of the endpoint's last window change and the delivery-log retention. */
+const lateEventsSince = (endpoint: Pick<WebhookEndpoint, 'deliveryWindowChangedAt'>, now: Date) =>
+  new Date(Math.max(+endpoint.deliveryWindowChangedAt, +now - WEBHOOK_LOG_RETENTION_MS));
+type Late = { count: number; since: Date };
+type LateInput = Pick<WebhookEndpoint, 'id' | 'projectId' | 'deliveryWindowSeconds' | 'deliveryWindowChangedAt'>;
+/** Late-event counts per endpoint. The lateness rollup fills the counts (#152); until then they read 0. */
+async function lateEvents(endpoints: LateInput[], now: Date): Promise<Map<string, Late>> {
+  return new Map(endpoints.map((endpoint) => [endpoint.id, { count: 0, since: lateEventsSince(endpoint, now) }]));
+}
+const lateFor = (late: Map<string, Late>, endpoint: LateInput, now: Date) =>
+  late.get(endpoint.id) ?? { count: 0, since: lateEventsSince(endpoint, now) };
+function serialize(endpoint: WebhookEndpoint, late: Late, activeSecretCount = 0) {
   const scope = storedWebhookScope(endpoint);
   const responseScope = scope === undefined ? (webhookEndpointSchema.shape.scope.safeParse(webhookScopeFromColumns(endpoint)).data ?? null) : scope;
   return webhookEndpointSchema.parse({
@@ -85,6 +97,7 @@ function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
       filterWarning: endpoint.filterReviewReason === 'invalid_filter' ? 'webhook_filter_invalid' : 'webhook_filter_review_required',
     }),
     scope: responseScope,
+    lateEvents: { count: endpoint.deliveryWindowSeconds === null ? 0 : late.count, since: late.since.toISOString() },
     createdAt: endpoint.createdAt.toISOString(),
     updatedAt: endpoint.updatedAt.toISOString(),
     disabledAt: endpoint.disabledAt?.toISOString() ?? null,
@@ -182,12 +195,14 @@ export const webhookRoutes = new Hono<AppEnv>()
   // Reads are owner/admin only too: a stored URL can itself be a credential (a Slack or Zapier hook path).
   .get(base, doc('List webhook endpoints (no secrets)', listWebhooksResponseSchema), async (c) => {
     await requireRole(c);
+    const now = await databaseNow();
     const endpoints = await prisma.webhookEndpoint.findMany({
       where: { projectId: c.get('project').id },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      include: activeSecretCount(await databaseNow()),
+      include: activeSecretCount(now),
     });
-    return c.json({ data: endpoints.map((endpoint) => serialize(endpoint, endpoint._count.secrets)) });
+    const late = await lateEvents(endpoints, now);
+    return c.json({ data: endpoints.map((endpoint) => serialize(endpoint, lateFor(late, endpoint, now), endpoint._count.secrets)) });
   })
   .post(
     base,
@@ -216,6 +231,8 @@ export const webhookRoutes = new Hono<AppEnv>()
             disabledAt: input.enabled === false ? createdAt : null,
             filterQuery: input.filterQuery ?? '',
             ...scopeColumns(input.scope ?? null),
+            deliveryWindowSeconds: input.deliveryWindowSeconds === undefined ? DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS : input.deliveryWindowSeconds,
+            deliveryWindowChangedAt: createdAt,
             createdById: c.get('user').id,
             secrets: { create: { ciphertext: encryptWebhookSecret(secret, secretKey) } },
           },
@@ -224,17 +241,19 @@ export const webhookRoutes = new Hono<AppEnv>()
         return endpoint;
       });
       c.header('Cache-Control', 'no-store');
-      return c.json({ endpoint: serialize(endpoint), secret }, 201);
+      // A new endpoint's window starts now, so nothing has arrived late yet.
+      return c.json({ endpoint: serialize(endpoint, { count: 0, since: endpoint.deliveryWindowChangedAt }), secret }, 201);
     },
   )
   .get(`${base}/:id`, doc('Get webhook endpoint (no secrets)', webhookEndpointSchema), async (c) => {
     await requireRole(c);
+    const now = await databaseNow();
     const endpoint = await prisma.webhookEndpoint.findFirst({
       where: { id: c.req.param('id'), projectId: c.get('project').id },
-      include: activeSecretCount(await databaseNow()),
+      include: activeSecretCount(now),
     });
     if (!endpoint) throw new ApiError(404, 'not_found', 'Webhook endpoint not found.');
-    return c.json(serialize(endpoint, endpoint._count.secrets));
+    return c.json(serialize(endpoint, lateFor(await lateEvents([endpoint], now), endpoint, now), endpoint._count.secrets));
   })
   .patch(`${base}/:id`, updateWebhookDoc, validator('json', updateWebhookSchema, webhookBody), async (c) => {
     const input = c.req.valid('json');
@@ -250,6 +269,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
       const scopeCorrected = input.scope !== undefined && (before.scopeReviewRequired || storedWebhookScope(before) === undefined);
       const filterConfirmed = input.filterQuery !== undefined && before.filterReviewRequired;
+      const windowChanged = input.deliveryWindowSeconds !== undefined && input.deliveryWindowSeconds !== before.deliveryWindowSeconds;
       const now = await databaseNow(tx);
       const after = await tx.webhookEndpoint.update({
         where: { id: before.id },
@@ -260,6 +280,8 @@ export const webhookRoutes = new Hono<AppEnv>()
           filterQuery: input.filterQuery,
           enabled: input.enabled,
           ...(input.scope !== undefined ? scopeColumns(input.scope) : {}),
+          // Applies to events discovered after this save; the cursor does not move back.
+          ...(windowChanged && { deliveryWindowSeconds: input.deliveryWindowSeconds, deliveryWindowChangedAt: now }),
           ...(scopeCorrected && { scopeReviewRequired: false }),
           ...(filterConfirmed && { filterReviewRequired: false, filterReviewReason: null }),
           ...(enabledChanged ? { disabledReason: input.enabled ? null : 'manual', disabledAt: input.enabled ? null : now } : {}),
@@ -277,9 +299,11 @@ export const webhookRoutes = new Hono<AppEnv>()
           data: { status: 'interrupted' },
         });
       }
-      const old = serialize(before),
-        current = serialize(after);
-      const fields = (['url', 'description', 'filterQuery', 'scope', 'enabled'] as const).filter(
+      // The audit diff compares stored settings only; the late count is not a setting.
+      const noLate = { count: 0, since: now };
+      const old = serialize(before, noLate),
+        current = serialize(after, noLate);
+      const fields = (['url', 'description', 'filterQuery', 'scope', 'enabled', 'deliveryWindowSeconds'] as const).filter(
         (field) =>
           (field === 'scope' && scopeCorrected) ||
           (field === 'filterQuery' && filterConfirmed) ||
@@ -289,7 +313,8 @@ export const webhookRoutes = new Hono<AppEnv>()
       if (enabledChanged) await record(c, tx, input.enabled ? 'webhook.enabled' : 'webhook.disabled', after, ['enabled'], 'manual');
       return after;
     });
-    return c.json(serialize(endpoint, endpoint._count.secrets));
+    const now = await databaseNow();
+    return c.json(serialize(endpoint, lateFor(await lateEvents([endpoint], now), endpoint, now), endpoint._count.secrets));
   })
   .delete(`${base}/:id`, routeDoc('Delete webhook endpoint', { responses: { 204: { description: 'Deleted' }, 503: mutationBusy } }), async (c) => {
     await lockedProject(c, async (tx) => {

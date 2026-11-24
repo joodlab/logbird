@@ -23,6 +23,7 @@ export default defineConfig({
       'src/ingest-storage-fault-fixture.test.ts',
       'src/slow-store.test.ts',
       'src/openapi-servers.test.ts',
+      'src/webhook-window-migration.test.ts',
     ],
     maxWorkers: 1,
     fileParallelism: false,
