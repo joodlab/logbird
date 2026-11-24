@@ -180,6 +180,55 @@ test('code that uses require, or has a method of that name, is not a require fun
   for (const code of cases) assert.deepEqual(importsOf(code, 'dist/probe.cjs'), [], code);
 });
 
+test("esbuild's ESM output of a CommonJS createRequire is read, through __require('node:module')", () => {
+  // esbuild 0.28.2, as above, for `var { createRequire } = require('node:module');
+  // module.exports = createRequire(__filename)('fictional-library');`.
+  const emitted = [
+    "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    'var __getOwnPropNames = Object.getOwnPropertyNames;',
+    'var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {',
+    '  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]',
+    '}) : x)(function(x) {',
+    '  if (typeof require !== "undefined") return require.apply(this, arguments);',
+    "  throw Error('Dynamic require of \"' + x + '\" is not supported');",
+    '});',
+    'var __commonJS = (cb, mod) => function __require2() {',
+    '  try {',
+    '    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;',
+    '  } catch (e) {',
+    '    throw mod = 0, e;',
+    '  }',
+    '};',
+    'var require_entry2 = __commonJS({',
+    '  "entry2.cjs"(exports, module) {',
+    '    var { createRequire } = __require("node:module");',
+    '    module.exports = createRequire(__filename)("fictional-library");',
+    '  }',
+    '});',
+    'export default require_entry2();',
+  ].join('\n');
+  assert.deepEqual(importsOf(emitted, 'dist/index.mjs'), ['node:module', 'fictional-library']);
+});
+
+test('a parameter or local that shadows a require function is its own binding', () => {
+  const shadowed = [
+    "import { createRequire } from 'node:module';",
+    'const load = createRequire(import.meta.url);',
+    "load('node:fs');",
+    'export function validate(load) {',
+    "  return load('fictional-field');",
+    '}',
+  ].join('\n');
+  assert.deepEqual(importsOf(shadowed, 'dist/index.mjs'), ['node:module', 'node:fs']);
+  // A parameter named require is not Node's require; the file's own require still is.
+  assert.deepEqual(importsOf("function run(require) { return require('fictional-field'); }\nrequire('zod');", 'dist/probe.cjs'), ['zod']);
+});
+
+test('the left of && is not what it yields', () => {
+  assert.deepEqual(importsOf("const validate = require && ((field) => field); validate('fictional-field');", 'dist/probe.cjs'), []);
+  assert.deepEqual(importsOf("const load = (typeof require === 'function' && require) || null; load('zod');", 'dist/probe.cjs'), ['zod']);
+});
+
 test('a value that only tests for require is not a require function', () => {
   assert.deepEqual(importsOf("const hasRequire = typeof require === 'function'; hasRequire('fictional-library');", 'dist/probe.cjs'), []);
 });

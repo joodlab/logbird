@@ -24,6 +24,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { parse } from '@babel/parser';
+import babelTraverse from '@babel/traverse';
+
+// @babel/traverse is CommonJS; its function is the default export's `default`.
+const traverse = babelTraverse.default ?? babelTraverse;
 
 /** Every package that may be packed, with what it may import beyond its declared dependencies and peers. */
 const PACKAGES = {
@@ -123,6 +127,16 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   const asModule = declaration || path.endsWith('.mjs') || (path.endsWith('.js') && moduleType === 'module');
   // `commonjs` is Node's CommonJS wrapper: top-level `return` and `new.target` are allowed, as Node allows them.
   const ast = parse(text, { sourceType: asModule ? 'module' : 'commonjs', plugins: declaration ? [['typescript', { dts: true }]] : [] });
+  // Every identifier's lexical binding, from Babel's scope analysis, so a parameter or local that shadows a require
+  // function is a different binding (`function validate(load) { return load(x); }` beside a module-level `load`).
+  const bindingOf = new Map();
+  traverse(ast, {
+    Identifier(path) {
+      bindingOf.set(path.node, path.scope.getBinding(path.node.name) ?? null);
+    },
+  });
+  /** What an identifier refers to: its binding, or `global:<name>` for a name the file does not declare. */
+  const keyOf = (node) => (node?.type === 'Identifier' ? (bindingOf.get(node) ?? `global:${node.name}`) : undefined);
   const found = new Set();
   const add = (node) => {
     const specifier = specifierOf(node);
@@ -152,13 +166,17 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   /** A key that names a property: `a.b`, `a['b']`, ``a[`b`]`` → "b"; `a[b]` names no fixed property. */
   const keyName = (key, computed) => (!computed && key?.type === 'Identifier' ? key.name : staticName(key));
   const propertyName = (member) => keyName(member.property, member.computed);
-  // The identifier at the root of a member chain: `require` in `require.main.require`, `module` in `module.parent`.
+  // What the identifier at the root of a member chain refers to: `require` in `require.main.require`, `module` in
+  // `module.parent`.
   const rootOf = (node) => {
     const inner = unwrap(node);
     if (isMember(inner)) return rootOf(inner.object);
     if (inner?.type === 'TSNonNullExpression') return rootOf(inner.expression);
-    return inner?.type === 'Identifier' ? inner.name : undefined;
+    return keyOf(inner);
   };
+  // The bindings a require function is bound to: Node's own `require` (when the file does not declare that name), and
+  // those found below.
+  const requires = new Set(['global:require']);
 
   // Node's `module` builtin, where createRequire comes from: `import m from 'node:module'`, `import * as m from …`,
   // `const m = require('node:module')`, tsc's `const node_module_1 = require("node:module")` (also through
@@ -170,10 +188,12 @@ export function importsOf(text, path, moduleType = 'commonjs') {
     if (node.type === 'ImportExpression') return true;
     if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return false;
     const callee = unwrap(node.callee);
-    if (callee.type === 'Import' || (callee.type === 'Identifier' && callee.name === 'require')) return true;
+    if (callee.type === 'Import' || (callee.type === 'Identifier' && requires.has(keyOf(callee)))) return true;
     if (!isMember(callee)) return false;
     const owner = rootOf(callee.object);
-    return (propertyName(callee) === 'require' && owner === 'module') || (propertyName(callee) === 'getBuiltinModule' && owner === 'process');
+    return (
+      (propertyName(callee) === 'require' && owner === 'global:module') || (propertyName(callee) === 'getBuiltinModule' && owner === 'global:process')
+    );
   };
   const loadsNodeModule = (value) => {
     let found = false;
@@ -191,37 +211,38 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // `createRequire` as a static (Rolldown emits `import { Module } from "node:module"; Module.createRequire(…)`).
   const SELF_EXPORTS = new Set(['default', 'Module']);
   const bindExport = (name, local) => {
-    if (name === 'createRequire') makers.add(local);
-    else if (SELF_EXPORTS.has(name)) moduleBindings.add(local);
+    if (name === 'createRequire') makers.add(keyOf(local));
+    else if (SELF_EXPORTS.has(name)) moduleBindings.add(keyOf(local));
   };
-  walk(ast.program, (node) => {
-    if (node.type === 'ImportDeclaration' && NODE_MODULE.has(node.source.value)) {
-      for (const specifier of node.specifiers) {
-        if (specifier.type !== 'ImportSpecifier') moduleBindings.add(specifier.local.name);
-        else bindExport(keyName(specifier.imported, false), specifier.local.name);
-      }
-    }
-    if (node.type === 'VariableDeclarator' && loadsNodeModule(node.init)) {
-      if (node.id.type === 'Identifier') moduleBindings.add(node.id.name);
-      if (node.id.type === 'ObjectPattern') {
-        for (const property of node.id.properties) {
-          if (property.type === 'ObjectProperty' && property.value.type === 'Identifier')
-            bindExport(keyName(property.key, property.computed), property.value.name);
+  // Run with the require loop below: a binding found there can load node:module here (esbuild's
+  // `var { createRequire } = __require("node:module")`), and one found here can make a require function there.
+  const bindNodeModule = () =>
+    walk(ast.program, (node) => {
+      if (node.type === 'ImportDeclaration' && NODE_MODULE.has(node.source.value)) {
+        for (const specifier of node.specifiers) {
+          if (specifier.type !== 'ImportSpecifier') moduleBindings.add(keyOf(specifier.local));
+          else bindExport(keyName(specifier.imported, false), specifier.local);
         }
       }
-    }
-  });
+      if (node.type === 'VariableDeclarator' && loadsNodeModule(node.init)) {
+        if (node.id.type === 'Identifier') moduleBindings.add(keyOf(node.id));
+        if (node.id.type === 'ObjectPattern') {
+          for (const property of node.id.properties) {
+            if (property.type === 'ObjectProperty' && property.value.type === 'Identifier')
+              bindExport(keyName(property.key, property.computed), property.value);
+          }
+        }
+      }
+    });
   // `cr(…)`, `m.createRequire(…)`, `(0, node_module_1.createRequire)(…)` or `require('node:module').createRequire(…)`: its
   // result is a require function.
   const makesRequire = (node) => {
     if (node?.type !== 'CallExpression' && node?.type !== 'OptionalCallExpression') return false;
     const callee = unwrap(node.callee);
-    if (callee.type === 'Identifier') return makers.has(callee.name);
+    if (callee.type === 'Identifier') return makers.has(keyOf(callee));
     if (!isMember(callee) || propertyName(callee) !== 'createRequire') return false;
     return moduleBindings.has(rootOf(callee.object)) || loadsNodeModule(callee.object);
   };
-  // The names a require function is bound to: `require`, and those found below.
-  const requires = new Set(['require']);
   const isFunction = (node) => node?.type === 'ArrowFunctionExpression' || node?.type === 'FunctionExpression';
   // The values a function returns: an arrow's expression body, or each `return` in its own body (not in nested functions).
   const returnsOf = (fn) => {
@@ -243,18 +264,21 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   /**
    * Whether an expression can evaluate to a require function, as opposed to merely using one (`require.cache[id]`,
    * `typeof require`) or holding a method of that name (`{ require(x) {…} }`). It does when it is a require binding,
-   * a createRequire call, either branch of a `?:` or `||` / `&&` / `??`, the last of a comma expression, an assignment's
-   * value, or a call of a function expression that returns one. That last case is a bundler's helper: Rolldown's
+   * a createRequire call, either branch of a `?:`, either side of `||` / `??`, the right of `&&` (a require function is
+   * truthy, so `a && b` only ever yields it as `b`), the last of a comma expression, an assignment's value, or a call of
+   * a function expression that returns one. That last case is a bundler's helper: Rolldown's
    * `(() => createRequire(import.meta.url))()` and esbuild's
    * `((x) => typeof require !== "undefined" ? require : …)(function (x) { … })`.
    */
   const yieldsRequire = (node, depth = 0) => {
     const value = unwrap(node);
     if (!value || depth > 20) return false;
-    if (value.type === 'Identifier') return requires.has(value.name);
+    if (value.type === 'Identifier') return requires.has(keyOf(value));
     if (makesRequire(value)) return true;
     if (value.type === 'ConditionalExpression') return yieldsRequire(value.consequent, depth + 1) || yieldsRequire(value.alternate, depth + 1);
-    if (value.type === 'LogicalExpression') return yieldsRequire(value.left, depth + 1) || yieldsRequire(value.right, depth + 1);
+    if (value.type === 'LogicalExpression') {
+      return (value.operator !== '&&' && yieldsRequire(value.left, depth + 1)) || yieldsRequire(value.right, depth + 1);
+    }
     if (value.type === 'AssignmentExpression') return yieldsRequire(value.right, depth + 1);
     if ((value.type === 'CallExpression' || value.type === 'OptionalCallExpression') && isFunction(unwrap(value.callee))) {
       return returnsOf(unwrap(value.callee)).some((returned) => yieldsRequire(returned, depth + 1));
@@ -263,20 +287,22 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   };
   // The names a require function is bound to: made by createRequire, or given one (`const r = require`, esbuild's
   // `__require`). Repeated until nothing new is found, since one binding can be given another.
-  for (let size = -1; size !== requires.size; ) {
-    size = requires.size;
+  const known = () => requires.size + makers.size + moduleBindings.size;
+  for (let size = -1; size !== known(); ) {
+    size = known();
+    bindNodeModule();
     walk(ast.program, (node) => {
       const [target, value] =
         node.type === 'VariableDeclarator' ? [node.id, node.init] : node.type === 'AssignmentExpression' ? [node.left, node.right] : [];
-      if (target?.type === 'Identifier' && !requires.has(target.name) && yieldsRequire(value)) requires.add(target.name);
+      if (target?.type === 'Identifier' && !requires.has(keyOf(target)) && yieldsRequire(value)) requires.add(keyOf(target));
     });
   }
   // `.require()` loads a module only on Node's own objects (`module.require`, `require.main.require`,
   // `globalThis.require`); on an ordinary object (`validator.require('field')`) it is a method like any other.
-  const NODE_OBJECTS = new Set(['module', 'global', 'globalThis']);
+  const NODE_OBJECTS = new Set(['global:module', 'global:global', 'global:globalThis']);
   const loads = (node) => {
     const callee = unwrap(node);
-    if (callee.type === 'Import' || (callee.type === 'Identifier' && requires.has(callee.name))) return true;
+    if (callee.type === 'Import' || (callee.type === 'Identifier' && requires.has(keyOf(callee)))) return true;
     if (isMember(callee) && propertyName(callee) === 'require') {
       const root = rootOf(callee.object);
       return root !== undefined && (NODE_OBJECTS.has(root) || requires.has(root));
