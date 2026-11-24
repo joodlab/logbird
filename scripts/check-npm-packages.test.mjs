@@ -36,6 +36,7 @@ const IMPORTS = [
   ["import { createRequire as cr } from 'node:module'; const load = cr(import.meta.url); load('zod');", ['node:module', 'zod']],
   ["const { createRequire: cr } = require('node:module'); cr(__filename)('zod');", ['node:module', 'zod']],
   ["module.require('zod');", 'zod'],
+  ["(0, require)('zod');", 'zod'],
 ];
 const DECLARATION_IMPORTS = [
   ["import type {\n  ZodType,\n  infer as Infer\n} from 'zod';", 'zod'],
@@ -71,6 +72,24 @@ test('every form of a declaration import is reported', () => {
 
 test('a string, a comment, a relative path or a computed specifier is not an import', () => {
   for (const code of NOT_IMPORTS) assert.deepEqual(importsOf(code, 'dist/index.mjs'), [], code);
+});
+
+test("TypeScript's CommonJS output of a createRequire import is read", () => {
+  // `tsc --module nodenext` (TypeScript 6) output for a .cts that does
+  // `import { createRequire } from 'node:module'; const load = createRequire(__filename); export const z = load('zod');`
+  const emitted = [
+    '"use strict";',
+    'Object.defineProperty(exports, "__esModule", { value: true });',
+    'exports.z = void 0;',
+    'const node_module_1 = require("node:module");',
+    'const load = (0, node_module_1.createRequire)(__filename);',
+    "exports.z = load('zod');",
+  ].join('\n');
+  assert.deepEqual(importsOf(emitted, 'dist/probe.cjs'), ['node:module', 'zod']);
+});
+
+test('a method named require on an ordinary object is not an import', () => {
+  assert.deepEqual(importsOf("const validator = { require: (f) => f }; validator.require('fictional-field');", 'dist/index.mjs'), []);
 });
 
 test('a reference directive after the first statement is not read, as TypeScript does not read it', () => {

@@ -131,10 +131,17 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // The names `createRequire` is bound to: itself, `import { createRequire as cr }`, `const { createRequire: cr } = …`.
   const makers = new Set(['createRequire']);
   const keyName = (node) => (node?.type === 'Identifier' ? node.name : node?.type === 'StringLiteral' ? node.value : undefined);
-  // `createRequire(…)`, `cr(…)` or `module.createRequire(…)`: its result is a require function.
-  const makesRequire = (node) =>
-    (node?.type === 'CallExpression' || node?.type === 'OptionalCallExpression') &&
-    (node.callee.type === 'Identifier' ? makers.has(node.callee.name) : keyName(node.callee.property) === 'createRequire');
+  // The function a callee names. Compilers wrap an imported function as `(0, ns.fn)(…)`, so it is not called as a method
+  // (TypeScript's CommonJS output: `(0, node_module_1.createRequire)(__filename)`).
+  const unwrap = (node) =>
+    node?.type === 'SequenceExpression' ? unwrap(node.expressions.at(-1)) : node?.type === 'ParenthesizedExpression' ? unwrap(node.expression) : node;
+  const isMember = (node) => node?.type === 'MemberExpression' || node?.type === 'OptionalMemberExpression';
+  // `createRequire(…)`, `cr(…)`, `module.createRequire(…)` or `(0, ns.createRequire)(…)`: its result is a require function.
+  const makesRequire = (node) => {
+    if (node?.type !== 'CallExpression' && node?.type !== 'OptionalCallExpression') return false;
+    const callee = unwrap(node.callee);
+    return callee.type === 'Identifier' ? makers.has(callee.name) : isMember(callee) && keyName(callee.property) === 'createRequire';
+  };
   // The names a require function is bound to: `require`, and every `const r = createRequire(…)` or `r = createRequire(…)`.
   const requires = new Set(['require']);
   const walk = (node, step) => {
@@ -159,13 +166,19 @@ export function importsOf(text, path, moduleType = 'commonjs') {
     if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && makesRequire(node.init)) requires.add(node.id.name);
     if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier' && makesRequire(node.right)) requires.add(node.left.name);
   });
-  const loads = (callee) =>
-    callee.type === 'Import' ||
-    (callee.type === 'Identifier' && requires.has(callee.name)) ||
-    // `module.require('x')`, `globalThis.require?.('x')`
-    ((callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression') && !callee.computed && callee.property.name === 'require') ||
-    // `createRequire(import.meta.url)('x')`
-    makesRequire(callee);
+  // `.require()` loads a module only on Node's own objects; `validator.require('field')` is an ordinary method.
+  const NODE_OBJECTS = new Set(['module', 'global', 'globalThis']);
+  const loads = (node) => {
+    const callee = unwrap(node);
+    return (
+      callee.type === 'Import' ||
+      (callee.type === 'Identifier' && requires.has(callee.name)) ||
+      // `module.require('x')`, `globalThis.require?.('x')`
+      (isMember(callee) && callee.object.type === 'Identifier' && NODE_OBJECTS.has(callee.object.name) && keyName(callee.property) === 'require') ||
+      // `createRequire(import.meta.url)('x')`
+      makesRequire(callee)
+    );
+  };
   const visit = (node) => {
     if (Array.isArray(node)) {
       for (const item of node) visit(item);
