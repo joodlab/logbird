@@ -12,14 +12,21 @@ export function ingestOrigin(): string {
  */
 export const SDK_PUBLISHED = false;
 
-/** The SDK install, one line each, shown as comments above the TypeScript snippet. */
-export const SDK_INSTALL = SDK_PUBLISHED
-  ? 'pnpm add @logbird/sdk'
-  : `@logbird/sdk is not on npm yet. Link it from a Logbird checkout
+/**
+ * The SDK install for either publication state, one line each, shown as comments above the TypeScript snippet. The
+ * linked source package is TypeScript, so it also says how to run the snippet (the published one ships JavaScript).
+ */
+export const sdkInstall = (published: boolean) =>
+  published
+    ? 'pnpm add @logbird/sdk'
+    : `@logbird/sdk is not on npm yet. Link it from a Logbird checkout
 (packages/sdk/README.md):
 git clone https://github.com/joodlab/logbird.git ../logbird
 pnpm -C ../logbird install
-pnpm add @logbird/sdk@link:../logbird/packages/sdk`;
+pnpm add @logbird/sdk@link:../logbird/packages/sdk
+It is TypeScript source: save this as first-event.mts and run
+pnpm dlx tsx first-event.mts`;
+export const SDK_INSTALL = sdkInstall(SDK_PUBLISHED);
 
 /** SDK_INSTALL as comment lines for the top of the TypeScript snippet. */
 export const sdkInstallComment = () =>
@@ -36,8 +43,8 @@ const INGEST_ENV = 'LOGBIRD_INGEST_KEY';
 const READ_ENV = 'LOGBIRD_READ_KEY';
 
 /** The site's sentences (apps/web/src/content/developers.ts), so the console and the site read as one product. */
-const OWN_ID = ['Send your own string id: a retry with the same id is', 'the same event, not a new one.'];
-const ACK = ['A 202 lists the stored event IDs in `ids` and', 'rejected events in `rejected`.'];
+const OWN_ID = ['Send your own string id: a retry with it is the same event.'];
+const ACK = ['A 202 lists stored IDs in `ids` and rejected ones in `rejected`.'];
 const comment = (prefix: string, lines: readonly string[]) => lines.map((line) => `${prefix} ${line}`).join('\n');
 /** Where the pasted first-run key should live in the person's own code. */
 const keyNote = (prefix: string, indent = '') =>
@@ -113,7 +120,7 @@ export function dotnetSnippet(key?: string): string {
 using var http = new HttpClient();
 ${auth}
 
-${comment('//', OWN_ID)} Keep it for retries.
+${comment('//', [...OWN_ID, 'Keep it for retries.'])}
 var id = Guid.NewGuid().ToString();
 var response = await http.PostAsJsonAsync("${ingestOrigin()}/v1/events", new
 {
@@ -143,8 +150,10 @@ record Rejection(int index, string code, string reason);`;
 /** Plain `fetch` (Node 18+, Deno, Bun, edge runtimes): no dependency at all. */
 export function fetchSnippet(key?: string): string {
   const auth = key ? `${keyNote('//', '    ')}\n    Authorization: 'Bearer ${key}',` : `    Authorization: \`Bearer \${process.env.${INGEST_ENV}}\`,`;
-  return `${comment('//', OWN_ID)} Keep it for retries.
-const id = crypto.randomUUID();
+  return `${comment('//', [...OWN_ID, 'Keep it for retries.'])}
+// Node 18 has no global crypto without a flag; node:crypto covers it.
+const uuid = globalThis.crypto ?? (await import('node:crypto'));
+const id = uuid.randomUUID();
 const response = await fetch('${ingestOrigin()}/v1/events', {
   method: 'POST',
   headers: {

@@ -1,6 +1,10 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { highlight } from '@logbird/ui/lib/highlight';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { curlSnippet, dotnetSnippet, fetchSnippet, SDK_PUBLISHED, sdkInstallComment, sdkSnippet } from './snippets';
+import { curlSnippet, dotnetSnippet, fetchSnippet, SDK_PUBLISHED, sdkInstall, sdkInstallComment, sdkSnippet } from './snippets';
 
 describe('the C# (.NET) first-event snippet', () => {
   it('posts the same event as curl with plain HttpClient, using the session key', () => {
@@ -47,8 +51,21 @@ describe('the first-event snippets, executed', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('fetch: sends the event with its own id and changes, and reports a 202 that rejected it', async () => {
-    const run = (fetch: ReturnType<typeof standIn>, log = vi.fn()) =>
-      new AsyncFunction('fetch', 'console', fetchSnippet('lb_ingest_test'))(fetch, { log });
+    // The snippet runs as a module of its own (it may import node:crypto), with no global Web Crypto, as on Node 18.
+    const run = async (fetch: ReturnType<typeof standIn>, log = vi.fn()) => {
+      const file = join(mkdtempSync(join(tmpdir(), 'logbird-snippet-')), 'first-event.mjs');
+      writeFileSync(file, fetchSnippet('lb_ingest_test'));
+      const crypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+      vi.stubGlobal('fetch', fetch);
+      const logs = vi.spyOn(console, 'log').mockImplementation(log);
+      delete (globalThis as { crypto?: unknown }).crypto;
+      try {
+        await import(/* @vite-ignore */ pathToFileURL(file).href);
+      } finally {
+        if (crypto) Object.defineProperty(globalThis, 'crypto', crypto);
+        logs.mockRestore();
+      }
+    };
     const ok = standIn(stored);
     const log = vi.fn();
     await run(ok, log);
@@ -82,14 +99,38 @@ describe('the first-event snippets, executed', () => {
   });
 
   it('shows the install that works today, and says the key belongs in the environment', () => {
-    expect(SDK_PUBLISHED).toBe(false);
-    expect(sdkInstallComment()).toContain('// pnpm add @logbird/sdk@link:../logbird/packages/sdk');
-    expect(sdkInstallComment()).not.toMatch(/^\/\/ pnpm add @logbird\/sdk$/m);
+    // Both publication states, so flipping SDK_PUBLISHED needs no test change; the panel shows the current one.
+    expect(sdkInstall(false)).toContain('pnpm add @logbird/sdk@link:../logbird/packages/sdk');
+    expect(sdkInstall(false)).toContain('pnpm dlx tsx first-event.mts');
+    expect(sdkInstall(false)).not.toMatch(/^pnpm add @logbird\/sdk$/m);
+    expect(sdkInstall(true)).toBe('pnpm add @logbird/sdk');
+    expect(sdkInstallComment()).toBe(
+      sdkInstall(SDK_PUBLISHED)
+        .split('\n')
+        .map((line) => `// ${line}`)
+        .join('\n'),
+    );
     for (const code of [sdkSnippet('k'), fetchSnippet('k'), dotnetSnippet('k')]) expect(code).toMatch(/never commit a key/);
     // Raw HTTP sends its own id; the curl comment shows the 202 body and the field to check.
     expect(curlSnippet('k')).toMatch(/"id": "evt_hotel_123_policy_1"/);
     expect(curlSnippet('k')).toMatch(/"rejected":\[\]/);
     expect(dotnetSnippet('k')).toMatch(/var id = Guid\.NewGuid\(\)\.ToString\(\);/);
     expect(dotnetSnippet('k')).toMatch(/result!\.rejected\.Length > 0/);
+  });
+
+  it('SDK: a shutdown that rejects is caught and reported, never thrown', async () => {
+    const failure = new Error('server unreachable');
+    class Unreachable {
+      track() {
+        // Accepted and queued; only the delivery on shutdown fails here.
+      }
+      shutdown() {
+        return Promise.reject(failure);
+      }
+    }
+    const error = vi.fn();
+    const body = sdkSnippet('lb_ingest_test').replace(/^import .*$/m, '');
+    await expect(new AsyncFunction('Logbird', 'console', body)(Unreachable, { error, log: vi.fn() })).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledWith('[logbird] undelivered', failure);
   });
 });

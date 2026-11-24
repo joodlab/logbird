@@ -84,9 +84,9 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
       ) : (
         <Listening projectId={projectId} setup={data} />
       )}
-      {/* Sample data is for looking around before real events: once one has arrived it is not promoted here, though
-          sample data already loaded can still be removed (#16). */}
-      {!first || data.ingest.sampleEvents > 0 ? <SampleDataControl projectId={projectId} setup={data} /> : null}
+      {/* Sample data is for looking around before real events: once the backend has sent one (a console test event
+          does not count) it is not promoted here, though sample data already loaded can still be removed (#16). */}
+      {!data.ingest.lastEventAt || data.ingest.sampleEvents > 0 ? <SampleDataControl projectId={projectId} setup={data} /> : null}
     </div>
   );
 }
