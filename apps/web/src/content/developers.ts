@@ -133,7 +133,7 @@ const envelopeRows: [string, string, string][] = [
   ],
   [
     'description',
-    "What happened, in words a person reads. It's the event's title in the console, and free-text search covers it.",
+    "What happened, in words a person reads. The console shows it as the event's title unless it only repeats the action, and free-text search covers it.",
     '"Lina cancelled booking #1042"',
   ],
   ['actor', 'Who caused it', '{ type: "user", id: "usr_42", name: "Lina Haddad" }'],

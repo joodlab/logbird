@@ -114,12 +114,12 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   operations each get their own page in the console. The conformance score is the
   share of nine recommended checks an event passes.
   <!-- source: docs/concepts.md; docs/SPEC.md §3 -->
-- **table:** <!-- outcome and description: SPEC §3 (envelope; the nine conformance checks include both) and docs/concepts.md's worked example (same description values); Recent problems = RECENT_PROBLEM_OUTCOMES in packages/contracts/src/api.ts; the drawer title is the description (apps/app/src/components/explorer/event-sheet.tsx); free-text search covers description (SPEC § Query language). The console's first-event snippets send outcome and description too. -->
+- **table:** <!-- outcome and description: SPEC §3 (envelope; the nine conformance checks include both) and docs/concepts.md's worked example (same description values); Recent problems lists events with an outcome in RECENT_PROBLEM_OUTCOMES (failure, denied) or severity RECENT_PROBLEM_SEVERITY (critical): packages/contracts/src/api.ts, packages/clickhouse/src/queries.ts; the event title is eventSentence(), which uses the description unless it equals the action (apps/app/src/lib/events.ts usesDescription); free-text search covers description (SPEC § Query language). The console's first-event snippets send outcome and description too. -->
 
   | Field | Answers | Example |
   | --- | --- | --- |
   | `outcome` | Whether it worked: success, failure, denied, partial or unknown. Failed and denied events show under Recent problems on the overview. | `"success"` |
-  | `description` | What happened, in words a person reads. It's the event's title in the console, and free-text search covers it. | `"Lina cancelled booking #1042"` |
+  | `description` | What happened, in words a person reads. The console shows it as the event's title unless it only repeats the action, and free-text search covers it. | `"Lina cancelled booking #1042"` |
   | `actor` | Who caused it | `{ type: "user", id: "usr_42", name: "Lina Haddad" }` |
   | `executor` | What did the work, and on which try | `{ type: "worker", id: "refunds-worker", jobId: "job_981", attempt: 2 }` |
   | `impersonator` | Which staff member acted for the actor | `{ id: "usr_1", name: "Support agent" }` |
