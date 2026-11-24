@@ -8,7 +8,7 @@ import { AppShell } from '@/components/shell/app-shell';
 import { ApiRequestError } from '@/lib/api/errors';
 import { projectQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { PROJECT_MISSING, projectIsListed } from '@/lib/project-listed';
-import { rememberProject } from '@/lib/session';
+import { redirectIfWorkspaceLost, rememberProject } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // A shared URL can carry `range=0` or `range=true`, which the router decodes as a number or boolean: drop it, so the page
@@ -30,7 +30,10 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
       context.queryClient.prefetchQuery(viewsQuery(params.projectId));
       return { project };
     } catch (error) {
-      if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) throw notFound({ data: PROJECT_MISSING });
+      if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) {
+        await redirectIfWorkspaceLost(context.queryClient);
+        throw notFound({ data: PROJECT_MISSING });
+      }
       throw error;
     }
   },

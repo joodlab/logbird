@@ -118,6 +118,8 @@ function Invitation({
     onError: () => refresh(),
   });
   const submitAccept = () => {
+    // The buttons are disabled while either answer is on its way; Enter in the name field must respect that too.
+    if (accept.isPending || decline.isPending) return;
     if (!needsName) return accept.mutate(null);
     const parsed = personNameSchema.safeParse(name);
     if (!parsed.success) {
@@ -212,14 +214,17 @@ function Invitation({
                 aria-invalid={Boolean(nameError) || undefined}
                 autoComplete="name"
                 dir="auto"
-                disabled={accept.isPending}
+                disabled={accept.isPending || decline.isPending}
                 id="invitation-name"
                 onChange={(e) => {
                   setName(e.target.value);
                   if (nameError) setNameError(null);
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') submitAccept();
+                  // Enter that only confirms an input-method composition (Japanese, Chinese…) is not a submit.
+                  if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                  e.preventDefault();
+                  submitAccept();
                 }}
                 placeholder="Lina Haddad"
                 ref={nameInput}

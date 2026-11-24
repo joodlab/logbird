@@ -62,7 +62,7 @@ export const invitation: EmailDefinition<InvitationEmailProps> = {
   name: 'Workspace invitation',
   recipient: 'email',
   subject: (p) => `${p.inviterName} invited you to ${p.workspace} on Logbird`,
-  preview: (p) => `Join as ${roleLabel(p.role)}. The invitation expires ${formatRelative(p.expiresAt, p.sentAt ?? new Date())}.`,
+  preview: (p) => `Join as ${withArticle(roleInProse(p.role))}. The invitation expires ${formatRelative(p.expiresAt, p.sentAt ?? new Date())}.`,
   text: (p) =>
     plainText({
       title: title(p),

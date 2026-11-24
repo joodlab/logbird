@@ -4,6 +4,7 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from '@tanstack/
 import { LogOutIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { BrandLockup } from '@/components/brand';
+import { LostWorkspacesAlert } from '@/components/lost-workspaces';
 import { SetupSteps } from '@/components/onboarding/setup-steps';
 import { workspaceSetupQuery } from '@/lib/api/queries';
 import { signOutFromConsole } from '@/lib/sign-out';
@@ -69,6 +70,8 @@ function OnboardingLayout() {
         </div>
       </header>
       <main className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-4 pt-6 pb-16 sm:pt-10">
+        {/* Every step, not only the workspace one: someone removed from a workspace can land on any of them (#4). */}
+        <LostWorkspacesAlert me={me} />
         {joining ? null : <SetupSteps current={current} steps={STEPS.map((step) => ({ id: step.id, label: step.label, done: done[step.id] }))} />}
         <div className="tm-fade-in">
           <Outlet />

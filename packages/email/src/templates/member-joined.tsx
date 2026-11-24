@@ -9,6 +9,8 @@ import { Button, DetailRows, EmailLayout, Note, Paragraph, Spacer, Strong, Title
 export interface MemberJoinedEmailProps {
   appUrl: string;
   workspace: string;
+  /** The workspace's id: the members link opens this workspace, whichever one the inviter has open. */
+  workspaceId: string;
   memberName: string;
   memberEmail: string;
   role: string;
@@ -21,7 +23,7 @@ const title = (p: MemberJoinedEmailProps) => `${p.memberName} joined ${p.workspa
 const lead = (p: MemberJoinedEmailProps) =>
   `${p.memberName} accepted your invitation and is now a member of ${p.workspace} as ${withArticle(roleInProse(p.role))}.`;
 /** The workspace's members page: where the inviter checks the new member's role. */
-const membersUrl = (p: MemberJoinedEmailProps) => `${p.appUrl}/workspace/members`;
+const membersUrl = (p: MemberJoinedEmailProps) => `${p.appUrl}/workspace/members?workspace=${encodeURIComponent(p.workspaceId)}`;
 const details = (p: MemberJoinedEmailProps) => [
   { label: 'Member', value: p.memberName === p.memberEmail ? p.memberEmail : `${p.memberName} (${p.memberEmail})` },
   { label: 'Role', value: roleLabel(p.role), hint: roleSummary(p.role) },

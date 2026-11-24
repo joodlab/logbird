@@ -37,7 +37,7 @@ Workspace: Acme
 Joined:    Nov 5, 2026, 14:32 UTC
 
 View members:
-https://audit.acme.test/workspace/members
+https://audit.acme.test/workspace/members?workspace=org_acme
 
 Not who you expected? An owner or admin can change their role or remove them from Acme under Workspace settings → Members.
 

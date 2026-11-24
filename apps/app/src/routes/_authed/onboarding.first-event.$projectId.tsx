@@ -1,6 +1,6 @@
 import { Button } from '@logbird/ui/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, notFound, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, notFound, redirect, useNavigate } from '@tanstack/react-router';
 import { ArrowRightIcon, KeyRoundIcon, SendIcon } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
 import { NotFound } from '@/components/not-found';
@@ -9,17 +9,25 @@ import { FIRST_EVENT_POLL_MS, FirstEventPanel } from '@/components/setup/first-e
 import { ApiRequestError } from '@/lib/api/errors';
 import { projectQuery, projectSetupQuery } from '@/lib/api/queries';
 import { skipFirstEvent } from '@/lib/onboarding';
-import { ensureActiveWorkspace } from '@/lib/session';
+import { ensureActiveWorkspace, redirectIfWorkspaceLost } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/onboarding/first-event/$projectId')({
   head: () => ({ meta: [{ title: 'Send your first event · Logbird' }] }),
-  beforeLoad: async ({ context }) => ({ me: await ensureActiveWorkspace(context.queryClient, context.me) }),
+  beforeLoad: async ({ context }) => {
+    const me = await ensureActiveWorkspace(context.queryClient, context.me);
+    // No workspace left (removed since this page was bookmarked): onboarding says which one, instead of Project not found.
+    if (me.organizations.length === 0) throw redirect({ to: '/onboarding' });
+    return { me };
+  },
   loader: async ({ context, params }) => {
     try {
       context.queryClient.prefetchQuery(projectSetupQuery(params.projectId, { pollUntilFirstEvent: FIRST_EVENT_POLL_MS }));
       return await context.queryClient.ensureQueryData(projectQuery(params.projectId));
     } catch (error) {
-      if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) throw notFound();
+      if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) {
+        await redirectIfWorkspaceLost(context.queryClient);
+        throw notFound();
+      }
       throw error;
     }
   },

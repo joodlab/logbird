@@ -1,8 +1,9 @@
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { toast } from 'sonner';
+import { lostTitle, useLostWorkspaces } from '@/components/lost-workspaces';
 import { FullPageLoader } from '@/components/route-states';
-import { ensureActiveWorkspace, noteLostWorkspace, rememberWorkspace, takeLostWorkspace } from '@/lib/session';
+import { ensureActiveWorkspace } from '@/lib/session';
 
 /** Requires an active workspace (organization). People without one go to onboarding. */
 export const Route = createFileRoute('/_authed/_workspace')({
@@ -18,19 +19,16 @@ export const Route = createFileRoute('/_authed/_workspace')({
   component: WorkspaceLayout,
 });
 
-/** Says once, by name, that the workspace this browser last showed is no longer one of the person's (#4). */
+/** Says once, by name, which of the person's workspaces they no longer belong to (#4). */
 function WorkspaceLayout() {
   const { workspace, me } = Route.useRouteContext();
+  const lost = useLostWorkspaces(me);
   useEffect(() => {
-    // Again in the browser: on a full page load the route guard ran on the server, without browser storage.
-    noteLostWorkspace(me);
-    rememberWorkspace(workspace);
-    const lost = takeLostWorkspace();
-    if (lost)
-      toast.info(`You no longer have access to ${lost}`, {
-        description: `An owner removed you from it. You are in ${workspace.name}; ask an owner of ${lost} to invite you again.`,
+    if (lost.length)
+      toast.info(lostTitle(lost), {
+        description: `You are in ${workspace.name}. To return, ask an owner or admin there to invite you again.`,
         duration: 12_000,
       });
-  }, [me, workspace]);
+  }, [lost, workspace.name]);
   return <Outlet />;
 }

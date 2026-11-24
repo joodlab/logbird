@@ -203,6 +203,7 @@ export const auth = betterAuth({
             await sendMemberJoined({
               inviterEmail: inviter.email,
               workspace: organization.name,
+              workspaceId: organization.id,
               memberName: displayName(user),
               memberEmail: user.email,
               role: primaryRole(member.role),

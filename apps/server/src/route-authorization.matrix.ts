@@ -110,7 +110,8 @@ export const authMatrix = {
   changeEmailEmailOTP: 'inactive',
   createOrganization: 'self',
   updateOrganization: 'organization-admin-no-name-or-slug',
-  deleteOrganization: 'organization-owner',
+  // Disabled (disableOrganizationDeletion): it left the workspace's events in ClickHouse. Purging deletion is #373.
+  deleteOrganization: 'inactive',
   setActiveOrganization: 'organization-member',
   getOrganization: 'organization-member',
   getFullOrganization: 'organization-member',

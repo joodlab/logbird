@@ -9,12 +9,15 @@ import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Loader2Icon, LogOutIcon, MailIcon, MoreHorizontalIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from 'lucide-react';
+import { z } from 'zod';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { InviteForm } from '@/components/members/invite-form';
 import { InviteLinkPanel, PanelHeading } from '@/components/members/invite-link-panel';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
+import { WorkspaceLinkNotice } from '@/components/workspace-link-notice';
 import {
+  hasRole,
   invitationUrl,
   type OrgMember,
   ROLE_INFO,
@@ -28,25 +31,29 @@ import {
 import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/workspace/members')({
+  // `?workspace=<id>` from a link such as the member-joined email: the workspace it is about (#8).
+  validateSearch: z.object({ workspace: z.string().optional().catch(undefined) }),
   staticData: { crumb: 'Members' },
   head: () => ({ meta: [{ title: 'Members · Workspace settings · Logbird' }] }),
   component: MembersSettings,
 });
 
 function MembersSettings() {
+  const { workspace: linkedWorkspace } = Route.useSearch();
+  const { workspace } = Route.useRouteContext();
   const { me, org, myRole, owners, canManage, pending } = useOrganization();
   const confirm = useConfirm();
   const { cancel, remove, changeRole } = useMemberActions();
   const resend = useInviteMember();
   const navigate = useNavigate();
   const leave = useLeaveWorkspace(() => navigate({ to: '/' }));
-  const lastOwnerSelf = myRole === 'owner' && owners <= 1;
+  const lastOwnerSelf = hasRole(org.data?.members.find((m) => m.userId === me.data?.user.id)?.role, 'owner') && owners <= 1;
   const members = [...(org.data?.members ?? [])].sort((a, b) => rank(a.role) - rank(b.role) || a.user.email.localeCompare(b.user.email));
 
   /** What I may do to this member. Mirrors better-auth's rules so we never offer an action it rejects. */
   const permissions = (m: OrgMember) => {
     const self = m.userId === me.data?.user.id;
-    const lastOwner = m.role === 'owner' && owners <= 1;
+    const lastOwner = hasRole(m.role, 'owner') && owners <= 1;
     const touchable = canManage && !self && (m.role !== 'owner' || myRole === 'owner');
     return { self, lastOwner, canChangeRole: touchable && !lastOwner, canRemove: touchable && !lastOwner };
   };
@@ -68,6 +75,7 @@ function MembersSettings() {
 
   return (
     <div className="flex flex-col gap-5">
+      {me.data ? <WorkspaceLinkNotice active={workspace} linked={linkedWorkspace} organizations={me.data.organizations} /> : null}
       <SettingsSection
         description={
           <>
