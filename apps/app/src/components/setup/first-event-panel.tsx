@@ -23,7 +23,7 @@ import { formatNumber } from '@/lib/format';
 import { firstEventCopy } from '@/lib/onboarding';
 import { useCan } from '@/lib/permissions';
 import { formatTerm } from '@/lib/query-language';
-import { curlSnippet, dotnetSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
+import { curlSnippet, dotnetSnippet, fetchSnippet, sdkInstallComment, sdkSnippet } from '@/lib/snippets';
 import { useSessionKey } from './api-key-step';
 import { useFirstArrival } from './use-first-arrival';
 import { useInvalidateSetup, useSampleData, useTestEvent } from './use-setup';
@@ -39,7 +39,7 @@ export function SendEventSnippets({ projectId }: { projectId: string }) {
       <CodeTabs
         tabs={[
           { id: 'curl', label: 'curl', code: curlSnippet(key), language: 'bash' },
-          { id: 'sdk', label: 'TypeScript SDK', code: `// ${SDK_INSTALL}\n${sdkSnippet(key)}`, language: 'ts' },
+          { id: 'sdk', label: 'TypeScript SDK', code: `${sdkInstallComment()}\n\n${sdkSnippet(key)}`, language: 'ts' },
           { id: 'dotnet', label: 'C# (.NET)', code: dotnetSnippet(key), language: 'csharp' },
           { id: 'fetch', label: 'fetch', code: fetchSnippet(key), language: 'ts' },
         ]}
@@ -84,7 +84,9 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
       ) : (
         <Listening projectId={projectId} setup={data} />
       )}
-      <SampleDataControl projectId={projectId} setup={data} />
+      {/* Sample data is for looking around before real events: once one has arrived it is not promoted here, though
+          sample data already loaded can still be removed (#16). */}
+      {!first || data.ingest.sampleEvents > 0 ? <SampleDataControl projectId={projectId} setup={data} /> : null}
     </div>
   );
 }
