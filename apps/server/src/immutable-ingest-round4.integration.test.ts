@@ -2,7 +2,7 @@ import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { read } from '@logbird/clickhouse';
-import { ProjectBusyError, prisma } from '@logbird/database';
+import { databaseClock, ProjectBusyError, prisma } from '@logbird/database';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -189,7 +189,10 @@ it('ready-only and grace-only recovery perform no rollup DELETE and expose the r
   await f.pending({ id: 'grace', action: 'old' }, { expired: true });
   await recoverProjectIngest(maintenanceClickhouse, f.project);
   commands.mockClear();
-  vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: 'grace' },
+    data: { receivedAt: new Date((await databaseClock()).getTime() - 11 * 60_000) },
+  });
   expect((await f.post({ id: 'grace', action: 'new' })).status).toBe(202);
   expect(commands.mock.calls.some(([p]) => /^DELETE FROM (events_by_minute|entities|attribute_keys)\b/.test(p.query))).toBe(false);
 });

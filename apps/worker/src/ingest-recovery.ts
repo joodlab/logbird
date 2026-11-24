@@ -10,6 +10,7 @@ import {
 import {
   cancelStagedRetention,
   confirmIngestReceipts,
+  databaseClock,
   INGEST_RECEIPT_WINDOW_MS,
   type Prisma,
   ProjectBusyError,
@@ -19,23 +20,56 @@ import {
 import { rebuildProjectReadModel } from './project-repair';
 
 const FLUSH_INTERVAL_MS = 60_000;
+// Old API servers stamped claims on their own clocks. Leave room for those claims during a rolling upgrade.
+export const RETENTION_CLOCK_SKEW_ALLOWANCE_MS = 30_000;
+const CLAIM_SETTLEMENT_MS = INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS + RETENTION_CLOCK_SKEW_ALLOWANCE_MS;
 let flushedAt = 0;
 let flushAttemptedAt = 0;
 let flushing: Promise<void> | undefined;
+const flushAsyncInserts = (ch: ClickHouseClient) =>
+  ch.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE', clickhouse_settings: { max_execution_time: 30 } });
+
 async function flushAfter(ch: ClickHouseClient, proofAfter: number) {
   if (flushedAt >= proofAfter) return true;
   if (flushing) await flushing;
   if (flushedAt >= proofAfter) return true;
   if (Date.now() - flushAttemptedAt < FLUSH_INTERVAL_MS) return false;
-  const startedAt = Date.now();
-  flushAttemptedAt = startedAt;
-  flushing = ch.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE', clickhouse_settings: { max_execution_time: 30 } }).then(() => {
+  flushAttemptedAt = Date.now();
+  // A cached flush proves settlement only for claims whose database deadline passed before the flush began.
+  flushing = (async () => {
+    const startedAt = (await databaseClock()).getTime();
+    await flushAsyncInserts(ch);
     flushedAt = startedAt;
-  });
+  })();
   try {
     await flushing;
   } finally {
     flushing = undefined;
+  }
+  return flushedAt >= proofAfter;
+}
+
+/** Caller holds EXCLUSIVE. Use the newest claim in the whole project, including IDs outside the current retry. */
+async function projectInsertSettlement(projectId: string, db: Pick<Prisma.TransactionClient, '$queryRaw'>) {
+  const [open] = await db.$queryRaw<[{ claimedAt: Date | null; now: Date }]>`
+    SELECT (SELECT "claimedAt" FROM "IngestReceipt"
+      WHERE "projectId"=${projectId} AND "confirmedAt" IS NULL AND "claimedAt" IS NOT NULL
+      ORDER BY "claimedAt" DESC LIMIT 1) AS "claimedAt", clock_timestamp() AS now`;
+  const proofAfter = open.claimedAt ? open.claimedAt.getTime() + CLAIM_SETTLEMENT_MS : 0;
+  return { proofAfter, settled: proofAfter <= open.now.getTime() };
+}
+
+/** Retention and manual rollup repair hold EXCLUSIVE until writes are proven settled. */
+export async function settleProjectInserts(ch: ClickHouseClient, projectId: string, db: Pick<Prisma.TransactionClient, '$queryRaw'> = prisma) {
+  const { proofAfter, settled } = await projectInsertSettlement(projectId, db);
+  if (!settled) return false;
+  if (!proofAfter) return true;
+  try {
+    await flushAsyncInserts(ch);
+  } catch (error) {
+    throw Object.assign(new Error('Retention needs the SYSTEM FLUSH ASYNC INSERT QUEUE grant on the ClickHouse writer.', { cause: error }), {
+      code: 'LOGBIRD_FLUSH_UNAVAILABLE',
+    });
   }
   return true;
 }
@@ -63,8 +97,7 @@ export function logIngestRecoveryFailure(error: unknown, projectId?: string) {
 }
 export async function probeIngestRecovery(ch: ClickHouseClient) {
   try {
-    await flushAfter(ch, Date.now());
-    return true;
+    return await flushAfter(ch, (await databaseClock()).getTime());
   } catch (error) {
     logIngestRecoveryFailure(error);
     console.error(
@@ -84,22 +117,14 @@ export interface IngestRecoveryOptions {
 }
 type ReceiptScope = Prisma.IngestReceiptWhereInput;
 function abandonedReceipts(projectId: string, now: number, eventIds?: string[]) {
-  const expiredAt = new Date(now - INGEST_CLAIM_LEASE_MS - ASYNC_INSERT_FLUSH_BOUND_MS);
+  const expiredAt = new Date(now - CLAIM_SETTLEMENT_MS);
   const eligible: ReceiptScope = {
     projectId,
     confirmedAt: null,
     OR: [{ claimedAt: { lt: expiredAt } }, { claimedAt: null }],
     ...(eventIds ? { eventId: { in: eventIds } } : {}),
   };
-  return { expiredAt, readyCutoff: new Date(now - INGEST_RECEIPT_WINDOW_MS), eligible };
-}
-
-/** Caller holds EXCLUSIVE. Undefined when the process-wide flush throttle refuses the required proof. */
-async function proveAbandonedWrites(ch: ClickHouseClient, eligible: ReceiptScope, expiredAt: Date) {
-  const newestClaim = await prisma.ingestReceipt.findFirst({ where: { ...eligible, claimedAt: { lt: expiredAt } }, orderBy: { claimedAt: 'desc' } });
-  const requiredProof = newestClaim?.claimedAt ? newestClaim.claimedAt.getTime() + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS : 0;
-  if (requiredProof && !(await flushAfter(ch, requiredProof))) return;
-  return { claimed: !!newestClaim };
+  return { readyCutoff: new Date(now - INGEST_RECEIPT_WINDOW_MS), eligible };
 }
 
 /** Caller holds EXCLUSIVE and rebuilt every derived destination after the flush proof. */
@@ -150,33 +175,45 @@ export async function recoverProjectIngest(
   // Tagged as this project's maintenance for every caller (server, worker, scripts/reconcile-ingest.ts): deletion can
   // stop a rebuild or index repair that a failed call left running in ClickHouse.
   const ch = projectMaintenance(client, projectId);
-  const now = Date.now();
-  const { expiredAt, readyCutoff, eligible } = abandonedReceipts(projectId, now, eventIds);
-  const preview = await prisma.ingestReceipt.findMany({ where: eligible, take: 1000, orderBy: { claimedAt: { sort: 'desc', nulls: 'last' } } });
+  // The local clock is only a prefilter, biased to include candidates if the app clock lags. The locked path
+  // rechecks eligibility on the database clock before changing a receipt or rebuilding rollups.
+  const previewScope = abandonedReceipts(projectId, Date.now() + RETENTION_CLOCK_SKEW_ALLOWANCE_MS, eventIds);
+  const preview = await prisma.ingestReceipt.findMany({
+    where: previewScope.eligible,
+    take: 1000,
+    orderBy: { claimedAt: { sort: 'desc', nulls: 'last' } },
+  });
   if (!preview.length) return false;
   const actionable =
     !candidates ||
     preview.some(
       (r) =>
-        (!r.claimedAt && r.receivedAt < readyCutoff) ||
+        (!r.claimedAt && r.receivedAt < previewScope.readyCutoff) ||
         candidates.some(
           (c) => c.eventId === r.eventId && retryFingerprint(c.input, projectId, r.receivedAt, r.eventId, r.fingerprint, r.eventAt) === r.fingerprint,
         ),
     );
   if (!actionable || (await hasFailedRepair(projectId))) return false;
-  const proofAfter = Math.max(
-    0,
-    ...preview.filter((r) => r.claimedAt).map((r) => (r.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS),
-  );
+  const newestPreview = preview[0]?.claimedAt;
+  const proofAfter = newestPreview ? newestPreview.getTime() + CLAIM_SETTLEMENT_MS : 0;
   // Avoid taking the project lock for a flush that the process-wide throttle will refuse.
-  if (proofAfter > flushedAt && !flushing && now - flushAttemptedAt < FLUSH_INTERVAL_MS) return false;
-  return withProjectLock(projectId, async () => {
+  if (proofAfter > flushedAt && !flushing && Date.now() - flushAttemptedAt < FLUSH_INTERVAL_MS) return false;
+  return withProjectLock(projectId, async (tx) => {
     // A repair can fail while this request is acquiring the lock. Its queued retention job owns recovery.
     if (await hasFailedRepair(projectId)) return false;
-    const proof = await proveAbandonedWrites(ch, eligible, expiredAt);
-    if (!proof) return false;
-    // A failed MV can commit any subset of destinations. Repair before confirming any page.
-    if (proof.claimed) await rebuildProjectReadModel(ch, projectId);
+    const { readyCutoff, eligible } = abandonedReceipts(projectId, (await databaseClock(tx)).getTime(), eventIds);
+    const receipt = await tx.ingestReceipt.findFirst({
+      where: eligible,
+      orderBy: { claimedAt: { sort: 'desc', nulls: 'last' } },
+      select: { claimedAt: true },
+    });
+    if (!receipt) return false;
+    if (receipt.claimedAt) {
+      const project = await projectInsertSettlement(projectId, tx);
+      if (!project.settled || !(await flushAfter(ch, project.proofAfter))) return false;
+      // A failed MV can commit any subset of destinations. Repair before confirming any page.
+      await rebuildProjectReadModel(ch, projectId);
+    }
     await settleAbandonedReceipts(ch, projectId, eligible, readyCutoff);
     if (replay) {
       // A replay writes rows with their original receive clock. A background retention run staged between its fences

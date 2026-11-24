@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { CLICKHOUSE_PLAIN_READ, insertEvents, pendingProjectMutations, read } from '@logbird/clickhouse';
 import { closeProjectLocks, ProjectBusyError, prisma, SERVER_CAPABILITIES, withProjectLock } from '@logbird/database';
-import { RETENTION_CLOCK_SKEW_ALLOWANCE_MS, clickhouse as retentionClickhouse, runBackgroundRetention } from '@logbird/worker/retention';
+import { RETENTION_CLOCK_SKEW_ALLOWANCE_MS } from '@logbird/worker/ingest-recovery';
+import { clickhouse as retentionClickhouse, runBackgroundRetention } from '@logbird/worker/retention';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { reconcileDestructiveMaintenance } from './destructive-maintenance';
@@ -366,7 +367,7 @@ it('cannot be moved by an app instance clock: fences use the database clock, and
   await expectRollupsExact('after a lagging instance wrote between the fences');
   // An unresolved claim that looks settled by lease and flush bound alone (80 s old) is still inside the allowance.
   expect(RETENTION_CLOCK_SKEW_ALLOWANCE_MS).toBeGreaterThan(10_000);
-  await f.pending({ id: 'in-flight', action: 'qa.claim' }, { expired: true });
+  await f.pending({ id: 'in-flight', action: 'qa.claim' }, { claimedAt: new Date(Date.now() - 80_000) });
   await prisma.project.update({ where: { id: f.project }, data: { retentionDays: 1 } });
   const before = await prisma.retentionRun.count({ where: { projectId: f.project } });
   expect(await runBackgroundRetention(f.project)).toBe('deferred');

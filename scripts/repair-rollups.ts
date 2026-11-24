@@ -3,9 +3,10 @@
 // (docs/self-hosting.md, "Stuck retention deletes"). It holds the project's exclusive lock for the rebuild, so the
 // project's ingest is refused with 503 project_busy (Retry-After) while it runs.
 import { closeProjectLocks, prisma, withProjectLock } from '@logbird/database';
+import { settleProjectInserts } from '../apps/worker/src/ingest-recovery';
 import { rebuildProjectReadModel } from '../apps/worker/src/project-repair';
 import { closeRetentionQueue } from '../apps/worker/src/queue';
-import { clickhouse, settleProjectInserts } from '../apps/worker/src/retention';
+import { clickhouse } from '../apps/worker/src/retention';
 
 try {
   const projectId = process.argv[2];
@@ -15,8 +16,9 @@ try {
   const started = Date.now();
   await withProjectLock(
     projectId,
-    async () => {
-      if (!(await settleProjectInserts(projectId))) throw new Error('Recent writes are still settling. Retry the rollup rebuild shortly.');
+    async (tx) => {
+      if (!(await settleProjectInserts(clickhouse, projectId, tx)))
+        throw new Error('Recent writes are still settling. Retry the rollup rebuild shortly.');
       await rebuildProjectReadModel(clickhouse, projectId);
     },
     { waitMs: 30_000 },

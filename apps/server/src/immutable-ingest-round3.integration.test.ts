@@ -1,6 +1,6 @@
 import { eventFingerprint, insertEvents, read } from '@logbird/clickhouse';
 import { ingestPendingDetailsSchema } from '@logbird/contracts';
-import { prisma, withProjectLock } from '@logbird/database';
+import { databaseClock, prisma, withProjectLock } from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
@@ -44,7 +44,10 @@ it('prechecks five different-content retries without a flush and releases a read
   const commands = vi.spyOn(maintenanceClickhouse, 'command');
   for (let i = 0; i < 5; i++) expect((await f.post({ ...input, action: 'new.content' })).status).toBe(503);
   expect(commands.mock.calls.filter(([p]) => p.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE')).toHaveLength(0);
-  vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: input.id },
+    data: { receivedAt: new Date((await databaseClock()).getTime() - 11 * 60_000) },
+  });
   expect((await f.post({ ...input, action: 'new.content' })).status).toBe(202);
   expect(await f.count()).toBe(1);
   expect(commands.mock.calls.filter(([p]) => p.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE')).toHaveLength(0);
@@ -133,7 +136,7 @@ it('recovers a missing old long-id claim using the safe stored id and its origin
       fingerprint: legacyFingerprint3a1541f(row),
       receivedAt,
       eventAt: new Date(row.timestamp),
-      claimedAt: new Date(Date.now() - 80_000),
+      claimedAt: new Date((await databaseClock()).getTime() - 120_000),
     },
   });
   expect((await f.post({ ...oldInput, id: row.event_id })).status).toBe(202);

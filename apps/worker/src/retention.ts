@@ -1,12 +1,10 @@
 import {
-  ASYNC_INSERT_FLUSH_BOUND_MS,
   applyRetention,
   committedReceivedAfter,
   createMaintenanceClickHouseClient,
   createSessionClickHouseClient,
   dropStagedRetentionRollups,
   hasExpiredEvents,
-  INGEST_CLAIM_LEASE_MS,
   pendingEventMutations,
   pendingProjectMutations,
   projectMaintenance,
@@ -34,7 +32,7 @@ import {
   withProjectLock,
 } from '@logbird/database';
 import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
-import { logIngestRecoveryFailure, settleProjectReceiptsAfterRepair } from './ingest-recovery';
+import { logIngestRecoveryFailure, settleProjectInserts, settleProjectReceiptsAfterRepair } from './ingest-recovery';
 import { heartbeatMaintenanceRun } from './project-repair';
 import { enqueueProjectRetention } from './queue';
 import {
@@ -125,7 +123,7 @@ export async function enforceProjectRetention(projectId: string) {
     const now = (await databaseClock(tx)).getTime();
     const cutoff = new Date(now - project.retentionDays * 86_400_000);
     // The synchronous purge also rewrites rollups. An unresolved insert must settle before any DELETE or rebuild.
-    if (!(await settleProjectInserts(projectId, tx))) throw new ProjectBusyError();
+    if (!(await settleProjectInserts(clickhouse, projectId, tx))) throw new ProjectBusyError();
     const run = await prisma.$transaction(async (db) => {
       await beginDestructiveMaintenance(projectId, db);
       await db.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
@@ -195,37 +193,6 @@ async function fenceClock(db: Prisma.TransactionClient) {
   const fence = await databaseClock(db);
   while ((await databaseClock(db)).getTime() <= fence.getTime()) await new Promise((resolve) => setTimeout(resolve, 1));
   return fence;
-}
-
-/**
- * Older servers stamped `claimedAt` with their own clocks. Allow for those servers' clock skew during an upgrade.
- */
-export const RETENTION_CLOCK_SKEW_ALLOWANCE_MS = 30_000;
-/**
- * Under the exclusive lock: proves no insert of the project can still land in ClickHouse (no unresolved claim, or the
- * newest is past its lease, flush bound and clock-skew allowance and the async queue was flushed). False when a claim
- * may still be in flight.
- */
-export async function settleProjectInserts(projectId: string, db: Pick<Prisma.TransactionClient, '$queryRaw'> = prisma) {
-  // One clock: claimedAt is stamped by the database and compared with the database clock here, so no instance clock
-  // can make an unresolved claim look settled. The allowance remains for claims stamped by an older server's own
-  // clock during a rolling upgrade.
-  const settleMs = INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS + RETENTION_CLOCK_SKEW_ALLOWANCE_MS;
-  const [open] = await db.$queryRaw<[{ claimedAt: Date | null; settledBefore: Date }]>`
-    SELECT (SELECT "claimedAt" FROM "IngestReceipt"
-      WHERE "projectId"=${projectId} AND "confirmedAt" IS NULL AND "claimedAt" IS NOT NULL
-      ORDER BY "claimedAt" DESC LIMIT 1) AS "claimedAt",
-      (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(secs => ${settleMs / 1000}::float8) AS "settledBefore"`;
-  if (!open.claimedAt) return true;
-  if (open.claimedAt > open.settledBefore) return false;
-  try {
-    await clickhouse.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE', clickhouse_settings: { max_execution_time: 30 } });
-  } catch (error) {
-    throw Object.assign(new Error('Retention needs the SYSTEM FLUSH ASYNC INSERT QUEUE grant on the ClickHouse writer.', { cause: error }), {
-      code: 'LOGBIRD_FLUSH_UNAVAILABLE',
-    });
-  }
-  return true;
 }
 
 const cancelRun = (id: string, error: string) =>
@@ -325,7 +292,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     // Capability gate (#296, round-1 finding 15): every API server seen recently must support background retention.
     if (!(await backgroundRetentionAllowed(projectId, 'fence_a'))) return 'incapable' as const;
     try {
-      if (!(await settleProjectInserts(projectId, tx))) return 'deferred' as const;
+      if (!(await settleProjectInserts(clickhouse, projectId, tx))) return 'deferred' as const;
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'LOGBIRD_FLUSH_UNAVAILABLE')) throw error;
       await tx.retentionRun.create({
@@ -376,7 +343,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
         await cancelRun(run.id, 'Other maintenance changed the project during the run; the next run retries.');
         return 'canceled' as const;
       }
-      if (!(await settleProjectInserts(projectId, tx))) {
+      if (!(await settleProjectInserts(clickhouse, projectId, tx))) {
         await cancelRun(run.id, 'Recent writes were still settling; the next run retries.');
         return 'canceled' as const;
       }

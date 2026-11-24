@@ -15,7 +15,7 @@
 ### Upgrade notes
 
 - **ClickHouse 26.9 or newer is required.** The server and worker now check it at startup and refuse to start against an older server, naming its version.
-- **Upgrade every server replica before starting the new worker.** For a rolling upgrade, first deploy a release that includes the server heartbeat and wait until every replica is on that release. Servers from 0.2.1 and earlier do not report a heartbeat. When upgrading directly from one of those releases, keep the new worker stopped until every old API replica has stopped serving traffic.
+- **Upgrade every server replica before starting the new worker.** A rolling upgrade requires every existing API replica to report a heartbeat. When upgrading from a release without server heartbeats, keep the new worker stopped until every old API replica has drained and stopped serving traffic.
 - The worker checks for heartbeat support at both retention fences. If a server seen in the last 90 seconds lacks support, or no server recently reported a heartbeat, the run uses the synchronous method and the project's ingest waits while ClickHouse deletes. Before restoring a pre-heartbeat server, stop the new worker and let pending retention deletes finish.
 - The ClickHouse writer needs `SYSTEM FLUSH ASYNC INSERT QUEUE` to settle an unresolved claim. If the flush fails at the first background retention fence, Settings records the canceled run and the reason. Synchronous retention and repair also require unresolved inserts to settle before they change stored rows.
 - If you rebuild a project's rollups by hand after killing a Logbird mutation, use `scripts/repair-rollups.ts PROJECT` (it refuses that project's ingest while it runs).

@@ -691,9 +691,12 @@ Raw `payload` and v1 identity keep the original input;
 search normalization is intentionally lossy. Invalid dates still fall back with
 warnings and job attempts clamp to UInt16.
 
-An exact retry or hourly worker recovers per project after the lease plus a
-conservative ten-second async flush bound. Candidate fingerprints are checked
-before taking the exclusive lock or flushing. Recovery drains the async queue,
+An exact retry or hourly worker recovers per project after the lease, a ten-second
+async flush bound and a 30-second allowance for claims stamped by older servers.
+Candidate fingerprints are checked before taking the exclusive lock or flushing.
+Before rebuilding, recovery checks the newest claim across the whole project
+against the database clock, including claims outside the requested event IDs.
+Recovery drains the async queue,
 reads raw evidence, repairs the index and rebuilds every rollup before confirming
 receipts. Stored evidence wins even when it differs from the abandoned claim:
 the stored identity is confirmed and the conflicting retry is rejected. Missing

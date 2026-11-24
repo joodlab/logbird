@@ -2,6 +2,7 @@ import { eventFingerprint, exportEvents, getEvent, insertEvents, read, searchEve
 import {
   claimIngestReceipts,
   confirmIngestReceipts,
+  databaseClock,
   expireIngestReceipts,
   findIngestReceipts,
   prisma,
@@ -238,14 +239,17 @@ it('retention cutoff cleanup preserves an unresolved delayed original while a co
   const delayed = await f.pending(input);
   // Force the actual retention purge path with another expired, acknowledged row.
   expect((await f.post({ ...input, id: 'expired-confirmed' })).status).toBe(202);
-  await enforceProjectRetention(f.project);
+  await expect(enforceProjectRetention(f.project)).rejects.toThrow('Project maintenance is busy');
   await withProjectLock(f.project, () => purgeIngestReceipts(f.project, new Date()));
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: original.id, confirmedAt: null } })).toBe(1);
   expect((await f.post({ ...input, action: 'conflict' })).status).toBe(503);
   await insertEvents(clickhouse, [delayed]);
-  vi.setSystemTime(Date.now() + 80_000);
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: original.id },
+    data: { claimedAt: new Date((await databaseClock()).getTime() - 120_000) },
+  });
   expect((await f.post(input)).status).toBe(202);
-  expect(await f.count()).toBe(1);
+  expect(await f.count()).toBe(2);
   await enforceProjectRetention(f.project);
   expect(await f.count()).toBe(0);
   expect((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM event_ids WHERE project_id={p:String}', { p: f.project }))[0]?.n).toBe(0);

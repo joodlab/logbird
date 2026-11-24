@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { read } from '@logbird/clickhouse';
-import { prisma } from '@logbird/database';
+import { databaseClock, prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
@@ -70,7 +70,10 @@ it.runIf(qa)('retains a real async-wait timeout while its insertion remains queu
   expect(await f.count()).toBe(1);
   // A visible raw row alone is not acknowledgement that every destination succeeded.
   expect((await f.post(input)).status).toBe(503);
-  vi.setSystemTime(Date.now() + 80_000);
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: input.id },
+    data: { claimedAt: new Date((await databaseClock()).getTime() - 120_000) },
+  });
   expect((await f.post(input)).status).toBe(202);
   await assertOne();
 });
@@ -96,7 +99,10 @@ it.runIf(qa).each(['event_ids', 'events_by_minute'] as const)(
     } finally {
       await clickhouse.command({ query: `ALTER TABLE ${target} DROP CONSTRAINT IF EXISTS ${constraint}` });
     }
-    vi.setSystemTime(Date.now() + 80_000);
+    await prisma.ingestReceipt.updateMany({
+      where: { projectId: f.project, eventId: input.id },
+      data: { claimedAt: new Date((await databaseClock()).getTime() - 120_000) },
+    });
     const writes = vi.spyOn(clickhouse, 'exec');
     expect((await f.post(input)).status).toBe(202);
     expect(writes.mock.calls.some(([p]) => p.query.startsWith('INSERT INTO events '))).toBe(false);

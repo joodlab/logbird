@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { eventFingerprint, normalizeEvent, read } from '@logbird/clickhouse';
-import { prisma, withProjectLock } from '@logbird/database';
+import { databaseClock, prisma, withProjectLock } from '@logbird/database';
 import { Hono } from 'hono';
 import { app } from './app';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
@@ -34,8 +34,9 @@ export async function immutableFixture(prefix = 'qa-immutable') {
     if (!normalized.ok) throw new Error(normalized.reason);
     return normalized.row;
   };
-  const pending = async (input: unknown, options: { expired?: boolean; legacy?: string; receivedAt?: Date } = {}) => {
+  const pending = async (input: unknown, options: { expired?: boolean; legacy?: string; receivedAt?: Date; claimedAt?: Date } = {}) => {
     const normalized = row(input, options.receivedAt);
+    const claimedAt = options.claimedAt ?? new Date((await databaseClock()).getTime() - (options.expired ? 120_000 : 0));
     await prisma.ingestReceipt.create({
       data: {
         projectId: project,
@@ -44,7 +45,7 @@ export async function immutableFixture(prefix = 'qa-immutable') {
         fingerprint: options.legacy ?? eventFingerprint(normalized),
         receivedAt: new Date(normalized.received_at),
         eventAt: new Date(normalized.timestamp),
-        claimedAt: options.expired ? new Date(Date.now() - 80_000) : new Date(),
+        claimedAt,
       },
     });
     return normalized;

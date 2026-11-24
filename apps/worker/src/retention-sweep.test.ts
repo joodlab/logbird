@@ -50,7 +50,8 @@ vi.mock('@logbird/clickhouse', async (original) => ({
   purgeProject: fake.purge,
   rebuildProjectRollups: vi.fn(),
 }));
-vi.mock('./ingest-recovery', () => ({
+vi.mock('./ingest-recovery', async (original) => ({
+  ...(await original<typeof import('./ingest-recovery')>()),
   recoverProjectIngest: fake.recover,
   logIngestRecoveryFailure: vi.fn(),
   settleProjectReceiptsAfterRepair: vi.fn(),
@@ -101,7 +102,7 @@ it.each(['recent', 'flush failed'])('holds a failed repair read fence when claim
     work({
       project: { findUnique: fake.project },
       retentionRun: { findFirst: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ status: 'failed' }) },
-      $queryRaw: async () => [{ claimedAt: condition === 'recent' ? now : new Date(0), settledBefore: new Date(now.getTime() - 100_000) }],
+      $queryRaw: async () => [{ claimedAt: condition === 'recent' ? now : new Date(0), now }],
     }),
   );
   fake.command.mockRejectedValue(new Error('QA flush denied'));
