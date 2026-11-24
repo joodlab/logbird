@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseAst } from 'vite';
 import { describe, expect, it } from 'vitest';
@@ -12,8 +12,11 @@ import { complianceEvidenceContent } from './use-cases/compliance-evidence';
 /**
  * Pages render the typed content modules in this folder, so each claim has one source (#250). A file that has moved holds
  * layout only, and this test fails on a prose literal in it: visible JSX text with a letter, a string of two or more
- * words, a template's text, or any string given to a wording prop (title, label, caption…). Class names, `sizes` and `cn`/`cx` arguments
- * are layout. Files join MOVED as their pages move; the last step lists every route file and marketing component.
+ * words, a template's text, or any string given to a wording prop (title, label, caption…). Class names, `sizes`,
+ * `cn`/`cx` arguments are layout; React keys, ids, aria references and DOM-query selectors are exempt only while shaped
+ * like a reference, and error messages count as words (an error boundary can show them). Every
+ * route file and every component has moved (group 6 moved the shell, the form and the last components), and MOVED must
+ * list each one: a new file joins it in the change that adds it.
  */
 const MOVED = [
   'routes/index.tsx',
@@ -54,6 +57,21 @@ const MOVED = [
   'components/marketing/blog-article.tsx',
   'routes/404.tsx',
   'components/not-found.tsx',
+  'routes/__root.tsx',
+  'components/site-shell.tsx',
+  'components/waitlist-form.tsx',
+  'components/clip.tsx',
+  'components/screenshot.tsx',
+  'components/marketing/button-link.tsx',
+  'components/marketing/callout.tsx',
+  'components/marketing/code.tsx',
+  'components/marketing/faq.tsx',
+  'components/marketing/frame.tsx',
+  'components/marketing/rich.tsx',
+  'components/marketing/section.tsx',
+  'components/marketing/security-contact.tsx',
+  'components/marketing/stacked-table.tsx',
+  'components/marketing/wordmark.tsx',
 ];
 
 /** Props and keys whose string value is always wording, even one word. */
@@ -72,32 +90,35 @@ const PASS_THROUGH = new Set([
   'TSSatisfiesExpression',
 ]);
 /** Attributes (and object keys) whose value is layout or a reference, whatever it looks like: classes, styles, ids. */
-const LAYOUT_ATTRIBUTES = new Set([
-  'className',
-  'sizes',
-  'style',
-  'id',
-  'htmlFor',
-  'labelledBy',
-  'aria-labelledby',
-  'aria-describedby',
-  'aria-controls',
-  'aria-owns',
-  'role',
-  'rel',
-  'target',
-  'type',
-  'd',
-  'viewBox',
-  'points',
-  'transform',
-]);
+const LAYOUT_ATTRIBUTES = new Set(['className', 'sizes', 'style', 'role', 'rel', 'target', 'type', 'd', 'viewBox', 'points', 'transform']);
 const LAYOUT_KEYS = new Set(['className', 'style', 'sizes']);
 const LAYOUT_CALLS = new Set(['cn', 'cx']);
+/**
+ * Places that hold a reference, not words, but whose value code could still read and show: a React `key`, an element
+ * `id` or `htmlFor`, an aria reference (as a JSX attribute or an object key), and the argument of a DOM query method
+ * (`form.querySelector(…)`, a member call only). A string there is exempt only while it is shaped like a reference;
+ * any other string there is reported, even a single word ("Retry!").
+ */
+const REFERENCE_ATTRIBUTES = new Set(['key', 'id', 'htmlFor']);
+/** Attributes and object keys that take a space-separated list of ids (`aria-labelledby="hero-title hero-status"`). */
+const ID_LIST_NAMES = new Set(['labelledBy', 'aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns']);
+const REFERENCE_KEYS = new Set(['aria-describedby', 'aria-labelledby', 'aria-controls', 'aria-owns']);
+const DOM_QUERIES = new Set(['querySelector', 'querySelectorAll', 'getElementById', 'closest', 'matches']);
 /** A prop named like wording (`frameTitle`, `requiredBadge`, `codeCaption`…) is wording too. */
 const WORDING_NAME = /(title|label|badge|caption|text|heading|lead|note|description|eyebrow|prompt)$/i;
 /** Two words, the first of at least two letters ("Join a team", "Retrace every step"). */
 const TWO_WORDS = /\p{L}{2,}[^\S\n]+\p{L}/u;
+/** Shaped like an id or a selector: no two words in a row, and no `.`, `!` or `?` ending a sentence. */
+const referenceShaped = (text: string) => !TWO_WORDS.test(text) && !/[.!?](\s|$)/.test(text);
+/**
+ * Shaped like a list of ids: one reference-shaped token, or several, each reference-shaped and marked as an id by a
+ * `-`, `_`, `:` or digit ("hero-title hero-status"), so a phrase such as "Please retry later" is not taken for a list.
+ */
+const idListShaped = (text: string) => {
+  const tokens = text.split(/\s+/).filter(Boolean);
+  if (tokens.length <= 1) return referenceShaped(text);
+  return tokens.every((token) => referenceShaped(token) && /[-_:0-9]/.test(token));
+};
 
 interface AstNode {
   type: string;
@@ -112,6 +133,9 @@ const nameOf = (node: unknown): string | undefined => {
   if (node.type === 'JSXNamespacedName') return `${nameOf(node.namespace)}:${nameOf(node.name)}`;
   return undefined;
 };
+/** The method a member call invokes (`form?.querySelector(…)` → querySelector); undefined for a plain call. */
+const methodName = (callee: unknown): string | undefined =>
+  isNode(callee) && callee.type === 'MemberExpression' && !callee.computed ? nameOf(callee.property) : undefined;
 
 /** Prose literals in `source`, as `line: "text"`. */
 function proseLiterals(source: string, file = 'file.tsx'): string[] {
@@ -129,6 +153,15 @@ function proseLiterals(source: string, file = 'file.tsx'): string[] {
           (up.type === 'CallExpression' && LAYOUT_CALLS.has(nameOf(up.callee) ?? '')),
       ) ||
       (classVariable >= 0 && !ancestors.slice(classVariable).some((up) => up.type === 'ObjectExpression' || up.type === 'ArrayExpression'));
+    // The innermost reference place holding this string, if any, and the shape its value must have.
+    const place = ancestors.findLast(
+      (up) =>
+        (up.type === 'JSXAttribute' && (REFERENCE_ATTRIBUTES.has(nameOf(up.name) ?? '') || ID_LIST_NAMES.has(nameOf(up.name) ?? ''))) ||
+        (up.type === 'Property' && REFERENCE_KEYS.has(nameOf(up.key) ?? '')) ||
+        (up.type === 'CallExpression' && DOM_QUERIES.has(methodName(up.callee) ?? '')),
+    );
+    const placeName = place?.type === 'JSXAttribute' ? nameOf(place.name) : place?.type === 'Property' ? nameOf(place.key) : undefined;
+    const shaped = placeName && ID_LIST_NAMES.has(placeName) ? idListShaped : referenceShaped;
     // A module specifier is a path, not words.
     const specifier = ancestors.at(-1)?.source === node;
     // Who receives the string: a prop, an object key, or the element's children (visible text, like JSX text).
@@ -154,6 +187,11 @@ function proseLiterals(source: string, file = 'file.tsx'): string[] {
           : [];
     for (const text of texts) {
       if (layout || specifier) continue;
+      // A reference place: exempt while reference-shaped, reported otherwise, however short ("Retry!", "Why?").
+      if (place) {
+        if (!shaped(text)) report(text);
+        continue;
+      }
       const letters = /\p{L}/u.test(text);
       // A template with text around a value is a sentence being built, so any letter counts.
       if (
@@ -194,6 +232,32 @@ describe('content modules', () => {
       "const planClass = { className: 'grid gap-2', label: 'Plans' };",
       "const flow = [{ name: 'API', role: 'Validates each event' }];",
       'const E = () => <Envelope frameTitle="POST /v1/events" requiredBadge="required" />;',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'const F = () => <source key={`phone-${format}`} />;',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'const radio = form?.querySelector(`input[name="interest"][value="${value}"]`);',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'document.getElementById(`${base}-tab-${next}`)?.focus();',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      "const field = { 'aria-describedby': `${name}-error`, hint: `Copied ${what}` };",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'window.alert(`Copied ${what}`);',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'if (!entry) throw new Error(`Unknown clip: ${id}`);',
+      'const K = () => <p>{(<i key="Please retry later." />).key}</p>;',
+      "const attrs = { 'aria-describedby': 'Please retry later.' };",
+      "const M = () => <p>{helper.matches('Please retry later.')}</p>;",
+      "const Q = () => form.querySelector('Please retry later.');",
+      "const R = () => <p>{new Error('Please retry later.').message}</p>;",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
+      'const S = matches(`input[name="${field}"]`);',
+      'const T = () => <p>{(<i key="Retry!" />).key}</p>;',
+      "const U = { 'aria-describedby': 'Wait.' };",
+      "const V = () => <p>{helper.matches('Why?')}</p>;",
+      'const W = () => <i key="Welcome!" />;',
+      'const X = () => <p aria-describedby="Please try again." />;',
+      'const Y = () => <label htmlFor="Your email" />;',
+      'const Z = () => <main id="main" aria-labelledby="hero-title" aria-describedby="Please retry later" />;',
     ].join('\n');
     expect(proseLiterals(sample)).toEqual([
       'file.tsx:4: "The explorer"',
@@ -215,7 +279,54 @@ describe('content modules', () => {
       // Props named like wording are wording.
       'file.tsx:18: "POST /v1/events"',
       'file.tsx:18: "required"',
+      // Lines 19–21: a React key, a DOM query's selector and an element id, each shaped like a reference, pass. Line 22:
+      // an id-shaped aria reference passes, a sibling key's sentence does not; line 23: other calls' arguments can be
+      // visible. Lines 24–30 can all reach the page (Astra rendered lines 25–27 and 29 as <p>Please retry later.</p>): an
+      // error message (an error boundary can show it), a sentence as a key, as an aria reference, as any object's
+      // `matches` argument, as a DOM query's argument, as an error's message, and a plain `matches(…)` call, which is not
+      // a DOM query even with a selector-shaped argument.
+      'file.tsx:22: "Copied"',
+      'file.tsx:23: "Copied"',
+      'file.tsx:24: "Unknown clip:"',
+      'file.tsx:25: "Please retry later."',
+      'file.tsx:26: "Please retry later."',
+      'file.tsx:27: "Please retry later."',
+      'file.tsx:28: "Please retry later."',
+      'file.tsx:29: "Please retry later."',
+      'file.tsx:30: "input[name=""',
+      // Lines 31–37: in a reference place, anything not shaped like a reference is reported, however short (a single
+      // word with sentence punctuation as a key, an aria object value or a `matches` argument; a JSX aria reference or
+      // `htmlFor` holding words). A real id and an id list pass on line 37; an unpunctuated phrase as an id list does not.
+      'file.tsx:31: "Retry!"',
+      'file.tsx:32: "Wait."',
+      'file.tsx:33: "Why?"',
+      'file.tsx:34: "Welcome!"',
+      'file.tsx:35: "Please try again."',
+      'file.tsx:36: "Your email"',
+      'file.tsx:37: "Please retry later"',
     ]);
+  });
+
+  it('MOVED lists every route file and every component', () => {
+    const src = fileURLToPath(new URL('../', import.meta.url));
+    // Every .ts and .tsx file at any depth under src/routes and src/components, except tests and the generated route tree.
+    const files = ['routes', 'components'].flatMap((dir) =>
+      readdirSync(`${src}${dir}`, { recursive: true, encoding: 'utf8' })
+        .map((name) => `${dir}/${name.replaceAll('\\', '/')}`)
+        // The generated route tree lives in src/, outside these folders, so nothing here is excluded by name.
+        .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file)),
+    );
+    expect(files.length).toBeGreaterThan(50);
+    expect(
+      files.filter((file) => !MOVED.includes(file)),
+      'add these files to MOVED',
+    ).toEqual([]);
+    // Outside those folders, lib/legal-facts.tsx renders the legal pages' fact sentences, so it is held to the same rule.
+    expect(MOVED, 'lib/legal-facts.tsx renders words').toContain('lib/legal-facts.tsx');
+    expect(
+      MOVED.filter((file) => !existsSync(`${src}${file}`)),
+      'MOVED names files that do not exist',
+    ).toEqual([]);
   });
 
   it('moved route files and components hold layout, not prose', () => {
