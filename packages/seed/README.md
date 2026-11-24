@@ -24,6 +24,14 @@ the project lock, and refuses to delete while a write is unresolved. Once the
 purge succeeds, it clears that project's receipts so a repeated seed can restore
 the deleted rows.
 
+The direct sink also uses `DATABASE_URL` and the local ClickHouse credentials.
+Direct writes and resets take the exclusive project lock and cancel any staged
+background retention run. For managed projects, direct writes assign receive
+time and register a receipt for each event under the same gate as API ingest.
+Recovery can use those event IDs if the write outcome is unknown. ClickHouse-only
+fixtures such as `seed-staydesk-dev` can still reset and reseed without a managed
+project row.
+
 - `--profile neutral` (default) uses generic names for screenshots: emitting app
   `booking-engine`, booking channel `channel-manager`, and project `Hotel demo`.
   `--profile staydesk` selects the maintainers' own hospitality demo (Acme), using
