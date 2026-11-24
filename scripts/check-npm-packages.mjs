@@ -195,107 +195,40 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   const isRequireMethod = (callee) =>
     isMember(callee) && propertyName(callee) === 'require' && (NODE_OBJECTS.has(rootOf(callee.object)) || requires.has(rootOf(callee.object)));
 
-  // Node's `module` builtin, where createRequire comes from: `import m from 'node:module'`, `import * as m from …`,
-  // `const m = require('node:module')`, tsc's `const node_module_1 = require("node:module")` (also through
-  // `__importDefault(…)`), or the call itself: `require('node:module').createRequire`.
-  const NODE_MODULE = new Set(['module', 'node:module']);
-  // A call that loads a module: `require(…)`, `import(…)`, `module.require(…)`, `process.getBuiltinModule(…)`. Not an
-  // ordinary function that happens to be given the string (`factory('node:module')`).
-  const isLoaderCall = (node) => {
-    if (node.type === 'ImportExpression') return true;
-    if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return false;
-    const callee = unwrap(node.callee);
-    if (callee.type === 'Import' || (callee.type === 'Identifier' && requires.has(keyOf(callee)))) return true;
-    if (!isMember(callee)) return false;
-    const owner = rootOf(callee.object);
-    return isRequireMethod(callee) || (propertyName(callee) === 'getBuiltinModule' && owner === 'global:process');
-  };
-  // Compilers' interop wrappers, which return the module they are given (or an object holding it): tsc's
-  // `__importDefault` / `__importStar`, Babel's `_interopRequireDefault` / `_interopRequireWildcard`, and esbuild's and
-  // Rolldown's `__toESM`.
-  // SWC's `_interop_require_default` / `_interop_require_wildcard` too, and each as a member when helpers are imported
-  // (tsc's `importHelpers`: `tslib_1.__importDefault(…)`; SWC's `_interop_require_default._(…)`).
-  const INTEROP =
-    /^_{1,2}(?:importDefault|importStar|interopRequireDefault|interopRequireWildcard|interop_require_default|interop_require_wildcard|toESM)\d*$/;
-  // A helper defined in the file is known by what it does rather than its name, since minifiers rename it (esbuild's
-  // `__toESM` becomes `b`): an interop helper hands on its first parameter (`function _interopDefault(e) { return e &&
-  // e.__esModule ? e : { default: e }; }`, `var b=(e,r,i)=>(…,e)`). A function that ignores what it is given
-  // (`factory = () => ({…})`) is not one.
-  const definedFunction = (callee) => {
-    const binding = callee.type === 'Identifier' ? keyOf(callee) : undefined;
-    if (!binding || typeof binding === 'string') return;
-    if (binding.path.isFunctionDeclaration()) return binding.path;
-    const init = binding.path.isVariableDeclarator() ? binding.path.get('init') : undefined;
-    return init?.isFunction() ? init : undefined;
-  };
-  const usesFirstParameter = (fn) => {
-    const first = fn.node.params[0];
-    return first?.type === 'Identifier' && (fn.scope.getOwnBinding(first.name)?.referenced ?? false);
-  };
-  const isInterop = (callee) => {
-    const fn = definedFunction(callee);
-    if (fn) return usesFirstParameter(fn);
-    return (
-      (callee.type === 'Identifier' && INTEROP.test(callee.name)) ||
-      (isMember(callee) && (INTEROP.test(propertyName(callee) ?? '') || (propertyName(callee) === '_' && isInterop(unwrap(callee.object)))))
-    );
-  };
-  // Whether an expression evaluates to node:module: a binding of it, a loader call given it, `await` of one, a member
-  // of one (`require('node:module').Module`), or an interop wrapper around one (Rollup's `_interopDefault(m)`, with `m`
-  // bound to it). Not any expression that merely contains one: `factory(require('node:module'))` returns whatever
-  // `factory` returns.
-  const loadsNodeModule = (node) => {
-    const value = unwrap(node);
-    if (!value) return false;
-    if (value.type === 'Identifier') return moduleBindings.has(keyOf(value));
-    if (value.type === 'AwaitExpression') return loadsNodeModule(value.argument);
-    if (isMember(value)) return loadsNodeModule(value.object);
-    if (isLoaderCall(value)) return NODE_MODULE.has(staticName(value.type === 'ImportExpression' ? value.source : value.arguments[0]));
-    if (value.type === 'CallExpression' || value.type === 'OptionalCallExpression') {
-      const callee = unwrap(value.callee);
-      return isInterop(callee) && loadsNodeModule(value.arguments[0]);
-    }
-    return false;
-  };
-  const moduleBindings = new Set();
-  // The names createRequire itself is bound to: `import { createRequire as cr } from 'node:module'`,
-  // `const { createRequire: cr } = require('node:module')`. An object's own `factory.createRequire()` is not one.
+  // createRequire, wherever it comes from. Tracing whether a value is really Node's `module` builtin through compilers'
+  // interop helpers (tsc's `__importDefault`, Babel's `_interopRequire*`, SWC's helpers, esbuild's and Rolldown's
+  // `__toESM`, Rollup's `_interopDefault`), each of which a minifier may rename or wrap, misses real output. So the guard
+  // fails safe instead: a missed load ships a forbidden dependency silently, while a false match fails our own build
+  // loudly. Any member call named `createRequire` (`m.createRequire(…)`, `(0, node_module_1.createRequire)(…)`,
+  // `e._(require("node:module")).default.createRequire(…)`), and any name imported or destructured as `createRequire`
+  // (`import { createRequire as cr }`, `const { createRequire: cr } = …`), makes a require function. The cost is that
+  // an object's own method of that name (`factory.createRequire()`) is read as one too; a local function merely named
+  // `createRequire` is not, since it is its own binding.
   const makers = new Set();
-  // A named export of node:module that is the module itself: its `default`, and the `Module` class, which carries
-  // `createRequire` as a static (Rolldown emits `import { Module } from "node:module"; Module.createRequire(…)`).
-  const SELF_EXPORTS = new Set(['default', 'Module']);
-  const bindExport = (name, local) => {
-    if (name === 'createRequire') makers.add(keyOf(local));
-    else if (SELF_EXPORTS.has(name)) moduleBindings.add(keyOf(local));
-  };
-  // Run with the require loop below: a binding found there can load node:module here (esbuild's
-  // `var { createRequire } = __require("node:module")`), and one found here can make a require function there.
-  const bindNodeModule = () =>
+  const bindMakers = () =>
     walk(ast.program, (node) => {
-      if (node.type === 'ImportDeclaration' && NODE_MODULE.has(node.source.value)) {
+      if (node.type === 'ImportDeclaration') {
         for (const specifier of node.specifiers) {
-          if (specifier.type !== 'ImportSpecifier') moduleBindings.add(keyOf(specifier.local));
-          else bindExport(keyName(specifier.imported, false), specifier.local);
+          if (specifier.type === 'ImportSpecifier' && keyName(specifier.imported, false) === 'createRequire') makers.add(keyOf(specifier.local));
         }
       }
-      if (node.type === 'VariableDeclarator' && loadsNodeModule(node.init)) {
-        if (node.id.type === 'Identifier') moduleBindings.add(keyOf(node.id));
-        if (node.id.type === 'ObjectPattern') {
-          for (const property of node.id.properties) {
-            if (property.type === 'ObjectProperty' && property.value.type === 'Identifier')
-              bindExport(keyName(property.key, property.computed), property.value);
-          }
+      if (node.type === 'ObjectPattern') {
+        for (const property of node.properties) {
+          if (
+            property.type === 'ObjectProperty' &&
+            keyName(property.key, property.computed) === 'createRequire' &&
+            property.value.type === 'Identifier'
+          )
+            makers.add(keyOf(property.value));
         }
       }
     });
-  // `cr(…)`, `m.createRequire(…)`, `(0, node_module_1.createRequire)(…)` or `require('node:module').createRequire(…)`: its
-  // result is a require function.
+  // `cr(…)`, `m.createRequire(…)` or `(0, node_module_1.createRequire)(…)`: its result is a require function.
   const makesRequire = (node) => {
     if (node?.type !== 'CallExpression' && node?.type !== 'OptionalCallExpression') return false;
     const callee = unwrap(node.callee);
     if (callee.type === 'Identifier') return makers.has(keyOf(callee));
-    if (!isMember(callee) || propertyName(callee) !== 'createRequire') return false;
-    return moduleBindings.has(rootOf(callee.object)) || loadsNodeModule(callee.object);
+    return isMember(callee) && propertyName(callee) === 'createRequire';
   };
   const isFunction = (node) => node?.type === 'ArrowFunctionExpression' || node?.type === 'FunctionExpression';
   // The values a function returns: an arrow's expression body, or each `return` in its own body (not in nested functions).
@@ -341,10 +274,10 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   };
   // The names a require function is bound to: made by createRequire, or given one (`const r = require`, esbuild's
   // `__require`). Repeated until nothing new is found, since one binding can be given another.
-  const known = () => requires.size + makers.size + moduleBindings.size;
+  const known = () => requires.size + makers.size;
   for (let size = -1; size !== known(); ) {
     size = known();
-    bindNodeModule();
+    bindMakers();
     walk(ast.program, (node) => {
       const [target, value] =
         node.type === 'VariableDeclarator' ? [node.id, node.init] : node.type === 'AssignmentExpression' ? [node.left, node.right] : [];

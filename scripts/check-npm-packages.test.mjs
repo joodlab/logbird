@@ -132,11 +132,12 @@ test('a static computed property names the method: module[`require`] and module[
   assert.deepEqual(importsOf("const name = 'other'; module[name]('fictional-field');", 'dist/probe.cjs'), []);
 });
 
-test('createRequire counts only from node:module', () => {
+test('any createRequire makes a require function, wherever it comes from (fail-safe)', () => {
   assert.deepEqual(importsOf("require('node:module').createRequire(__filename)('zod');", 'dist/probe.cjs'), ['zod', 'node:module']);
-  // An ordinary object's own method named createRequire makes nothing.
+  // Deliberately fail-safe: an object's own method named createRequire is read as Node's too, since telling the two apart
+  // through minified interop helpers missed real loads. The match fails our own build loudly instead of shipping a load.
   const factory = "const factory = { createRequire: () => (f) => f }; const validate = factory.createRequire(); validate('fictional-field');";
-  assert.deepEqual(importsOf(factory, 'dist/index.mjs'), []);
+  assert.deepEqual(importsOf(factory, 'dist/index.mjs'), ['fictional-field']);
   // Rolldown 1.2.16's output through Node's named `Module` export, and the same as an alias, `default`, and destructured.
   const viaModule = 'import { Module } from "node:module";\nconst x = Module.createRequire(import.meta.url)("fictional-library");\nexport { x };';
   assert.deepEqual(importsOf(viaModule, 'dist/index.mjs'), ['node:module', 'fictional-library']);
@@ -145,24 +146,22 @@ test('createRequire counts only from node:module', () => {
   assert.deepEqual(importsOf(aliased, 'dist/index.mjs'), ['node:module', 'zod']);
   const destructured = "const { Module } = require('node:module'); Module.createRequire(__filename)('zod');";
   assert.deepEqual(importsOf(destructured, 'dist/probe.cjs'), ['node:module', 'zod']);
-  // A function merely given the string 'node:module' loads nothing.
+  // The same rule, whatever the receiver: a factory given 'node:module', or node:module itself, or ignoring it.
   const given =
     "const factory = () => ({ createRequire: () => (value) => value }); const object = factory('node:module'); const validate = object.createRequire(); validate('fictional-field');";
-  assert.deepEqual(importsOf(given, 'dist/index.mjs'), []);
-  // Nor does a function given node:module itself: it returns whatever it returns.
+  assert.deepEqual(importsOf(given, 'dist/index.mjs'), ['fictional-field']);
   const wrapped =
     "const factory = () => ({ createRequire: () => (value) => value }); const object = factory(require('node:module')); const validate = object.createRequire(); validate('fictional-field');";
-  assert.deepEqual(importsOf(wrapped, 'dist/probe.cjs'), ['node:module']);
+  assert.deepEqual(importsOf(wrapped, 'dist/probe.cjs'), ['node:module', 'fictional-field']);
   // `await import('node:module')`, and esbuild / Rolldown's __toESM wrapper, are node:module.
   const awaited = "const m = await import('node:module'); m.createRequire(import.meta.url)('zod');";
   assert.deepEqual(importsOf(awaited, 'dist/index.mjs'), ['node:module', 'zod']);
   const toEsm = "var import_node_module = __toESM(require('node:module')); (0, import_node_module.createRequire)(__filename)('zod');";
   assert.deepEqual(importsOf(toEsm, 'dist/probe.cjs'), ['node:module', 'zod']);
-  // A factory that takes the module and ignores it is not an interop helper either.
   const ignoring =
     "const factory = (m) => ({ createRequire: () => (value) => value }); const object = factory(require('node:module')); object.createRequire()('fictional-field');";
-  assert.deepEqual(importsOf(ignoring, 'dist/probe.cjs'), ['node:module']);
-  // esbuild 0.28.2, minified CommonJS: `__toESM` is renamed `b`, and known by what it does.
+  assert.deepEqual(importsOf(ignoring, 'dist/probe.cjs'), ['node:module', 'fictional-field']);
+  // esbuild 0.28.2, minified CommonJS: `__toESM` is renamed `b`.
   const minified =
     'var f=Object.create;var t=Object.defineProperty;var l=Object.getOwnPropertyDescriptor;var n=Object.getOwnPropertyNames;var p=Object.getPrototypeOf,q=Object.prototype.hasOwnProperty;var _=(e,r)=>{for(var i in r)t(e,i,{get:r[i],enumerable:!0})},m=(e,r,i,a)=>{if(r&&typeof r=="object"||typeof r=="function")for(let o of n(r))!q.call(e,o)&&o!==i&&t(e,o,{get:()=>r[o],enumerable:!(a=l(r,o))||a.enumerable});return e};var b=(e,r,i)=>(i=e!=null?f(p(e)):{},m(r||!e||!e.__esModule?t(i,"default",{value:e,enumerable:!0}):i,e)),s=e=>m(t({},"__esModule",{value:!0}),e);var x={};_(x,{q:()=>u});module.exports=s(x);var c=b(require("node:module"),1),u=c.default.createRequire(__filename)("fictional-library");0&&(module.exports={q});';
   assert.deepEqual(importsOf(minified, 'dist/probe.cjs'), ['node:module', 'fictional-library']);
@@ -201,6 +200,15 @@ test('createRequire counts only from node:module', () => {
   assert.deepEqual(importsOf(interop, 'dist/probe.cjs'), ['node:module', 'zod']);
   const builtin = "const { createRequire } = process.getBuiltinModule('node:module'); createRequire(__filename)('zod');";
   assert.deepEqual(importsOf(builtin, 'dist/probe.cjs'), ['zod']);
+  // Minified with esbuild: tsc's guarded helper (`var t=exports&&exports.__importDefault||function(e){…}`) and SWC's
+  // external helper with its receiver renamed (`e._(require("node:module"))`).
+  const tscMinified =
+    '"use strict";var t=exports&&exports.__importDefault||function(e){return e&&e.__esModule?e:{default:e}};Object.defineProperty(exports,"__esModule",{value:!0}),exports.t=void 0;const u=t(require("node:module"));exports.t=u.default.createRequire(__filename)("fictional-target");';
+  assert.deepEqual(importsOf(tscMinified, 'dist/probe.cjs'), ['node:module', 'fictional-target']);
+  const swcMinified =
+    'const e=require("@swc/helpers/_/_interop_require_default"),r=e._(require("node:module"));exports.t=r.default.createRequire(__filename)("fictional-target");';
+  assert.deepEqual(importsOf(swcMinified, 'dist/probe.cjs'), ['@swc/helpers/_/_interop_require_default', 'node:module', 'fictional-target']);
+  // A local function merely named createRequire is its own binding, not one imported or destructured as it.
   const ownFunction = "function createRequire() { return (f) => f; } const validate = createRequire(); validate('fictional-field');";
   assert.deepEqual(importsOf(ownFunction, 'dist/index.mjs'), []);
 });
@@ -282,9 +290,11 @@ test("a top-level `var require;` keeps CommonJS's require; one given a value doe
 test('require.main.require loading node:module makes createRequire available', () => {
   const code = "const { createRequire } = require.main.require('node:module');\nconst load = createRequire(__filename);\nload('zod');";
   assert.deepEqual(importsOf(code, 'dist/probe.cjs'), ['node:module', 'zod']);
+  // An ordinary object's `require` method loads nothing, but what is destructured as createRequire counts (fail-safe).
   const ordinary =
     "const loader = { require: () => ({ createRequire: () => (f) => f }) }; const { createRequire } = loader.require('node:module'); createRequire()('fictional-field');";
-  assert.deepEqual(importsOf(ordinary, 'dist/probe.cjs'), []);
+  assert.deepEqual(importsOf(ordinary, 'dist/probe.cjs'), ['fictional-field']);
+  assert.deepEqual(importsOf("const loader = { require: (x) => x }; loader.require('fictional-field');", 'dist/probe.cjs'), []);
 });
 
 test('the left of && is not what it yields', () => {
