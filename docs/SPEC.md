@@ -517,7 +517,7 @@ Endpoint configuration includes URL, description, enabled state/disabled reason,
 Logbird `filterQuery`, optional `{ tenantId?, target?: { type, id }, mask? }` scope, and
 `deliveryWindowSeconds`: the endpoint delivers an event only if it arrived no later than this after it occurred
 (whole hours, 1 hour to 3,650 days; default 7 days, `DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS`; `null` means no limit).
-Responses add `lateEvents { count, since }` for events that arrived later than the window, in whole arrival hours from `since`: arrivals, including any since removed by retention; never higher than the true number, lower after a partial storage failure during ingest; no backfill.
+Responses add `lateEvents { count, since }` for events that arrived later than the window, in whole arrival hours from `since`: arrivals, including any since removed by retention. The count is approximate: exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher; no backfill; not for reconciliation.
 PATCH scope replaces the whole scope (`null` clears it); absent fields preserve
 stored values. URLs require HTTPS unless `WEBHOOKS_ALLOW_HTTP=true`; every resolved
 address must be public unicast. Save-time DNS uses a cancellable c-ares resolver

@@ -1150,10 +1150,13 @@ counted before its filter and scope apply, in the whole arrival hours from `sinc
 first hour boundary at or after the later of its last window change and 30 days ago.
 A new endpoint, or one whose window just changed, therefore reports 0 until the next
 hour begins. The count records arrivals, so it includes late events since removed by
-retention or deletion and can be higher than what a search finds. It is never higher
-than the true number of late arrivals, but it can be lower: after a partial storage
-failure during ingest (the worker then logs `ingest.lateness_rollup_not_rebuilt`), and
-for arrivals before the upgrade that added it, since it is not backfilled. The window
+retention or deletion and can be higher than what a search finds. The count is
+approximate: it is exact in normal operation, but after a storage failure, a retried
+write or a restore it can be lower or higher than the true number (the worker logs
+`ingest.lateness_rollup_not_rebuilt` or `ingest.lateness_count_may_be_high` when
+recovery touches late arrivals). It counts arrivals since `since`, with no backfill of
+arrivals before the upgrade that added it. Do not use it for reconciliation; it is
+operational telemetry about what a webhook skipped, not audit evidence. The window
 also narrows each discovery scan to recent occurrence times, which keeps discovery
 cheap on large projects.
 
