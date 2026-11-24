@@ -74,6 +74,10 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 - `ip` empties `context.ip`; `user_agent` empties `context.userAgent`.
 - `actor_email` replaces `actor.email` with `masked:<24 hex>`, a keyed hash that is stable per project, so a viewer
   can still group by person without seeing the address.
+- Because the pseudonym is stable per project, it is also linkable and testable. A reader who can both cause an
+  event to be recorded with an address of their choosing (their own profile email, for example) and read masked events
+  learns that address's pseudonym, and can then test whether the address appears elsewhere in the project. Where that
+  matters, don't give that reader the actor fields at all. Keying pseudonyms per read key or scope is tracked in #370.
 - It also hides an actor **name that carries an address**: lower-cased with all whitespace removed, the name contains
   `@`, equals the email, or (cut at its 512-character cap) is a prefix of it. That covers a producer that used the
   address as the display name, put it inside the name (`Ada <ada@example.org>`), or sent an address only as the name.
