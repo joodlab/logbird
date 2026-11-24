@@ -25,6 +25,11 @@ Page text renders from `apps/web/src/content/comparisons.ts` (the facts and sour
 - **id:** `table`
 - **heading:** At a glance
 - **data:** the "At a glance" table is rendered from `apps/web/src/content/comparisons.ts`, its only source.
+- **Streaming to SIEM (Logbird cell):** "No built-in SIEM connectors; signed webhooks to any HTTPS endpoint". The job:
+  don't overstate (Logbird has no SIEM connector), and don't understate (a SIEM's HTTPS intake can receive Logbird's
+  signed webhooks). Held with the 0.3.0 webhook delivery: merges only after 0.3.0 is deployed and checked in production.
+  The "log streams to a SIEM … now" bullet under choose-them stays.
+  <!-- source: docs/SPEC.md § Webhook endpoint management (HTTPS endpoints with public addresses; Standard Webhooks signatures) -->
 
 - **visual:** none
 

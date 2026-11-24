@@ -253,5 +253,7 @@ Use these words the same way on every page. They match `docs/concepts.md`.
 | guarded SQL `WHERE` expression | "full SQL access", "SQL console" |
 | plain numbers with a source | seamless, blazing, effortless, AI-powered, revolutionize, enterprise-grade, best-in-class, exclamation marks |
 
+Webhook copy states at-least-once delivery with retries for up to 24 hours and never claims tamper-proof or guaranteed delivery.
+
 Casing: "Logbird" in prose, `logbird` in code, commands and the wordmark, لوغبيرد in Arabic. Fictional data only:
 Lina Haddad (`usr_42`), Azure Hotels (`biz_7`), booking `bk_1042`, emails at `@example.test`.

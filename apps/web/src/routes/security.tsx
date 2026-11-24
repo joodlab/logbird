@@ -5,13 +5,18 @@ import {
   BadgeXIcon,
   BanIcon,
   Building2Icon,
+  CircleSlashIcon,
+  EyeOffIcon,
   GaugeIcon,
   GlobeIcon,
   HashIcon,
   KeyRoundIcon,
+  LockIcon,
   MailIcon,
+  NetworkIcon,
   ShieldAlertIcon,
   ShieldIcon,
+  UserCogIcon,
 } from 'lucide-react';
 import { ButtonLink } from '../components/marketing/button-link';
 import { Callout } from '../components/marketing/callout';
@@ -99,7 +104,7 @@ function SelfHostDiagram() {
 
 function SecurityPage() {
   const { samples, hero, selfHost, retention, isolation, sqlGuard, roles, impersonation, selfAudit, limits, reporting, dontClaim } = security;
-  const { features, scoped } = isolation;
+  const { features, scoped, webhooks } = isolation;
   return (
     <>
       <PageHero aside={<OnThisPage />} eyebrow={hero.eyebrow} lead={<Rich text={hero.lead} />} title={hero.title} />
@@ -155,6 +160,28 @@ function SecurityPage() {
             </div>
           </section>
         ) : null}
+        <section aria-labelledby="webhooks-title" className="mt-16 flex scroll-mt-24 flex-col gap-6" id="webhooks">
+          <h3 className="font-semibold text-xl tracking-tight" id="webhooks-title">
+            {webhooks.title}
+          </h3>
+          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
+            <Feature icon={<UserCogIcon className="size-4" />} title={webhooks.admins.title}>
+              <Rich text={webhooks.admins.body} />
+            </Feature>
+            <Feature icon={<LockIcon className="size-4" />} title={webhooks.secrets.title}>
+              <Rich text={webhooks.secrets.body} />
+            </Feature>
+            <Feature icon={<NetworkIcon className="size-4" />} title={webhooks.destinations.title}>
+              <Rich text={webhooks.destinations.body} />
+            </Feature>
+            <Feature icon={<CircleSlashIcon className="size-4" />} title={webhooks.redirects.title}>
+              <Rich text={webhooks.redirects.body} />
+            </Feature>
+            <Feature icon={<EyeOffIcon className="size-4" />} title={webhooks.masks.title}>
+              <Rich text={webhooks.masks.body} />
+            </Feature>
+          </div>
+        </section>
       </Section>
 
       <Section id="sql-guard" labelledBy="sql-guard-title" tone="sunken">

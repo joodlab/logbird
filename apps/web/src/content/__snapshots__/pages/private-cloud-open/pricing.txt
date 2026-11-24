@@ -62,7 +62,7 @@ What's on our roadmap.
 These are candidates from our public roadmap, not features or commitments. Order and timing can change.
 Project-level redaction controls, behind the redaction your client already does.
 Alerts on chosen actions.
-Signed webhooks and archive exports.
+Archive exports.
 Single sign-on for the console.
 Questions
 Pricing questions.

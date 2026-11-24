@@ -28,7 +28,7 @@ const ROADMAP_SENTENCES: Record<string, string[]> = {
 const ROADMAP_ITEMS = [
   'Project-level redaction controls, behind the redaction your client already does.', // § Customer-facing history
   'Alerts on chosen actions.', // § Later candidates: "Action alerts"
-  'Signed webhooks and archive exports.', // § Later candidates
+  'Archive exports.', // § Later candidates
   'Single sign-on for the console.', // § Later candidates: "Console SSO"
 ];
 const ROADMAP_HEADING = "What's on our roadmap.";

@@ -15,6 +15,12 @@ h3 Scoped reads: one customer account per key or token.
 h3 One account per scope
 h3 Two layers
 h3 Browser origins
+h3 Webhook endpoints: signed, checked, and managed by admins.
+h3 Owners and admins only
+h3 Secrets shown once
+h3 Public destinations only
+h3 No redirects, no console credentials
+h3 Masks on every delivery
 h2 SQL search that can only read your project.
 h3 Checked against ClickHouse's own parse
 h3 Allowlisted
@@ -40,6 +46,7 @@ On this page
 Where data lives
 Retention
 Projects and keys
+Webhook endpoints
 SQL mode
 Roles
 Impersonation
@@ -49,7 +56,7 @@ Responsible disclosure
 What we don't claim
 Where data lives
 Self-hosted, your events stay on your servers.
-When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the SMTP provider you choose, and resolves a webhook endpoint's hostname when you save it.
+When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the SMTP provider you choose and, when you add webhook endpoints, delivers events to them; it resolves an endpoint's hostname when you save it and before each delivery.
 Your server
 Console
 API
@@ -59,7 +66,7 @@ ClickHouse
 Redis
 [aria-hidden] sign-in codes, invitations
 Your SMTP provider
-The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. Outbound, the server connects to your SMTP provider (sign-in codes, invitations and membership notices) and looks up a webhook endpoint's hostname when you save it. With your own databases, it also connects to them.
+The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. Outbound, the server connects to your SMTP provider (sign-in codes, invitations and membership notices) and delivers webhooks to the endpoints you add, looking up each endpoint's hostname when you save it and before each delivery. With your own databases, it also connects to them.
 Retention
 Expired events are permanently deleted.
 Each project has a retention window, from 7 days to 10 years. New projects start at 90 days.
@@ -94,6 +101,22 @@ Logbird's query builders always apply the scope. ClickHouse checks the customer 
 [aria-hidden: ]
 Browser origins
 A web page on another origin can read with a token only if that origin is listed on the key.
+Webhook endpoints: signed, checked, and managed by admins.
+[aria-hidden: ]
+Owners and admins only
+Only owners and admins can see or manage webhook endpoints: a stored URL can itself be a credential.
+[aria-hidden: ]
+Secrets shown once
+Each endpoint's signing secret is encrypted at rest (AES-256-GCM) and shown once, when you create or rotate it.
+[aria-hidden: ]
+Public destinations only
+A destination must resolve only to public addresses. Logbird checks it when you save the URL and again before every delivery, and connects only to the address it checked.
+[aria-hidden: ]
+No redirects, no console credentials
+Redirects are never followed and count as a failed delivery. A delivery carries the event and its signature headers, never console headers or cookies.
+[aria-hidden: ]
+Masks on every delivery
+Field masks set on an endpoint apply to every delivery, including retries and resends.
 SQL mode
 SQL search that can only read your project.
 SQL mode accepts a single boolean WHERE expression. Four layers stand between it and other people's data.
@@ -172,6 +195,7 @@ links:
 Where data lives → #self-host
 Retention → #retention
 Projects and keys → #isolation
+Webhook endpoints → #webhooks
 SQL mode → #sql-guard
 Roles → #roles
 Impersonation → #impersonation

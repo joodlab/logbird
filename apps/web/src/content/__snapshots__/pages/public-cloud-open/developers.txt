@@ -13,6 +13,7 @@ h2 Keep the actor when the work moves to a queue.
 h2 What happens between track() and the 202.
 h2 The numbers to design around.
 h2 Read your own history back.
+h2 Verify each delivery, then process it once.
 h2 Your server documents itself.
 h2 Start with one event.
 [shell: footer — see _shell.txt]
@@ -37,6 +38,7 @@ Workers
 Delivery
 Limits
 Read API
+Webhooks
 API reference
 SDK quickstart
 Install, create a client, track an event.
@@ -261,6 +263,38 @@ pre|     range: { from: '2026-01-01T00:00:00Z', to: new Date().toISOString() },
 pre|   }),
 pre| );
 pre| // page.data: events; page.nextCursor: pass back as `cursor` for the next page
+Webhooks
+Verify each delivery, then process it once.
+Each delivery is a POST of the event as JSON, signed with the Standard Webhooks headers webhook-id, webhook-timestamp and webhook-signature. Verify the raw body with verifyWebhook from @logbird/sdk (the .NET package verifies them too; see docs/sdk-dotnet.md), store or enqueue the event, then answer 2xx.
+A 2xx response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect is a failure.
+Failures are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to 24 hours.
+Delivery is at least once: deduplicate by webhook-id, which stays the same across retries and resends.
+Answering 410 Gone disables the endpoint.
+Verify the raw request body before parsing it: a body re-serialized from parsed JSON won't verify.
+Your receiver
+pre| import { Hono } from 'hono';
+pre| import { verifyWebhook, WebhookVerificationError } from '@logbird/sdk';
+pre|
+pre| const app = new Hono();
+pre| const secret = process.env.LOGBIRD_WEBHOOK_SECRET!; // whsec_...; keep on the receiver
+pre|
+pre| app.post('/webhooks/logbird', async (c) => {
+pre|   try {
+pre|     const event = await verifyWebhook<{ id: string }>({
+pre|       payload: await c.req.text(), // never JSON.stringify(await c.req.json())
+pre|       headers: c.req.raw.headers,
+pre|       secret,
+pre|     });
+pre|     // Durably enqueue/process event before returning 2xx. Deduplicate using
+pre|     // webhook-id within this receiver: retries can carry the same event again.
+pre|     console.log(event.id);
+pre|     return c.body(null, 204);
+pre|   } catch (error) {
+pre|     // A bad request: answer 400. Anything else (a malformed secret is a TypeError) is your bug: let it surface.
+pre|     if (error instanceof WebhookVerificationError) return c.text('Invalid webhook', 400);
+pre|     throw error;
+pre|   }
+pre| });
 API reference
 Your server documents itself.
 Every Logbird server serves its OpenAPI document at /openapi.json and an interactive reference at /docs, so the reference always matches the version you run. The API listener stays on the private network; your public origin forwards /api, /v1, the health checks and these two read-only reference paths, and nothing else. Open https://your-logbird-origin/docs, or localhost:4600/docs when you run locally.
@@ -292,6 +326,7 @@ Workers → #workers
 Delivery → #delivery
 Limits → #limits
 Read API → #read-api
+Webhooks → #webhooks
 API reference → #reference
 Self-host a server → /self-hosting
 Request access → /contact
@@ -306,6 +341,7 @@ button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" text="Hono"
+button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
