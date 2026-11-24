@@ -8,11 +8,14 @@
 //   no `workspace:` specifier left anywhere in its manifest;
 // - `repository.directory` naming the package's folder, `license` MIT and a LICENSE file, `engines.node` set;
 // - every `exports` target present in the tarball, and only `dist/` code shipped (no `src/`);
-// - its runtime `dependencies` exactly the allowed ones, with every @logbird dependency at the same version;
-// - every bare import in its built JavaScript and declarations (`dist/**/*.mjs`, `*.d.mts`, `*.d.ts`) declared as a
-//   dependency or peer dependency, or a Node built-in, or listed for that package below. Never `zod` and never
-//   `@logbird/contracts`: the SDK bundles what it needs from contracts, so the published packages do not depend on it;
-// - no source map that records an absolute path (a machine's own path, as a local build would leave).
+// - its `dependencies` and `peerDependencies` exactly the allowed ones, every @logbird dependency at the same version,
+//   no optional or bundled dependencies, and `zod` / `@logbird/contracts` in none of those fields;
+// - every bare import in its built JavaScript and declarations (`dist/**/*.mjs`, `*.d.mts`, `*.d.ts`), compact or
+//   spaced, static, side-effect, dynamic or `require`, declared as a dependency or peer dependency, or a Node built-in,
+//   or listed for that package below. Never `zod` and never `@logbird/contracts`: the SDK bundles what it needs from
+//   contracts, so the published packages do not depend on it;
+// - no source map whose `sources` or `sourceRoot` is an absolute path (POSIX, drive, UNC or file: URL), as a local
+//   build would leave.
 // The tarballs are read here (gzip, then the tar headers), with no dependency.
 import { readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
@@ -21,18 +24,28 @@ import { gunzipSync } from 'node:zlib';
 
 /** Every package that may be packed, with what it may import beyond its declared dependencies and peers. */
 const PACKAGES = {
-  '@logbird/sdk': { dir: 'packages/sdk', dependencies: [], alsoImports: [] },
-  '@logbird/hono': { dir: 'packages/integrations/hono', dependencies: ['@logbird/sdk'], alsoImports: [] },
-  '@logbird/vue': { dir: 'packages/integrations/vue', dependencies: ['@logbird/sdk'], alsoImports: [] },
-  '@logbird/tanstack-start': { dir: 'packages/integrations/tanstack-start', dependencies: ['@logbird/sdk'], alsoImports: [] },
+  '@logbird/sdk': { dir: 'packages/sdk', dependencies: [], peers: [], alsoImports: [] },
+  '@logbird/hono': { dir: 'packages/integrations/hono', dependencies: ['@logbird/sdk'], peers: ['hono'], alsoImports: [] },
+  '@logbird/vue': { dir: 'packages/integrations/vue', dependencies: ['@logbird/sdk'], peers: ['vue'], alsoImports: [] },
+  '@logbird/tanstack-start': {
+    dir: 'packages/integrations/tanstack-start',
+    dependencies: ['@logbird/sdk'],
+    peers: ['@tanstack/react-start'],
+    alsoImports: [],
+  },
   // A Nuxt module runs inside the application's Nuxt: it imports Nuxt's own packages and virtual modules.
   '@logbird/nuxt': {
     dir: 'packages/integrations/nuxt',
     dependencies: ['@logbird/sdk', '@logbird/vue', '@nuxt/kit', 'h3'],
+    peers: ['nuxt'],
     alsoImports: ['#imports', '#logbird-hooks', '@nuxt/schema', 'nitropack', 'vue'],
   },
 };
 const FORBIDDEN = ['zod', '@logbird/contracts'];
+/** Manifest fields that make npm install something for the consumer, or name what may be bundled with it. */
+const INSTALLED_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies'];
+/** An absolute path: POSIX, a drive (either slash), a UNC or other backslash-rooted path, or a file: URL. */
+const ABSOLUTE = /^([A-Za-z]:[\\/]|[\\/]|file:)/;
 
 /** The files of a .tgz: { path (without the leading "package/") → Buffer }. */
 function readTarball(file) {
@@ -69,16 +82,24 @@ function readTarball(file) {
 const packageOf = (specifier) => (specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]);
 const builtins = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
 
-/** Bare specifiers imported by JavaScript or declaration text: static and dynamic imports, re-exports, require. */
+/**
+ * Bare specifiers imported by JavaScript or declaration text. Deliberately broad, so compact or minified code cannot
+ * slip past: any `from "x"` (static imports and re-exports, with or without spaces: `import{z}from"zod"`,
+ * `export*from"x"`), a side-effect `import "x"`, `import("x")` (dynamic, or a declaration's type import) and
+ * `require("x")`. A string that merely looks like one of these is reported too, which fails safe.
+ */
 function importsOf(text) {
   const found = new Set();
+  // A module specifier has no whitespace; prose in a message string ("from 'a' and/or 'b'") does, so it is skipped.
+  const specifier = String.raw`["']([@#\w][^"'\s]*)["']`;
   const patterns = [
-    /\b(?:import|export)\s+(?:type\s+)?(?:[\w$*{}\s,]+?\s+from\s+)?["']([^"']+)["']/g,
-    /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
-    /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g,
+    new RegExp(String.raw`\bfrom\s*${specifier}`, 'g'),
+    new RegExp(String.raw`\bimport\s*${specifier}`, 'g'),
+    new RegExp(String.raw`\bimport\s*\(\s*${specifier}\s*\)`, 'g'),
+    new RegExp(String.raw`\brequire\s*\(\s*${specifier}\s*\)`, 'g'),
   ];
   for (const pattern of patterns) for (const match of text.matchAll(pattern)) found.add(match[1]);
-  return [...found].filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('/'));
+  return [...found];
 }
 
 const [folder, expected] = process.argv.slice(2);
@@ -129,10 +150,20 @@ for (const tarball of tarballs) {
   if (targets.length === 0) fail('no exports');
   for (const target of targets) if (!files.has(target.replace(/^\.\//, ''))) fail(`exports names ${target}, which the tarball does not carry`);
 
-  // Runtime dependencies: exactly the allowed ones; @logbird ones at this version.
-  const dependencies = Object.keys(manifest.dependencies ?? {}).sort();
-  if (JSON.stringify(dependencies) !== JSON.stringify([...known.dependencies].sort())) {
-    fail(`dependencies are [${dependencies}], expected [${[...known.dependencies].sort()}]`);
+  // What npm installs for a consumer: exactly the allowed dependencies and peers, no optional or bundled ones, and
+  // never zod or @logbird/contracts in any of these fields.
+  for (const field of INSTALLED_FIELDS) {
+    const names = Array.isArray(manifest[field]) ? manifest[field] : Object.keys(manifest[field] ?? {});
+    for (const name of names) if (FORBIDDEN.includes(name)) fail(`${field} names ${name}: the published packages must not depend on it`);
+  }
+  const same = (actual, wanted) => JSON.stringify([...actual].sort()) === JSON.stringify([...wanted].sort());
+  const dependencies = Object.keys(manifest.dependencies ?? {});
+  if (!same(dependencies, known.dependencies)) fail(`dependencies are [${dependencies.sort()}], expected [${[...known.dependencies].sort()}]`);
+  const peers = Object.keys(manifest.peerDependencies ?? {});
+  if (!same(peers, known.peers)) fail(`peerDependencies are [${peers.sort()}], expected [${[...known.peers].sort()}]`);
+  for (const field of ['optionalDependencies', 'bundleDependencies', 'bundledDependencies']) {
+    const value = manifest[field];
+    if (value && (Array.isArray(value) ? value.length : Object.keys(value).length)) fail(`${field} must be empty`);
   }
   for (const [name, range] of Object.entries(manifest.dependencies ?? {})) {
     if (name.startsWith('@logbird/') && range !== manifest.version) fail(`depends on ${name}@${range}, not exactly ${manifest.version}`);
@@ -150,7 +181,8 @@ for (const tarball of tarballs) {
     }
     if (path.endsWith('.map')) {
       const map = JSON.parse(body.toString('utf8'));
-      const absolute = (map.sources ?? []).filter((source) => /^([A-Za-z]:[\\/]|\/|file:)/.test(source));
+      // A relative source resolves beneath sourceRoot, so an absolute sourceRoot records a machine's path too.
+      const absolute = [map.sourceRoot, ...(map.sources ?? [])].filter((source) => typeof source === 'string' && ABSOLUTE.test(source));
       if (absolute.length) fail(`${path} records absolute paths: ${absolute.join(', ')}`);
     }
   }

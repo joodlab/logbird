@@ -55,9 +55,15 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   response.setHeader('content-type', 'application/json');
   if (request.method === 'POST' && url.pathname === '/v1/events') {
     const events = (JSON.parse(body) as { events: Record<string, unknown>[] }).events;
-    received.push(...events);
+    // An event whose action is `stand-in.reject` is refused by index, as ingest refuses an invalid event; the others
+    // are accepted. So the client must read the acknowledgement, not only the 202.
+    const rejected = events.flatMap((event, index) =>
+      event.action === 'stand-in.reject' ? [{ index, reason: 'invalid_event: fictional rejection', code: 'invalid_event' }] : [],
+    );
+    const accepted = events.filter((event) => event.action !== 'stand-in.reject');
+    received.push(...accepted);
     response.statusCode = 202;
-    response.end(JSON.stringify({ accepted: events.length, ids: events.map((event) => event.id), rejected: [] }));
+    response.end(JSON.stringify({ accepted: accepted.length, ids: accepted.map((event) => event.id), rejected }));
     return;
   }
   if (request.method === 'GET' && url.pathname === '/v1/events') {
@@ -110,6 +116,17 @@ try {
   expect(drops.length === 0 && errors.length === 0, `no drop and no error (drops ${drops.length}, errors ${errors.length})`);
   pass('Logbird track and flush: serialized, redacted by beforeSend, acknowledged');
 
+  // 1b. The acknowledgement is read: in one batch, the event ingest refuses is dropped and reported, the other kept.
+  client.track({ action: 'stand-in.reject', actor: { type: 'user', id: 'u1' } });
+  client.track({ action: 'invoice.kept', actor: { type: 'user', id: 'u1' } });
+  await client.flush();
+  expect(drops.length === 1 && drops[0]?.action === 'stand-in.reject', `the refused event, and only it, dropped (drops ${drops.length})`);
+  expect(errors.length === 1 && /rejected/.test(errors[0]?.message ?? ''), 'the rejection reported to onError');
+  expect(received.at(-1)?.action === 'invoice.kept' && !received.some((event) => event.action === 'stand-in.reject'), 'the other event delivered');
+  drops.length = 0;
+  errors.length = 0;
+  pass('Logbird acknowledgement: a refused event dropped and reported, the rest of the batch kept');
+
   // 2. The Hono middleware fills the request context; an inbound x-request-id is ignored by default (#321).
   const app = new Hono<{ Variables: AuditVariables }>();
   app.use(logbird({ client, actor: () => ({ type: 'user', id: 'u2' }), tenant: () => ({ id: 't2' }) }));
@@ -134,6 +151,15 @@ try {
   expect(
     uuid.test(viaHono?.context.requestId ?? '') && uuid.test(viaHono?.context.operationId ?? ''),
     'generated request and operation ids, not the inbound header',
+  );
+  // A second request gets ids of its own: generated per request, not a constant of the right shape.
+  await app.request('/invoices/inv_10', { method: 'POST', headers: { 'x-request-id': 'req_from_client' } });
+  await client.flush();
+  const second = received.at(-1) as { targets: { id: string }[]; context: { requestId: string; operationId: string } } | undefined;
+  expect(second?.targets[0]?.id === 'inv_10', 'the second request recorded');
+  expect(
+    second?.context.requestId !== viaHono?.context.requestId && second?.context.operationId !== viaHono?.context.operationId,
+    'distinct ids for each request',
   );
   pass('Hono middleware: recorded in a request, context filled, inbound x-request-id ignored by default');
 

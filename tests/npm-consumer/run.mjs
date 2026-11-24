@@ -3,7 +3,7 @@
 //   node tests/npm-consumer/run.mjs [--project=phase1|adapters] [--skip-pack] [--hono=<version or range>] [--update-api]
 // --skip-pack uses the tarballs already in the project's .packages folder (CI downloads them there).
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -106,6 +106,11 @@ if (hono === 'floor' || hono === 'latest') {
 }
 run('npm', ['install', '--no-save', '--no-audit', '--no-fund', ...files, ...(hono ? [`hono@${hono}`] : [])]);
 const installed = (name) => JSON.parse(readFileSync(join(here, 'node_modules', ...name.split('/'), 'package.json'), 'utf8')).version;
+// npm keeps the locked hono when the requested one conflicts with the peer range: never test a version other than
+// the one asked for.
+if (hono && /^\d+\.\d+\.\d+$/.test(hono) && installed('hono') !== hono) {
+  throw new Error(`asked for hono ${hono}, but npm installed ${installed('hono')}`);
+}
 console.log(
   `installed: ${project.install.map(({ name }) => `${name}@${installed(name)}`).join(', ')}${project.run ? `, hono@${installed('hono')}` : ''}`,
 );
@@ -145,7 +150,12 @@ const extractor = join(here, 'node_modules', '@microsoft', 'api-extractor', 'bin
 const slash = (path) => path.replaceAll('\\', '/');
 const stale = [];
 for (const { name, reports } of project.report) {
-  const folder = join(here, 'node_modules', ...name.split('/'));
+  // API Extractor treats every file under node_modules as an external package and looks for the analysed package's
+  // package.json next to its config file. So the installed package is copied out of node_modules first (staying under
+  // this folder, so its own imports still resolve), and the config is written into that copy. Otherwise a shared
+  // declaration chunk (dist/index-<hash>.d.mts) would be reported as an opaque import and its members never compared.
+  const folder = join(temp, name.replace('/', '__'));
+  cpSync(join(here, 'node_modules', ...name.split('/')), folder, { recursive: true });
   for (const [reportName, entry] of Object.entries(reports)) {
     const report = `${reportName}.api.md`;
     const config = {
@@ -175,7 +185,7 @@ for (const { name, reports } of project.report) {
         tsdocMessageReporting: { default: { logLevel: 'none' } },
       },
     };
-    const configPath = join(temp, `${report}.json`);
+    const configPath = join(folder, `api-extractor.${reportName}.json`);
     writeFileSync(configPath, JSON.stringify(config, null, 2));
     run(process.execPath, [extractor, 'run', '--local', '--config', configPath]);
     const generated = readFileSync(join(temp, report), 'utf8').replace(/\r\n/g, '\n');
