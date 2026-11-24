@@ -1,5 +1,6 @@
-import { createHmac, hkdfSync } from 'node:crypto';
+import { hkdfSync } from 'node:crypto';
 import type { AuditEvent, ReadScope } from '@logbird/contracts';
+import { actorNameIsEmail, maskedEmail } from './actor-name-mask';
 import { facetColumn } from './queries';
 import { type CompileOptions, compileQuery, QueryError } from './query';
 import { MASKED_ATTRIBUTES, MASKED_COLUMNS } from './scope';
@@ -8,10 +9,7 @@ type Masks = ReadScope['mask'];
 
 export const fieldMaskKey = (authSecret: string) => Buffer.from(hkdfSync('sha256', authSecret, '', 'logbird-field-mask-v1', 32));
 
-/** A stable per-project pseudonym, so scoped readers can still group by person. */
-export function maskedEmail(projectId: string, email: string, secret: Buffer) {
-  return email ? `masked:${createHmac('sha256', secret).update(`${projectId}\0${email.toLowerCase()}`).digest('hex').slice(0, 24)}` : '';
-}
+export { maskedEmail } from './actor-name-mask';
 
 export function maskEvent(event: AuditEvent, mask: Masks, secret?: Buffer): AuditEvent {
   if (!mask?.length) return event;
@@ -23,9 +21,9 @@ export function maskEvent(event: AuditEvent, mask: Masks, secret?: Buffer): Audi
     if (masked.actor) {
       const { email, name } = masked.actor;
       const hidden = maskedEmail(event.projectId, email, secret);
-      // A producer that used the address as the display name too: the name would show what the mask hides. Same value.
-      const nameIsEmail = Boolean(email) && name.trim().toLowerCase() === email.trim().toLowerCase();
-      masked.actor = { ...masked.actor, email: hidden, name: nameIsEmail ? hidden : name };
+      // A producer that used the address as the display name too: the name would show what the mask hides. Same value,
+      // and the same rule facets and filters apply in SQL (actor-name-mask.ts).
+      masked.actor = { ...masked.actor, email: hidden, name: actorNameIsEmail(name, email) ? hidden : name };
     }
   }
   for (const preset of mask) for (const key of MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];

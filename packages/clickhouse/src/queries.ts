@@ -30,6 +30,7 @@ import {
   RECENT_PROBLEM_SEVERITY,
 } from '@logbird/contracts';
 import type { z } from 'zod';
+import { ACTOR_NAME_MARKER, ACTOR_NAME_MASK_PARAMS, MASKED_ACTOR_NAME_SQL, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
@@ -157,10 +158,15 @@ export function timeRange(q: RangeQuery, now = Date.now()) {
 export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: CompiledFilter, scope?: ReadScope | null) {
   const c = compiled ?? (await filter(ch, q));
   const s = scopePredicate(scope);
+  // Under the actor_email mask, a filter cannot probe an address through a name that is the address (#333). Every
+  // scoped reader goes through here, with a filter this package compiled (scoped readers have no SQL mode).
+  const maskName = Boolean(scope?.mask?.includes('actor_email'));
+  if (maskName && q.lang === 'sql') throw new Error('SQL mode is not available to a masked scope.');
+  const userSql = maskName ? maskActorNameInFilter(c.sql) : c.sql;
   // The scope is ANDed outside the user's filter: nothing inside `(c.sql)` can widen it.
   return {
-    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql}) AND (${s.sql})`,
-    params: { project: projectId, ...timeRange(q), ...c.params, ...s.params },
+    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${userSql}) AND (${s.sql})`,
+    params: { project: projectId, ...timeRange(q), ...c.params, ...s.params, ...(maskName ? ACTOR_NAME_MASK_PARAMS : {}) },
   };
 }
 const iso = (s: string) => new Date(s.endsWith('Z') ? s : `${s.replace(' ', 'T')}Z`).toISOString();
@@ -464,7 +470,7 @@ const TARGET_COLUMNS = ['target_ids', 'target_types', 'target_names'];
 /** Two target-level facets expand ONE (id, type, name) tuple, so an id is never paired with another target's type. */
 const SHARED_TARGETS = 'ARRAY JOIN arrayZip(target_ids,target_types,target_names) AS facet_targets';
 /** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
-function facetLevel(field: string, n: number, sharedTargets = false) {
+function facetLevel(field: string, n: number, sharedTargets = false, maskName = false) {
   const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
   let expr = col ?? `attributes[{attr${n}:String}]`;
   let join = '';
@@ -480,7 +486,8 @@ function facetLevel(field: string, n: number, sharedTargets = false) {
   } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
-  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) label = `${field}_name`;
+  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field))
+    label = maskName && field === 'actor' ? MASKED_ACTOR_NAME_SQL : `${field}_name`;
   else if (!col) {
     // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
     // other element types keep their JSON text. An empty array contributes no group.
@@ -494,6 +501,11 @@ function facetLevel(field: string, n: number, sharedTargets = false) {
     expr = `toString(${expr})`;
     label = expr;
   }
+  // Under the actor_email mask a name that is the address leaves SQL only as a marker (#333); facets() maps it.
+  if (maskName && col === 'actor_name') {
+    expr = MASKED_ACTOR_NAME_SQL;
+    label = expr;
+  }
   return { expr, label, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };
 }
 /** The stored column a facet field reads (undefined for attributes). */
@@ -504,37 +516,60 @@ export async function facets(
   q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
   scope?: ReadScope | null,
   compiled?: CompiledFilter,
+  /** The field mask key (`fieldMaskKey`); required when the scope masks `actor_email`. */
+  maskKey?: Buffer,
 ): Promise<FacetResponse> {
+  // Under the actor_email mask, a name that is the address shows as the address's pseudonym, the same one the scope's
+  // events carry, in values, groups and labels at both levels (#333). It fails closed without the key.
+  const maskName = Boolean(scope?.mask?.includes('actor_email'));
+  if (maskName && !maskKey) throw new Error('The actor_email mask requires a field mask key.');
+  const unmask = (text: string) =>
+    maskName && text.startsWith(ACTOR_NAME_MARKER) ? maskedEmail(p, text.slice(ACTOR_NAME_MARKER.length), maskKey as Buffer) : text;
+  const maskParams = maskName ? ACTOR_NAME_MASK_PARAMS : {};
   const w = await where(ch, p, q, compiled, scope);
-  const one = facetLevel(q.field, 1);
+  const one = facetLevel(q.field, 1, false, maskName);
   // Only the top `limit` groups leave ClickHouse; the window sum (computed before LIMIT) keeps otherCount exact.
   const rows = await read<{ value: string; label: string; count: number; total: number }>(
     ch,
     `SELECT ${one.expr} value,coalesce(nullIf(argMaxIf(${one.label},received_at,${one.label}!=''),''),value) label,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value LIMIT {facetLimit:UInt32}`,
-    { ...w.params, ...one.params, facetLimit: q.limit },
+    { ...w.params, ...one.params, ...maskParams, facetLimit: q.limit },
   );
   const values: FacetResponse['values'] = rows.map((r) => ({ value: r.value, label: r.label, count: Number(r.count) }));
   const total = Number(rows[0]?.total ?? 0);
   const otherCount = Math.max(total - values.reduce((n, v) => n + v.count, 0), 0);
-  if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values, otherCount };
+  // Markers are replaced only on the way out: the second level filters on the values exactly as SQL returned them.
+  const finish = (by: string | null) => {
+    for (const v of values) {
+      v.value = unmask(v.value);
+      v.label = unmask(v.label);
+      for (const g of v.groups ?? []) {
+        g.value = unmask(g.value);
+        g.label = unmask(g.label);
+      }
+    }
+    return { field: q.field, by, values, otherCount };
+  };
+  if (!q.by || !values.length) return finish(q.by ?? null);
   // Second level (#140): the top `byLimit` values of `by` within each returned value, and the count of the rest.
   // One bounded query: the outer filter keeps only the returned first-level values.
   const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
   const shared = isTarget(q.field) && isTarget(q.by);
-  const both = shared ? { one: facetLevel(q.field, 1, true), two: facetLevel(q.by, 2, true) } : { one, two: facetLevel(q.by, 2) };
+  const both = shared
+    ? { one: facetLevel(q.field, 1, true, maskName), two: facetLevel(q.by, 2, true, maskName) }
+    : { one, two: facetLevel(q.by, 2, false, maskName) };
   const two = both.two;
   const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
   const groups = await read<{ value: string; grp: string; label: string; count: number; total: number }>(
     ch,
     `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE value IN {facetValues:Array(String)} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
-    { ...w.params, ...one.params, ...two.params, facetValues: values.map((v) => v.value), byLimit: q.byLimit ?? 5 },
+    { ...w.params, ...one.params, ...two.params, ...maskParams, facetValues: values.map((v) => v.value), byLimit: q.byLimit ?? 5 },
   );
   for (const v of values) {
     const mine = groups.filter((g) => g.value === v.value);
     v.groups = mine.map((g) => ({ value: g.grp, label: g.label, count: Number(g.count) }));
     v.groupsOtherCount = Math.max(Number(mine[0]?.total ?? 0) - v.groups.reduce((n, g) => n + g.count, 0), 0);
   }
-  return { field: q.field, by: q.by, values, otherCount };
+  return finish(q.by);
 }
 async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
   const w = await where(ch, p, q);
