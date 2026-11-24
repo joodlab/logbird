@@ -6,14 +6,15 @@ export type { Audit } from '@logbird/sdk/integration';
 export { readAuditTrail, trailQuery } from '@logbird/sdk/read';
 
 // Named through @tanstack/react-start, which the application depends on, so the published declarations never point at
-// TanStack's internal packages. The `{}` is TanStack's own "no extra register" type argument.
-// biome-ignore lint/complexity/noBannedTypes: TanStack's type parameter is `{}`.
-type Register = {};
+// TanStack's internal packages. The `{}` is TanStack's own "no extra register" type argument, written in place so the
+// published declarations name no private alias.
 /** The request middleware: it puts `context.audit` on every request it runs for. */
-export type LogbirdRequestMiddleware = RequestMiddlewareAfterServer<Register, undefined, { audit: Audit }>;
+// biome-ignore lint/complexity/noBannedTypes: TanStack's register type argument is `{}`.
+export type LogbirdRequestMiddleware = RequestMiddlewareAfterServer<{}, undefined, { audit: Audit }>;
 /** The function middleware: it runs the request middleware and passes `context.audit` on to server functions. */
 export type LogbirdFunctionMiddleware = FunctionMiddlewareAfterServer<
-  Register,
+  // biome-ignore lint/complexity/noBannedTypes: TanStack's register type argument is `{}`.
+  {},
   readonly [LogbirdRequestMiddleware],
   undefined,
   { audit: Audit },

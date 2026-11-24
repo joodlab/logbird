@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { ApiError } from '../errors';
 import type { AppEnv } from '../types';
+import { projectAccess } from './require-project-access';
 import { requireSession } from './require-session';
 
 const all = ['owner', 'admin', 'member'] as const;
@@ -42,6 +43,15 @@ export async function requireRole(c: Context<AppEnv>, roles: readonly string[] =
   return member;
 }
 
+/** A malformed escape (`%E0%A4%A`) is a project that does not exist: the same 404, never a 500. */
+function decodedProjectId(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new ApiError(404, 'not_found', 'Project not found.');
+  }
+}
+
 export const authorizeMutation = createMiddleware<AppEnv>(async (c, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) return next();
   // This endpoint consumes a bearer invitation, with its own domain/expiry/use checks.
@@ -52,9 +62,8 @@ export const authorizeMutation = createMiddleware<AppEnv>(async (c, next) => {
     const projectId = c.req.path.match(/^\/api\/projects\/([^/]+)/)?.[1];
     let organizationId = c.get('activeOrganizationId');
     if (projectId) {
-      const project = await prisma.project.findUnique({ where: { id: decodeURIComponent(projectId) } });
-      if (!project || project.organizationId !== organizationId) throw new ApiError(404, 'not_found', 'Project not found.');
-      organizationId = project.organizationId;
+      // The same check as requireProjectAccess (404, or 409 for a member of the workspace that owns it); then the role.
+      organizationId = (await projectAccess(c, decodedProjectId(projectId))).project.organizationId;
     }
     if (!('self' in permission && permission.self)) await requireRole(c, permission.roles, organizationId);
     await next();

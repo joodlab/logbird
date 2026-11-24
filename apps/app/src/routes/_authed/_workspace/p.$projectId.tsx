@@ -1,13 +1,16 @@
 import { Button } from '@logbird/ui/components/ui/button';
-import { createFileRoute, Link, notFound, Outlet, retainSearchParams } from '@tanstack/react-router';
-import { useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { createFileRoute, Link, notFound, Outlet, retainSearchParams, useRouter } from '@tanstack/react-router';
+import { Loader2Icon } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { NotFound } from '@/components/not-found';
 import { PageSkeleton } from '@/components/route-states';
 import { AppShell } from '@/components/shell/app-shell';
-import { ApiRequestError } from '@/lib/api/errors';
+import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { projectQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
-import { PROJECT_MISSING, projectIsListed } from '@/lib/project-listed';
+import { authCall, authClient } from '@/lib/auth-client';
+import { confirmedProject, PROJECT_MISSING, type ProjectElsewhere, projectElsewhere, readProject, withOpenWorkspace } from '@/lib/project-listed';
 import { redirectIfWorkspaceLost, rememberProject } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
@@ -15,11 +18,17 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // falls back to its default range instead of failing validation.
   validateSearch: z.object({ range: z.string().optional().catch(undefined) }),
   search: { middlewares: [retainSearchParams(['range'])] },
-  // A project this workspace does not list (deleted, another workspace's, a stale bookmark) is not found before any of
-  // its requests runs: the loader and the page's own queries would each answer 404 into the console. A project the
-  // cached list lacks is checked against a fresh list first, so one created since is never shown as not found.
-  beforeLoad: async ({ context, params }) => {
-    if (!(await projectIsListed(context.queryClient, params.projectId))) throw notFound({ data: PROJECT_MISSING });
+  // On entering a project (a link, a bookmark, another project), it is read fresh before any of its pages load: a cache
+  // filled while another workspace was active (in this tab or another) never stands in for access. A project in another
+  // of the person's workspaces is named, so they can switch to it (never switched silently); one that is not theirs is
+  // not found; a failure to read it shows the usual error with a retry. Moving between pages of the same project reuses
+  // that read; moving to another project id (which the router also calls 'stay') does not.
+  beforeLoad: async ({ context, params, cause, preload }) => {
+    if (cause === 'stay' && !preload && confirmedProject(context.queryClient) === params.projectId) return;
+    const outcome = await readProject(context.queryClient, params.projectId, { visit: !preload });
+    // Missing may mean the open workspace itself is gone (removed since `me` was read): start over at `/` if so (#4).
+    if (outcome === PROJECT_MISSING && !preload) await redirectIfWorkspaceLost(context.queryClient);
+    if (outcome !== 'readable') throw notFound({ data: outcome });
   },
   loader: async ({ context, params }) => {
     try {
@@ -30,6 +39,8 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
       context.queryClient.prefetchQuery(viewsQuery(params.projectId));
       return { project };
     } catch (error) {
+      const elsewhere = projectElsewhere(error);
+      if (elsewhere) throw notFound({ data: await withOpenWorkspace(context.queryClient, elsewhere) });
       if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) {
         await redirectIfWorkspaceLost(context.queryClient);
         throw notFound({ data: PROJECT_MISSING });
@@ -47,7 +58,9 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // switcher stay and the way out is one click. Any other not-found here (an unknown page under a real project) renders
   // inside the project's layout, which stays mounted: a page-level fallback, never a second shell.
   notFoundComponent: ({ data }) =>
-    data === PROJECT_MISSING ? (
+    isElsewhere(data) ? (
+      <ProjectInOtherWorkspace elsewhere={data} />
+    ) : data === PROJECT_MISSING ? (
       <AppShell projectMissing>
         <NotFound
           action={
@@ -64,6 +77,63 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
     ),
   component: ProjectLayout,
 });
+
+const isElsewhere = (data: unknown): data is ProjectElsewhere => (data as ProjectElsewhere | null)?.kind === 'project-elsewhere';
+
+/**
+ * A link to a project in another of the person's workspaces (#1): say where it is and switch only when asked. The switch
+ * stays on this URL, search included; if it fails, the page says so and stays.
+ */
+function ProjectInOtherWorkspace({ elsewhere }: { elsewhere: ProjectElsewhere }) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [switching, setSwitching] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const switchWorkspace = async () => {
+    setSwitching(true);
+    setFailed(null);
+    try {
+      await authCall(authClient.organization.setActive({ organizationId: elsewhere.workspaceId }));
+    } catch (error) {
+      setFailed(errorMessage(error));
+      setSwitching(false);
+      return;
+    }
+    // Everything cached belongs to the workspace just left; the same URL then loads again in the new one.
+    queryClient.clear();
+    await router.invalidate();
+  };
+  return (
+    <AppShell projectMissing>
+      <NotFound
+        action={
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button data-testid="switch-to-project-workspace" disabled={switching} onClick={switchWorkspace} size="sm">
+                {switching ? <Loader2Icon className="animate-spin" /> : null}
+                Switch workspace
+              </Button>
+              <Button nativeButton={false} render={<Link to="/projects" />} size="sm" variant="outline">
+                All projects
+              </Button>
+            </div>
+            {failed ? (
+              <p className="max-w-sm text-center text-destructive text-sm" data-testid="switch-failed" role="alert">
+                Could not switch to {elsewhere.workspaceName}: {failed}
+              </p>
+            ) : null}
+          </div>
+        }
+        description={
+          elsewhere.openWorkspaceName
+            ? `You are a member of ${elsewhere.workspaceName}, but ${elsewhere.openWorkspaceName} is the workspace open now. Switch to open this project; the link stays the same.`
+            : `You are a member of ${elsewhere.workspaceName}. Switch to it to open this project; the link stays the same.`
+        }
+        title={`This project is in ${elsewhere.workspaceName}`}
+      />
+    </AppShell>
+  );
+}
 
 function ProjectLayout() {
   const { projectId } = Route.useParams();
