@@ -6,7 +6,6 @@ import { FeatureRow } from '../components/marketing/feature-row';
 import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { developers } from '../content/developers';
-import { GITHUB_PUBLIC } from '../env';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/developers')({ head: () => pageHead('/developers'), component: DevelopersPage });
@@ -103,9 +102,11 @@ function DevelopersPage() {
         title={quickstart.title}
         visual={
           <div className="flex flex-col gap-3">
-            {GITHUB_PUBLIC ? <SiteCode code={samples.sourceInstall} language="bash" title={quickstart.sourceInstallTitle} /> : null}
+            <SiteCode code={samples.install} language="bash" title={quickstart.installTitle} />
             <SiteCode code={samples.quickstart} language="ts" title={quickstart.quickstartTitle} />
-            <p className="text-muted-foreground text-sm">{quickstart.npmNote}</p>
+            <p className="text-muted-foreground text-sm">
+              <Rich text={quickstart.npmNote} />
+            </p>
           </div>
         }
       >
@@ -171,7 +172,12 @@ function DevelopersPage() {
         id="integrations"
         limit={integrations.limit}
         title={integrations.title}
-        visual={<SiteCodeTabs tabs={[{ id: 'hono', label: integrations.tabLabel, code: samples.hono, language: 'ts' }]} />}
+        visual={
+          <div className="flex flex-col gap-3">
+            <SiteCode code={samples.honoInstall} language="bash" title={integrations.honoInstallTitle} />
+            <SiteCodeTabs tabs={[{ id: 'hono', label: integrations.tabLabel, code: samples.hono, language: 'ts' }]} />
+          </div>
+        }
       >
         <p>
           <Rich text={integrations.body} />

@@ -99,11 +99,12 @@ Page text renders from `apps/web/src/content/open-source.ts`; edit it there. Thi
 - **eyebrow:** Versions
 - **heading:** Where the project is today.
 - **body:** The supported line is `<supported line>`, and the latest release is `<latest release>`,
-  with Docker images on GHCR for amd64 and arm64. The SDK and the integrations share the platform's version. They
-  aren't on npm yet: use them from source. <!-- private repository: "They aren't on npm yet." With no release in the
+  with Docker images on GHCR for amd64 and arm64. The SDK and the integrations share the platform's version.
+  `@logbird/sdk` and `@logbird/hono` are on npm; the Vue, Nuxt and TanStack Start integrations aren't yet: use them
+  from source. <!-- private repository: the sentence ends at "aren't yet." With no release in the
   list, the first sentence is "Nothing has been released yet." and the images cell shows "—". -->
-  <!-- source: the release list (apps/web/src/lib/releases.ts, `supportedLine` and `latestRelease`); packages/*/package.json share the platform version; npm registry 404 for @logbird/sdk on 2026-11-22 -->
+  <!-- source: the release list (apps/web/src/lib/releases.ts, `supportedLine` and `latestRelease`); packages/*/package.json share the platform version; npm phase 1: @logbird/sdk and @logbird/hono, verified on npmjs.com by the maintainer before this copy merged -->
 - **facts panel:** Supported line — `<supported line>` · Latest release — `<latest release>` · Docker images — GHCR · npm packages —
-  Not yet.
+  @logbird/sdk, @logbird/hono.
 - **cta:** Read the changelog → `/changelog`
 - **visual:** none

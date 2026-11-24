@@ -1,10 +1,9 @@
-import { CLONE_URL, SELF_HOST_VERSION } from '../lib/selfhost';
 import { byRepo, SITE } from './site';
 
-/** The working install until the packages are on npm (packages/sdk/README.md): link the SDK from a checkout of the release. */
-const sourceInstall = `git clone ${SELF_HOST_VERSION ? `--branch v${SELF_HOST_VERSION} ` : ''}${CLONE_URL} ../logbird
-pnpm -C ../logbird install
-pnpm add @logbird/sdk@link:../logbird/packages/sdk`;
+/** The install from npm, with no version number (packages/sdk/README.md). Phase 1 publishes @logbird/sdk and @logbird/hono only. */
+const install = 'pnpm add @logbird/sdk';
+/** @logbird/hono depends on the SDK, but the app imports Logbird from @logbird/sdk itself, so it declares both; hono is a peer. */
+const honoInstall = 'pnpm add @logbird/sdk @logbird/hono';
 
 const quickstart = `import { Logbird } from '@logbird/sdk';
 
@@ -164,7 +163,7 @@ const limits: [string, string][] = [
  * and packages/integrations READMEs. Inline marks: `code` and **bold** (components/marketing/rich.tsx).
  */
 export const developers = {
-  samples: { sourceInstall, quickstart, http, smallest, worked, hono, workers, read },
+  samples: { install, honoInstall, quickstart, http, smallest, worked, hono, workers, read },
   hero: {
     eyebrow: 'Developers',
     title: 'Add an audit log in an afternoon. Keep it for years.',
@@ -190,7 +189,7 @@ export const developers = {
   quickstart: {
     eyebrow: 'SDK quickstart',
     title: 'Install, create a client, track an event.',
-    body: "The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.",
+    body: "The SDK's capture entry point has no dependencies. It runs on Node 20 or later and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.",
     bullets: [
       '`track(event)` never throws and never waits for the network.',
       "`flush()` and `shutdown()` can reject, for example when retryable delivery (network, `429`, `5xx`) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through `onError` and `onDrop` instead.",
@@ -199,11 +198,13 @@ export const developers = {
     ],
     limit:
       '**Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.',
-    sourceInstallTitle: 'From source (not on npm yet)',
+    installTitle: 'Install from npm',
     quickstartTitle: 'server.ts',
     npmNote: byRepo(SITE, {
-      public: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild.",
-      private: "The packages aren't on npm yet.",
+      public:
+        "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet: until they are, install them from a Logbird checkout, as their READMEs describe.",
+      private:
+        "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet.",
     }),
   },
   http: {
@@ -245,6 +246,7 @@ export const developers = {
     title: 'Middleware for the stacks we run.',
     limit: 'There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from those stacks.',
     tabLabel: 'Hono',
+    honoInstallTitle: 'Install for Hono',
     body: 'First-party packages for Hono, TanStack Start, Vue and Nuxt. On the server, the Hono, TanStack Start and Nuxt packages give you an `audit(action, partialEvent)` function per request. It resolves the actor, tenant, request id and operation id when you call it, so identity set by a per-route auth guard is still picked up. `audit()` returns the event id straight away and never waits for delivery.',
     packages: [
       {

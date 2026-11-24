@@ -83,13 +83,13 @@ export const openSource = {
   versions: {
     eyebrow: 'Versions',
     title: 'Where the project is today.',
-    lead: `${latestRelease && supportedLine ? `The supported line is ${supportedLine}, and the latest release is ${latestRelease.version}, with Docker images on GHCR for amd64 and arm64.` : NO_RELEASES} The SDK and the integrations share the platform's version. They aren't on npm yet${byRepo(SITE, { public: ': use them from source.', private: '.' })}`,
+    lead: `${latestRelease && supportedLine ? `The supported line is ${supportedLine}, and the latest release is ${latestRelease.version}, with Docker images on GHCR for amd64 and arm64.` : NO_RELEASES} The SDK and the integrations share the platform's version. \`@logbird/sdk\` and \`@logbird/hono\` are on npm; the Vue, Nuxt and TanStack Start integrations aren't yet${byRepo(SITE, { public: ': use them from source.', private: '.' })}`,
     action: 'Read the changelog',
     facts: [
       { label: 'Supported line', value: supportedLine ?? '—' },
       { label: 'Latest release', value: latestRelease ? latestRelease.version : '—' },
       { label: 'Docker images', value: latestRelease ? 'GHCR' : '—' },
-      { label: 'npm packages', value: 'Not yet' },
+      { label: 'npm packages', value: '@logbird/sdk, @logbird/hono' },
     ],
   },
 } as const;
