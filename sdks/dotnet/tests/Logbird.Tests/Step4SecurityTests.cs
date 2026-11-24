@@ -62,7 +62,7 @@ public class Step4SecurityTests
                 ? never.Task
                 : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{}", Encoding.UTF8, "application/json") });
         });
-        using var reader = Reader(handler, TimeSpan.FromMilliseconds(100));
+        using var reader = Reader(handler, TimeSpan.FromSeconds(1));
 
         for (var i = 0; i < LogbirdReadClient.MaxAbandonedReads; i++)
         {
