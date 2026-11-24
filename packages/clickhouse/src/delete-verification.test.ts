@@ -242,6 +242,42 @@ it('continues the purge after a delete that succeeds on its second attempt', asy
   ]);
 });
 
+it('makes a definite rejection after the raw-event delete retryable, and a retry finishes the purge', async () => {
+  const rejected = Object.assign(new Error("Table events_lateness_by_hour doesn't exist"), { code: '60' });
+  const command = vi
+    .fn()
+    .mockImplementation(async ({ query: sql }: { query: string }) =>
+      sql.startsWith('DELETE FROM events_lateness_by_hour ') ? Promise.reject(rejected) : {},
+    );
+  const query = vi.fn().mockResolvedValue({ json: async () => [{ n: 0 }] });
+  const ch = { command, query } as unknown as ClickHouseClient;
+  // Events are already gone, so the purge is partial: callers get the retryable code the API maps to a 503.
+  const failure = await settle(purgeProject(ch, 'qa359-partial')).catch((error: unknown) => error);
+  expect(failure).toMatchObject({ code: 'LOGBIRD_DELETE_UNVERIFIED', cause: rejected });
+  const statements = () => command.mock.calls.map(([args]) => args.query.split(' WHERE ')[0]);
+  expect(statements()).toEqual(['DELETE FROM events', 'DELETE FROM event_ids', 'DELETE FROM events_lateness_by_hour']);
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"stage":"after_events","causeCode":"60"'));
+
+  command.mockReset().mockResolvedValue({});
+  await settle(purgeProject(ch, 'qa359-partial'));
+  expect(statements()).toEqual([
+    'DELETE FROM events',
+    'DELETE FROM event_ids',
+    'DELETE FROM events_lateness_by_hour',
+    'DELETE FROM events_by_minute',
+    'DELETE FROM entities',
+    'DELETE FROM attribute_keys',
+  ]);
+});
+
+it('passes a definite rejection of the raw-event delete through unchanged: nothing was deleted', async () => {
+  const rejected = Object.assign(new Error('Not enough privileges'), { code: '497' });
+  const command = vi.fn().mockRejectedValue(rejected);
+  const query = vi.fn();
+  await expect(settle(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa359-untouched'))).rejects.toBe(rejected);
+  expect(command).toHaveBeenCalledTimes(1);
+});
+
 it.each(['events_by_minute', 'entities', 'attribute_keys'])('refuses to rebuild when completed deletes leave rows in %s', async (table) => {
   const command = vi.fn().mockResolvedValue({});
   const query = vi.fn().mockImplementation(async ({ query: sql }: { query: string }) => ({

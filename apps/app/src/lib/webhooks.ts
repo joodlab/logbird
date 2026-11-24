@@ -159,6 +159,17 @@ export const LATE_EVENTS_APPROXIMATE = 'Approximate. It can be off after a stora
 export const lateEventsCounted = (e: Pick<WebhookEndpoint, 'deliveryWindowSeconds' | 'lateEvents'>, now: Date) =>
   e.deliveryWindowSeconds !== null && Date.parse(e.lateEvents.since) <= now.getTime();
 
+/**
+ * The endpoint a PATCH returned, ready to show in place of `previous`. The PATCH carries a null count when ClickHouse
+ * could not be read (the settings were saved regardless): the previous count is kept while it still describes the same
+ * window and start, and otherwise stays null until the endpoint is read again.
+ */
+export function withKnownLateCount(updated: WebhookEndpoint, previous: WebhookEndpoint | undefined): WebhookEndpoint {
+  if (updated.lateEvents.count !== null || !previous || previous.lateEvents.count === null) return updated;
+  const same = previous.deliveryWindowSeconds === updated.deliveryWindowSeconds && previous.lateEvents.since === updated.lateEvents.since;
+  return same ? { ...updated, lateEvents: previous.lateEvents } : updated;
+}
+
 export function lateEventsSentence(
   e: Pick<WebhookEndpoint, 'deliveryWindowSeconds' | 'lateEvents'>,
   since: string,
@@ -168,6 +179,8 @@ export function lateEventsSentence(
   const window = windowLabel(e.deliveryWindowSeconds);
   const { count } = e.lateEvents;
   if (Date.parse(e.lateEvents.since) > now.getTime()) return `Logbird starts counting events that arrive more than ${window} late at ${since}.`;
+  // Only a PATCH response can carry an unread count; the endpoint is read again for it.
+  if (count === null) return null;
   // Project-wide and before this endpoint's filter and scope (the approved meaning): it says how many arrived late, not
   // which of them this endpoint would otherwise have sent.
   if (count === 0) return `Since ${since}, Logbird has recorded no event in this project arriving more than ${window} after it happened.`;

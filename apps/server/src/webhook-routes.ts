@@ -81,7 +81,25 @@ const lateEvents = (endpoints: readonly LateInput[], now: Date) =>
   countLateEvents(endpoints, now, (projectId, windows) => lateEventCounts(clickhouse, projectId, windows));
 const lateFor = (late: Map<string, Late>, endpoint: LateInput, now: Date) =>
   late.get(endpoint.id) ?? { count: 0, since: lateEventsSince(endpoint, now) };
-function serialize(endpoint: WebhookEndpoint, late: Late, activeSecretCount = 0) {
+/** `count: null`: storage could not be read. Only PATCH answers that way, so a settings change never depends on ClickHouse. */
+type ResponseLate = Omit<Late, 'count'> & { count: number | null };
+const lateOrUnknown = (endpoint: LateInput, now: Date): Promise<ResponseLate> =>
+  lateEvents([endpoint], now).then(
+    (late) => lateFor(late, endpoint, now),
+    (error: unknown) => {
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          event: 'webhook.late_events_unavailable',
+          endpointId: endpoint.id,
+          projectId: endpoint.projectId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return { count: null, since: lateEventsSince(endpoint, now) };
+    },
+  );
+function serialize(endpoint: WebhookEndpoint, late: ResponseLate, activeSecretCount = 0) {
   const scope = storedWebhookScope(endpoint);
   const responseScope = scope === undefined ? (webhookEndpointSchema.shape.scope.safeParse(webhookScopeFromColumns(endpoint)).data ?? null) : scope;
   return webhookEndpointSchema.parse({
@@ -255,8 +273,9 @@ export const webhookRoutes = new Hono<AppEnv>()
     const input = c.req.valid('json');
     // A missing endpoint is a 404 before any DNS lookup; the locked re-read below still decides.
     const current = await findEndpoint(c);
-    // Count before saving, so a failed ClickHouse read fails the request before anything is written.
-    const counted = lateFor(await lateEvents([current], await databaseNow()), current, new Date());
+    // Count before saving. The count is telemetry: a failed read gives `count: null` and never blocks the save, so an
+    // endpoint can be disabled while ClickHouse is down.
+    const counted = await lateOrUnknown(current, await databaseNow());
     const url = input.url === undefined ? undefined : await allowedUrl(c, input.url);
     const {
       after: endpoint,
@@ -324,7 +343,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       ? { count: 0, since: lateEventsSince(endpoint, savedAt) }
       : unchanged
         ? counted
-        : lateFor(await lateEvents([endpoint], savedAt), endpoint, savedAt);
+        : await lateOrUnknown(endpoint, savedAt);
     return c.json(serialize(endpoint, late, endpoint._count.secrets));
   })
   .delete(`${base}/:id`, routeDoc('Delete webhook endpoint', { responses: { 204: { description: 'Deleted' }, 503: mutationBusy } }), async (c) => {

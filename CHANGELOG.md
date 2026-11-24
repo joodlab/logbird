@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Upgrade notes
+
+- **A workspace always keeps an owner.** Migration `20261124120000_member_keep_an_owner` adds a Postgres trigger on
+  `member`: a leave, removal or role change that would leave an organization without an owner is refused with
+  409 `workspace_needs_owner` ("A workspace needs at least one owner."). The migration is additive and does not check
+  existing rows: an organization that already has no owner keeps working as before, and the trigger only stops new
+  changes from removing the last owner. Deleting an organization still removes its members.
+  **Limit:** removing or demoting an owner must run under READ COMMITTED, Postgres's default and what Logbird uses.
+  Under REPEATABLE READ or SERIALIZABLE the trigger refuses it (SQLSTATE `LB410`), even when another owner remains,
+  because a count taken on an older snapshot could not be trusted. Scripts that change owners at those levels must
+  switch to READ COMMITTED.
+
 ## 0.2.1
 
 ### Highlights

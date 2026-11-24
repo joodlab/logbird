@@ -31,6 +31,7 @@ import {
   windowLabel,
   windowParts,
   windowSeconds,
+  withKnownLateCount,
 } from './webhooks';
 
 /** Every path the console serves, as the router resolves them. */
@@ -392,6 +393,20 @@ describe('delivery window (#152)', () => {
     );
     expect(windowLabel(null)).toBe('No limit');
     expect(deliveryWindowLine(null)).toBe('No limit on arrival time');
+  });
+  it('keeps the shown count when a save could not read it, while it still describes the same window and start', () => {
+    const shown = { ...ep(604_800, 12), lateEvents: { count: 12, since: '2026-10-25T00:00:00.000Z' } } as WebhookEndpoint;
+    const unread = (over: Partial<WebhookEndpoint> = {}) =>
+      ({ ...shown, description: 'Saved', lateEvents: { count: null, since: shown.lateEvents.since }, ...over }) as WebhookEndpoint;
+    expect(withKnownLateCount(unread(), shown)).toMatchObject({ description: 'Saved', lateEvents: { count: 12 } });
+    // A changed window restarts the count: the old number would be wrong, so it waits for the read that follows.
+    const rewindowed = unread({ deliveryWindowSeconds: 3600, lateEvents: { count: null, since: '2026-11-24T03:00:00.000Z' } });
+    expect(withKnownLateCount(rewindowed, shown).lateEvents.count).toBeNull();
+    expect(withKnownLateCount(unread(), undefined).lateEvents.count).toBeNull();
+    // A count the PATCH did read always wins.
+    expect(withKnownLateCount({ ...shown, lateEvents: { ...shown.lateEvents, count: 13 } }, shown).lateEvents.count).toBe(13);
+    // An unread count is never shown as a number.
+    expect(lateEventsSentence(unread(), 'Oct 25, 2026')).toBeNull();
   });
 });
 

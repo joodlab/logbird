@@ -1,7 +1,7 @@
 import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from '@logbird/auth';
 import { CursorError, QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
-import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
+import { isWorkspaceNeedsOwnerError, Prisma, ProjectBusyError, prisma, WORKSPACE_NEEDS_OWNER } from '@logbird/database';
 import { failedRepairStatus } from '@logbird/worker/project-repair';
 import { connection } from '@logbird/worker/queue';
 import { type Context, Hono } from 'hono';
@@ -136,6 +136,8 @@ app.onError((error, c) => {
       { error: { code: 'key_restricted', message: 'A replacement key must keep the scope and the expiry of the key it replaces.' } },
       409,
     );
+  // The member trigger refusing to leave a workspace without an owner, reached outside better-auth.
+  if (isWorkspaceNeedsOwnerError(error)) return c.json({ error: { ...WORKSPACE_NEEDS_OWNER } }, 409);
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
     return c.json({ error: { code: 'conflict', message: 'This record already exists.' } }, 409);
   if (error instanceof HTTPException) return c.json({ error: { code: 'invalid_request', message: error.message } }, error.status);

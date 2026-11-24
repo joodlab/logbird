@@ -26,7 +26,7 @@ backend using the read API.
 
 ## Later candidates
 
-- Action alerts, signed webhooks and archive exports.
+- Action alerts and archive exports.
 - Scoped customer exports and action schema hints.
 - Console SSO and data-subject erasure with explicit deletion semantics.
 

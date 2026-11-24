@@ -1,14 +1,16 @@
+import type { MeResponse } from '@logbird/contracts';
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { keys, meQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
 import { activeRole, isAdminRole } from '@/lib/permissions';
+import { forgetWorkspace } from '@/lib/session';
 
 export type Role = 'owner' | 'admin' | 'member';
 export const INVITE_ROLES: Role[] = ['member', 'admin'];
 
 export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
-  owner: { label: 'Owner', description: 'Everything, including other owners and deleting the workspace.' },
+  owner: { label: 'Owner', description: 'Everything, including other owners and deleting projects with their events.' },
   admin: { label: 'Admin', description: 'Projects, API keys, retention and members.' },
   member: { label: 'Member', description: 'Explore events, follow entities, save views.' },
 };
@@ -52,13 +54,17 @@ export const invitationUrl = (invitationId: string) =>
 
 export const isPendingInvitation = (i: OrgInvitation, now = Date.now()) => i.status === 'pending' && new Date(i.expiresAt).getTime() > now;
 
+/** Whether a stored role (better-auth keeps several comma-separated, e.g. "owner,admin") includes `role`. */
+export const hasRole = (stored: string | null | undefined, role: Role) => (stored ?? '').split(',').some((r) => r.trim() === role);
+
 /** The active workspace, my membership and what I may do in it. */
 export function useOrganization() {
   const me = useQuery(meQuery());
   const org = useQuery(organizationQuery(me.data?.activeOrganizationId));
   const self = org.data?.members.find((m) => m.userId === me.data?.user.id);
   const myRole = (self?.role ?? 'member') as Role;
-  const owners = org.data?.members.filter((m) => m.role === 'owner').length ?? 0;
+  // Counted the way the server counts owners before refusing the last one's departure.
+  const owners = org.data?.members.filter((m) => hasRole(m.role, 'owner')).length ?? 0;
   return {
     me,
     org,
@@ -144,4 +150,23 @@ export function useMemberActions() {
     onError: (e) => toast.error('Could not change the role', { description: e.message }),
   });
   return { cancel, remove, changeRole };
+}
+
+/**
+ * Leave a workspace on purpose. It is forgotten first, so no "you no longer have access" notice follows, and the console
+ * then starts over at `/`: another of the person's workspaces, or onboarding when this was their only one.
+ */
+export function useLeaveWorkspace(onLeft: () => void) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (workspace: { id: string; name: string }) => authCall(authClient.organization.leave({ organizationId: workspace.id })),
+    onSuccess: (_, workspace) => {
+      const userId = queryClient.getQueryData<MeResponse>(meQuery().queryKey)?.user.id;
+      if (userId) forgetWorkspace(userId, workspace.id);
+      queryClient.clear();
+      toast.success(`You left ${workspace.name}`);
+      onLeft();
+    },
+    onError: (e) => toast.error('Could not leave the workspace', { description: e.message }),
+  });
 }

@@ -100,6 +100,9 @@ model Organization {
   @@map("organization")
 }
 
+/// A database trigger (migration 20261124120000_member_keep_an_owner, not visible to Prisma) refuses any delete or role
+/// change that would leave an organization without an owner (SQLSTATE LB409, "logbird_workspace_needs_owner"), so two
+/// owners leaving at once cannot both succeed. Deleting the organization itself still cascades its members.
 model Member {
   id             String       @id
   organizationId String

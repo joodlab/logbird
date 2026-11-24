@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS events_lateness_by_hour
 ENGINE = SummingMergeTree(events)
 PARTITION BY toYYYYMM(received_hour)
 ORDER BY (project_id, received_hour, late_hours)
-TTL received_hour + INTERVAL 32 DAY DELETE
+TTL toDateTime(least(toDateTime64(received_hour, 3, 'UTC') + INTERVAL 32 DAY, toDateTime64('2106-02-07 06:28:15', 3, 'UTC'))) DELETE
 SETTINGS ttl_only_drop_parts = 1;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS events_lateness_mv TO events_lateness_by_hour AS

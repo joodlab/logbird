@@ -25,13 +25,17 @@ Page text renders from `apps/web/src/content/security.ts` (the scoped-read limit
 - **heading:** Self-hosted, your events stay on your servers.
 - **body:** When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your
   own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the
-  SMTP provider you choose, and resolves a webhook endpoint's hostname when you save it.
+  SMTP provider you choose and, when you add webhook endpoints, delivers events to them; it resolves an endpoint's
+  hostname when you save it and before each delivery.
+  <!-- webhooks: apps/server/src/webhook-routes.ts:105–107 (save-time check); apps/worker/src/webhook-transport.ts:63 (resolved again per attempt) -->
+
   <!-- source: docs/self-hosting.md; README.md §Architecture; no analytics/telemetry code found in apps/ or packages/ (grep, 2026-11-07) — owner to confirm -->
 - **visual:** diagram: one box labelled "Your server" holding console, API, worker, Postgres, ClickHouse and Redis.
   The arrow leaving the box goes to "Your SMTP provider".
   Caption: "The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your
   server. Outbound, the server connects to your SMTP provider (sign-in codes, invitations and membership notices) and
-  looks up a webhook endpoint's hostname when you save it. With your own databases, it also connects to them."
+  delivers webhooks to the endpoints you add, looking up each endpoint's hostname when you save it and before each
+  delivery. With your own databases, it also connects to them."
 
 ## retention
 
@@ -80,6 +84,29 @@ page, this section and the customer-facing audit logs page all render; `content-
     and a source installation runs `create-query-user` once.
   - **Browser origins.** A web page on another origin can read with a token only if that origin is listed on the key.
   <!-- source: docs/scoped-read-access.md § The scope, § Browser use (CORS); docs/security.md § Two enforcement layers; CHANGELOG.md 0.2.0 "Restricted query user" -->
+
+## webhooks
+
+Inside the keys section (`isolation`), after the scoped reads, with the same structure (an h3 and a grid of features).
+Held: this section ships with the 0.3.0 webhook delivery and merges only after 0.3.0 is deployed and checked in
+production. Code citations below refer to [`84a32282`](https://github.com/joodlab/logbird/tree/84a3228259d130126e3ca6312f47dee4a6fb5082).
+
+- **id:** `webhooks` (in "On this page" as "Webhook endpoints", right after "Projects and keys")
+- **heading:** Webhook endpoints: signed, checked, and managed by admins.
+- **job:** say who can manage endpoints, how the signing secret is kept, which destinations are allowed and when they
+  are checked, what a delivery carries, and that masks apply on every send. Never "tamper-proof" or "guaranteed
+  delivery".
+- **bullets:**
+  - **Owners and admins only.** Only owners and admins can see or manage webhook endpoints: a stored URL can itself be
+    a credential. <!-- source: apps/server/src/webhook-routes.ts:184, :231 (requireRole(c)); apps/server/src/middlewares/require-role.ts:40 (default roles: admins); docs/SPEC.md § Webhook endpoint management -->
+  - **Secrets shown once.** Each endpoint's signing secret is encrypted at rest (AES-256-GCM) and shown once, when you
+    create or rotate it. <!-- source: packages/database/src/webhook-secrets.ts:16–20 (aes-256-gcm, random 12-byte IV, auth tag), :6–13 (WEBHOOK_SECRET_KEY or HKDF-SHA256 from BETTER_AUTH_SECRET); apps/server/src/webhook-routes.ts:194, :226–227 (create: no-store, { endpoint, secret }), :417–418 (rotate: no-store, { secret }), :183, :230 (list and get carry no secret) -->
+  - **Public destinations only.** A destination must resolve only to public addresses. Logbird checks it when you save
+    the URL and again before every delivery, and connects only to the address it checked. <!-- source: apps/server/src/webhook-routes.ts:105–107 (validateWebhookUrl); packages/database/src/webhook-address.ts:102 (HTTPS unless WEBHOOKS_ALLOW_HTTP), :116–117 (public unicast only); apps/worker/src/webhook-transport.ts:63 (resolveWebhookDestination per attempt), :99–103 (new socket per send, lookup returns the validated address, TLS hostname kept) -->
+  - **No redirects, no console credentials.** Redirects are never followed: a redirect counts as a failed attempt, retried while the 24-hour window is open. A delivery
+    carries the event and its signature headers, never console headers or cookies. <!-- source: apps/worker/src/webhook-transport.ts:100 (Node's HTTP client never follows a redirect), :105–112 (Content-Type, Content-Length, User-Agent, webhook-id, webhook-timestamp, webhook-signature only); apps/worker/src/webhook-delivery.ts:400 (success is a 2xx only), :426 (a non-2xx attempt stays pending and is retried until the 24-hour window ends) -->
+  - **Masks on every delivery.** Field masks set on an endpoint apply to every delivery, including retries and
+    resends. <!-- source: apps/worker/src/webhook-delivery.ts:583 (maskEvent on every attempt's body); apps/server/src/webhook-routes.ts:356–373 (resend only requeues) -->
 
 ## sql-guard
 

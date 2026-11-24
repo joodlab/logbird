@@ -34,6 +34,7 @@ export function createFixtures({ appUrl = 'https://audit.acme.test', now = new D
     memberJoined: {
       appUrl,
       workspace: 'Acme',
+      workspaceId: 'org_acme',
       memberName: 'Lina Haddad',
       memberEmail: 'lina@acme.test',
       role: 'admin',

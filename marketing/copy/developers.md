@@ -339,6 +339,36 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   <!-- source: docs/integrations.md §Design; docs/query-language.md; docs/roadmap.md P1-1 -->
 - **visual:** code sample
 
+## webhooks
+
+Held: this section ships with the 0.3.0 webhook delivery and merges only after 0.3.0 is deployed and checked in
+production.
+
+- **id:** `webhooks`
+- **eyebrow:** Webhooks
+- **heading:** Verify each delivery, then process it once.
+- **job:** show a developer how to receive a delivery safely: verify the raw body with the SDK, store or enqueue, answer
+  `2xx`, and deduplicate by `webhook-id`, because delivery is at least once. State what counts as a failure and how long
+  retries last. Never "guaranteed delivery", "exactly once" or "tamper-proof".
+- **body:** Each delivery is a `POST` of the event as JSON, signed with the Standard Webhooks headers `webhook-id`,
+  `webhook-timestamp` and `webhook-signature`. Verify the raw body with `verifyWebhook` from `@logbird/sdk`, store or
+  enqueue the event, then answer `2xx`.
+  <!-- source: docs/SPEC.md § Webhook endpoint management (POST body, headers); packages/sdk/README.md § Standard Webhooks -->
+- **bullets:**
+  - A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect
+    is a failure. <!-- source: SPEC ("2xx succeeds"; redirects count as failures; connect and total deadlines 5 and 10 s) -->
+  - Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to
+    24 hours. <!-- source: SPEC (retry schedule) -->
+  - Delivery is at least once: deduplicate by `webhook-id`, which stays the same across retries and resends.
+    <!-- source: SPEC ("Receivers use the stable webhook-id to deduplicate retries and resends") -->
+  - Answering `410 Gone` disables the endpoint at once, and so do 50 consecutive failed deliveries (by default) or 24 hours of failures without a success. A disabled endpoint gets no deliveries until it is enabled again. <!-- source: SPEC ("HTTP 410 disables immediately"; consecutive_failures after 50 by default or 24 hours; "Disabled endpoints pause scanning and sending"); apps/worker/src/webhook-delivery.ts:79, :285 (only enabled endpoints are claimed) -->
+- **limit line:** Verify the raw body before parsing it. Re-serializing parsed JSON can change the signed bytes.
+  This example logs the event ID. In production, durably store or enqueue the event before returning `2xx`.
+  <!-- source: packages/sdk/README.md § Standard Webhooks ("Verify the raw body before parsing it") -->
+- **code sample:** "Signature verification example", the Hono receiver from `packages/sdk/README.md` § Standard Webhooks, byte for byte
+  (`webhookReceiver` in the module's samples). Re-copy it whenever the README's sample changes.
+- **visual:** code sample
+
 ## reference
 
 - **id:** `reference`

@@ -25,7 +25,8 @@ const strongClass = 'font-medium text-foreground';
 const codeTitleClass = 'font-mono text-[0.85em] tracking-normal';
 
 function ProductPage() {
-  const { samples, hero, overview, toc, explorer, search, sql, entities, operations, eventDetail, more, setup, retention, readApi } = product;
+  const { samples, hero, overview, toc, explorer, search, sql, entities, operations, eventDetail, more, setup, retention, readApi, webhooks } =
+    product;
   return (
     <>
       <PageHero
@@ -237,6 +238,18 @@ function ProductPage() {
             {readApi.developersLink}
           </ButtonLink>
         </span>
+      </FeatureRow>
+
+      <FeatureRow
+        bullets={webhooks.bullets.map((bullet) => <Rich key={bullet} text={bullet} />)}
+        eyebrow={webhooks.eyebrow}
+        id="webhooks"
+        limit={webhooks.limit}
+        reverse
+        title={webhooks.title}
+        visual={<SiteCode code={samples.webhookSample} language="text" title={webhooks.codeTitle} />}
+      >
+        <Rich text={webhooks.body} />
       </FeatureRow>
 
       <Section labelledBy="roadmap-title">

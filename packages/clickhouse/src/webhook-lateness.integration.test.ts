@@ -14,7 +14,8 @@ afterAll(async () => {
   } finally {
     await ch.close();
   }
-});
+  // Six synchronous DELETEs, each verified: on a busy shared ClickHouse this outlasts the 10 s hook default.
+}, 120_000);
 
 it.runIf(process.env.CLICKHOUSE_URL)(
   'counts late arrivals by whole hours, agrees with discovery at every window boundary, and deletes them with the project',

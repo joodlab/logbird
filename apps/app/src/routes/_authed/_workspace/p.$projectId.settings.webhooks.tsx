@@ -52,6 +52,7 @@ import {
   webhookErrorCopy,
   webhookRetry,
   windowSeconds,
+  withKnownLateCount,
 } from '@/lib/webhooks';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/webhooks')({
@@ -175,7 +176,9 @@ function useEndpointMutations(projectId: string) {
    * in between sees the saved values (never the previous filter or its rejection).
    */
   const apply = (updated: WebhookEndpoint) => {
-    queryClient.setQueryData(webhooksQuery(projectId).queryKey, (list) => list?.map((e) => (e.id === updated.id ? updated : e)));
+    queryClient.setQueryData(webhooksQuery(projectId).queryKey, (list) =>
+      list?.map((e) => (e.id === updated.id ? withKnownLateCount(updated, e) : e)),
+    );
     refresh();
   };
   return { refresh, apply };

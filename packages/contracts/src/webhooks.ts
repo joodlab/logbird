@@ -109,7 +109,7 @@ export const webhookEndpointSchema = z.object({
   deliveryWindowSeconds: webhookDeliveryWindowSchema,
   lateEvents: z
     .object({
-      count: z.number().int().nonnegative(),
+      count: z.number().int().nonnegative().nullable(),
       since: z.iso.datetime(),
     })
     .describe(
@@ -119,7 +119,8 @@ export const webhookEndpointSchema = z.object({
         'events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is ' +
         'exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than ' +
         'the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use ' +
-        'it for reconciliation. 0 when the window is null.',
+        'it for reconciliation. 0 when the window is null. null only in a PATCH response when the count could not be read: ' +
+        'the settings were saved regardless; read the endpoint again for the count.',
     ),
   createdById: z.string().nullable(),
   createdAt: z.iso.datetime(),

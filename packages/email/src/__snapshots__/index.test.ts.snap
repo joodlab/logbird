@@ -4,7 +4,7 @@ exports[`'invitation' email > has a plain-text part with the footer and no marku
 "Join Acme on Logbird
 ====================
 
-Sami Nasser (sami@acme.test) invited you to the Acme workspace as an Admin. Logbird keeps a searchable history of who did what, when and where across your team’s systems.
+Sami Nasser (sami@acme.test) invited you to the Acme workspace as an admin. Logbird keeps a searchable history of who did what, when and where across your team’s systems.
 
 Workspace:       Acme
 Role:            Admin
@@ -28,7 +28,7 @@ exports[`'memberJoined' email > has a plain-text part with the footer and no mar
 "Lina Haddad joined Acme
 =======================
 
-Lina Haddad accepted your invitation and is now a member of Acme as an Admin.
+Lina Haddad accepted your invitation and is now a member of Acme as an admin.
 
 Member:    Lina Haddad (lina@acme.test)
 Role:      Admin
@@ -36,10 +36,10 @@ Role:      Admin
 Workspace: Acme
 Joined:    Nov 5, 2026, 14:32 UTC
 
-Open Logbird:
-https://audit.acme.test
+View members:
+https://audit.acme.test/workspace/members?workspace=org_acme
 
-Not who you expected? An owner or admin can change their role or remove them from Acme under Settings → Members.
+Not who you expected? An owner or admin can change their role or remove them from Acme under Workspace settings → Members.
 
 --
 You received this email because you invited lina@acme.test to the Acme workspace.
