@@ -185,7 +185,17 @@ function DoomedCount({ count, loading, error }: { count: number | undefined; loa
   return null;
 }
 
-const RUN_OUTCOME: Record<string, string> = { completed: 'success', succeeded: 'success', failed: 'failure', running: 'unknown' };
+const RUN_OUTCOME: Record<string, string> = {
+  completed: 'success',
+  succeeded: 'success',
+  failed: 'failure',
+  running: 'unknown',
+  staging: 'unknown',
+  materializing: 'unknown',
+  canceled: 'unknown',
+};
+// The hourly run's background states (#268): deleting in ClickHouse while ingest and reads continue.
+const RUN_LABEL: Record<string, string> = { staging: 'Preparing', materializing: 'Finishing', canceled: 'Skipped' };
 
 function RetentionStatusGrid({ status }: { status: RetentionStatus }) {
   const run = status.lastRun;
@@ -231,7 +241,7 @@ function RetentionStatusGrid({ status }: { status: RetentionStatus }) {
         ) : run ? (
           <>
             <OutcomeDot outcome={RUN_OUTCOME[run.status] ?? 'unknown'} />
-            <span className="capitalize">{run.status}</span>
+            <span className="capitalize">{RUN_LABEL[run.status] ?? run.status}</span>
             <Timestamp className="font-normal text-muted-foreground" format="relative" iso={run.finishedAt ?? run.startedAt} />
           </>
         ) : (

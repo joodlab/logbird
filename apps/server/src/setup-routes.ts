@@ -9,7 +9,7 @@ import { companyFromEmail, pickLandingProject } from './landing';
 import { requireProjectAccess, requireSession } from './middlewares';
 import { doc, routeDoc } from './openapi';
 import { loadSampleData, removeSampleData } from './sample-data';
-import { invalidateSetup, setupFacts } from './setup-cache';
+import { invalidateSetup, setupFacts, setupGeneration } from './setup-cache';
 import { computeSetup } from './setup-status';
 import type { AppEnv } from './types';
 
@@ -41,7 +41,7 @@ async function projectSetup(projectId: string, team: Awaited<ReturnType<typeof t
     where: { id: projectId },
     include: { keys: { where: { revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } } },
   });
-  const result = computeSetup(project, await setupFacts(projectId), team);
+  const result = computeSetup(project, await setupFacts(projectId, setupGeneration(project)), team);
   if (result.complete && !project.setupCompletedAt) {
     await prisma.project.updateMany({ where: { id: projectId, setupCompletedAt: null }, data: { setupCompletedAt: new Date() } });
     const saved = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });

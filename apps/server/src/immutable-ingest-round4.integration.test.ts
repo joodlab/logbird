@@ -2,7 +2,7 @@ import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { read } from '@logbird/clickhouse';
-import { ProjectBusyError, prisma } from '@logbird/database';
+import { databaseClock, ProjectBusyError, prisma } from '@logbird/database';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -104,6 +104,10 @@ it('fences readers after all rollup DELETEs, excludes repair from settings, and 
 it('keeps failed repairs read-fenced while healthy siblings commit, then retention restores every destination', purgeLimit(90_000), async () => {
   await populated();
   await f.pending(pending, { expired: true });
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: pending.id },
+    data: { claimedAt: new Date(wallClock() - 120_000) },
+  });
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   const spy = vi.spyOn(maintenanceClickhouse, 'command').mockImplementation(async (params) => {
     const result = await command(params);
@@ -138,7 +142,7 @@ it('repairs a process killed after destructive deletes without exposing an empty
   await f.pending(pending);
   await prisma.ingestReceipt.updateMany({
     where: { projectId: f.project, eventId: pending.id },
-    data: { claimedAt: new Date(wallClock() - 80_000) },
+    data: { claimedAt: new Date(wallClock() - 120_000) },
   });
   const child = fork(fileURLToPath(new URL('./ingest-crash-fixture.ts', import.meta.url)), [], {
     execArgv: ['--import', 'tsx'],
@@ -159,6 +163,11 @@ it('repairs a process killed after destructive deletes without exposing an empty
     await unavailable();
     child.kill('SIGKILL');
     await exited;
+    const databaseNow = await databaseClock();
+    await prisma.retentionRun.updateMany({
+      where: { projectId: f.project, kind: 'ingest_repair', status: 'running' },
+      data: { heartbeatAt: new Date(databaseNow.getTime() - 11 * 60_000) },
+    });
     vi.useFakeTimers({ toFake: ['Date'] });
     clock = Math.max(clock, wallClock()) + 11 * 60_000;
     vi.setSystemTime(clock);
@@ -185,12 +194,15 @@ it('ready-only and grace-only recovery perform no rollup DELETE and expose the r
   await f.pending({ id: 'grace', action: 'old' }, { expired: true });
   await recoverProjectIngest(maintenanceClickhouse, f.project);
   commands.mockClear();
-  vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: 'grace' },
+    data: { receivedAt: new Date((await databaseClock()).getTime() - 11 * 60_000) },
+  });
   expect((await f.post({ id: 'grace', action: 'new' })).status).toBe(202);
   expect(commands.mock.calls.some(([p]) => /^DELETE FROM (events_by_minute|entities|attribute_keys)\b/.test(p.query))).toBe(false);
 });
 it('flush failures retain the pending index and store siblings with a throttled Retry-After', async () => {
-  await f.pending(pending, { expired: true });
+  await f.pending(pending, { needsFreshFlush: true });
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   const calls = vi
     .spyOn(maintenanceClickhouse, 'command')

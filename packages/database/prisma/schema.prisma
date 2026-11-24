@@ -239,6 +239,8 @@ model RetentionRun {
   status        String
   deletedEvents Int?
   error         String?
+  /// Background retention only: derived-table drift baselines and their check (#296). Null = not verified.
+  verification  Json?
 
   @@index([projectId, startedAt])
   @@index([projectId, kind, status])
@@ -246,6 +248,17 @@ model RetentionRun {
   // Not expressible here: the raw-SQL partial index "RetentionRun_failed_ingest_repair" (migration
   // 20261111120000_retention_run_failed_ingest_repair) serves /readyz. A generated migration that drops it must be
   // edited out; packages/database/src/migrations-guard.test.ts fails if a migration drops it.
+}
+
+/// One row per running API server, upserted every 30 s with what it supports (#296). Background retention runs only
+/// while every server seen recently declares it; rows not seen for a day are pruned.
+model ServerHeartbeat {
+  instanceId   String   @id
+  version      String   @default("")
+  capabilities String[] @default([])
+  seenAt       DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
+
+  @@index([seenAt])
 }
 
 model InviteLink {

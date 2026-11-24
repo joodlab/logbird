@@ -125,10 +125,11 @@ async function claimEvents(
   organizationId: string,
   candidates: IngestCandidate[],
   fingerprint: (row: EventRow) => string,
-  onWarningChange?: AcceptanceWarning,
+  onWarningChange: AcceptanceWarning | undefined,
+  exclusiveReplay: boolean,
 ) {
   try {
-    return await claimPhase(projectId, organizationId, candidates, fingerprint, onWarningChange);
+    return await claimPhase(projectId, organizationId, candidates, fingerprint, onWarningChange, exclusiveReplay);
   } catch (error) {
     if (!(error instanceof ApiError)) logReceiptPhaseFailure('claim', error);
     if (!(error instanceof ApiError) && isDatabaseFailure(error))
@@ -160,7 +161,8 @@ async function claimPhase(
   organizationId: string,
   candidates: IngestCandidate[],
   fingerprint: (row: EventRow) => string,
-  onWarningChange?: AcceptanceWarning,
+  onWarningChange: AcceptanceWarning | undefined,
+  exclusiveReplay: boolean,
 ) {
   const unique = new Map<string, IngestCandidate>();
   for (const candidate of candidates) if (!unique.has(candidate.row.event_id)) unique.set(candidate.row.event_id, candidate);
@@ -185,7 +187,7 @@ async function claimPhase(
   const owned = new Map<string, IngestReceipt>();
   try {
     // The receipt must commit before discovery can capture its watermark. Ready replays already have a receipt.
-    const inserted = await withIngestReceiptGate(projectId, 'shared', async (tx) => {
+    const { inserted, freshLeaseExpiresAt } = await withIngestReceiptGate(projectId, 'shared', async (tx) => {
       const acceptedAt = await ingestReceiptClock(tx, projectId);
       acceptCandidates(projectId, candidates, acceptedAt, onWarningChange);
       const values = eventIds.flatMap((id) => {
@@ -200,14 +202,23 @@ async function claimPhase(
             receivedAt: legacy?.receivedAt ?? acceptedAt,
             eventAt: legacy?.eventAt ?? new Date(row.timestamp),
             confirmedAt: legacy ? new Date() : null,
-            claimedAt: new Date(),
           },
         ];
       });
-      return claimIngestReceipts(projectId, organizationId, values, tx);
+      // Start the local send budget before requesting the claim. The database stamps ownership after this point.
+      const freshLeaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS;
+      return { inserted: await claimIngestReceipts(projectId, organizationId, values, tx), freshLeaseExpiresAt };
     });
     for (const receipt of inserted) owned.set(receipt.eventId, receipt);
-    await takeOverReadyClaims(projectId, prior, candidates, owned);
+    let leaseExpiresAt = inserted.some((receipt) => !receipt.confirmedAt) ? freshLeaseExpiresAt : Number.POSITIVE_INFINITY;
+    // A ready receipt writes its row with the original receive clock, which a retention run staged after that clock
+    // has not counted. Only the exclusive replay (recoverProjectIngest), which cancels staged retention under the
+    // exclusive lock first, may take one over; on the shared path the id stays pending and its retry replays it.
+    if (exclusiveReplay) {
+      const replayLeaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS;
+      await takeOverReadyClaims(projectId, prior, candidates, owned);
+      leaseExpiresAt = Math.min(leaseExpiresAt, replayLeaseExpiresAt);
+    }
     const rechecked = await recheckAfterPause(projectId, owned, stored, lookupAt);
     // RETURNING already supplies this attempt's receipts. Only competitors (or a paused recheck)
     // can have changed the remaining identities while the shared project lock is held.
@@ -220,7 +231,7 @@ async function claimPhase(
       for (const receipt of await findIngestReceipts(projectId, reloadIds))
         if (owned.has(receipt.eventId) || !receipt.confirmedAt || receipt.confirmedAt >= reloadCutoff) receipts.set(receipt.eventId, receipt);
     }
-    return { owned, receipts };
+    return { owned, receipts, leaseExpiresAt };
   } catch (error) {
     await releaseClaimsSafely(projectId, owned, error);
     throw error;
@@ -291,7 +302,13 @@ function classifyCandidates(
 }
 
 /** Insert owns release before send and on definite failure. Unproven write outcomes retain the lease. */
-async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>, fingerprint: (row: EventRow) => string) {
+async function persistRows(
+  projectId: string,
+  rows: EventRow[],
+  owned: Map<string, IngestReceipt>,
+  fingerprint: (row: EventRow) => string,
+  leaseExpiresAt: number,
+) {
   const empty = { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false, unconfirmed: false };
   if (!rows.length) {
     try {
@@ -307,16 +324,13 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
   const releasable = new Map(owned);
   let persisted: Awaited<ReturnType<typeof isolateIngestRows>> & { unconfirmed: boolean };
   try {
-    const expiresAt = Math.min(
-      ...[...owned.values()].filter((c) => !c.confirmedAt).map((c) => (c.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS),
-    );
     // Keep claims as soon as a statement may have written, so even an unexpected throw later in isolation can never
     // release a claim for a row that is already stored.
     const keepClaims = (part: EventRow[]) => {
       for (const row of part) releasable.delete(row.event_id);
     };
-    const outcome = await isolateIngestRows(rows, expiresAt, (part, body) =>
-      insertEvents(clickhouse, part, expiresAt, body).then(
+    const outcome = await isolateIngestRows(rows, leaseExpiresAt, (part, body) =>
+      insertEvents(clickhouse, part, leaseExpiresAt, body).then(
         () => keepClaims(part),
         (error: unknown) => {
           if (error instanceof AmbiguousInsertError) keepClaims(part);
@@ -386,6 +400,8 @@ export async function insertImmutableEvents(
   candidates: IngestCandidate[],
   supportsSubsetRetry = false,
   onWarningChange?: AcceptanceWarning,
+  /** True only inside recoverProjectIngest's replay: the exclusive lock is held and staged retention was canceled. */
+  exclusiveReplay = false,
 ) {
   if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string; code: string }[] };
   // The wire payload and normalized rows are immutable within this attempt; hash each row once.
@@ -398,7 +414,7 @@ export async function insertImmutableEvents(
     }
     return value;
   };
-  const { owned, receipts } = await claimEvents(projectId, organizationId, candidates, fingerprint, onWarningChange);
+  const { owned, receipts, leaseExpiresAt } = await claimEvents(projectId, organizationId, candidates, fingerprint, onWarningChange, exclusiveReplay);
   let result: ReturnType<typeof classifyCandidates>;
   try {
     result = classifyCandidates(projectId, candidates, receipts, owned, fingerprint);
@@ -406,7 +422,7 @@ export async function insertImmutableEvents(
     await releaseClaimsSafely(projectId, owned, error);
     throw error;
   }
-  const outcome = await persistRows(projectId, result.rows, owned, fingerprint);
+  const outcome = await persistRows(projectId, result.rows, owned, fingerprint, leaseExpiresAt);
   return composeIngestOutcome(projectId, candidates, result, outcome, receipts, supportsSubsetRetry);
 }
 

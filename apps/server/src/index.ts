@@ -1,6 +1,8 @@
 import { serve } from '@hono/node-server';
-import { closeProjectLocks, prisma } from '@logbird/database';
+import { assertSupportedClickHouse } from '@logbird/clickhouse';
+import { closeProjectLocks, prisma, startServerHeartbeat } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
+import manifest from '../package.json' with { type: 'json' };
 import { app } from './app';
 import { backfillAuthEmailHashes, flushFailedSignIns } from './auth-failures';
 import { clickhouse, maintenanceClickhouse, queryClickhouse } from './clickhouse';
@@ -11,6 +13,8 @@ import { ingest } from './ingest';
 import { startAuditDrainer } from './outbox-delivery';
 import { rateLimitStore } from './rate-limit';
 
+// Before accepting requests: an unsupported ClickHouse fails here, naming its version, not on the first read (#268).
+await assertSupportedClickHouse(clickhouse);
 const server = serve({ fetch: app.fetch, port: env.PORT }, () =>
   console.log(JSON.stringify({ level: 'info', event: 'server.ready', port: env.PORT })),
 );
@@ -26,6 +30,8 @@ const auditDrainer = startAuditDrainer(ingest, async () => {
   await flushFailedSignIns();
 });
 const maintenanceReconciler = startDestructiveMaintenanceReconciler();
+// Declares what this server supports; the worker runs background retention only while every server seen does (#296).
+const heartbeat = startServerHeartbeat({ version: manifest.version });
 let stopping = false;
 function shutdown() {
   if (stopping) return;
@@ -38,6 +44,7 @@ function shutdown() {
   deadline.unref();
   server.close(async () => {
     await drained;
+    await heartbeat.stop();
     await drainExportAudits();
     const results = await Promise.allSettled([
       closeRetentionQueue(),

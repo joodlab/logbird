@@ -47,7 +47,6 @@ it.each([
         receivedAt: new Date(0),
         eventAt: new Date(0),
         confirmedAt: null,
-        claimedAt: new Date(0),
       },
     ]),
   ).rejects.toMatchObject({ code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT', operation: 'claim' });
@@ -67,7 +66,6 @@ it.each([
         receivedAt: new Date(0),
         eventAt: new Date(0),
         confirmedAt: null,
-        claimedAt: new Date(0),
       },
     ]),
   ).rejects.toBe(error);

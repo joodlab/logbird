@@ -6,6 +6,7 @@ import {
   Prisma,
   ProjectBusyError,
   prisma,
+  RETENTION_MATERIALIZING,
   storeAuditEvent,
   withProjectLock,
 } from '@logbird/database';
@@ -54,6 +55,15 @@ async function readMembership(db: Prisma.TransactionClient, projectId: string, r
     select: { id: true, exportDeleteStartedAt: true, exportGeneration: true, maintenanceGeneration: true },
   });
   const run = await db.retentionRun.findFirst({ where: { projectId }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }] });
+  // The hourly run's DELETEs are still being applied in ClickHouse (#268): say so, with when to retry.
+  if (project && run?.kind === 'retention' && run.status === RETENTION_MATERIALIZING)
+    throw new ApiError(
+      503,
+      'export_project_unreadable',
+      'Retention is finishing deleting expired events in this project. Retry the export in about a minute.',
+      undefined,
+      60,
+    );
   if (!project || project.exportDeleteStartedAt || run?.status === 'running' || run?.status === 'failed')
     throw new ApiError(503, 'export_project_unreadable', 'Data maintenance is incomplete for this project. Retry after maintenance finishes.');
   // An ambiguous INSERT can outlive its ingest caller's shared lock. Its first receipt clock is inside the fence,
@@ -115,11 +125,14 @@ export async function stageExport(
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${namespace}:exports`},0))`;
         const now = await leaseClock(tx, at);
         let membership: string | null;
+        // Why the project is unreadable, said to the caller after the request is recorded (e.g. retention finishing).
+        let unreadable: ApiError | undefined;
         try {
           membership = await readMembership(tx, input.projectId, input.receivedBefore ?? now, now);
         } catch (error) {
           if (!(error instanceof ApiError && error.code === 'export_project_unreadable')) throw error;
           membership = null;
+          unreadable = error;
         }
         const active = { namespace, expiresAt: { gt: now } };
         const [total, user, workspace] = await Promise.all([
@@ -148,7 +161,7 @@ export async function stageExport(
         await tx.auditOutbox.create({
           data: { ...freezeAuditEvent(input.unknown), stream: input.stream, namespace, confirmedAt: null, awaitingUntil: expiresAt },
         });
-        return { ...requested, membership, leaseMs: EXPORT_LEASE_MS };
+        return { ...requested, membership, unreadable, leaseMs: EXPORT_LEASE_MS };
       }),
     input.signal ?? new AbortController().signal,
   );

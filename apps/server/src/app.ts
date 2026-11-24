@@ -1,5 +1,5 @@
 import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from '@logbird/auth';
-import { CursorError, QueryError } from '@logbird/clickhouse';
+import { CursorError, foreignMutationPending, isPendingMutationBlockingReads, QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { isWorkspaceNeedsOwnerError, Prisma, ProjectBusyError, prisma, WORKSPACE_NEEDS_OWNER } from '@logbird/database';
 import { failedRepairStatus } from '@logbird/worker/project-repair';
@@ -104,7 +104,20 @@ app.use('*', async (c, next) => {
     }),
   );
 });
-app.onError((error, c) => {
+/** A pending mutation created outside Logbird is breaking reads (#268): a specific, retryable answer, never a 500. */
+function storeMaintenanceBlocking(c: Context<AppEnv>) {
+  c.header('Retry-After', '30');
+  return c.json(
+    {
+      error: {
+        code: 'store_maintenance_blocking',
+        message: 'A maintenance operation on the event store is blocking reads. Retry in about 30 seconds.',
+      },
+    },
+    503,
+  );
+}
+app.onError(async (error, c) => {
   if (error instanceof ProjectBusyError) {
     c.header('Retry-After', '1');
     return c.json({ error: { code: 'project_busy', message: error.message } }, 503);
@@ -112,6 +125,10 @@ app.onError((error, c) => {
 
   // A malformed cursor, or one minted under another scope (#138).
   if (error instanceof CursorError) return c.json({ error: { code: 'validation_error', message: error.message } }, 422);
+  // A pending foreign mutation whose predicate fails when a read applies it surfaces as a resource limit (ClickHouse
+  // reports, say, its sleep cap as TOO_SLOW): name the real cause instead of telling the caller to narrow the range.
+  if (error instanceof QueryError && error.details.reason === 'limit' && (await foreignMutationPending(clickhouse).catch(() => false)))
+    return storeMaintenanceBlocking(c);
   if (error instanceof QueryError)
     return c.json({ error: { code: 'invalid_query', message: error.message, details: queryErrorDetailsSchema.parse(error.details) } }, 422);
   const receiptFailure = ingestReceiptFailureResponse(error);
@@ -149,6 +166,11 @@ app.onError((error, c) => {
     c.header('Retry-After', deleteFailure.retryAfter);
     return c.json(deleteFailure.body, deleteFailure.status);
   }
+  // A mutation created outside Logbird is pending and broke this read, either because ClickHouse cannot apply it on
+  // the fly or because its predicate failed when the read applied it: say so (no fallback to plain reads, which could
+  // show expired events or double-counted rollups while Logbird's own DELETEs finish).
+  if (isPendingMutationBlockingReads(error) || ('code' in error && (await foreignMutationPending(clickhouse).catch(() => false))))
+    return storeMaintenanceBlocking(c);
   if ('code' in error || /timeout|budget/i.test(error.message))
     return c.json(
       { error: { code: 'query_unavailable', message: 'Storage query failed or exceeded its budget. Narrow the time range and retry.' } },

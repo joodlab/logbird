@@ -2,6 +2,7 @@ import { eventFingerprint, exportEvents, getEvent, insertEvents, read, searchEve
 import {
   claimIngestReceipts,
   confirmIngestReceipts,
+  databaseClock,
   expireIngestReceipts,
   findIngestReceipts,
   prisma,
@@ -256,14 +257,17 @@ it('retention cutoff cleanup preserves an unresolved delayed original while a co
   const delayed = await f.pending(input);
   // Force the actual retention purge path with another expired, acknowledged row.
   expect((await f.post({ ...input, id: 'expired-confirmed' })).status).toBe(202);
-  await enforceProjectRetention(f.project);
+  await expect(enforceProjectRetention(f.project)).rejects.toThrow('Project maintenance is busy');
   await withProjectLock(f.project, () => purgeIngestReceipts(f.project, new Date()));
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: original.id, confirmedAt: null } })).toBe(1);
   expect((await f.post({ ...input, action: 'conflict' })).status).toBe(503);
   await insertEvents(clickhouse, [delayed]);
-  vi.setSystemTime(Date.now() + 80_000);
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: original.id },
+    data: { claimedAt: new Date((await databaseClock()).getTime() - 120_000) },
+  });
   expect((await f.post(input)).status).toBe(202);
-  expect(await f.count()).toBe(1);
+  expect(await f.count()).toBe(2);
   await enforceProjectRetention(f.project);
   expect(await f.count()).toBe(0);
   expect((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM event_ids WHERE project_id={p:String}', { p: f.project }))[0]?.n).toBe(0);
@@ -345,7 +349,6 @@ it('typed-array claim dates round-trip in a non-UTC Postgres session', async () 
           receivedAt,
           eventAt: new Date(row.timestamp),
           confirmedAt: receivedAt,
-          claimedAt: receivedAt,
         },
       ],
       tx,
@@ -366,20 +369,24 @@ it('typed-array claims arbitrate 1000 overlapping ids with lossless strings and 
     receivedAt,
     eventAt,
     confirmedAt: null,
-    claimedAt: receivedAt,
   }));
+  const dbNow = async () => (await prisma.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`)[0].now.getTime();
+  const before = await dbNow();
   const [a, b] = await Promise.all([claimIngestReceipts(f.project, f.org, claims), claimIngestReceipts(f.project, f.org, [...claims].reverse())]);
+  const after = await dbNow();
   expect(a.length + b.length).toBe(1000);
   expect(new Set([...a, ...b].map((r) => r.eventId)).size).toBe(1000);
   expect(a.some((r) => b.some((other) => other.eventId === r.eventId))).toBe(false);
   for (const receipt of [...a, ...b]) {
     expect(receipt.receivedAt.toISOString()).toBe(receivedAt.toISOString());
     expect(receipt.eventAt.toISOString()).toBe(eventAt.toISOString());
-    expect(receipt.claimedAt?.toISOString()).toBe(receivedAt.toISOString());
+    // claimedAt is the database clock at claim time, never the caller's (#268).
+    expect(receipt.claimedAt?.getTime()).toBeGreaterThanOrEqual(before - 1);
+    expect(receipt.claimedAt?.getTime()).toBeLessThanOrEqual(after + 1);
     expect(receipt.confirmedAt).toBeNull();
   }
   expect(await claimIngestReceipts(f.project, f.org, claims)).toHaveLength(0);
-  const confirmed = { eventId: 'already-stored', fingerprint: 'v1:stored', receivedAt, eventAt, claimedAt: receivedAt, confirmedAt: receivedAt };
+  const confirmed = { eventId: 'already-stored', fingerprint: 'v1:stored', receivedAt, eventAt, confirmedAt: receivedAt };
   expect((await claimIngestReceipts(f.project, f.org, [confirmed]))[0]?.confirmedAt?.toISOString()).toBe(receivedAt.toISOString());
 });
 

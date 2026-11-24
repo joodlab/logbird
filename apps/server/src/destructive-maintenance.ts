@@ -1,5 +1,7 @@
 import { prisma, withProjectLock } from '@logbird/database';
 import { reconcileDestructiveMaintenance as reconcile } from '@logbird/worker/destructive-maintenance';
+import { enqueueProjectRetention } from '@logbird/worker/queue';
+import { verifyRetentionRuns } from '@logbird/worker/retention-verification';
 import { maintenanceClickhouse } from './clickhouse';
 
 export { beginDestructiveMaintenance } from '@logbird/worker/destructive-maintenance';
@@ -26,6 +28,11 @@ export function startDestructiveMaintenanceReconciler() {
         const ageSeconds = project.exportDeleteStartedAt ? Math.max(0, Math.floor((Date.now() - +project.exportDeleteStartedAt) / 1000)) : 0;
         try {
           const settled = await withProjectLock(project.id, () => reconcileDestructiveMaintenance(project.id), { waitMs: 100 });
+          // Outside the lock: the derived-table check of runs that just completed scans the project (#296).
+          if (settled)
+            await verifyRetentionRuns(maintenanceClickhouse, project.id, enqueueProjectRetention).catch(() =>
+              console.warn(JSON.stringify({ event: 'retention.verification_unavailable', projectId: project.id })),
+            );
           if (!settled && ageSeconds >= 300)
             console.warn(
               JSON.stringify({ event: 'maintenance.reconciliation_pending', projectId: project.id, ageSeconds, code: 'destructive_work_pending' }),

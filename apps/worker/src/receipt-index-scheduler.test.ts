@@ -58,6 +58,7 @@ vi.mock('@logbird/database', () => ({
   sweepExpiredAuthRecords: vi.fn(),
   sweepIngestReceipts: vi.fn(),
 }));
+vi.mock('@logbird/clickhouse', () => ({ assertSupportedClickHouse: vi.fn() }));
 vi.mock('./env', () => ({ env: { BULLMQ_PREFIX: 'qa-scheduler' } }));
 vi.mock('./ingest-recovery', () => ({ probeIngestRecovery: vi.fn() }));
 vi.mock('./queue', () => ({

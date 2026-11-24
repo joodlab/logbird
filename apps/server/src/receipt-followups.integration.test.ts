@@ -203,6 +203,10 @@ it('retention that completes a failed repair also settles its receipts, so the r
   const pending = { id: 'abandoned', action: 'repair.pending' };
   expect((await f.post({ id: 'retained', action: 'retained.event', actor: { id: 'person', type: 'user' } })).status).toBe(202);
   await f.pending(pending, { expired: true });
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: pending.id },
+    data: { claimedAt: minutesAgo(2) },
+  });
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   const failing = vi.spyOn(maintenanceClickhouse, 'command').mockImplementation(async (params) => {
     const result = await command(params);

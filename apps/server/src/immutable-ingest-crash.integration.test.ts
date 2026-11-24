@@ -2,7 +2,7 @@ import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { read } from '@logbird/clickhouse';
-import { prisma } from '@logbird/database';
+import { databaseClock, prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
@@ -56,7 +56,7 @@ it.each(['before-send', 'after-ack'] as const)(
       vi.setSystemTime(clock);
       await prisma.ingestReceipt.updateMany({
         where: { projectId: f.project, eventId: input.id },
-        data: { claimedAt: new Date(Date.now() - 80_000) },
+        data: { claimedAt: new Date((await databaseClock()).getTime() - 120_000) },
       });
       expect((await f.post(input)).status).toBe(202);
       expect(await f.count()).toBe(2);

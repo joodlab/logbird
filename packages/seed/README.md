@@ -18,6 +18,12 @@ generator accepts an explicit `now` for reproducibility; CLI runs use current ti
 for relative console ranges. IDs depend on project/seed, timestamps also depend on
 `now`. Use `--reset` for replacement rather than appending a second run.
 
+With `--sink api --reset`, set `DATABASE_URL` and the local ClickHouse credentials.
+The reset checks that the ingest key belongs to the selected project, waits for
+the project lock, and refuses to delete while a write is unresolved. Once the
+purge succeeds, it clears that project's receipts so a repeated seed can restore
+the deleted rows.
+
 - `--profile neutral` (default) uses generic names for screenshots: emitting app
   `booking-engine`, booking channel `channel-manager`, and project `Hotel demo`.
   `--profile staydesk` selects the maintainers' own hospitality demo (Acme), using

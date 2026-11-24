@@ -7,6 +7,7 @@ export * from './generated/client';
 export * from './ingest-receipts';
 export * from './membership-roles';
 export * from './receipt-index-maintenance';
+export * from './server-heartbeat';
 
 const databaseUrl = keys().DATABASE_URL;
 const poolLimit = Number(new URL(databaseUrl).searchParams.get('connection_limit') ?? 10);
@@ -126,6 +127,15 @@ export function withIngestReceiptGate<T>(
   );
 }
 
+/**
+ * The database clock, the one ingest stamps `received_at` with (`ingestReceiptClock`), at the millisecond precision
+ * stored. Watermarks compared with `received_at` (export, retention fences) come from it, never an app instance clock.
+ */
+export async function databaseClock(db: Pick<import('./generated/client').Prisma.TransactionClient, '$queryRaw'> = prisma) {
+  const [row] = await db.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+  return new Date(row.now.getTime());
+}
+
 /** The separate project data lock prevents a new export fence until the insert settles. */
 export async function ingestReceiptClock(db: import('./generated/client').Prisma.TransactionClient, projectId: string) {
   const [row] = await db.$queryRaw<{ acceptedAt: Date }[]>`
@@ -139,10 +149,31 @@ export async function ingestReceiptClock(db: import('./generated/client').Prisma
 /** Call only while holding the project lock. Old clients/runs fall back to startedAt. */
 export const RETENTION_LEASE_MS = 10 * 60_000;
 export async function recoverAbandonedRetention(tx: import('./generated/client').Prisma.TransactionClient, projectId: string) {
-  const expired = new Date(Date.now() - RETENTION_LEASE_MS);
-  return tx.retentionRun.updateMany({
-    where: { projectId, status: 'running', OR: [{ heartbeatAt: { lt: expired } }, { heartbeatAt: null, startedAt: { lt: expired } }] },
-    data: { status: 'failed', finishedAt: new Date(), error: 'abandoned' },
+  const count = await tx.$executeRaw`
+    WITH clock AS (SELECT clock_timestamp() AT TIME ZONE 'UTC' AS now)
+    UPDATE "RetentionRun"
+    SET status = 'failed', "finishedAt" = clock.now, error = 'abandoned'
+    FROM clock
+    WHERE "projectId" = ${projectId} AND status = 'running'
+      AND COALESCE("heartbeatAt", "startedAt") < clock.now - make_interval(secs => ${RETENTION_LEASE_MS / 1000}::float8)`;
+  return { count };
+}
+
+/**
+ * Background retention run states (apps/worker/src/retention.ts). `staging` (between its fences) and `materializing`
+ * (DELETE mutations still finishing) never refuse ingest or reads; only `running` (its second fence) does.
+ */
+export const RETENTION_STAGING = 'staging';
+export const RETENTION_MATERIALIZING = 'materializing';
+/** Call while holding the exclusive project lock, before writing rows with an original (earlier) receive clock. */
+export async function cancelStagedRetention(
+  projectId: string,
+  db: import('./generated/client').Prisma.TransactionClient = prisma,
+  reason = 'Recovered writes arrived during the run; the next run retries.',
+) {
+  return db.retentionRun.updateMany({
+    where: { projectId, kind: 'retention', status: RETENTION_STAGING },
+    data: { status: 'canceled', finishedAt: new Date(), error: reason },
   });
 }
 

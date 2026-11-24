@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { insertEvents } from '@logbird/clickhouse';
 import * as receipts from '@logbird/database';
-import { prisma } from '@logbird/database';
+import { databaseClock, prisma } from '@logbird/database';
 import { Logbird } from '@logbird/sdk';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
@@ -45,7 +45,10 @@ const classifyServerCode = async (code: string) => {
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(ambiguous ? 1 : 0);
   if (ambiguous) {
     expect((await response.json()).error.code).toBe('ingest_pending');
-    vi.setSystemTime(Date.now() + 80_000);
+    await prisma.ingestReceipt.updateMany({
+      where: { projectId: f.project },
+      data: { claimedAt: new Date((await databaseClock()).getTime() - 120_000) },
+    });
   }
   expect((await f.post(input)).status).toBe(202);
   expect(await f.count()).toBe(1);
@@ -85,7 +88,10 @@ it('retains only an ambiguity after the body was consumed, then recovers an abse
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({ error: { code: 'ingest_pending', details: { indices: [0], eventIds: ['same'] } } });
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: null } })).toBe(1);
-  await prisma.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { claimedAt: new Date(Date.now() - 80_000) } });
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project },
+    data: { claimedAt: new Date((await databaseClock()).getTime() - 120_000) },
+  });
   expect((await f.post(input)).status).toBe(202);
   expect(await f.count()).toBe(1);
 });
@@ -93,7 +99,7 @@ it.each([false, true])('refuses an insert if its claim lease expires while the p
   const claim = receipts.claimIngestReceipts;
   vi.spyOn(receipts, 'claimIngestReceipts').mockImplementation(async (...args) => {
     const rows = await claim(...args);
-    for (const receipt of rows) receipt.claimedAt = new Date(Date.now() - 61_000);
+    vi.setSystemTime(Date.now() + 61_000);
     return rows;
   });
   const spy = vi.spyOn(clickhouse, 'exec');
@@ -254,7 +260,7 @@ it('rechecks retained evidence after a long lookup-to-claim pause without double
 });
 
 it('a failed async-queue drain keeps expired claims fenced', async () => {
-  await f.pending(input, { expired: true });
+  await f.pending(input, { needsFreshFlush: true });
   vi.spyOn(maintenanceClickhouse, 'command').mockRejectedValueOnce(new Error('queue drain timeout'));
   const response = await f.post(input);
   expect(response.status).toBe(503);

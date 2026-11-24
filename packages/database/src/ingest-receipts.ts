@@ -66,22 +66,26 @@ export async function findIngestReceipts(projectId: string, eventIds: string[]) 
   return guarded<import('./generated/client').IngestReceipt[]>(findIngestReceiptsSql(projectId, eventIds));
 }
 
-/** Sorted, typed-array claims preserve ON CONFLICT ownership without a bind parameter per cell. */
+/**
+ * Sorted, typed-array claims preserve ON CONFLICT ownership without a bind parameter per cell. `claimedAt` is stamped
+ * by the database clock, never the caller's, so every proof that a claim has settled (retention's fences, recovery,
+ * project deletion) compares one clock with itself (#268).
+ */
 export async function claimIngestReceipts(
   projectId: string,
   organizationId: string,
-  claims: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date; confirmedAt: Date | null; claimedAt: Date }[],
+  claims: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date; confirmedAt: Date | null }[],
   db: Pick<Prisma.TransactionClient, '$queryRaw'> = prisma,
 ) {
   if (!claims.length) return [];
   try {
     return await db.$queryRaw<import('./generated/client').IngestReceipt[]>(Prisma.sql`
     WITH claimed AS (INSERT INTO "IngestReceipt" ("projectId","organizationId","eventId","fingerprint","receivedAt","eventAt","confirmedAt","claimedAt")
-    SELECT ${projectId},${organizationId},v.id,v.fingerprint,v.received,v.event,v.confirmed,v.claimed
+    SELECT ${projectId},${organizationId},v.id,v.fingerprint,v.received,v.event,v.confirmed,(clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
     FROM unnest(${claims.map((r) => r.eventId)}::text[], ${claims.map((r) => r.fingerprint)}::text[],
       ${claims.map((r) => r.receivedAt.toISOString())}::timestamp[], ${claims.map((r) => r.eventAt.toISOString())}::timestamp[],
-      ${claims.map((r) => r.confirmedAt?.toISOString() ?? null)}::timestamp[], ${claims.map((r) => r.claimedAt.toISOString())}::timestamp[])
-      AS v(id,fingerprint,received,event,confirmed,claimed)
+      ${claims.map((r) => r.confirmedAt?.toISOString() ?? null)}::timestamp[])
+      AS v(id,fingerprint,received,event,confirmed)
     ORDER BY v.id
     ON CONFLICT ("projectId","eventId") DO NOTHING RETURNING *),
     fenced AS (UPDATE "ExportLease" SET invalidated=true
@@ -119,7 +123,7 @@ export function isUniqueViolation(error: unknown) {
  */
 export async function takeOverIngestReceipts(projectId: string, eventIds: string[]) {
   return prisma.$queryRaw<import('./generated/client').IngestReceipt[]>(Prisma.sql`
-    WITH claimed AS (UPDATE "IngestReceipt" SET "claimedAt"=${new Date().toISOString()}::timestamp
+    WITH claimed AS (UPDATE "IngestReceipt" SET "claimedAt"=(clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       WHERE "projectId"=${projectId} AND "eventId"=ANY(${eventIds}::text[])
         AND "confirmedAt" IS NULL AND "claimedAt" IS NULL RETURNING *),
     fenced AS (UPDATE "ExportLease" SET invalidated=true
@@ -275,6 +279,13 @@ export function sweepIngestReceipts(projectId?: string) {
 }
 
 /** Call after the matching ClickHouse purge while holding the exclusive project lock. */
-export async function purgeIngestReceipts(projectId: string, cutoff?: Date) {
-  await prisma.ingestReceipt.deleteMany({ where: { projectId, ...(cutoff ? { eventAt: { lt: cutoff }, confirmedAt: { not: null } } : {}) } });
+/** `receivedBefore` limits a cutoff purge to the receipts of the rows a background retention run deleted. */
+export async function purgeIngestReceipts(projectId: string, cutoff?: Date, receivedBefore?: Date) {
+  await prisma.ingestReceipt.deleteMany({
+    where: {
+      projectId,
+      ...(cutoff ? { eventAt: { lt: cutoff }, confirmedAt: { not: null } } : {}),
+      ...(cutoff && receivedBefore ? { receivedAt: { lte: receivedBefore } } : {}),
+    },
+  });
 }

@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@logbird/sdk": "workspace:*",
-    "@logbird/clickhouse": "workspace:*"
+    "@logbird/clickhouse": "workspace:*",
+    "@logbird/database": "workspace:*"
   },
   "devDependencies": {
     "@logbird/tsconfig": "workspace:*",

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { eventFingerprint, normalizeEvent, read } from '@logbird/clickhouse';
-import { prisma, withProjectLock } from '@logbird/database';
+import { databaseClock, prisma, withProjectLock } from '@logbird/database';
+import { CLAIM_SETTLEMENT_MS } from '@logbird/worker/ingest-recovery';
 import { Hono } from 'hono';
 import { app } from './app';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
@@ -34,8 +35,15 @@ export async function immutableFixture(prefix = 'qa-immutable') {
     if (!normalized.ok) throw new Error(normalized.reason);
     return normalized.row;
   };
-  const pending = async (input: unknown, options: { expired?: boolean; legacy?: string; receivedAt?: Date } = {}) => {
+  const pending = async (
+    input: unknown,
+    options: { expired?: boolean; legacy?: string; receivedAt?: Date; claimedAt?: Date; needsFreshFlush?: boolean } = {},
+  ) => {
     const normalized = row(input, options.receivedAt);
+    const dbNow = (await databaseClock()).getTime();
+    const freshDeadline = options.needsFreshFlush ? dbNow + 1 : undefined;
+    const claimedAt =
+      options.claimedAt ?? new Date(freshDeadline === undefined ? dbNow - (options.expired ? 120_000 : 0) : freshDeadline - CLAIM_SETTLEMENT_MS);
     await prisma.ingestReceipt.create({
       data: {
         projectId: project,
@@ -44,9 +52,13 @@ export async function immutableFixture(prefix = 'qa-immutable') {
         fingerprint: options.legacy ?? eventFingerprint(normalized),
         receivedAt: new Date(normalized.received_at),
         eventAt: new Date(normalized.timestamp),
-        claimedAt: options.expired ? new Date(Date.now() - 80_000) : new Date(),
+        claimedAt,
       },
     });
+    // A successful flush from an earlier test must not certify this fixture's claim.
+    if (freshDeadline !== undefined) {
+      while ((await databaseClock()).getTime() <= freshDeadline) await new Promise((resolve) => setTimeout(resolve, 1));
+    }
     return normalized;
   };
   const count = async () =>

@@ -1,4 +1,5 @@
 import type { ClickHouseClient } from '@clickhouse/client';
+import { CLICKHOUSE_PLAIN_READ } from '@logbird/clickhouse';
 import { ApiError } from './errors';
 
 type Reader = Pick<ClickHouseClient, 'query'>;
@@ -39,6 +40,8 @@ export async function projectHasNoStoredRows(ch: Reader, projectId: string): Pro
             query: `SELECT 1 AS present FROM ${quoteIdentifier(name)} WHERE project_id = {p:String} LIMIT 1`,
             query_params: { p: projectId },
             format: 'JSONEachRow',
+            // Stored parts, not what readers see: rows hidden by a pending DELETE are still there (#268).
+            clickhouse_settings: CLICKHOUSE_PLAIN_READ,
           })
         ).json<{ present: number }>();
         return rows.length > 0;

@@ -6,7 +6,7 @@ import {
   insertEvents,
   normalizeEvent,
 } from '@logbird/clickhouse';
-import { claimIngestReceipts, confirmIngestReceipts, findIngestReceipts, prisma } from '@logbird/database';
+import { claimIngestReceipts, confirmIngestReceipts, findIngestReceipts, prisma, takeOverIngestReceipts } from '@logbird/database';
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { afterEach, expect, it, vi } from 'vitest';
 import { insertImmutableEvents, UNVERIFIED_PARSE_REJECTION, uncheckedIngestPolicy } from './immutable-ingest';
@@ -38,11 +38,24 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it.each([-25_000, 25_000])('sends a fresh claim with database clock offset %i ms', async (offset) => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
+    values.map((value) => ({ ...value, claimedAt: new Date(Date.now() + offset), projectId, organizationId })),
+  );
+  vi.mocked(insertEvents).mockResolvedValue(undefined);
+  const input = candidates();
+  await expect(insertImmutableEvents('qa91-unit', 'qa-clock-org', input, true)).resolves.toMatchObject({
+    ids: input.map(({ row }) => row.event_id),
+  });
+  expect(vi.mocked(insertEvents).mock.calls[0]?.[2]).toBe(Date.now() + INGEST_CLAIM_LEASE_MS);
+});
+
 it.each(['452', '60', '62', '81', '164', '497', '516', 'parse', 'mixed', 'held'])('composes retry timing for %s failures', async (failure) => {
   vi.useFakeTimers({ toFake: ['Date'] });
   const receivedAt = new Date();
   vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+    values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
   );
   vi.mocked(insertEvents).mockImplementation(async (_client, rows) => {
     if (failure === 'held') throw new AmbiguousInsertError();
@@ -78,7 +91,7 @@ it.each(['452', '60', '62', '81', '164', '497', '516', 'parse', 'mixed', 'held']
 it('waits 5 s when storage refused rows, even with unchecked rows in the same response', async () => {
   const input = candidates();
   vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+    values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
   );
   vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
     written: [input[0]!.row],
@@ -98,7 +111,7 @@ it('keeps the composed outcome when confirmation and the claim release both fail
   vi.useFakeTimers({ toFake: ['Date'] });
   const input = candidates();
   vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+    values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
   );
   vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
     written: [input[0]!.row],
@@ -146,7 +159,7 @@ it.each([true, false])('composes all unresolved/pending combinations for subset 
     for (const pending of [false, true]) {
       const input = candidates();
       vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-        values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+        values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
       );
       vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
         written: input.filter((_, index) => index === 0 || (index === 2 && !unresolved) || (index === 3 && !pending)).map((c) => c.row),
@@ -185,7 +198,7 @@ it('keeps rows deferred before any statement ran retryable for clients without t
   expect(uncheckedIngestPolicy(false, false, true)).toBe('reject');
   const input = candidates();
   vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+    values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
   );
   vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
     written: [],
@@ -260,4 +273,34 @@ it.each(['ambiguous', 'held-claim conflict'])('legacy identical retries reach 20
     ],
   });
   expect(isolate.mock.calls[1]![0].map((row) => row.event_id)).toEqual(['bad', 'unchecked']);
+});
+
+// #296 round 1, finding 2: a ready receipt writes its row with the original receive clock, which a staged retention
+// run has not counted. Only the exclusive replay (which cancels staged retention first) may take it over.
+it.each([
+  [false, 0],
+  [true, 1],
+])('takes over a ready receipt only on the exclusive replay path (exclusive: %s)', async (exclusive, takeOvers) => {
+  const receivedAt = new Date(Date.now() - 60_000);
+  const input = { id: 'ready-1', action: 'qa296.ready' };
+  const normalized = normalizeEvent(input, { projectId: 'qa296-unit', receivedAt });
+  if (!normalized.ok) throw new Error(normalized.reason);
+  const ready = {
+    projectId: 'qa296-unit',
+    organizationId: 'qa296-org',
+    eventId: 'ready-1',
+    fingerprint: eventFingerprint(normalized.row),
+    receivedAt,
+    eventAt: new Date(normalized.row.timestamp),
+    confirmedAt: null,
+    claimedAt: null,
+    expiresAt: new Date(Date.now() + 300_000),
+  };
+  vi.mocked(findIngestReceipts).mockResolvedValue([ready] as never);
+  vi.mocked(claimIngestReceipts).mockResolvedValue([]);
+  const candidates = [{ index: 0, input, row: { ...normalized.row } }];
+  const result = await insertImmutableEvents('qa296-unit', 'qa296-org', candidates, false, undefined, exclusive).catch((error: unknown) => error);
+  expect(vi.mocked(takeOverIngestReceipts).mock.calls).toEqual(takeOvers ? [['qa296-unit', ['ready-1']]] : []);
+  // Not taken over (or nothing returned by the takeover): the id stays pending, so its retry replays it exclusively.
+  expect(result).toMatchObject({ status: 503, code: 'ingest_pending' });
 });

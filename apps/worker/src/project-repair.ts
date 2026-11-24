@@ -1,13 +1,14 @@
 import { type ClickHouseClient, projectMaintenance, rebuildProjectRollups } from '@logbird/clickhouse';
-import { prisma } from '@logbird/database';
+import { databaseClock, prisma } from '@logbird/database';
 import { createFailedRepairStatus } from './failed-repair-status';
 import { enqueueProjectRetention } from './queue';
 
 export function heartbeatMaintenanceRun(runId: string) {
   const timer = setInterval(() => {
-    void prisma.retentionRun
-      .updateMany({ where: { id: runId, status: 'running' }, data: { heartbeatAt: new Date() } })
-      .catch(() => console.error(JSON.stringify({ level: 'error', event: 'maintenance.heartbeat_failed', runId })));
+    void prisma.$executeRaw`UPDATE "RetentionRun" SET "heartbeatAt" = clock_timestamp() AT TIME ZONE 'UTC'
+        WHERE id = ${runId} AND status IN ('running', 'staging')`.catch(() =>
+      console.error(JSON.stringify({ level: 'error', event: 'maintenance.heartbeat_failed', runId })),
+    );
   }, 30_000);
   return () => clearInterval(timer);
 }
@@ -37,16 +38,17 @@ export async function rebuildProjectReadModel(client: ClickHouseClient, projectI
   if (projectId.startsWith('ws:')) return rebuildProjectRollups(ch, projectId);
   const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
   const run = await prisma.$transaction(async (tx) => {
+    const now = await databaseClock(tx);
     await tx.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
     return tx.retentionRun.create({
       data: {
         projectId,
         kind: 'ingest_repair',
         retentionDays: project.retentionDays,
-        cutoff: new Date(Date.now() - project.retentionDays * 86_400_000),
+        cutoff: new Date(now.getTime() - project.retentionDays * 86_400_000),
         status: 'running',
-        startedAt: new Date(),
-        heartbeatAt: new Date(),
+        startedAt: now,
+        heartbeatAt: now,
       },
     });
   });

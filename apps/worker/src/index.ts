@@ -1,3 +1,4 @@
+import { assertSupportedClickHouse } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
@@ -9,6 +10,8 @@ import { enforceRetention } from './retention-sweep';
 import { webhookSigningConfig } from './webhook-config';
 import { startWebhookQueues } from './webhook-queues';
 
+// An unsupported ClickHouse fails here, naming its version, instead of on the first read (#268).
+await assertSupportedClickHouse(clickhouse);
 const signing = webhookSigningConfig(env);
 if (!signing.key) console.error(JSON.stringify({ level: 'error', event: signing.event, message: signing.message }));
 await probeIngestRecovery(clickhouse);

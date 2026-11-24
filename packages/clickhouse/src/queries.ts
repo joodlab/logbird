@@ -40,7 +40,7 @@ import {
   maskedEmail,
 } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
-import { boundTenant, isQueryClient } from './client';
+import { boundTenant, CLICKHOUSE_PLAIN_READ, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
@@ -1042,7 +1042,7 @@ export async function projectStats(
 export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: Date) {
   const rows = await read<{ n: number }>(
     ch,
-    'SELECT (SELECT count() FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)) + (SELECT count() FROM (SELECT 1 FROM event_ids WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)) n',
+    "SELECT (SELECT count() FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} LIMIT 1)) + (SELECT count() FROM (SELECT 1 FROM event_ids WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} LIMIT 1)) n",
     { p, before: before.toISOString().replace('T', ' ').slice(0, -1) },
   );
   return Number(rows[0]?.n ?? 0) > 0;
@@ -1111,7 +1111,9 @@ export async function deleteAndVerify(
     // that outrank every attempt. Completion alone never proves deletion.
     // The probe binds exactly the DELETE's params (not through read(), which rewrites date keys and turns a timeout
     // into a 422 query-budget error). A filter outside the sort key (sample-data `source`) scans the whole project once
-    // nothing matches, so it gets a maintenance budget.
+    // nothing matches, so it gets a maintenance budget. It reads the stored parts plainly (CLICKHOUSE_PLAIN_READ): with
+    // mutations applied on the fly, a DELETE still pending (stuck or retrying) would hide the rows and the delete would
+    // look verified while they are still stored (#268).
     let rows: { n: number }[];
     try {
       rows = await (
@@ -1119,7 +1121,7 @@ export async function deleteAndVerify(
           query: `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`,
           query_params: bound,
           format: 'JSONEachRow',
-          clickhouse_settings: { max_execution_time: 60 },
+          clickhouse_settings: { max_execution_time: 60, ...CLICKHOUSE_PLAIN_READ },
         })
       ).json<{ n: number }>();
     } catch (error) {
@@ -1156,15 +1158,15 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
     ? await read<{ kind: string; id: string }>(
         ch,
         `SELECT DISTINCT kind,id FROM (
-    SELECT 'actor' kind,actor_id id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND actor_id!=''
-    UNION ALL SELECT 'tenant',tenant_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND tenant_id!=''
-    UNION ALL SELECT 'executor',executor_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND executor_id!=''
-    UNION ALL SELECT 'target',concat(t.1,':',t.2) FROM events ARRAY JOIN arrayZip(target_types,target_ids) AS t WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)}
-    UNION ALL SELECT 'attribute',arrayJoin(mapKeys(attributes)) FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)})`,
+    SELECT 'actor' kind,actor_id id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} AND actor_id!=''
+    UNION ALL SELECT 'tenant',tenant_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} AND tenant_id!=''
+    UNION ALL SELECT 'executor',executor_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} AND executor_id!=''
+    UNION ALL SELECT 'target',concat(t.1,':',t.2) FROM events ARRAY JOIN arrayZip(target_types,target_ids) AS t WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')}
+    UNION ALL SELECT 'attribute',arrayJoin(mapKeys(attributes)) FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')})`,
         params,
       )
     : [];
-  const cutoff = before ? 'timestamp < {before:DateTime64(3)}' : '';
+  const cutoff = before ? "timestamp < {before:DateTime64(3,'UTC')}" : '';
   await deleteAndVerify(ch, p, 'events', cutoff, cutoffParams);
   // Raw events are gone from here on, so any later failure (even a definite rejection, which deleteAndVerify passes
   // through unchanged) leaves the purge partial: index, lateness counts or rollups still describe deleted events.
@@ -1213,7 +1215,7 @@ async function purgeAfterEvents(
     return rebuildProjectRollups(ch, p, false);
   }
   const filters = {
-    events_by_minute: 'bucket <= {bucket:DateTime64(3)}',
+    events_by_minute: "bucket <= {bucket:DateTime64(3,'UTC')}",
     entities: '(kind,entity_id) IN arrayZip({kinds:Array(String)},{entityIds:Array(String)})',
     attribute_keys: 'key IN {keys:Array(String)}',
   };
@@ -1258,7 +1260,7 @@ export async function rebuildProjectRollups(client: ClickHouseClient, p: string,
 export async function retentionStats(ch: ClickHouseClient, p: string, days?: number) {
   const rows = await read<{ oldest: string | null; n: string }>(
     ch,
-    'SELECT minOrNull(timestamp) oldest,countIf(timestamp < {cutoff:DateTime64(3)}) n FROM events WHERE project_id={p:String}',
+    "SELECT minOrNull(timestamp) oldest,countIf(timestamp < {cutoff:DateTime64(3,'UTC')}) n FROM events WHERE project_id={p:String}",
     { p, cutoff: new Date(Date.now() - (days ?? 3650) * 86_400_000).toISOString() },
   );
   return { oldestEventAt: rows[0]?.oldest ? iso(rows[0].oldest) : null, previewDeletedEvents: days === undefined ? null : Number(rows[0]?.n ?? 0) };

@@ -36,7 +36,16 @@ export function createMaintenanceClickHouseClient(env = process.env): ClickHouse
   const requestTimeout = Math.max(CLICKHOUSE_MAINTENANCE_TIMEOUT_MS, (maxExecutionSeconds + 300) * 1000);
   return configuredClient(env, requestTimeout, maxExecutionSeconds);
 }
-function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExecutionTime?: number): ClickHouseClient {
+/**
+ * A maintenance client with its own ClickHouse session, so temporary tables live across its statements (the retention
+ * run stages rollup rows in one between its two fences). Run one statement at a time on it; close it when done.
+ */
+export function createSessionClickHouseClient(sessionId: string, env = process.env): ClickHouseClient {
+  const maxExecutionSeconds = maintenanceMaxExecutionSeconds(env);
+  const requestTimeout = Math.max(CLICKHOUSE_MAINTENANCE_TIMEOUT_MS, (maxExecutionSeconds + 300) * 1000);
+  return configuredClient(env, requestTimeout, maxExecutionSeconds, sessionId);
+}
+function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExecutionTime?: number, sessionId?: string): ClickHouseClient {
   return createClient({
     url: env.CLICKHOUSE_URL,
     database: env.CLICKHOUSE_DATABASE,
@@ -44,9 +53,19 @@ function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExe
     password: env.CLICKHOUSE_PASSWORD,
     // This is a socket-idle timeout for every operation, independent of the INSERT lease.
     request_timeout: requestTimeout,
+    ...(sessionId === undefined ? {} : { session_id: sessionId }),
     clickhouse_settings: {
       date_time_input_format: 'best_effort',
       output_format_json_quote_64bit_integers: 0,
+      // Every read applies DELETE mutations that are still being materialized: the hourly retention run creates its
+      // DELETEs without waiting for them (#268), so no reader may see a row a pending DELETE removes. The few reads
+      // that must see stored parts as they are pass 0 explicitly (see CLICKHOUSE_PLAIN_READ).
+      apply_mutations_on_fly: 1,
+      // A pending mutation whose predicate calls now() or a subquery cannot be applied on the fly: while it is pending,
+      // every such read fails. Every mutation Logbird creates resolves them to literals when it is created.
+      mutations_execute_nondeterministic_on_initiator: 1,
+      mutations_execute_subqueries_on_initiator: 1,
+      ...(sessionId === undefined ? {} : { session_timeout: '900' }),
       ...(maxExecutionTime === undefined
         ? {}
         : {
@@ -56,6 +75,58 @@ function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExe
           }),
     },
   });
+}
+/** For the reads that must see stored parts as they are, ignoring pending DELETE mutations (retention verification). */
+export const CLICKHOUSE_PLAIN_READ = { apply_mutations_on_fly: 0 } as const;
+/**
+ * The client with every query read plain (CLICKHOUSE_PLAIN_READ). Only ingest's identity lookups use it: a pending
+ * Logbird DELETE hides only rows that are already past retention, so seeing them is safe there, and ingest must not
+ * fail when a foreign mutation that cannot be applied on the fly is pending (#268, condition 8).
+ */
+export function withPlainReads(ch: ClickHouseClient): ClickHouseClient {
+  return new Proxy(ch, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (property === 'query' && typeof value === 'function')
+        return (params: Parameters<ClickHouseClient['query']>[0]) =>
+          value.call(target, { ...params, clickhouse_settings: { ...params.clickhouse_settings, ...CLICKHOUSE_PLAIN_READ } });
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+/**
+ * A read refused because a pending mutation on the table cannot be applied on the fly (its predicate calls now(),
+ * rand() or a subquery, created outside Logbird). Readers answer 503 `store_maintenance_blocking` until it finishes.
+ */
+export function isPendingMutationBlockingReads(error: unknown): boolean {
+  for (let current = error, depth = 0; current && depth < 5; depth++) {
+    if (current instanceof Error && /cannot be applied on fly/i.test(current.message)) return true;
+    current = current && typeof current === 'object' && 'cause' in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
+}
+/** The ClickHouse line Logbird supports (docs/self-hosting.md). Retention relies on apply_mutations_on_fly as measured on it. */
+export const SUPPORTED_CLICKHOUSE = { major: 26, minor: 9 } as const;
+/**
+ * Startup check: the connected ClickHouse is the supported line or newer and has `apply_mutations_on_fly`. An older
+ * server fails here, with a sentence that names its version, instead of on the first read.
+ */
+export async function assertSupportedClickHouse(ch: ClickHouseClient) {
+  const [row] = await (
+    await ch.query({
+      query: "SELECT version() version, (SELECT count() FROM system.settings WHERE name = 'apply_mutations_on_fly') onTheFly",
+      format: 'JSONEachRow',
+    })
+  ).json<{ version: string; onTheFly: number }>();
+  const [major = 0, minor = 0] = String(row?.version ?? '')
+    .split('.')
+    .map(Number);
+  const supported = major > SUPPORTED_CLICKHOUSE.major || (major === SUPPORTED_CLICKHOUSE.major && minor >= SUPPORTED_CLICKHOUSE.minor);
+  if (!supported || Number(row?.onTheFly) !== 1)
+    throw new Error(
+      `Logbird needs ClickHouse ${SUPPORTED_CLICKHOUSE.major}.${SUPPORTED_CLICKHOUSE.minor} or newer (with apply_mutations_on_fly); the configured server runs ClickHouse ${row?.version ?? 'unknown'}. Upgrade ClickHouse before starting Logbird.`,
+    );
+  return row?.version ?? '';
 }
 export const INGEST_CLAIM_LEASE_MS = 60_000;
 export const ASYNC_INSERT_FLUSH_BOUND_MS = 10_000;

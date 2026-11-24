@@ -63,6 +63,8 @@ it.each([
     );
     expect(args.query_params).toEqual({ p: 'qa95-retry', ids: ['private-value-not-for-logs'] });
     expect(args.clickhouse_settings.max_execution_time).toBe(60);
+    // It proves the stored parts: a DELETE still pending must not hide the rows from the verification (#268).
+    expect(args.clickhouse_settings.apply_mutations_on_fly).toBe(0);
   }
   // Backoff between attempts: 50 ms, then 100 ms.
   expect(sleep.mock.calls.map(([, ms]) => ms)).toEqual([50, 100].slice(0, attempts - 1));
@@ -334,9 +336,12 @@ it('cutoff cleanup preserves narrow affected-key reads without repairing retaine
   // The cutoff reaches the verified deletes intact, with p bound to this project.
   const cutoffDeletes = command.mock.calls.map(([p]) => p).filter((p) => /^DELETE FROM (events|event_ids) /.test(p.query));
   expect(cutoffDeletes.map((p) => p.query)).toEqual([
-    'DELETE FROM events WHERE project_id={p:String} AND (timestamp < {before:DateTime64(3)})',
-    'DELETE FROM event_ids WHERE project_id={p:String} AND (timestamp < {before:DateTime64(3)})',
+    "DELETE FROM events WHERE project_id={p:String} AND (timestamp < {before:DateTime64(3,'UTC')})",
+    "DELETE FROM event_ids WHERE project_id={p:String} AND (timestamp < {before:DateTime64(3,'UTC')})",
   ]);
   for (const p of cutoffDeletes)
     expect(p.query_params).toEqual({ p: 'qa-narrow-retention', before: '2026-11-07 00:00:00.000', bucket: '2026-11-07 00:00:00.000' });
+  const minuteCommands = command.mock.calls.map(([p]) => p.query).filter((sql) => /^(DELETE FROM|INSERT INTO) events_by_minute\b/.test(sql));
+  expect(minuteCommands).toHaveLength(2);
+  for (const sql of minuteCommands) expect(sql).toContain("bucket <= {bucket:DateTime64(3,'UTC')}");
 });

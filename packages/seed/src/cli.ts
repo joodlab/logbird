@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import {
   createClickHouseClient,
@@ -44,16 +45,51 @@ if (!Number.isInteger(Number(values.seed))) throw new Error('Invalid seed');
 if (values.reset && !values['project-id']) throw new Error('--reset requires --project-id');
 if (!['api', 'direct'].includes(values.sink)) throw new Error('sink must be api or direct');
 if (values.sink === 'api' && !values.key) throw new Error('--key is required for the api sink');
-if (values.reset) {
-  // In API mode the supplied project ID must belong to the ingest key. Purging
-  // uses local ClickHouse credentials because the public API has no reset route.
+
+async function purgeSeedProject(projectId: string) {
   const ch = createClickHouseClient();
   try {
-    await purgeProject(ch, values['project-id'] as string);
+    await purgeProject(ch, projectId);
   } finally {
     await ch.close();
   }
 }
+
+async function resetApiSeed(projectId: string, apiKey: string) {
+  const { cancelStagedRetention, closeProjectLocks, prisma, withProjectLock } = await import('@logbird/database');
+  const hash = createHash('sha256').update(apiKey).digest('hex');
+  try {
+    await withProjectLock(
+      projectId,
+      async (db) => {
+        // The purge uses local ClickHouse credentials. Bind it to the ingest key's project first.
+        const key = await db.apiKey.findFirst({
+          where: { projectId, hash, kind: 'ingest', revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+          select: { id: true },
+        });
+        if (!key) throw new Error('The ingest key must belong to the project being reset.');
+        if (await db.ingestReceipt.findFirst({ where: { projectId, confirmedAt: null, claimedAt: { not: null } }, select: { eventId: true } }))
+          throw new Error('A write for this project is still unresolved. Retry the reset after ingest recovery.');
+
+        await cancelStagedRetention(projectId, db, 'Seed data was reset during the run; the next run retries.');
+        await purgeSeedProject(projectId);
+        await prisma.$transaction([
+          prisma.ingestReceipt.deleteMany({ where: { projectId } }),
+          prisma.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } }),
+        ]);
+      },
+      { waitMs: 60_000 },
+    );
+  } finally {
+    await Promise.all([closeProjectLocks(), prisma.$disconnect()]);
+  }
+}
+
+if (values.reset && values['project-id']) {
+  if (values.sink === 'api' && values.key) await resetApiSeed(values['project-id'], values.key);
+  else await purgeSeedProject(values['project-id']);
+}
+
 const generator = generateEvents({
   events,
   days,
