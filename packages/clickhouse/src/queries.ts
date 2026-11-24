@@ -31,7 +31,7 @@ import {
 } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
-import { boundTenant, isQueryClient } from './client';
+import { boundTenant, CLICKHOUSE_PLAIN_READ, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
@@ -999,7 +999,9 @@ export async function deleteAndVerify(
     // that outrank every attempt. Completion alone never proves deletion.
     // The probe binds exactly the DELETE's params (not through read(), which rewrites date keys and turns a timeout
     // into a 422 query-budget error). A filter outside the sort key (sample-data `source`) scans the whole project once
-    // nothing matches, so it gets a maintenance budget.
+    // nothing matches, so it gets a maintenance budget. It reads the stored parts plainly (CLICKHOUSE_PLAIN_READ): with
+    // mutations applied on the fly, a DELETE still pending (stuck or retrying) would hide the rows and the delete would
+    // look verified while they are still stored (#268).
     let rows: { n: number }[];
     try {
       rows = await (
@@ -1007,7 +1009,7 @@ export async function deleteAndVerify(
           query: `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`,
           query_params: bound,
           format: 'JSONEachRow',
-          clickhouse_settings: { max_execution_time: 60 },
+          clickhouse_settings: { max_execution_time: 60, ...CLICKHOUSE_PLAIN_READ },
         })
       ).json<{ n: number }>();
     } catch (error) {

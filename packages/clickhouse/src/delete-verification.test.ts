@@ -63,6 +63,8 @@ it.each([
     );
     expect(args.query_params).toEqual({ p: 'qa95-retry', ids: ['private-value-not-for-logs'] });
     expect(args.clickhouse_settings.max_execution_time).toBe(60);
+    // It proves the stored parts: a DELETE still pending must not hide the rows from the verification (#268).
+    expect(args.clickhouse_settings.apply_mutations_on_fly).toBe(0);
   }
   // Backoff between attempts: 50 ms, then 100 ms.
   expect(sleep.mock.calls.map(([, ms]) => ms)).toEqual([50, 100].slice(0, attempts - 1));
