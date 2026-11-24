@@ -1059,7 +1059,11 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
   // Its plain MergeTree/MV keeps every raw tuple, so cutoff deletion preserves surviving
   // versions without scanning retained history under the exclusive project lock.
 
-  if (!before) return rebuildProjectRollups(ch, p, false);
+  if (!before) {
+    // Project deletion also removes its late-arrival counts (#152). A retention cutoff leaves them to the 32-day TTL.
+    await deleteAndVerify(ch, p, 'events_lateness_by_hour');
+    return rebuildProjectRollups(ch, p, false);
+  }
   const filters = {
     events_by_minute: 'bucket <= {bucket:DateTime64(3)}',
     entities: '(kind,entity_id) IN arrayZip({kinds:Array(String)},{entityIds:Array(String)})',

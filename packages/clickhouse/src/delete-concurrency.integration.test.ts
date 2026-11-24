@@ -4,7 +4,7 @@ import { createMaintenanceClickHouseClient, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
 import { purgeProject, read } from './queries';
 
-const tables = ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys'];
+const tables = ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys', 'events_lateness_by_hour'];
 
 it.runIf(process.env.CLICKHOUSE_URL)(
   'concurrent project purges leave no raw, identity or rollup rows',
