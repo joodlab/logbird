@@ -383,7 +383,7 @@ public class HardeningFollowUpTests
     public async Task An_export_body_is_not_bound_by_the_read_timeout()
     {
         var body = new string('x', 1000);
-        using var reader = Reader(Server020((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new SlowContent(body, TimeSpan.FromMilliseconds(400)) })), TimeSpan.FromMilliseconds(200));
+        using var reader = Reader(Server020((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new SlowContent(body, TimeSpan.FromMilliseconds(2500)) })), TimeSpan.FromSeconds(1));
         using var destination = new MemoryStream();
         Assert.Equal(body.Length, await reader.ExportAsync(new ExportQuery(ExportFormat.Jsonl), destination));
     }
