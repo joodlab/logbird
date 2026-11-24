@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { keys, meQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
 import { activeRole, isAdminRole } from '@/lib/permissions';
+import { forgetWorkspace } from '@/lib/session';
 
 export type Role = 'owner' | 'admin' | 'member';
 export const INVITE_ROLES: Role[] = ['member', 'admin'];
@@ -144,4 +145,22 @@ export function useMemberActions() {
     onError: (e) => toast.error('Could not change the role', { description: e.message }),
   });
   return { cancel, remove, changeRole };
+}
+
+/**
+ * Leave a workspace on purpose. It is forgotten first, so no "you no longer have access" notice follows, and the console
+ * then starts over at `/`: another of the person's workspaces, or onboarding when this was their only one.
+ */
+export function useLeaveWorkspace(onLeft: () => void) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (workspace: { id: string; name: string }) => authCall(authClient.organization.leave({ organizationId: workspace.id })),
+    onSuccess: (_, workspace) => {
+      forgetWorkspace(workspace.id);
+      queryClient.clear();
+      toast.success(`You left ${workspace.name}`);
+      onLeft();
+    },
+    onError: (e) => toast.error('Could not leave the workspace', { description: e.message }),
+  });
 }

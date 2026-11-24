@@ -7,8 +7,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { NativeSelect, NativeSelectOption } from '@logbird/ui/components/ui/native-select';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
-import { createFileRoute } from '@tanstack/react-router';
-import { Loader2Icon, MailIcon, MoreHorizontalIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from 'lucide-react';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { Loader2Icon, LogOutIcon, MailIcon, MoreHorizontalIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from 'lucide-react';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { InviteForm } from '@/components/members/invite-form';
 import { InviteLinkPanel, PanelHeading } from '@/components/members/invite-link-panel';
@@ -21,6 +21,7 @@ import {
   type Role,
   roleLabel,
   useInviteMember,
+  useLeaveWorkspace,
   useMemberActions,
   useOrganization,
 } from '@/lib/organization';
@@ -37,6 +38,9 @@ function MembersSettings() {
   const confirm = useConfirm();
   const { cancel, remove, changeRole } = useMemberActions();
   const resend = useInviteMember();
+  const navigate = useNavigate();
+  const leave = useLeaveWorkspace(() => navigate({ to: '/' }));
+  const lastOwnerSelf = myRole === 'owner' && owners <= 1;
   const members = [...(org.data?.members ?? [])].sort((a, b) => rank(a.role) - rank(b.role) || a.user.email.localeCompare(b.user.email));
 
   /** What I may do to this member. Mirrors better-auth's rules so we never offer an action it rejects. */
@@ -268,6 +272,41 @@ function MembersSettings() {
           ))}
         </ul>
       </SettingsSection>
+
+      {/* Any member may leave; the last owner may not, since nobody could manage the workspace after them (#2). */}
+      {org.data ? (
+        <SettingsSection
+          description={
+            lastOwnerSelf
+              ? 'You are the only owner. Make another member an owner first, so someone can still manage the workspace.'
+              : `You lose access to every project in ${org.data.name}. An owner or admin can invite you again.`
+          }
+          title="Leave this workspace"
+        >
+          <div>
+            <Button
+              data-testid="leave-workspace"
+              disabled={lastOwnerSelf || leave.isPending}
+              onClick={async () => {
+                const workspace = org.data;
+                if (!workspace) return;
+                const ok = await confirm({
+                  title: `Leave ${workspace.name}?`,
+                  description: `You lose access to every project in ${workspace.name} at once. To come back, an owner or admin has to invite you again.`,
+                  confirmLabel: 'Leave workspace',
+                  destructive: true,
+                });
+                if (ok) leave.mutate({ id: workspace.id, name: workspace.name });
+              }}
+              size="sm"
+              variant="outline"
+            >
+              {leave.isPending ? <Loader2Icon className="animate-spin" /> : <LogOutIcon />}
+              Leave workspace
+            </Button>
+          </div>
+        </SettingsSection>
+      ) : null}
     </div>
   );
 }

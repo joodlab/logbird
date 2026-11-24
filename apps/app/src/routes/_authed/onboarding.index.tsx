@@ -1,3 +1,4 @@
+import { Alert, AlertDescription, AlertTitle } from '@logbird/ui/components/ui/alert';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
@@ -10,6 +11,7 @@ import { z } from 'zod';
 import { api } from '@/lib/api/client';
 import { authCall, authClient } from '@/lib/auth-client';
 import { fieldErrorMessage } from '@/lib/forms';
+import { takeLostWorkspace } from '@/lib/session';
 import { hasName } from '@/lib/user';
 
 export const Route = createFileRoute('/_authed/onboarding/')({
@@ -40,6 +42,9 @@ function WorkspaceStep() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
+  // Read once after mount (browser storage): a workspace this person lost access to since this browser last showed it.
+  const [lost, setLost] = useState<string | null>(null);
+  useEffect(() => setLost(takeLostWorkspace()), []);
   const nameInput = useRef<HTMLInputElement>(null);
   // Pre-fill from the email domain only when nobody at that domain has a workspace or a pending invitation yet:
   // otherwise every acme.com teammate would create another "Acme" instead of joining the existing one.
@@ -87,6 +92,15 @@ function WorkspaceStep() {
   return (
     <div className="grid gap-10 md:grid-cols-[1fr_260px]">
       <div className="flex flex-col gap-6">
+        {lost !== null ? (
+          // Removed from the only workspace they had: say so, instead of greeting them as a brand-new user (#4).
+          <Alert data-testid="lost-workspace">
+            <AlertTitle>You no longer have access to {lost || 'your workspace'}</AlertTitle>
+            <AlertDescription>
+              An owner removed you, or the workspace was deleted. Ask an owner to invite you again, or create a workspace of your own below.
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <div className="flex flex-col gap-1.5">
           <h1 className="font-semibold text-2xl tracking-tight">Create your workspace</h1>
           <p className="text-muted-foreground text-sm">
