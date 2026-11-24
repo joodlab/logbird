@@ -47,7 +47,10 @@ const isWindows = process.platform === 'win32';
 function run(command, commandArgs, cwd = here) {
   console.log(`$ ${command} ${commandArgs.join(' ')}`);
   // npm and pnpm are .cmd shims on Windows and need a shell; Node itself (whose path may hold spaces) does not.
-  execFileSync(command, commandArgs, { cwd, stdio: 'inherit', shell: isWindows && command !== process.execPath });
+  const shell = isWindows && command !== process.execPath;
+  // Through a shell, an argument with a space (a checkout under "C:\Work Projects\…") must be quoted to stay one argument.
+  const args = shell ? commandArgs.map((arg) => (/[\s"]/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg)) : commandArgs;
+  execFileSync(command, args, { cwd, stdio: 'inherit', shell });
 }
 
 /** One file's text from a .tgz (gzip, then tar headers), without a tar binary. */
@@ -164,8 +167,10 @@ for (const { name, reports } of project.report) {
       compiler: {
         overrideTsconfig: {
           compilerOptions: {
-            module: 'nodenext',
-            moduleResolution: 'nodenext',
+            // bundler resolution follows extensionless relative imports in declarations (Nuxt's ./runtime/hooks),
+            // which nodenext would leave unresolved and the report would list as opaque imports.
+            module: 'esnext',
+            moduleResolution: 'bundler',
             target: 'es2022',
             lib: ['es2022', 'dom'],
             strict: true,

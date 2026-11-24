@@ -95,8 +95,9 @@ function importsOf(text) {
   const patterns = [
     new RegExp(String.raw`\bfrom\s*${specifier}`, 'g'),
     new RegExp(String.raw`\bimport\s*${specifier}`, 'g'),
-    new RegExp(String.raw`\bimport\s*\(\s*${specifier}\s*\)`, 'g'),
-    new RegExp(String.raw`\brequire\s*\(\s*${specifier}\s*\)`, 'g'),
+    // No closing parenthesis required: `import('x', { with: … })` has a second argument.
+    new RegExp(String.raw`\bimport\s*\(\s*${specifier}`, 'g'),
+    new RegExp(String.raw`\brequire\s*\(\s*${specifier}`, 'g'),
   ];
   for (const pattern of patterns) for (const match of text.matchAll(pattern)) found.add(match[1]);
   return [...found];

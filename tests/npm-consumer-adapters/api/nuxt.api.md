@@ -4,17 +4,33 @@
 
 ```ts
 
-import { AuditedH3Event } from './runtime/capture';
-import { LogbirdHooks } from './runtime/hooks';
+import type { EventInput } from '@logbird/sdk';
+import { H3Event } from 'h3';
 import { NuxtModule } from '@nuxt/schema';
+import type { SearchInput } from '@logbird/sdk/read';
 
-export { AuditedH3Event }
+// @public (undocumented)
+export type AuditedH3Event = H3Event;
 
 // @public (undocumented)
 const _default: NuxtModule<ModuleOptions, ModuleOptions, false>;
 export default _default;
 
-export { LogbirdHooks }
+// @public (undocumented)
+export interface LogbirdHooks {
+    // (undocumented)
+    actor?: (event: H3Event) => EventInput['actor'] | Promise<EventInput['actor']>;
+    // (undocumented)
+    authorize: (event: H3Event, query: Readonly<Record<string, unknown>>) => false | SearchInput | Promise<false | SearchInput>;
+    // (undocumented)
+    executor?: (event: H3Event) => EventInput['executor'] | Promise<EventInput['executor']>;
+    // (undocumented)
+    onError?: (error: Error) => void;
+    // (undocumented)
+    tenant?: (event: H3Event) => EventInput['tenant'] | Promise<EventInput['tenant']>;
+    useOperationHeader?: boolean;
+    useRequestIdHeader?: boolean;
+}
 
 // @public (undocumented)
 export interface ModuleOptions {
