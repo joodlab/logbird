@@ -141,6 +141,27 @@ test('createRequire counts only from node:module', () => {
   assert.deepEqual(importsOf(ownFunction, 'dist/index.mjs'), []);
 });
 
+test("Rolldown's ESM output of a require call is read", () => {
+  // Rolldown 1.2.16, platform 'node', format 'esm', the dependency external, for `export const x = require('fictional-library');`.
+  const emitted = [
+    'import { createRequire } from "node:module";',
+    '// entry.js',
+    'const x = (/* @__PURE__ */ (() => createRequire(import.meta.url))())("fictional-library");',
+    'export { x };',
+  ].join('\n');
+  assert.deepEqual(importsOf(emitted, 'dist/index.mjs'), ['node:module', 'fictional-library']);
+});
+
+test('code that uses require, or has a method of that name, is not a require function', () => {
+  const cases = [
+    "const validator = { require(x) { return x; } }; validator.require('fictional-field');",
+    "const inCache = (id) => Boolean(require.cache[id]); inCache('fictional-key');",
+    "const resolve = (id) => require.resolve(id); resolve('fictional-key');",
+    "const load = (id) => { const m = require(id); return m.default; }; load('fictional-key');",
+  ];
+  for (const code of cases) assert.deepEqual(importsOf(code, 'dist/probe.cjs'), [], code);
+});
+
 test('a value that only tests for require is not a require function', () => {
   assert.deepEqual(importsOf("const hasRequire = typeof require === 'function'; hasRequire('fictional-library');", 'dist/probe.cjs'), []);
 });

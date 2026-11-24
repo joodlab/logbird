@@ -207,39 +207,53 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   };
   // The names a require function is bound to: `require`, and those found below.
   const requires = new Set(['require']);
-  // Whether a value hands a require function on: it holds a known require name other than as the function called, as
-  // `typeof`'s operand or as a property name. esbuild's helper is one:
-  // `var __require = ((x) => typeof require !== "undefined" ? require : …)(function (x) { … require.apply(this, arguments) … })`.
-  const passesRequire = (value) => {
-    let found = false;
-    const look = (node, parent, key) => {
-      if (found || !node || typeof node !== 'object') return;
+  const isFunction = (node) => node?.type === 'ArrowFunctionExpression' || node?.type === 'FunctionExpression';
+  // The values a function returns: an arrow's expression body, or each `return` in its own body (not in nested functions).
+  const returnsOf = (fn) => {
+    if (fn.body.type !== 'BlockStatement') return [fn.body];
+    const values = [];
+    const look = (node) => {
+      if (!node || typeof node !== 'object') return;
       if (Array.isArray(node)) {
-        for (const item of node) look(item, parent, key);
+        for (const item of node) look(item);
         return;
       }
-      if (typeof node.type !== 'string') return;
-      if (node.type === 'Identifier' && requires.has(node.name)) {
-        const called = (parent?.type === 'CallExpression' || parent?.type === 'OptionalCallExpression') && key === 'callee';
-        const property =
-          (isMember(parent) && key === 'property' && !parent.computed) || (parent?.type === 'ObjectProperty' && key === 'key' && !parent.computed);
-        const typeofOperand = parent?.type === 'UnaryExpression' && parent.operator === 'typeof';
-        if (!called && !property && !typeofOperand) found = true;
-        return;
-      }
-      for (const [childKey, child] of Object.entries(node)) if (!NOT_CHILDREN.has(childKey)) look(child, node, childKey);
+      if (typeof node.type !== 'string' || isFunction(node) || node.type === 'FunctionDeclaration' || node.type === 'ClassBody') return;
+      if (node.type === 'ReturnStatement' && node.argument) values.push(node.argument);
+      for (const [key, child] of Object.entries(node)) if (!NOT_CHILDREN.has(key)) look(child);
     };
-    look(value, undefined, undefined);
-    return found;
+    look(fn.body.body);
+    return values;
   };
-  // The names a require function is bound to: made by createRequire, or handed one (`const r = require`, esbuild's
-  // `__require`). Repeated until nothing new is found, since one binding can pass on another.
+  /**
+   * Whether an expression can evaluate to a require function, as opposed to merely using one (`require.cache[id]`,
+   * `typeof require`) or holding a method of that name (`{ require(x) {…} }`). It does when it is a require binding,
+   * a createRequire call, either branch of a `?:` or `||` / `&&` / `??`, the last of a comma expression, an assignment's
+   * value, or a call of a function expression that returns one. That last case is a bundler's helper: Rolldown's
+   * `(() => createRequire(import.meta.url))()` and esbuild's
+   * `((x) => typeof require !== "undefined" ? require : …)(function (x) { … })`.
+   */
+  const yieldsRequire = (node, depth = 0) => {
+    const value = unwrap(node);
+    if (!value || depth > 20) return false;
+    if (value.type === 'Identifier') return requires.has(value.name);
+    if (makesRequire(value)) return true;
+    if (value.type === 'ConditionalExpression') return yieldsRequire(value.consequent, depth + 1) || yieldsRequire(value.alternate, depth + 1);
+    if (value.type === 'LogicalExpression') return yieldsRequire(value.left, depth + 1) || yieldsRequire(value.right, depth + 1);
+    if (value.type === 'AssignmentExpression') return yieldsRequire(value.right, depth + 1);
+    if ((value.type === 'CallExpression' || value.type === 'OptionalCallExpression') && isFunction(unwrap(value.callee))) {
+      return returnsOf(unwrap(value.callee)).some((returned) => yieldsRequire(returned, depth + 1));
+    }
+    return false;
+  };
+  // The names a require function is bound to: made by createRequire, or given one (`const r = require`, esbuild's
+  // `__require`). Repeated until nothing new is found, since one binding can be given another.
   for (let size = -1; size !== requires.size; ) {
     size = requires.size;
     walk(ast.program, (node) => {
       const [target, value] =
         node.type === 'VariableDeclarator' ? [node.id, node.init] : node.type === 'AssignmentExpression' ? [node.left, node.right] : [];
-      if (target?.type === 'Identifier' && !requires.has(target.name) && (makesRequire(value) || passesRequire(value))) requires.add(target.name);
+      if (target?.type === 'Identifier' && !requires.has(target.name) && yieldsRequire(value)) requires.add(target.name);
     });
   }
   // `.require()` loads a module only on Node's own objects (`module.require`, `require.main.require`,
@@ -252,8 +266,8 @@ export function importsOf(text, path, moduleType = 'commonjs') {
       const root = rootOf(callee.object);
       return root !== undefined && (NODE_OBJECTS.has(root) || requires.has(root));
     }
-    // `createRequire(import.meta.url)('x')`
-    return makesRequire(callee);
+    // `createRequire(import.meta.url)('x')`, Rolldown's `(() => createRequire(import.meta.url))()('x')`
+    return yieldsRequire(callee);
   };
   const visit = (node) => {
     if (Array.isArray(node)) {
