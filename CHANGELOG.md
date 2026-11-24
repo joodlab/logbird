@@ -2,17 +2,144 @@
 
 ## Unreleased
 
-### Upgrade notes
+## 0.3.0
 
-- **A workspace always keeps an owner.** Migration `20261124120000_member_keep_an_owner` adds a Postgres trigger on
-  `member`: a leave, removal or role change that would leave an organization without an owner is refused with
-  409 `workspace_needs_owner` ("A workspace needs at least one owner."). The migration is additive and does not check
-  existing rows: an organization that already has no owner keeps working as before, and the trigger only stops new
-  changes from removing the last owner. Deleting an organization still removes its members.
-  **Limit:** removing or demoting an owner must run under READ COMMITTED, Postgres's default and what Logbird uses.
-  Under REPEATABLE READ or SERIALIZABLE the trigger refuses it (SQLSTATE `LB410`), even when another owner remains,
-  because a count taken on an older snapshot could not be trusted. Scripts that change owners at those levels must
-  switch to READ COMMITTED.
+### Highlights
+
+- Logbird delivers signed webhooks for matching audit events. Project owners and admins can manage endpoints, rotate signing secrets, send test pings, inspect delivery attempts and resend completed deliveries.
+- The .NET SDK can mint viewer tokens, query facets and stream exports for scoped reads.
+- Scoped reads with the `actor_email` mask now protect addresses recorded in actor names across event results, facets and search.
+
+### Changes
+
+**Webhooks.** The worker discovers matching events and delivers signed payloads.
+Endpoints support filters, tenant and record scopes, and field masks. The console
+shows delivery history and explains when an endpoint needs filter, scope or cursor
+review. Copy the signing secret when you create or rotate it. Receivers should verify
+the signature against the raw request body and deduplicate by `webhook-id`, which
+stays the same on retries and resends. In webhook filters, relative times are based
+on each event's arrival, and regexes use RE2. See the
+[webhook guide](docs/self-hosting.md#webhook-endpoint-settings). (#179, #248, #255, #343)
+
+Each endpoint has a delivery window, which defaults to seven days and can be
+set to no limit. Events that arrive after the window stay stored and searchable.
+Changing the window applies to discovery after the save. Already queued
+deliveries, resends and test pings are unaffected. The console shows an approximate
+late-arrival count for completed arrival hours, starting after the latest
+window change or 30 days ago, whichever is later. (#359, #360)
+
+**Console.** Explorer filters, chips and Query-to-SQL conversion preserve the
+meaning of quoted fields, literals and negated groups. Jump to keeps the server's
+result order, and the Explorer offers to retry an incomplete ID lookup or failed
+date check. Record history opens from its link. The overview shows an empty state
+before the first event, and Fields reports target coverage. First-event examples
+explain how to run the source SDK and how to check whether ingest rejected an event.
+Members who follow a project link from another workspace can switch to it from the
+project page. (#276, #281, #283, #290, #324, #335, #340, #346, #372, #379, #381)
+
+Members can leave a workspace from its settings after confirming. The last
+owner must make another member an owner before leaving. A removed member sees
+a one-time notice, and an invitee without a name is prompted to enter one.
+Workspace deletion through the auth API is disabled because it could leave
+events behind. (#375)
+
+**SDK breaking changes.**
+
+- **Inbound correlation.** TypeScript `createAudit` and the Hono, Nuxt and
+  TanStack Start integrations ignore inbound `x-logbird-operation` and
+  `x-request-id` by default. Enable `useOperationHeader` and
+  `useRequestIdHeader` only behind a trusted ingress that sets or sanitizes
+  those headers. Explicit correlation IDs on events and resolver results still
+  take precedence. ASP.NET Core callers have the same opt-ins through
+  `LogbirdRequestOptions.UseOperationHeader` and `UseRequestIdHeader`.
+  (#350, #342)
+- **Redaction.** Both SDKs keep event and party identifiers. Matching a party
+  redacts its other fields. Transform identifiers before redaction if they
+  need pseudonyms, for example with TypeScript's `beforeSend`. TypeScript
+  `redact()` returns the JSON form of the event and rejects cycles. .NET code
+  that inspected `RedactionOptions.Keys` for names registered through
+  `AddKeys` should read `AddedKeys`. Review custom patterns against both
+  regex engines if you share redaction rules. (#345)
+- **Read helpers.** TypeScript `trailQuery` refuses missing selectors, invalid
+  selector values and malformed queries that could widen a read. Pass a target,
+  actor, tenant or valid query. For a deliberately project-wide read, pass
+  `q: 'timestamp:*'`. The `readAuditTrail` helper requires a non-blank `q`. Use
+  `isTrailQueryError` to identify invalid inputs. Bind a Vue fetcher once if
+  its method uses `this`. These helpers require Logbird 0.2.0 or later. (#311)
+- **.NET public API.** Rename `GetAsync` calls on `LogbirdReadClient` to
+  `GetEventAsync`. Replace counter construction or deconstruction with
+  property reads, and return `default(LogbirdStats)` for a zero snapshot in
+  test doubles. Use `AuditCarrier.ToJson()`, `ToJsonUtf8Bytes()` and
+  `FromJson(...)` instead of `AuditCarrierJsonContext`, which is now internal.
+  If you need an HTTP proxy, supply a trusted transport explicitly. (#309, #332)
+
+**.NET.** The read client now supports viewer tokens, facets and streamed CSV or
+JSONL exports, including JSONL evidence. Read results expose read-only
+collections. Drop reports include `MayBeStored` for callers reconciling ambiguous
+delivery outcomes. The [SDK guide](docs/sdk-dotnet.md) explains shutdown and
+notification limits. NuGet publication requires separate maintainer enablement.
+(#262, #295, #308, #326, #332, #342, #349, #367)
+
+**Scoped read.** The `actor_email` mask now pseudonymizes addresses stored in
+actor names in event results and facet values, groups and labels. The address
+is excluded from actor-name filters and free-text matching on that field.
+Pseudonyms are stable within a project. If a reader can cause a chosen address
+to be recorded and link its pseudonym to other events, omit actor fields from
+what that reader can see. (#361, #371)
+
+**Marketing site.** The site adds use-case pages for customer-facing audit logs
+and support investigations. Console captures open full size, and the developer
+examples include outcome and description. The optional site deploys separately.
+(#266, #282, #289, #291, #376)
+
+### Self-hoster actions
+
+Follow [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups) to
+stop writers and take matched backups. Pin `LOGBIRD_VERSION=0.3.0` after the
+images publish. Run the migrate service before starting the new API and worker.
+If their environments are managed separately, give both roles the same
+`WEBHOOK_SECRET_KEY` or the same `BETTER_AUTH_SECRET` for a derived key, and
+align `WEBHOOKS_ALLOW_HTTP`. Give the worker the existing SMTP settings,
+`MAIL_FROM` and `APP_URL` for disable notices.
+
+Existing enabled endpoints with an empty filter can start delivering at the
+original rollout time in UTC. Older events are not backfilled. Confirm stored
+non-empty filters in Project settings and resolve any scope or cursor holds
+before delivery resumes. Follow the
+[webhook upgrade and recovery instructions](docs/self-hosting.md#webhook-delivery-on-upgrade)
+for held endpoints or a missed delivery interval.
+
+PostgreSQL takes the locks below during migration. `ACCESS EXCLUSIVE` blocks
+reads and writes. `SHARE` and `SHARE ROW EXCLUSIVE` block ordinary writes.
+
+| PostgreSQL migration | Additive or data change | Locks |
+| --- | --- | --- |
+| `20261122140000_webhook_deliveries` | Additive. Adds rollout cursors, delivery, attempt and notice tables, and indexes. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`. Indexes are built without `CONCURRENTLY`. |
+| `20261122150000_webhook_rollout_utc` | Beyond additive. Changes defaults to UTC, adds a warning timestamp and repairs untouched rollout cursors. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`, `WebhookDelivery` and `WebhookDisableNotice`. The repair updates matching rows. |
+| `20261122160000_webhook_repair_original_cursor` | Data-only repair of remaining original rollout cursors. | `ROW EXCLUSIVE` on `WebhookEndpoint` and row locks on updated endpoints. |
+| `20261122170000_webhook_delivery_occurrence` | Beyond additive. Adds a nullable webhook ID and replaces the delivery uniqueness index with one that includes arrival time. | `ACCESS EXCLUSIVE` on `WebhookDelivery`. The replacement index is built without `CONCURRENTLY`. |
+| `20261122180000_webhook_scope_mask_cursor_review` | Additive. Adds field masks and a cursor review flag. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`. |
+| `20261122190000_webhook_reconciliation` | Additive. Adds a scope review flag and a verified cursor floor. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`. |
+| `20261122200000_webhook_filter_review` | Additive schema with a data backfill. Adds review columns and flags existing non-empty filters for review. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`. The backfill updates matching rows. |
+| `20261122210000_webhook_scan_attempted_at` | Additive. Adds the attempt timestamp and its scheduling index. | `ACCESS EXCLUSIVE` for the new column and `SHARE` for the non-concurrent index build on `WebhookEndpoint`. |
+| `20261123100000_webhook_filter_review_reason` | Additive. Adds a nullable reason for a filter hold. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`. |
+| `20261123120000_webhook_claim_rotation` | Additive. Adds the per-project claim rotation table and its foreign key. | `SHARE ROW EXCLUSIVE` on `Project` and `WebhookClaimRotation` for the foreign key. |
+| `20261124100000_webhook_delivery_window` | Additive. Adds window columns and a check constraint. Existing endpoints get seven days. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`. PostgreSQL validates the new constraint against existing rows. |
+| `20261124120000_member_keep_an_owner` | Additive schema. Adds functions and triggers that enforce the owner rule on future writes. Existing memberships are preserved. | `SHARE ROW EXCLUSIVE` on `member` when installing the triggers. The triggers also take a transaction advisory lock per workspace when deleting or updating an owner row. |
+
+Workspaces that already have no owner keep working. The migration does not
+assign owners. If a workspace later gains an owner, the triggers prevent removal
+or demotion of its last owner.
+Removing or demoting an owner must run under READ COMMITTED, PostgreSQL's
+default and what Logbird uses. Under REPEATABLE READ or SERIALIZABLE the trigger
+refuses it with SQLSTATE `LB410`, even when another owner remains. Scripts that
+change owners at those isolation levels must switch to READ COMMITTED.
+
+ClickHouse migration `011_events_lateness.sql` is additive. It uses DDL locks
+to create the lateness rollup table and its materialized view, with no backfill
+or mutation of existing events. Counts start when the view is created. A storage
+failure, retried write or restore can make the count higher or lower than the
+actual count.
 
 ## 0.2.1
 
