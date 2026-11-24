@@ -53,7 +53,15 @@ for (let offset = 0; offset < TOTAL; offset += BATCH) {
 const importSeconds = (performance.now() - importStarted) / 1000;
 await delay(5000);
 
-const results: { endpoints: number; window: number | null; passMs: number; perEndpointMs: number; readRows: number; readBytes: number }[] = [];
+const results: {
+  endpoints: number;
+  window: number | null;
+  passMs: number;
+  perEndpointMs: number;
+  passes: number;
+  readRows: number;
+  readBytes: number;
+}[] = [];
 for (const endpoints of [1, 10, 100])
   for (const window of [null, DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS]) {
     const hooks = await Promise.all(
@@ -74,12 +82,16 @@ for (const endpoints of [1, 10, 100])
     const before = new Date();
     const clock = await webhookCursorClock(prisma);
     const started = performance.now();
+    let passes = 0;
     for (const hook of hooks) {
       // Each endpoint scans until it has caught up with the import, as passes would.
+      // Discovery's watermark trails the clock, so "caught up" is a pass that no longer moves the cursor.
       for (let pass = 0; pass < 10; pass++) {
         const current = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } });
-        if (+current.cursorReceivedAt >= +clock.now - 1000) break;
         await discoverWebhookDeliveries(ch, current, { now: clock.now, rollout: new Date(+start - 1) });
+        passes++;
+        const after = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } });
+        if (+after.cursorReceivedAt === +current.cursorReceivedAt && after.cursorEventId === current.cursorEventId) break;
       }
     }
     const passMs = performance.now() - started;
@@ -96,6 +108,7 @@ for (const endpoints of [1, 10, 100])
       window,
       passMs: Math.round(passMs),
       perEndpointMs: Math.round(passMs / endpoints),
+      passes,
       readRows: Number(usage?.rows ?? 0),
       readBytes: Number(usage?.bytes ?? 0),
     };

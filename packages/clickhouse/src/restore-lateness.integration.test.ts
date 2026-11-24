@@ -112,6 +112,8 @@ it.runIf(scratch)('a normalization that stops after detaching the view is repair
   const detach = statements.findIndex((statement) => statement.startsWith('DETACH TABLE'));
   expect(detach).toBeGreaterThan(0);
   await mutationsSettled();
+  const rawCount = async () => Number((await read<{ n: number }>(ch, 'SELECT count() n FROM events'))[0]?.n);
+  const rawBefore = await rawCount();
   for (const query of statements.slice(0, detach + 1)) await ch.command({ query });
   expect(await viewPresent()).toBe(false);
   await migrate(ch);
@@ -119,7 +121,7 @@ it.runIf(scratch)('a normalization that stops after detaching the view is repair
   // The script checks and detaches before its first TRUNCATE, so this stop cleared nothing: drop the leftovers. (Resuming a
   // half-run replay through the re-attached view would count its late rows again: a documented limit of the approximate
   // count.)
-  expect(Number((await read<{ n: number }>(ch, 'SELECT count() n FROM events WHERE project_id = {p:String}', { p: projectId }))[0]?.n)).toBe(1);
+  expect(await rawCount()).toBe(rawBefore);
   await ch.command({ query: 'DROP TABLE events_restore_staging' });
   await ch.command({ query: 'DROP TABLE lateness_restore_check' });
   await ch.command({ query: 'DROP VIEW events_lateness_mv' });
