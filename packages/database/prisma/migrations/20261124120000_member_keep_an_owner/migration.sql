@@ -4,11 +4,12 @@
 -- lives in the database, so it covers those endpoints and any path added later.
 --
 -- "Is an owner" is the same test the application uses (hasWorkspaceRole in packages/database/src/membership-roles.ts):
--- the stored role is a comma-separated list, and one of its trimmed entries is exactly 'owner'. A test checks the two
--- definitions against each other.
+-- the stored role is a comma-separated list, and one of its trimmed entries is exactly 'owner'. Trimmed as JavaScript's
+-- trim() does (every Unicode space and line terminator, not only the ASCII space btrim() removes by default). A test checks
+-- the two definitions against each other, tabs, newlines and no-break spaces included.
 CREATE FUNCTION logbird_is_owner(role text) RETURNS boolean
 LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-  SELECT EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(role, ''), ',')) AS entry WHERE btrim(entry) = 'owner')
+  SELECT EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(role, ''), ',')) AS entry WHERE btrim(entry, E' \u0009\u000A\u000B\u000C\u000D\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF') = 'owner')
 $$;
 
 -- BEFORE an owner row is deleted or stops being an owner: serialise changes to that organization's owners, before this
@@ -28,11 +29,10 @@ $$;
 -- AFTER the change, holding the lock: does the organization still have an owner?
 -- * READ COMMITTED (the default, and what Prisma and better-auth use): this statement takes a fresh snapshot, so it sees
 --   an owner removal another transaction committed while this one waited for the lock.
--- * SERIALIZABLE: the snapshot predates the wait, but Postgres's serializable checks see that each transaction read an
---   owner row the other removed, and abort one of them with 40001 (could not serialize); the caller retries.
--- * REPEATABLE READ: the snapshot predates the wait and nothing would catch a stale count, so removing or demoting an
---   owner is refused at that level (LB410). Logbird never uses it; a caller that does gets a clear error, never an
---   ownerless workspace.
+-- * REPEATABLE READ and SERIALIZABLE: the snapshot predates the wait, and a concurrent removal by a READ COMMITTED
+--   transaction is outside Postgres's serializable checks, so a stale count could let both commit. Removing or demoting
+--   an owner is therefore refused at those levels (LB410). Logbird (Prisma, better-auth) uses READ COMMITTED; a caller
+--   that does not gets a clear error, never an ownerless workspace.
 -- The count takes no row locks: Postgres locks a row before its BEFORE trigger runs, so a transaction waiting for the
 -- organization lock already holds its own owner row, and locking that row here would deadlock.
 -- Deleting the organization itself (its members go by cascade, in the same statement) is allowed: the row is gone.
@@ -45,8 +45,8 @@ BEGIN
   IF NOT logbird_is_owner(OLD.role) THEN RETURN NULL; END IF;
   IF TG_OP = 'UPDATE' AND logbird_is_owner(NEW.role) AND NEW."organizationId" = OLD."organizationId" THEN RETURN NULL; END IF;
   IF NOT EXISTS (SELECT 1 FROM organization WHERE id = organization_id) THEN RETURN NULL; END IF;
-  IF current_setting('transaction_isolation') = 'repeatable read' THEN
-    RAISE EXCEPTION 'logbird_workspace_owner_isolation: owner changes need READ COMMITTED or SERIALIZABLE'
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'logbird_workspace_owner_isolation: removing or demoting an owner needs READ COMMITTED'
       USING ERRCODE = 'LB410';
   END IF;
   SELECT count(*) INTO owners FROM member WHERE "organizationId" = organization_id AND logbird_is_owner(role);

@@ -39,6 +39,8 @@ export function WorkspaceLinkNotice({
     // Everything cached belongs to the workspace just left; the same page then loads again in the new one.
     queryClient.clear();
     await router.invalidate();
+    // Ready again if this notice is shown later for another linked workspace (the page can stay mounted).
+    setSwitching(false);
   };
   return (
     <Alert data-testid="workspace-link-notice">

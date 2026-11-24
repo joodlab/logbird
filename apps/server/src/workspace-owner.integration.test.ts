@@ -92,7 +92,12 @@ it(`two owners racing through leave, remove and role change: exactly one wins, t
         if (refused.status === 409) {
           expect(refused.body?.message).toBe('A workspace needs at least one owner. Make another member an owner first.');
           triggered[label] = (triggered[label] ?? 0) + 1;
-        } else expect(refused, `${label} #${i}`).toMatchObject({ status: 400, body: { message: expect.stringMatching(/only owner/i) } });
+        } else {
+          // Refused before the trigger: by better-auth's own last-owner check, or (B's remove or role change after B's
+          // own leave committed) because B is no longer a member allowed to do it. Never a server error.
+          expect(refused.status, `${label} #${i}: ${JSON.stringify(refused.body)}`).toBeGreaterThanOrEqual(400);
+          expect(refused.status, `${label} #${i}: ${JSON.stringify(refused.body)}`).toBeLessThan(500);
+        }
       }
     }
     // The race is real: across the runs, the trigger was what stopped at least some of them.

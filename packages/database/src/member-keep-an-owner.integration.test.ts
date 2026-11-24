@@ -65,8 +65,8 @@ async function attempt(sql: string, params: unknown[], isolation = 'READ COMMITT
     client.release();
   }
 }
-const leave = (member: string) => ['DELETE FROM member WHERE id = $1', [member]] as const;
-const demote = (member: string) => [`UPDATE member SET role = 'member' WHERE id = $1`, [member]] as const;
+const leave = (member: string): [string, unknown[]] => ['DELETE FROM member WHERE id = $1', [member]];
+const demote = (member: string): [string, unknown[]] => [`UPDATE member SET role = 'member' WHERE id = $1`, [member]];
 
 it('defines "is an owner" in SQL exactly as hasWorkspaceRole does in the application', async () => {
   const roles = [
@@ -84,6 +84,9 @@ it('defines "is an owner" in SQL exactly as hasWorkspaceRole does in the applica
     ',',
     'owner,',
     ',owner',
+    // JavaScript's trim() removes every Unicode space and line terminator, not only the ASCII space.
+    ...[0x09, 0x0a, 0x0d, 0xa0, 0x20_28, 0x30_00, 0xfe_ff].map((c) => `${String.fromCharCode(c)}owner${String.fromCharCode(c)}`),
+    `admin,${String.fromCharCode(0x09)}owner`,
   ];
   for (const role of roles) {
     const sql = (await pool.query('SELECT logbird_is_owner($1) AS owner', [role])).rows[0].owner as boolean;
@@ -140,43 +143,42 @@ it('holds the second removal until the first commits, then refuses it (the inter
     await a.query('COMMIT');
     expect(await b).toBe('needs-owner');
   } finally {
+    // Never return a connection to the pool with its transaction (and the organization lock) still open.
+    await a.query('ROLLBACK').catch(() => undefined);
     a.release();
   }
   expect(await owners(w.id)).toBe(1);
 });
 
-it('under SERIALIZABLE callers, two removals of the last two owners never both commit', async () => {
-  for (let i = 0; i < 100; i++) {
+it('refuses owner removals under REPEATABLE READ and SERIALIZABLE, where a stale count could not be caught', async () => {
+  // SERIALIZABLE too: a concurrent READ COMMITTED removal is outside Postgres's serializable checks.
+  for (const isolation of ['REPEATABLE READ', 'SERIALIZABLE']) {
     const w = await workspace(['owner', 'owner']);
-    const results = await Promise.all([
-      attempt(...leave(w.members[0] as string), 'SERIALIZABLE'),
-      attempt(...leave(w.members[1] as string), 'SERIALIZABLE'),
-    ]);
-    // One commits; the other is refused or aborted as not serializable (40001), for the caller to retry.
-    expect(
-      results.filter((r) => r === 'ok'),
-      `SERIALIZABLE #${i}: ${results}`,
-    ).toHaveLength(1);
-    expect(await owners(w.id), `SERIALIZABLE #${i}`).toBe(1);
+    const client = await pool.connect();
+    try {
+      await client.query(`BEGIN ISOLATION LEVEL ${isolation}`);
+      const error = await client.query(...leave(w.members[0] as string)).then(
+        () => null,
+        (e: { code?: string }) => e,
+      );
+      expect(error?.code, isolation).toBe('LB410');
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+    }
+    expect(await owners(w.id), isolation).toBe(2);
   }
-}, 300_000);
+});
 
-it('refuses owner removals under REPEATABLE READ, where a stale count could not be caught', async () => {
+it('leaves non-owner changes alone at any isolation level', async () => {
   const w = await workspace(['owner', 'owner']);
   const client = await pool.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-    const error = await client.query(...leave(w.members[0] as string)).then(
-      () => null,
-      (e: { code?: string }) => e,
-    );
-    expect(error?.code).toBe('LB410');
-    await client.query('ROLLBACK');
-    // A non-owner change is unaffected at that level.
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     await client.query(`UPDATE member SET "createdAt" = now() WHERE id = $1`, [w.members[0]]);
     await client.query('COMMIT');
   } finally {
+    await client.query('ROLLBACK').catch(() => undefined);
     client.release();
   }
   expect(await owners(w.id)).toBe(2);
