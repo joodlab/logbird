@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { api } from '@/lib/api/client';
 import { authCall, authClient } from '@/lib/auth-client';
 import { fieldErrorMessage } from '@/lib/forms';
-import { takeLostWorkspace } from '@/lib/session';
+import { noteLostWorkspace, takeLostWorkspace } from '@/lib/session';
 import { hasName } from '@/lib/user';
 
 export const Route = createFileRoute('/_authed/onboarding/')({
@@ -44,7 +44,12 @@ function WorkspaceStep() {
   const [serverError, setServerError] = useState<string | null>(null);
   // Read once after mount (browser storage): a workspace this person lost access to since this browser last showed it.
   const [lost, setLost] = useState<string | null>(null);
-  useEffect(() => setLost(takeLostWorkspace()), []);
+  useEffect(() => {
+    noteLostWorkspace(me);
+    // Taken once: a later run (a new `me`) finds nothing and must not clear the notice already shown.
+    const name = takeLostWorkspace();
+    if (name !== null) setLost(name);
+  }, [me]);
   const nameInput = useRef<HTMLInputElement>(null);
   // Pre-fill from the email domain only when nobody at that domain has a workspace or a pending invitation yet:
   // otherwise every acme.com teammate would create another "Acme" instead of joining the existing one.

@@ -46,6 +46,7 @@ const LOST_WORKSPACE_KEY = 'logbird.lostWorkspace';
 
 /** The workspace this browser last showed, so losing access to it can be said by name. */
 export function rememberWorkspace(workspace: { id: string; name: string }): void {
+  if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(LAST_WORKSPACE_KEY, JSON.stringify({ id: workspace.id, name: workspace.name }));
   } catch {
@@ -56,8 +57,11 @@ export function rememberWorkspace(workspace: { id: string; name: string }): void
 /**
  * When the workspace this browser last showed is no longer among the person's workspaces (an owner removed them), keep
  * its name for one notice: "You no longer have access to <workspace>". Leaving on purpose forgets it first.
+ * Browser storage only: route guards also run on the server for a full page load, so the page that shows the notice
+ * calls this again after mount.
  */
-function noteLostWorkspace(me: MeResponse): void {
+export function noteLostWorkspace(me: Pick<MeResponse, 'organizations'>): void {
+  if (typeof window === 'undefined') return;
   try {
     const raw = window.localStorage.getItem(LAST_WORKSPACE_KEY);
     if (!raw) return;

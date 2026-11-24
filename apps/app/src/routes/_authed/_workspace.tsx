@@ -2,7 +2,7 @@ import { createFileRoute, Outlet, redirect } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { FullPageLoader } from '@/components/route-states';
-import { ensureActiveWorkspace, takeLostWorkspace } from '@/lib/session';
+import { ensureActiveWorkspace, noteLostWorkspace, rememberWorkspace, takeLostWorkspace } from '@/lib/session';
 
 /** Requires an active workspace (organization). People without one go to onboarding. */
 export const Route = createFileRoute('/_authed/_workspace')({
@@ -20,14 +20,17 @@ export const Route = createFileRoute('/_authed/_workspace')({
 
 /** Says once, by name, that the workspace this browser last showed is no longer one of the person's (#4). */
 function WorkspaceLayout() {
-  const { workspace } = Route.useRouteContext();
+  const { workspace, me } = Route.useRouteContext();
   useEffect(() => {
+    // Again in the browser: on a full page load the route guard ran on the server, without browser storage.
+    noteLostWorkspace(me);
+    rememberWorkspace(workspace);
     const lost = takeLostWorkspace();
     if (lost)
       toast.info(`You no longer have access to ${lost}`, {
         description: `An owner removed you, or the workspace was deleted. You are in ${workspace.name}; ask an owner of ${lost} to invite you again.`,
         duration: 12_000,
       });
-  }, [workspace.name]);
+  }, [me, workspace]);
   return <Outlet />;
 }
