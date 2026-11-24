@@ -44,7 +44,12 @@ deliveries.mockImplementation(async (_p: string, _e: string, query: { status?: s
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
 let lastClient: QueryClient | undefined;
-const endpoint = { id: 'qa-endpoint-1', url: 'https://example.com/qa-hook' } as WebhookEndpoint;
+const endpoint = {
+  id: 'qa-endpoint-1',
+  url: 'https://example.com/qa-hook',
+  deliveryWindowSeconds: 604_800,
+  lateEvents: { count: 0, since: '2026-10-25T00:00:00.000Z' },
+} as WebhookEndpoint;
 
 async function open(sendBlocked: string | null) {
   const host = document.createElement('div');
@@ -167,3 +172,10 @@ it('settles a resend from a pending list longer than one page, reading every pag
   });
   expect(allReads()).toBeGreaterThan(before);
 }, 10_000);
+
+it('says how many events in the project came too late for the window', async () => {
+  await open(null);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(
+    /^No event in this project has arrived more than 7 days after it happened since /,
+  );
+});

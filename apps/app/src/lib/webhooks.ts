@@ -1,6 +1,9 @@
 import {
+  DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS,
   listWebhookDeliveriesResponseSchema,
+  MAX_WEBHOOK_DELIVERY_WINDOW_SECONDS,
   MAX_WEBHOOK_ENDPOINTS,
+  MIN_WEBHOOK_DELIVERY_WINDOW_SECONDS,
   type WebhookEndpoint,
   webhookAttemptSchema,
   webhookDeliverySchema,
@@ -105,6 +108,7 @@ export function webhookErrorCopy(error: unknown, endpoint?: Pick<WebhookEndpoint
 
 /* ---------------- the endpoint form ---------------- */
 
+export type WindowUnit = 'hours' | 'days';
 export type Form = {
   url: string;
   description: string;
@@ -114,7 +118,52 @@ export type Form = {
   targetId: string;
   masks: ScopeMask[];
   enabled: boolean;
+  /** Deliver only events that arrive within `windowAmount` `windowUnit` of happening; false is "No limit". */
+  windowLimited: boolean;
+  windowAmount: string;
+  windowUnit: WindowUnit;
 };
+
+const HOUR = 3600;
+const DAY = 86_400;
+/** A window in seconds as the form shows it: whole days when it is a whole number of days, else hours. */
+export function windowParts(seconds: number | null): Pick<Form, 'windowLimited' | 'windowAmount' | 'windowUnit'> {
+  if (seconds === null) return { windowLimited: false, windowAmount: String(DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS / DAY), windowUnit: 'days' };
+  return seconds % DAY === 0
+    ? { windowLimited: true, windowAmount: String(seconds / DAY), windowUnit: 'days' }
+    : { windowLimited: true, windowAmount: String(seconds / HOUR), windowUnit: 'hours' };
+}
+/** The form's window in seconds, null for "No limit", or undefined when the amount is not a whole positive number. */
+export function windowSeconds(f: Pick<Form, 'windowLimited' | 'windowAmount' | 'windowUnit'>): number | null | undefined {
+  if (!f.windowLimited) return null;
+  const text = f.windowAmount.trim();
+  if (!/^\d+$/.test(text)) return undefined;
+  return Number(text) * (f.windowUnit === 'days' ? DAY : HOUR);
+}
+/** The endpoint card's line: what the window means, in a few words. */
+export function deliveryWindowLine(seconds: number | null): string {
+  return seconds === null ? 'No limit: every matching event is sent' : `Events that arrive within ${windowLabel(seconds)} of happening`;
+}
+
+/**
+ * The delivery log's sentence about late events (#152): events in this project that arrived later than this endpoint's
+ * window, before the endpoint's filter and scope are applied, counted since `since`. Null when there is no window.
+ */
+export function lateEventsSentence(e: Pick<WebhookEndpoint, 'deliveryWindowSeconds' | 'lateEvents'>, since: string): string | null {
+  if (e.deliveryWindowSeconds === null) return null;
+  const window = windowLabel(e.deliveryWindowSeconds);
+  const { count } = e.lateEvents;
+  if (count === 0) return `No event in this project has arrived more than ${window} after it happened since ${since}.`;
+  return `${count.toLocaleString('en-US')} ${count === 1 ? 'event' : 'events'} in this project arrived more than ${window} after ${count === 1 ? 'it' : 'they'} happened since ${since}, so this endpoint did not send ${count === 1 ? 'it' : 'them'}. The count is before this endpoint’s filter and scope.`;
+}
+
+/** "7 days", "36 hours", "1 day", or "No limit". */
+export function windowLabel(seconds: number | null): string {
+  if (seconds === null) return 'No limit';
+  const [n, unit] = seconds % DAY === 0 ? [seconds / DAY, 'day'] : [seconds / HOUR, 'hour'];
+  return `${n.toLocaleString('en-US')} ${unit}${n === 1 ? '' : 's'}`;
+}
+
 export const formFrom = (e: WebhookEndpoint | null): Form => ({
   url: e?.url ?? '',
   description: e?.description ?? '',
@@ -124,6 +173,8 @@ export const formFrom = (e: WebhookEndpoint | null): Form => ({
   targetId: e?.scope?.target?.id ?? '',
   masks: (e?.scope?.mask ?? []) as ScopeMask[],
   enabled: e?.enabled ?? true,
+  // A new endpoint shows the server's default (7 days); an existing one shows its own window, or "No limit".
+  ...windowParts(e ? e.deliveryWindowSeconds : DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS),
 });
 export type FormErrors = Partial<Record<keyof Form | 'form', string>>;
 
@@ -142,6 +193,8 @@ export function endpointPatch(target: WebhookEndpoint, f: Form, scope: ReturnTyp
   // Compared with the scope as stored (not trimmed).
   if (target.scopeWarning || JSON.stringify(scope) !== JSON.stringify(storedScope(target))) body.scope = scope;
   if (f.enabled !== before.enabled) body.enabled = f.enabled;
+  const window = windowSeconds(f);
+  if (window !== undefined && window !== target.deliveryWindowSeconds) body.deliveryWindowSeconds = window;
   return body;
 }
 
@@ -168,6 +221,10 @@ export function validateWebhookForm(f: Form): FormErrors {
   if (type && !id) e.targetId ??= 'Add the record’s id: a record needs both its type and its id.';
   if (id && !type) e.targetType ??= 'Add the record’s type: a record needs both its type and its id.';
   if (f.masks.length && !f.tenantId.trim() && !(type && id)) e.masks = 'Hidden fields apply to a tenant or a record: name one above.';
+  const window = windowSeconds(f);
+  if (window === undefined) e.windowAmount = `Enter a whole number of ${f.windowUnit}.`;
+  else if (window !== null && (window < MIN_WEBHOOK_DELIVERY_WINDOW_SECONDS || window > MAX_WEBHOOK_DELIVERY_WINDOW_SECONDS))
+    e.windowAmount = f.windowUnit === 'days' ? 'Choose from 1 to 3,650 days.' : 'Choose from 1 to 87,600 hours (3,650 days).';
   return e;
 }
 

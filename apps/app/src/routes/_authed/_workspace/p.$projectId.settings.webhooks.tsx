@@ -21,6 +21,7 @@ import { SettingsSection } from '@/components/settings-section';
 import { TextField } from '@/components/text-field';
 import { Timestamp } from '@/components/timestamp';
 import { DeliveryLog } from '@/components/webhooks/delivery-log';
+import { DeliveryWindowField } from '@/components/webhooks/delivery-window-field';
 import { EndpointStates } from '@/components/webhooks/endpoint-states';
 import { api } from '@/lib/api/client';
 import { ApiRequestError } from '@/lib/api/errors';
@@ -31,6 +32,7 @@ import { useOrganization } from '@/lib/organization';
 import { useCan } from '@/lib/permissions';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import {
+  deliveryWindowLine,
   disabledCopy,
   displayUrl,
   endpointPatch,
@@ -49,6 +51,7 @@ import {
   validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
+  windowSeconds,
 } from '@/lib/webhooks';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/webhooks')({
@@ -311,6 +314,8 @@ function EndpointCard({
           {' · '}
           {scopeSummary(endpoint.scope)}
         </dd>
+        <dt className="text-muted-foreground">Delivery window</dt>
+        <dd data-testid="delivery-window">{deliveryWindowLine(endpoint.deliveryWindowSeconds)}</dd>
         <dt className="text-muted-foreground">Created</dt>
         <dd>
           <Timestamp format="date" iso={endpoint.createdAt} />
@@ -429,6 +434,8 @@ function EndpointDialog({
           description: f.description.trim() || null,
           filterQuery: f.filter.trim(),
           scope,
+          // Sent explicitly (7 days unless changed), so what the form showed is what the endpoint gets.
+          deliveryWindowSeconds: windowSeconds(f) ?? null,
         });
         // The endpoint exists now, so its secret is shown whatever happened to this form meanwhile (closed, reopened).
         // It goes straight to the one-time dialog and never enters the mutation's state.
@@ -524,6 +531,7 @@ function EndpointDialog({
             purpose="Which events to send. Empty sends every event."
             value={form.filter}
           />
+          <DeliveryWindowField error={errors.windowAmount} id={`${ids}-window`} onChange={set} value={form} />
           <div className="flex min-w-0 flex-col gap-3">
             <button
               aria-controls={`${ids}-narrow`}

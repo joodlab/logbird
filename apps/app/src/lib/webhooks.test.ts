@@ -6,6 +6,7 @@ import { ApiRequestError } from './api/errors';
 import {
   attemptErrorCopy,
   attemptWhy,
+  deliveryWindowLine,
   disabledCopy,
   displayUrl,
   endpointPatch,
@@ -15,6 +16,7 @@ import {
   formFrom,
   isHoldRefusal,
   isWebhookBusy,
+  lateEventsSentence,
   lenientDeliveriesSchema,
   scopeOf,
   scopeSummary,
@@ -24,6 +26,9 @@ import {
   validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
+  windowLabel,
+  windowParts,
+  windowSeconds,
 } from './webhooks';
 
 /** Every path the console serves, as the router resolves them. */
@@ -131,6 +136,8 @@ describe('webhooks after delivery (#179)', () => {
     disabledAt: null,
     filterQuery: 'action:booking.*',
     scope: null,
+    deliveryWindowSeconds: 604_800,
+    lateEvents: { count: 0, since: '2026-10-24T10:00:00.000Z' },
     createdById: null,
     createdAt: '2026-11-22T10:00:00.000Z',
     updatedAt: '2026-11-22T10:00:00.000Z',
@@ -320,5 +327,56 @@ describe('settledResends', () => {
     expect(settledResends(watching, { ids: [], complete: true, startedAt: 200 })).toEqual(['A']);
     // The next read, started after B was queued, can settle it.
     expect(settledResends(new Map([['B', 300]]), { ids: [], complete: true, startedAt: 400 })).toEqual(['B']);
+  });
+});
+
+describe('delivery window (#152)', () => {
+  const ep = (deliveryWindowSeconds: number | null, count = 0) =>
+    ({ deliveryWindowSeconds, lateEvents: { count, since: '2026-10-25T00:00:00.000Z' } }) as WebhookEndpoint;
+  it('shows a new endpoint at the 7-day default, and an existing one at its own window or "No limit"', () => {
+    expect(windowParts(604_800)).toEqual({ windowLimited: true, windowAmount: '7', windowUnit: 'days' });
+    expect(windowParts(5400 * 2)).toEqual({ windowLimited: true, windowAmount: '3', windowUnit: 'hours' });
+    expect(windowParts(null)).toMatchObject({ windowLimited: false });
+    expect(formFrom(null)).toMatchObject({ windowLimited: true, windowAmount: '7', windowUnit: 'days' });
+  });
+  it('turns the form into seconds, null for no limit, and refuses what the contract refuses', () => {
+    expect(windowSeconds({ windowLimited: true, windowAmount: '36', windowUnit: 'hours' })).toBe(129_600);
+    expect(windowSeconds({ windowLimited: true, windowAmount: '2', windowUnit: 'days' })).toBe(172_800);
+    expect(windowSeconds({ windowLimited: false, windowAmount: 'x', windowUnit: 'days' })).toBeNull();
+    expect(windowSeconds({ windowLimited: true, windowAmount: '1.5', windowUnit: 'days' })).toBeUndefined();
+    const base = { ...formFrom(null), url: 'https://hooks.example.com/x' };
+    expect(validateWebhookForm({ ...base, windowAmount: '0' }).windowAmount).toBe('Choose from 1 to 3,650 days.');
+    expect(validateWebhookForm({ ...base, windowAmount: '3651' }).windowAmount).toBe('Choose from 1 to 3,650 days.');
+    expect(validateWebhookForm({ ...base, windowAmount: '3650' }).windowAmount).toBeUndefined();
+    expect(validateWebhookForm({ ...base, windowUnit: 'hours', windowAmount: '87601' }).windowAmount).toMatch(/87,600 hours/);
+    expect(validateWebhookForm({ ...base, windowAmount: 'soon' }).windowAmount).toBe('Enter a whole number of days.');
+    expect(validateWebhookForm({ ...base, windowLimited: false, windowAmount: '' }).windowAmount).toBeUndefined();
+  });
+  it('sends the window only when it changed, and null to remove the limit', () => {
+    const target = {
+      ...ep(604_800),
+      id: 'w',
+      url: 'https://hooks.example.com/x',
+      description: null,
+      enabled: true,
+      filterQuery: '',
+      scope: null,
+    } as WebhookEndpoint;
+    const f = formFrom(target);
+    expect(endpointPatch(target, f, scopeOf(f))).not.toHaveProperty('deliveryWindowSeconds');
+    expect(endpointPatch(target, { ...f, windowAmount: '14' }, scopeOf(f))).toMatchObject({ deliveryWindowSeconds: 1_209_600 });
+    expect(endpointPatch(target, { ...f, windowLimited: false }, scopeOf(f))).toMatchObject({ deliveryWindowSeconds: null });
+  });
+  it('says how many events came too late, with the approved meaning, and nothing when there is no window', () => {
+    expect(lateEventsSentence(ep(604_800, 0), 'Oct 25, 2026')).toBe(
+      'No event in this project has arrived more than 7 days after it happened since Oct 25, 2026.',
+    );
+    expect(lateEventsSentence(ep(604_800, 1204), 'Oct 25, 2026')).toBe(
+      '1,204 events in this project arrived more than 7 days after they happened since Oct 25, 2026, so this endpoint did not send them. The count is before this endpoint’s filter and scope.',
+    );
+    expect(lateEventsSentence(ep(3600, 1), 'Oct 25, 2026')).toMatch(/^1 event in this project arrived more than 1 hour after it happened/);
+    expect(lateEventsSentence(ep(null, 5), 'Oct 25, 2026')).toBeNull();
+    expect(windowLabel(null)).toBe('No limit');
+    expect(deliveryWindowLine(null)).toBe('No limit: every matching event is sent');
   });
 });

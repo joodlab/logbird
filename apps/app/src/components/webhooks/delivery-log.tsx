@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { keys as queryKeys } from '@/lib/api/queries';
+import { formatDate } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
 import {
   ATTEMPT_STATUS_LABEL,
@@ -21,6 +22,7 @@ import {
   DELIVERY_STATUS_LABEL,
   displayUrl,
   isHoldRefusal,
+  lateEventsSentence,
   settledResends,
   webhookErrorCopy,
   webhookRetry,
@@ -71,6 +73,7 @@ export function DeliveryLog({
     refetchInterval: (query) => (open && query.state.data?.pages.some((p) => p.data.some((d) => d.status === 'pending')) ? 3000 : false),
   });
   const rows = log.data?.pages.flatMap((p) => p.data) ?? [];
+  const lateSentence = lateEventsSentence(endpoint, formatDate(endpoint.lateEvents.since));
   // Resends still on their way. A resent delivery keeps its id and place, so it can sit below the loaded pages, where
   // the log's own polling cannot see it: while any is outstanding, the endpoint's pending deliveries are read every few
   // seconds, and once a resent one is no longer pending the log reloads to show how it ended.
@@ -128,6 +131,12 @@ export function DeliveryLog({
               </SegmentedControlItem>
             ))}
           </SegmentedControl>
+          {/* How many events in the project came too late for this endpoint's window (#152). */}
+          {lateSentence ? (
+            <p className="text-muted-foreground text-sm" data-testid="late-events">
+              {lateSentence}
+            </p>
+          ) : null}
           {sendBlocked ? (
             <p className="text-muted-foreground text-sm" data-testid="send-blocked">
               {sendBlocked}
