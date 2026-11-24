@@ -346,12 +346,15 @@ describe('content modules', () => {
     expect(closedPrivate.hero.lead).toContain('once the source opens, or join the waitlist for Logbird Cloud.');
     expect(closedPrivate.hero.signIn).toBeUndefined();
     expect(closedPrivate.hero.github).toBeUndefined();
-    expect(closedPrivate.developers.otherStacks.link).toBeUndefined();
+    // The .NET line is the same in every state: the packages are on NuGet whether or not the repository is public.
+    expect(closedPrivate.developers.otherStacks.text).toContain('`dotnet add package Logbird`');
+    expect(closedPrivate.developers.otherStacks.text).toBe(
+      homeContent(state({ repoPublic: true, cloudOpen: true, githubUrl: 'https://github.example.test/acme/logbird/' })).developers.otherStacks.text,
+    );
     expect(openPublic.hero.primaryCta.label).toBe('Request access');
     expect(openPublic.hero.lead).toMatch(/run it on your own servers, or ask for early access to Logbird Cloud\.$/);
     expect(openPublic.hero.signIn?.href).toBe('https://app.example.test/login');
     expect(openPublic.hero.github?.href).toBe('https://github.example.test/acme/logbird/');
-    expect(openPublic.developers.otherStacks.link?.href).toBe('https://github.example.test/acme/logbird/tree/master/sdks/dotnet');
     for (const repoPublic of [true, false]) {
       for (const cloudOpen of [true, false]) {
         const { description, fullTitle } = homeMetaFor(state({ repoPublic, cloudOpen }));

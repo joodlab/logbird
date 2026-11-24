@@ -37,6 +37,10 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   Small print: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite
   or esbuild." While the repository is private: "The packages aren't on npm yet."
   <!-- source: packages/sdk/README.md (source install); npm registry 404 for @logbird/sdk on 2026-11-22 -->
+- **code tabs:** TypeScript (the sample below) and .NET (`dotnetQuickstart` in `apps/web/src/content/developers.ts`: the
+  same event with the `Logbird` package, its install command in a comment, no version number; compiled against
+  `sdks/dotnet` when it changes). Live only after the maintainer verified the packages on nuget.org.
+  <!-- source: sdks/dotnet/README.md § Install, § Record events -->
 - **code sample:**
 
   ```ts

@@ -50,7 +50,8 @@ From source (not on npm yet)
 pre| git clone --branch v0.2.1 https://github.com/example-org/logbird.git ../logbird
 pre| pnpm -C ../logbird install
 pre| pnpm add @logbird/sdk@link:../logbird/packages/sdk
-server.ts
+TypeScript
+.NET
 pre| import { Logbird } from '@logbird/sdk';
 pre|
 pre| const client = new Logbird({
@@ -302,6 +303,8 @@ controls:
 [shell: header — see _shell.txt]
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
+button type="button" text="TypeScript"
+button type="button" text=".NET"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"

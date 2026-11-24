@@ -32,6 +32,30 @@ await client.flush().catch((error) => console.error('audit delivery pending', er
 // On exit: stop accepting events and drain the queue. Can reject like flush().
 await client.shutdown().catch((error) => console.error('audit events left undelivered', error));`;
 
+/**
+ * The same event with the .NET package (sdks/dotnet/README.md § Install, § Record events). No version: `dotnet add
+ * package` takes the one nuget.org lists. Compiled against sdks/dotnet before it changes (see the PR that adds it).
+ */
+const dotnetQuickstart = `// dotnet add package Logbird   (ASP.NET Core: dotnet add package Logbird.AspNetCore)
+using Logbird;
+
+await using var audit = new LogbirdClient(new LogbirdOptions
+{
+    Endpoint = new Uri("https://audit.example.com"), // your Logbird origin, without /v1/events
+    IngestKey = Environment.GetEnvironmentVariable("LOGBIRD_INGEST_KEY"), // lb_ingest_...
+    Environment = "production",
+});
+
+// After the change is committed:
+audit.Track(new AuditEvent("booking.cancelled")
+{
+    Actor = AuditActor.User("usr_42", name: "Lina Haddad"),
+    Tenant = new AuditTenant("biz_7") { Name = "Azure Hotels" },
+    Targets = { new AuditTarget("booking", "bk_1042") { Name = "Booking #1042" } },
+    Changes = { new AuditChange("status", "confirmed", "cancelled") },
+});
+// Disposing the client (await using) sends what is still queued.`;
+
 const http = `curl https://audit.example.com/v1/events \\
   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \\
   -H 'Content-Type: application/json' \\
@@ -148,7 +172,7 @@ const limits: [string, string][] = [
  * and packages/integrations READMEs. Inline marks: `code` and **bold** (components/marketing/rich.tsx).
  */
 export const developers = {
-  samples: { sourceInstall, quickstart, http, smallest, worked, hono, workers, read },
+  samples: { sourceInstall, quickstart, dotnetQuickstart, http, smallest, worked, hono, workers, read },
   hero: {
     eyebrow: 'Developers',
     title: 'Add an audit log in an afternoon. Keep it for years.',
@@ -184,7 +208,8 @@ export const developers = {
     limit:
       '**Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.',
     sourceInstallTitle: 'From source (not on npm yet)',
-    quickstartTitle: 'server.ts',
+    /** The quickstart's two tabs: the TypeScript client and the .NET package (on NuGet). */
+    tabs: { typescript: 'TypeScript', dotnet: '.NET' },
     npmNote: byRepo(SITE, {
       public: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild.",
       private: "The packages aren't on npm yet.",

@@ -46,7 +46,8 @@ flush() and shutdown() can reject, for example when retryable delivery (network,
 Call shutdown() from your host's own exit hook. The SDK installs no process handlers.
 Keep ingest keys on the server. Never ship one in a browser bundle.
 Redaction: beforeSend: redact() deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with [redacted] before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.
-server.ts
+TypeScript
+.NET
 pre| import { Logbird } from '@logbird/sdk';
 pre|
 pre| const client = new Logbird({
@@ -297,6 +298,8 @@ Self-host when the source opens → /contact?interest=self-host
 controls:
 [shell: header — see _shell.txt]
 button type="button" aria-label="Copy code"
+button type="button" text="TypeScript"
+button type="button" text=".NET"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
