@@ -198,3 +198,30 @@ it('shows the late count only from a read made since the log opened, and says wh
   expect(document.querySelector('[data-testid="late-events-error"]')).toBeNull();
   expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Since .+, Logbird has recorded no event in this project/);
 });
+
+it('keeps "starts counting" tied to its read, and reads again once counting has started with the log open', async () => {
+  // Counting starts 300 ms after the first read; the read after that has one event recorded.
+  const startsAt = new Date(Date.now() + 300).toISOString();
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 0, since: startsAt } }));
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 1, since: startsAt } }));
+  await open(null);
+  const sentence = () => document.querySelector('[data-testid="late-events"]')?.textContent;
+  expect(sentence()).toMatch(/^Logbird starts counting events that arrive more than 7 days late at /);
+  const reads = get.mock.calls.length;
+  // Past the start but before the re-read: a re-render (a filter click) must not turn the old read into "no event".
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  });
+  const failed = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Failed');
+  await act(async () => {
+    failed?.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(sentence()).toMatch(/^Logbird starts counting/);
+  // After the margin the endpoint is read again, and the count shows.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  });
+  expect(get.mock.calls.length).toBe(reads + 1);
+  expect(sentence()).toMatch(/^Since .+, Logbird has recorded 1 event in this project arriving more than 7 days after it happened\./);
+}, 10_000);

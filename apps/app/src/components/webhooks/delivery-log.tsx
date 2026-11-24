@@ -35,6 +35,8 @@ import {
  * that a full scan every few seconds would cost more than the log reloading a little later.
  */
 const PENDING_WATCH_PAGES = 5;
+/** How long after the late count starts the open log reads the endpoint again, for a browser clock behind the server's. */
+const COUNT_START_MARGIN_MS = 2000;
 
 type Delivery = Awaited<ReturnType<typeof api.webhooks.deliveries>>['data'][number];
 const FILTERS = [
@@ -87,7 +89,18 @@ export function DeliveryLog({
   const [opening, setOpening] = useState(() => ({ open, at: Date.now() }));
   if (opening.open !== open) setOpening({ open, at: Date.now() });
   const current = fresh.data && !fresh.isError && fresh.dataUpdatedAt >= opening.at ? fresh.data : null;
-  const lateSentence = current ? lateEventsSentence(current, lateSince(current.lateEvents.since)) : null;
+  // Judged at the time of the read that produced it, never at render time: a read made before counting began says when
+  // it starts, even if the log is still open after that.
+  const lateSentence = current ? lateEventsSentence(current, lateSince(current.lateEvents.since), new Date(fresh.dataUpdatedAt)) : null;
+  // Counting starts later (just after a window change): with the log still open then, read the endpoint again so the
+  // sentence becomes a count. The margin allows for the browser's clock being a little behind the server's.
+  const startsAt = current ? Date.parse(current.lateEvents.since) : Number.NaN;
+  const { refetch: refetchFresh } = fresh;
+  useEffect(() => {
+    if (!open || !(startsAt > fresh.dataUpdatedAt)) return;
+    const timer = setTimeout(() => refetchFresh(), Math.max(startsAt - Date.now(), 0) + COUNT_START_MARGIN_MS);
+    return () => clearTimeout(timer);
+  }, [open, startsAt, fresh.dataUpdatedAt, refetchFresh]);
   // Resends still on their way. A resent delivery keeps its id and place, so it can sit below the loaded pages, where
   // the log's own polling cannot see it: while any is outstanding, the endpoint's pending deliveries are read every few
   // seconds, and once a resent one is no longer pending the log reloads to show how it ended.
