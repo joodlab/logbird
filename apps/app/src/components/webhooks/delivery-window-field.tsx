@@ -58,6 +58,7 @@ export function DeliveryWindowField({
             value={value.windowAmount}
           />
           <NativeSelect
+            aria-describedby={describedBy(id)}
             aria-label="Delivery window unit"
             id={`${id}-unit`}
             onBlur={blur}

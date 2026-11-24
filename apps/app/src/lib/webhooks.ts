@@ -142,7 +142,7 @@ export function windowSeconds(f: Pick<Form, 'windowLimited' | 'windowAmount' | '
 }
 /** The endpoint card's line: what the window means, in a few words. */
 export function deliveryWindowLine(seconds: number | null): string {
-  return seconds === null ? 'No limit: every matching event is sent' : `Events that arrive within ${windowLabel(seconds)} of happening`;
+  return seconds === null ? 'No limit on arrival time' : `Events that arrive within ${windowLabel(seconds)} of happening`;
 }
 
 /**
@@ -153,8 +153,10 @@ export function lateEventsSentence(e: Pick<WebhookEndpoint, 'deliveryWindowSecon
   if (e.deliveryWindowSeconds === null) return null;
   const window = windowLabel(e.deliveryWindowSeconds);
   const { count } = e.lateEvents;
-  if (count === 0) return `No event in this project has arrived more than ${window} after it happened since ${since}.`;
-  return `${count.toLocaleString('en-US')} ${count === 1 ? 'event' : 'events'} in this project arrived more than ${window} after ${count === 1 ? 'it' : 'they'} happened since ${since}, so this endpoint did not send ${count === 1 ? 'it' : 'them'}. The count is before this endpoint’s filter and scope.`;
+  // Project-wide and before this endpoint's filter and scope (the approved meaning): it says how many arrived late, not
+  // which of them this endpoint would otherwise have sent.
+  if (count === 0) return `Since ${since}, no event in this project has arrived more than ${window} after it happened.`;
+  return `Since ${since}, ${count.toLocaleString('en-US')} ${count === 1 ? 'event' : 'events'} in this project arrived more than ${window} after ${count === 1 ? 'it' : 'they'} happened. The count covers the whole project, before this endpoint’s filter and scope.`;
 }
 
 /** "7 days", "36 hours", "1 day", or "No limit". */
@@ -232,7 +234,7 @@ export function validateWebhookForm(f: Form): FormErrors {
 export function fieldErrorsFromValidation(error: unknown): FormErrors {
   if (!(error instanceof ApiRequestError) || error.code !== 'validation_error' || !Array.isArray(error.details)) return {};
   const out: FormErrors = {};
-  const map: Record<string, keyof Form> = { url: 'url', description: 'description', filterQuery: 'filter' };
+  const map: Record<string, keyof Form> = { url: 'url', description: 'description', filterQuery: 'filter', deliveryWindowSeconds: 'windowAmount' };
   for (const issue of error.details as { path?: unknown[]; message?: string }[]) {
     const [top, sub, leaf] = issue.path ?? [];
     const field =

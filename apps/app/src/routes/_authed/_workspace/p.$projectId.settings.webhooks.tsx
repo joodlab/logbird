@@ -383,6 +383,18 @@ function EndpointCard({
 /** A save from an earlier opening of the dialog: dropped, never retried. */
 class SaveAbandoned extends Error {}
 
+/** The dialog's fields in reading order, and each one's element id suffix, for focusing the first invalid one. */
+const FIELD_ORDER = ['url', 'description', 'filter', 'windowAmount', 'tenantId', 'targetType', 'targetId'] as const;
+const FIELD_IDS: Record<(typeof FIELD_ORDER)[number], string> = {
+  url: 'url',
+  description: 'description',
+  filter: 'filter',
+  windowAmount: 'window-amount',
+  tenantId: 'tenant',
+  targetType: 'target-type',
+  targetId: 'target-id',
+};
+
 function EndpointDialog({
   projectId,
   endpoint,
@@ -472,6 +484,9 @@ function EndpointDialog({
     setErrors(next);
     if (Object.keys(next).length) {
       if (next.tenantId || next.targetType || next.targetId || next.masks) setNarrowOpen(true);
+      // Move focus to the first field that needs attention, so a keyboard or screen-reader user hears its error.
+      const first = FIELD_ORDER.find((field) => next[field]);
+      if (first) requestAnimationFrame(() => document.getElementById(`${ids}-${FIELD_IDS[first]}`)?.focus());
       return;
     }
     save.mutate({ f: form, target: endpoint, at: session.current });
@@ -486,7 +501,7 @@ function EndpointDialog({
           <DialogTitle>{endpoint ? 'Edit endpoint' : 'Add a webhook endpoint'}</DialogTitle>
           <DialogDescription>
             {endpoint
-              ? 'Changes apply to every delivery attempt that starts after you save, retries included.'
+              ? 'Changes apply to every delivery attempt that starts after you save, retries included. The delivery window is the exception: it applies when events are found, so deliveries already queued still go out.'
               : 'Logbird POSTs each new matching event to this URL, signed with a secret you see once.'}
           </DialogDescription>
         </DialogHeader>
@@ -531,7 +546,16 @@ function EndpointDialog({
             purpose="Which events to send. Empty sends every event."
             value={form.filter}
           />
-          <DeliveryWindowField error={errors.windowAmount} id={`${ids}-window`} onChange={set} value={form} />
+          <DeliveryWindowField
+            error={errors.windowAmount}
+            id={`${ids}-window`}
+            onChange={(patch) => {
+              set(patch);
+              // A new choice answers the old error: "No limit" or a new amount must not keep "Choose from 1 to 3,650 days".
+              setErrors((e) => ({ ...e, windowAmount: undefined }));
+            }}
+            value={form}
+          />
           <div className="flex min-w-0 flex-col gap-3">
             <button
               aria-controls={`${ids}-narrow`}

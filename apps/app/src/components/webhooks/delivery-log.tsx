@@ -14,8 +14,9 @@ import { toast } from 'sonner';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { keys as queryKeys } from '@/lib/api/queries';
-import { formatDate } from '@/lib/format';
+import { displayTimeZone, formatDate, formatTime } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
+import { shortZoneLabel } from '@/lib/time-zone';
 import {
   ATTEMPT_STATUS_LABEL,
   attemptWhy,
@@ -73,7 +74,16 @@ export function DeliveryLog({
     refetchInterval: (query) => (open && query.state.data?.pages.some((p) => p.data.some((d) => d.status === 'pending')) ? 3000 : false),
   });
   const rows = log.data?.pages.flatMap((p) => p.data) ?? [];
-  const lateSentence = lateEventsSentence(endpoint, formatDate(endpoint.lateEvents.since));
+  // The endpoint as it is now, read when the log opens: its window or late count may have changed in another session
+  // since the settings list was loaded. Until it answers, the list's copy stands in.
+  const fresh = useQuery({
+    queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'detail'],
+    queryFn: ({ signal }) => api.webhooks.get(projectId, endpoint.id, signal),
+    enabled: open,
+    staleTime: 0,
+  });
+  const now = fresh.data ?? endpoint;
+  const lateSentence = lateEventsSentence(now, lateSince(now.lateEvents.since));
   // Resends still on their way. A resent delivery keeps its id and place, so it can sit below the loaded pages, where
   // the log's own polling cannot see it: while any is outstanding, the endpoint's pending deliveries are read every few
   // seconds, and once a resent one is no longer pending the log reloads to show how it ended.
@@ -300,4 +310,10 @@ function DeliveryRow({
       </ol>
     </li>
   );
+}
+
+/** When the late count started, to the minute and with its zone: two window changes the same afternoon differ. */
+function lateSince(iso: string): string {
+  const zone = displayTimeZone();
+  return `${formatDate(iso)}, ${formatTime(iso)} ${zone === 'UTC' ? 'UTC' : shortZoneLabel(zone)}`;
 }

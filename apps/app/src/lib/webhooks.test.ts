@@ -369,14 +369,25 @@ describe('delivery window (#152)', () => {
   });
   it('says how many events came too late, with the approved meaning, and nothing when there is no window', () => {
     expect(lateEventsSentence(ep(604_800, 0), 'Oct 25, 2026')).toBe(
-      'No event in this project has arrived more than 7 days after it happened since Oct 25, 2026.',
+      'Since Oct 25, 2026, no event in this project has arrived more than 7 days after it happened.',
     );
     expect(lateEventsSentence(ep(604_800, 1204), 'Oct 25, 2026')).toBe(
-      '1,204 events in this project arrived more than 7 days after they happened since Oct 25, 2026, so this endpoint did not send them. The count is before this endpoint’s filter and scope.',
+      'Since Oct 25, 2026, 1,204 events in this project arrived more than 7 days after they happened. The count covers the whole project, before this endpoint’s filter and scope.',
     );
-    expect(lateEventsSentence(ep(3600, 1), 'Oct 25, 2026')).toMatch(/^1 event in this project arrived more than 1 hour after it happened/);
+    // Never claims a delivery outcome: the count is project-wide, before filter and scope.
+    expect(lateEventsSentence(ep(604_800, 1204), 'Oct 25, 2026')).not.toMatch(/did not send/);
+    expect(lateEventsSentence(ep(3600, 1), 'Oct 25, 2026')).toMatch(
+      /^Since Oct 25, 2026, 1 event in this project arrived more than 1 hour after it happened/,
+    );
     expect(lateEventsSentence(ep(null, 5), 'Oct 25, 2026')).toBeNull();
     expect(windowLabel(null)).toBe('No limit');
-    expect(deliveryWindowLine(null)).toBe('No limit: every matching event is sent');
+    expect(deliveryWindowLine(null)).toBe('No limit on arrival time');
+  });
+});
+
+describe('delivery window errors from the server (#152)', () => {
+  it('puts a 422 on deliveryWindowSeconds beside the window field', () => {
+    const error = new ApiRequestError(422, 'validation_error', 'Invalid', [{ path: ['deliveryWindowSeconds'], message: 'Too large' }]);
+    expect(fieldErrorsFromValidation(error)).toEqual({ windowAmount: 'Too large' });
   });
 });

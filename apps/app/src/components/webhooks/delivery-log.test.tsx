@@ -25,7 +25,7 @@ const { resend, failedPing, deliveries, pendingIds } = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/api/client', () => ({
-  api: { webhooks: { deliveries, resend } },
+  api: { webhooks: { deliveries, resend, get: async () => endpoint } },
 }));
 
 import { DeliveryLog } from './delivery-log';
@@ -176,6 +176,6 @@ it('settles a resend from a pending list longer than one page, reading every pag
 it('says how many events in the project came too late for the window', async () => {
   await open(null);
   expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(
-    /^No event in this project has arrived more than 7 days after it happened since /,
+    /^Since .+, no event in this project has arrived more than 7 days after it happened\.$/,
   );
 });
