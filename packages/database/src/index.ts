@@ -7,6 +7,7 @@ export * from './generated/client';
 export * from './ingest-receipts';
 export * from './membership-roles';
 export * from './receipt-index-maintenance';
+export * from './server-heartbeat';
 
 const databaseUrl = keys().DATABASE_URL;
 const poolLimit = Number(new URL(databaseUrl).searchParams.get('connection_limit') ?? 10);

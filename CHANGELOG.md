@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Upgrade notes
+
+- **Each API server now records a heartbeat** (new table `ServerHeartbeat`, additive migration): its instance id, version and capabilities, every 30 seconds, stamped by the database clock. A server removes its row when it stops cleanly, and rows not seen for a day are pruned. Nothing reads it in this release. A later release runs the hourly retention without holding the project lock (#296); it will rely on these rows to confirm that every server supports that, so **upgrade to that release from 0.3 or later**, not straight from 0.2.
+
 ## 0.2.1
 
 ### Highlights

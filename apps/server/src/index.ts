@@ -1,5 +1,6 @@
+import { createRequire } from 'node:module';
 import { serve } from '@hono/node-server';
-import { closeProjectLocks, prisma } from '@logbird/database';
+import { closeProjectLocks, prisma, startServerHeartbeat } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
 import { backfillAuthEmailHashes, flushFailedSignIns } from './auth-failures';
@@ -26,11 +27,14 @@ const auditDrainer = startAuditDrainer(ingest, async () => {
   await flushFailedSignIns();
 });
 const maintenanceReconciler = startDestructiveMaintenanceReconciler();
+// This server's version and capabilities, for the release that runs retention without the ingest lock (#296).
+const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
+const heartbeat = startServerHeartbeat({ version });
 let stopping = false;
 function shutdown() {
   if (stopping) return;
   stopping = true;
-  const drained = Promise.all([auditDrainer.stop(), maintenanceReconciler.stop()]);
+  const drained = Promise.all([auditDrainer.stop(), maintenanceReconciler.stop(), heartbeat.stop()]);
   const deadline = setTimeout(() => {
     if ('closeAllConnections' in server) server.closeAllConnections();
     process.exit(1);
