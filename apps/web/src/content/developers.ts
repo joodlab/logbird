@@ -201,8 +201,10 @@ export const developers = {
     installTitle: 'Install from npm',
     quickstartTitle: 'server.ts',
     npmNote: byRepo(SITE, {
-      public: "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet: until they are, install them from a Logbird checkout, as their READMEs describe.",
-      private: "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet.",
+      public:
+        "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet: until they are, install them from a Logbird checkout, as their READMEs describe.",
+      private:
+        "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet.",
     }),
   },
   http: {
