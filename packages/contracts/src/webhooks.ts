@@ -115,7 +115,8 @@ export const webhookEndpointSchema = z.object({
     .describe(
       "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are " +
         "applied. Counted from `since`: the later of the endpoint's last window change and 30 days ago (the delivery log " +
-        'retention). 0 when the window is null.',
+        'retention), by arrival hour from the hour that contains `since`. It counts arrivals, so it includes late events ' +
+        'since removed by retention or deletion, and can exceed what a search finds. 0 when the window is null.',
     ),
   createdById: z.string().nullable(),
   createdAt: z.iso.datetime(),

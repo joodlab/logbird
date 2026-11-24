@@ -44,6 +44,7 @@ import { requireProjectAccess, requireSession } from './middlewares';
 import { requireRole } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
 import type { AppEnv } from './types';
+import { lateEvents as countLateEvents, type Late, type LateInput, lateEventsSince } from './webhook-late-events';
 
 const base = '/projects/:projectId/webhooks';
 const secretKey = webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY);
@@ -75,31 +76,9 @@ const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
     },
   });
 const updateWebhookDoc = webhookUrlDoc('Update webhook endpoint', webhookEndpointSchema);
-/** The late-event count starts at the later of the endpoint's last window change and the delivery-log retention. */
-const lateEventsSince = (endpoint: Pick<WebhookEndpoint, 'deliveryWindowChangedAt'>, now: Date) =>
-  new Date(Math.max(+endpoint.deliveryWindowChangedAt, +now - WEBHOOK_LOG_RETENTION_MS));
-type Late = { count: number; since: Date };
-type LateInput = Pick<WebhookEndpoint, 'id' | 'projectId' | 'deliveryWindowSeconds' | 'deliveryWindowChangedAt'>;
-/**
- * Late-event counts per endpoint from the lateness rollup (#152), one ClickHouse query per project on the internal client.
- * An endpoint without a window counts 0.
- */
-async function lateEvents(endpoints: LateInput[], now: Date): Promise<Map<string, Late>> {
-  const late = new Map(endpoints.map((endpoint) => [endpoint.id, { count: 0, since: lateEventsSince(endpoint, now) }]));
-  const windowed = endpoints.filter((endpoint) => endpoint.deliveryWindowSeconds !== null);
-  const projectId = windowed[0]?.projectId;
-  if (!projectId) return late;
-  const counts = await lateEventCounts(
-    clickhouse,
-    projectId,
-    windowed.map((endpoint) => ({ since: lateEventsSince(endpoint, now), windowSeconds: endpoint.deliveryWindowSeconds ?? 0 })),
-  );
-  for (const [index, endpoint] of windowed.entries()) {
-    const entry = late.get(endpoint.id);
-    if (entry) entry.count = counts[index] ?? 0;
-  }
-  return late;
-}
+/** Late-event counts from the lateness rollup (#152), on the internal ClickHouse client, one query per project. */
+const lateEvents = (endpoints: readonly LateInput[], now: Date) =>
+  countLateEvents(endpoints, now, (projectId, windows) => lateEventCounts(clickhouse, projectId, windows));
 const lateFor = (late: Map<string, Late>, endpoint: LateInput, now: Date) =>
   late.get(endpoint.id) ?? { count: 0, since: lateEventsSince(endpoint, now) };
 function serialize(endpoint: WebhookEndpoint, late: Late, activeSecretCount = 0) {
