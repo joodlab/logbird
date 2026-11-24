@@ -10121,6 +10121,20 @@
                             "description": "Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.",
                             "type": "string"
                           },
+                          "deliveryWindowSeconds": {
+                            "anyOf": [
+                              {
+                                "maximum": 315360000,
+                                "minimum": 3600,
+                                "multipleOf": 3600,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Deliver an event only if it arrived no later than this many seconds after it occurred (receivedAt − occurredAt). A whole number of hours, from 1 hour to 3,650 days; null means no limit. Later events stay stored and searchable but are not delivered. Resends and test pings ignore the window. A change applies to events discovered after the save."
+                          },
                           "description": {
                             "type": [
                               "string",
@@ -10170,6 +10184,26 @@
                           },
                           "id": {
                             "type": "string"
+                          },
+                          "lateEvents": {
+                            "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied. Counted from `since`: the later of the endpoint's last window change and 30 days ago (the delivery log retention). 0 when the window is null.",
+                            "properties": {
+                              "count": {
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "since": {
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "count",
+                              "since"
+                            ],
+                            "type": "object"
                           },
                           "projectId": {
                             "type": "string"
@@ -10250,6 +10284,8 @@
                           "disabledAt",
                           "filterQuery",
                           "scope",
+                          "deliveryWindowSeconds",
+                          "lateEvents",
                           "createdById",
                           "createdAt",
                           "updatedAt"
@@ -10407,6 +10443,20 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "deliveryWindowSeconds": {
+                    "anyOf": [
+                      {
+                        "maximum": 315360000,
+                        "minimum": 3600,
+                        "multipleOf": 3600,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Deliver an event only if it arrived no later than this many seconds after it occurred (receivedAt − occurredAt). A whole number of hours, from 1 hour to 3,650 days; null means no limit. Later events stay stored and searchable but are not delivered. Resends and test pings ignore the window. A change applies to events discovered after the save."
+                  },
                   "description": {
                     "anyOf": [
                       {
@@ -10525,6 +10575,20 @@
                           "description": "Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.",
                           "type": "string"
                         },
+                        "deliveryWindowSeconds": {
+                          "anyOf": [
+                            {
+                              "maximum": 315360000,
+                              "minimum": 3600,
+                              "multipleOf": 3600,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Deliver an event only if it arrived no later than this many seconds after it occurred (receivedAt − occurredAt). A whole number of hours, from 1 hour to 3,650 days; null means no limit. Later events stay stored and searchable but are not delivered. Resends and test pings ignore the window. A change applies to events discovered after the save."
+                        },
                         "description": {
                           "type": [
                             "string",
@@ -10574,6 +10638,26 @@
                         },
                         "id": {
                           "type": "string"
+                        },
+                        "lateEvents": {
+                          "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied. Counted from `since`: the later of the endpoint's last window change and 30 days ago (the delivery log retention). 0 when the window is null.",
+                          "properties": {
+                            "count": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "since": {
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "count",
+                            "since"
+                          ],
+                          "type": "object"
                         },
                         "projectId": {
                           "type": "string"
@@ -10654,6 +10738,8 @@
                         "disabledAt",
                         "filterQuery",
                         "scope",
+                        "deliveryWindowSeconds",
+                        "lateEvents",
                         "createdById",
                         "createdAt",
                         "updatedAt"
@@ -11123,6 +11209,20 @@
                       "description": "Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.",
                       "type": "string"
                     },
+                    "deliveryWindowSeconds": {
+                      "anyOf": [
+                        {
+                          "maximum": 315360000,
+                          "minimum": 3600,
+                          "multipleOf": 3600,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Deliver an event only if it arrived no later than this many seconds after it occurred (receivedAt − occurredAt). A whole number of hours, from 1 hour to 3,650 days; null means no limit. Later events stay stored and searchable but are not delivered. Resends and test pings ignore the window. A change applies to events discovered after the save."
+                    },
                     "description": {
                       "type": [
                         "string",
@@ -11172,6 +11272,26 @@
                     },
                     "id": {
                       "type": "string"
+                    },
+                    "lateEvents": {
+                      "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied. Counted from `since`: the later of the endpoint's last window change and 30 days ago (the delivery log retention). 0 when the window is null.",
+                      "properties": {
+                        "count": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "since": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "since"
+                      ],
+                      "type": "object"
                     },
                     "projectId": {
                       "type": "string"
@@ -11252,6 +11372,8 @@
                     "disabledAt",
                     "filterQuery",
                     "scope",
+                    "deliveryWindowSeconds",
+                    "lateEvents",
                     "createdById",
                     "createdAt",
                     "updatedAt"
@@ -11409,6 +11531,20 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "deliveryWindowSeconds": {
+                    "anyOf": [
+                      {
+                        "maximum": 315360000,
+                        "minimum": 3600,
+                        "multipleOf": 3600,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Deliver an event only if it arrived no later than this many seconds after it occurred (receivedAt − occurredAt). A whole number of hours, from 1 hour to 3,650 days; null means no limit. Later events stay stored and searchable but are not delivered. Resends and test pings ignore the window. A change applies to events discovered after the save."
+                  },
                   "description": {
                     "anyOf": [
                       {
@@ -11522,6 +11658,20 @@
                       "description": "Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.",
                       "type": "string"
                     },
+                    "deliveryWindowSeconds": {
+                      "anyOf": [
+                        {
+                          "maximum": 315360000,
+                          "minimum": 3600,
+                          "multipleOf": 3600,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Deliver an event only if it arrived no later than this many seconds after it occurred (receivedAt − occurredAt). A whole number of hours, from 1 hour to 3,650 days; null means no limit. Later events stay stored and searchable but are not delivered. Resends and test pings ignore the window. A change applies to events discovered after the save."
+                    },
                     "description": {
                       "type": [
                         "string",
@@ -11571,6 +11721,26 @@
                     },
                     "id": {
                       "type": "string"
+                    },
+                    "lateEvents": {
+                      "description": "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are applied. Counted from `since`: the later of the endpoint's last window change and 30 days ago (the delivery log retention). 0 when the window is null.",
+                      "properties": {
+                        "count": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "since": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "since"
+                      ],
+                      "type": "object"
                     },
                     "projectId": {
                       "type": "string"
@@ -11651,6 +11821,8 @@
                     "disabledAt",
                     "filterQuery",
                     "scope",
+                    "deliveryWindowSeconds",
+                    "lateEvents",
                     "createdById",
                     "createdAt",
                     "updatedAt"
