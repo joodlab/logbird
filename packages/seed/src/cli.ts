@@ -2,10 +2,9 @@ import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import {
   createClickHouseClient,
-  eventFingerprint,
+  type EventRow,
   facets,
   histogram,
-  INGEST_CLAIM_LEASE_MS,
   insertEvents,
   listEntities,
   normalizeEvent,
@@ -13,8 +12,7 @@ import {
   purgeProject,
   searchEvents,
 } from '@logbird/clickhouse';
-import type { Prisma } from '@logbird/database';
-import { type EventInput, Logbird } from '@logbird/sdk';
+import { Logbird } from '@logbird/sdk';
 import { generateEvents, SEED_PROFILES, type SeedProfile } from './index';
 
 const { values } = parseArgs({
@@ -47,72 +45,51 @@ if (!Number.isInteger(Number(values.seed))) throw new Error('Invalid seed');
 if (values.reset && !values['project-id']) throw new Error('--reset requires --project-id');
 if (!['api', 'direct'].includes(values.sink)) throw new Error('sink must be api or direct');
 if (values.sink === 'api' && !values.key) throw new Error('--key is required for the api sink');
-const database = values.reset || values.sink === 'direct' ? await import('@logbird/database') : undefined;
 
-async function closeDatabase() {
-  if (database) await Promise.all([database.closeProjectLocks(), database.prisma.$disconnect()]);
-}
-
-/**
- * Writes that bypass the API (`--reset` and `--sink direct`) are fenced like the server's own maintenance (#296):
- * under the exclusive project lock, after canceling a background retention run staged for the project (it would not
- * count these rows), with `received_at` from the database clock. Without Postgres there is no fence, so they refuse
- * instead of writing unfenced.
- */
-async function fenced<T>(projectId: string, reason: string, work: (db: Prisma.TransactionClient) => Promise<T>) {
-  if (!database) throw new Error('Postgres is required for direct seeding.');
-  const { prisma, withProjectLock, cancelStagedRetention } = database;
+async function purgeSeedProject(projectId: string) {
+  const ch = createClickHouseClient();
   try {
-    await prisma.$queryRaw`SELECT 1`;
-  } catch {
-    throw new Error(
-      'Direct writes (--sink direct, --reset) need Postgres (DATABASE_URL) to fence them against retention and ingest; refusing to write unfenced.',
-    );
+    await purgeProject(ch, projectId);
+  } finally {
+    await ch.close();
   }
-  return withProjectLock(
-    projectId,
-    async (db) => {
-      await cancelStagedRetention(projectId, db, reason);
-      return work(db);
-    },
-    { waitMs: 60_000 },
-  );
 }
-if (values.reset && database) {
-  // In API mode the supplied project ID must belong to the ingest key. Purging
-  // uses local ClickHouse credentials because the public API has no reset route.
-  const projectId = values['project-id'] as string;
-  let reset = false;
+
+async function resetApiSeed(projectId: string, apiKey: string) {
+  const { cancelStagedRetention, closeProjectLocks, prisma, withProjectLock } = await import('@logbird/database');
+  const hash = createHash('sha256').update(apiKey).digest('hex');
   try {
-    await fenced(projectId, 'Seed data was reset during the run; the next run retries.', async (db) => {
-      if (values.sink === 'api') {
-        const hash = createHash('sha256')
-          .update(values.key ?? '')
-          .digest('hex');
+    await withProjectLock(
+      projectId,
+      async (db) => {
+        // The purge uses local ClickHouse credentials. Bind it to the ingest key's project first.
         const key = await db.apiKey.findFirst({
           where: { projectId, hash, kind: 'ingest', revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
           select: { id: true },
         });
         if (!key) throw new Error('The ingest key must belong to the project being reset.');
-      }
-      if (await db.ingestReceipt.findFirst({ where: { projectId, confirmedAt: null, claimedAt: { not: null } }, select: { eventId: true } }))
-        throw new Error('A write for this project is still unresolved. Retry the reset after ingest recovery.');
-      const ch = createClickHouseClient();
-      try {
-        await purgeProject(ch, projectId);
-        await database.prisma.$transaction([
-          database.prisma.ingestReceipt.deleteMany({ where: { projectId } }),
-          database.prisma.project.updateMany({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } }),
+        if (await db.ingestReceipt.findFirst({ where: { projectId, confirmedAt: null, claimedAt: { not: null } }, select: { eventId: true } }))
+          throw new Error('A write for this project is still unresolved. Retry the reset after ingest recovery.');
+
+        await cancelStagedRetention(projectId, db, 'Seed data was reset during the run; the next run retries.');
+        await purgeSeedProject(projectId);
+        await prisma.$transaction([
+          prisma.ingestReceipt.deleteMany({ where: { projectId } }),
+          prisma.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } }),
         ]);
-      } finally {
-        await ch.close();
-      }
-    });
-    reset = true;
+      },
+      { waitMs: 60_000 },
+    );
   } finally {
-    if (!reset || values.sink === 'api') await closeDatabase();
+    await Promise.all([closeProjectLocks(), prisma.$disconnect()]);
   }
 }
+
+if (values.reset && values['project-id']) {
+  if (values.sink === 'api' && values.key) await resetApiSeed(values['project-id'], values.key);
+  else await purgeSeedProject(values['project-id']);
+}
+
 const generator = generateEvents({
   events,
   days,
@@ -142,58 +119,22 @@ if (values.sink === 'api') {
   console.log(`Sent ${n} fictional events through API`);
 } else if (values.sink === 'direct') {
   const p = values['project-id'];
-  if (!p || !database) throw new Error('--project-id required');
-  const { claimIngestReceipts, confirmIngestReceipts, databaseClock, ingestReceiptClock, withIngestReceiptGate } = database;
+  if (!p) throw new Error('--project-id required');
   const ch = createClickHouseClient();
-  let n = 0;
+  let batch: EventRow[] = [],
+    n = 0;
   try {
-    await fenced(p, 'Seed data was written directly during the run; the next run retries.', async (db) => {
-      const managed = await db.project.findUnique({ where: { id: p }, select: { organizationId: true } });
-      let batch: EventInput[] = [];
-      const normalizeBatch = (receivedAt: Date) =>
-        batch.map((event) => {
-          const result = normalizeEvent(event, { projectId: p, receivedAt });
-          if (!result.ok) throw new Error(result.reason);
-          return result.row;
-        });
-      const writeBatch = async () => {
-        if (!batch.length) return;
-        // ClickHouse-only fixture IDs have no managed retention or webhook discovery.
-        if (!managed) return insertEvents(ch, normalizeBatch(await databaseClock(db)));
-        const { rows, identities, leaseExpiresAt } = await withIngestReceiptGate(p, 'shared', async (tx) => {
-          const receivedAt = await ingestReceiptClock(tx, p);
-          const rows = normalizeBatch(receivedAt);
-          const identities = rows.map((row) => ({
-            eventId: row.event_id,
-            fingerprint: eventFingerprint(row),
-            receivedAt,
-            eventAt: new Date(row.timestamp),
-          }));
-          // A delayed claim response spends the local send budget, as it does in API ingest.
-          const leaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS;
-          const claimed = await claimIngestReceipts(
-            p,
-            managed.organizationId,
-            identities.map((identity) => ({ ...identity, confirmedAt: null })),
-            tx,
-          );
-          if (claimed.length !== rows.length) throw new Error('Some seed event IDs already have receipts. Use --reset for a replacement run.');
-          await tx.project.update({ where: { id: p }, data: { maintenanceGeneration: { increment: 1 } } });
-          return { rows, identities, leaseExpiresAt };
-        });
-        await insertEvents(ch, rows, leaseExpiresAt);
-        await confirmIngestReceipts(p, identities);
-      };
-      for (const event of generator) {
-        batch.push(event);
-        n++;
-        if (batch.length === 5000) {
-          await writeBatch();
-          batch = [];
-        }
+    for (const event of generator) {
+      const result = normalizeEvent(event, { projectId: p, receivedAt: new Date() });
+      if (!result.ok) throw new Error(result.reason);
+      batch.push(result.row);
+      n++;
+      if (batch.length === 5000) {
+        await insertEvents(ch, batch);
+        batch = [];
       }
-      await writeBatch();
-    });
+    }
+    await insertEvents(ch, batch);
     console.log(`Inserted ${n} fictional events into project ${p}`);
     if (values.benchmark) {
       const to = until ?? new Date();
@@ -215,6 +156,6 @@ if (values.sink === 'api') {
       }
     }
   } finally {
-    await Promise.all([ch.close(), closeDatabase()]);
+    await ch.close();
   }
 } else throw new Error('sink must be api or direct');
