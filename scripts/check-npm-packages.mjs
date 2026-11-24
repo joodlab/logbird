@@ -47,8 +47,11 @@ const PACKAGES = {
 const FORBIDDEN = ['zod', '@logbird/contracts'];
 /** Manifest fields that make npm install something for the consumer, or name what may be bundled with it. */
 const INSTALLED_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies'];
-/** What a tarball may carry under dist/: JavaScript and declarations, each with an optional source map. */
-const DIST_FILE = /^dist\/.+\.(?:[cm]?js|d\.[cm]?ts)(?:\.map)?$/;
+/**
+ * What a tarball may carry under dist/: JavaScript and declarations, each with an optional source map, and a nested
+ * package.json, which a dual build uses to set a folder's module type (`dist/cjs/package.json`).
+ */
+const DIST_FILE = /^dist\/(?:.+\.(?:[cm]?js|d\.[cm]?ts)(?:\.map)?|(?:.+\/)?package\.json)$/;
 /** What it may carry outside dist/: npm always includes package.json, the readme, the licence and the changelog. */
 const TOP_LEVEL_FILE = /^(?:package\.json|(?:README|LICENSE|LICENCE|CHANGELOG)(?:\.md|\.txt)?)$/i;
 /** An absolute path: POSIX, a drive (either slash), a UNC or other backslash-rooted path, or a file: URL. */
@@ -162,22 +165,60 @@ export function importsOf(text, path, moduleType = 'commonjs') {
       }
     }
   });
-  walk(ast.program, (node) => {
-    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && makesRequire(node.init)) requires.add(node.id.name);
-    if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier' && makesRequire(node.right)) requires.add(node.left.name);
-  });
-  // `.require()` loads a module only on Node's own objects; `validator.require('field')` is an ordinary method.
+  // Whether a value hands a require function on: it holds a known require name other than as the function called, as
+  // `typeof`'s operand or as a property name. esbuild's helper is one:
+  // `var __require = ((x) => typeof require !== "undefined" ? require : …)(function (x) { … require.apply(this, arguments) … })`.
+  const passesRequire = (value) => {
+    let found = false;
+    const look = (node, parent, key) => {
+      if (found || !node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const item of node) look(item, parent, key);
+        return;
+      }
+      if (typeof node.type !== 'string') return;
+      if (node.type === 'Identifier' && requires.has(node.name)) {
+        const called = (parent?.type === 'CallExpression' || parent?.type === 'OptionalCallExpression') && key === 'callee';
+        const property =
+          (isMember(parent) && key === 'property' && !parent.computed) || (parent?.type === 'ObjectProperty' && key === 'key' && !parent.computed);
+        const typeofOperand = parent?.type === 'UnaryExpression' && parent.operator === 'typeof';
+        if (!called && !property && !typeofOperand) found = true;
+        return;
+      }
+      for (const [childKey, child] of Object.entries(node)) if (!NOT_CHILDREN.has(childKey)) look(child, node, childKey);
+    };
+    look(value, undefined, undefined);
+    return found;
+  };
+  // The names a require function is bound to: made by createRequire, or handed one (`const r = require`, esbuild's
+  // `__require`). Repeated until nothing new is found, since one binding can pass on another.
+  for (let size = -1; size !== requires.size; ) {
+    size = requires.size;
+    walk(ast.program, (node) => {
+      const [target, value] =
+        node.type === 'VariableDeclarator' ? [node.id, node.init] : node.type === 'AssignmentExpression' ? [node.left, node.right] : [];
+      if (target?.type === 'Identifier' && !requires.has(target.name) && (makesRequire(value) || passesRequire(value))) requires.add(target.name);
+    });
+  }
+  // The identifier at the root of a member chain: `require` in `require.main.require`, `module` in `module.parent`.
+  const rootOf = (node) => {
+    const inner = unwrap(node);
+    if (isMember(inner)) return rootOf(inner.object);
+    if (inner?.type === 'TSNonNullExpression') return rootOf(inner.expression);
+    return inner?.type === 'Identifier' ? inner.name : undefined;
+  };
+  // `.require()` loads a module only on Node's own objects (`module.require`, `require.main.require`,
+  // `globalThis.require`); on an ordinary object (`validator.require('field')`) it is a method like any other.
   const NODE_OBJECTS = new Set(['module', 'global', 'globalThis']);
   const loads = (node) => {
     const callee = unwrap(node);
-    return (
-      callee.type === 'Import' ||
-      (callee.type === 'Identifier' && requires.has(callee.name)) ||
-      // `module.require('x')`, `globalThis.require?.('x')`
-      (isMember(callee) && callee.object.type === 'Identifier' && NODE_OBJECTS.has(callee.object.name) && keyName(callee.property) === 'require') ||
-      // `createRequire(import.meta.url)('x')`
-      makesRequire(callee)
-    );
+    if (callee.type === 'Import' || (callee.type === 'Identifier' && requires.has(callee.name))) return true;
+    if (isMember(callee) && keyName(callee.property) === 'require') {
+      const root = rootOf(callee.object);
+      return root !== undefined && (NODE_OBJECTS.has(root) || requires.has(root));
+    }
+    // `createRequire(import.meta.url)('x')`
+    return makesRequire(callee);
   };
   const visit = (node) => {
     if (Array.isArray(node)) {

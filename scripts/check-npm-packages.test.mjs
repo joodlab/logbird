@@ -88,6 +88,47 @@ test("TypeScript's CommonJS output of a createRequire import is read", () => {
   assert.deepEqual(importsOf(emitted, 'dist/probe.cjs'), ['node:module', 'zod']);
 });
 
+test("esbuild's ESM output of a CommonJS entry is read, through its __require helper", () => {
+  // esbuild 0.28.2: bundle: true, platform: 'node', format: 'esm', packages: 'external', with the usual createRequire
+  // banner, for an entry that does `require('fictional-library')` and `require.main.require('fictional-other')`.
+  const emitted = [
+    "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    'var __getOwnPropNames = Object.getOwnPropertyNames;',
+    'var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {',
+    '  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]',
+    '}) : x)(function(x) {',
+    '  if (typeof require !== "undefined") return require.apply(this, arguments);',
+    "  throw Error('Dynamic require of \"' + x + '\" is not supported');",
+    '});',
+    'var __commonJS = (cb, mod) => function __require2() {',
+    '  try {',
+    '    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;',
+    '  } catch (e) {',
+    '    throw mod = 0, e;',
+    '  }',
+    '};',
+    'var require_entry = __commonJS({',
+    '  "entry.cjs"(exports, module) {',
+    '    var z = __require("fictional-library");',
+    '    module.exports = { z, main: __require.main.require("fictional-other") };',
+    '  }',
+    '});',
+    'export default require_entry();',
+  ].join('\n');
+  assert.deepEqual(importsOf(emitted, 'dist/index.mjs'), ['node:module', 'fictional-library', 'fictional-other']);
+});
+
+test('require.main.require and module.parent.require load modules', () => {
+  // tsc emits `require.main!.require(…)` as `require.main.require(…)`; the declaration form keeps the `!`.
+  assert.deepEqual(importsOf("const x = require.main.require('fictional-library');", 'dist/probe.cjs'), ['fictional-library']);
+  assert.deepEqual(importsOf("const x = module.parent?.require('fictional-library');", 'dist/probe.cjs'), ['fictional-library']);
+  assert.deepEqual(importsOf("const r = require; r('fictional-library');", 'dist/probe.cjs'), ['fictional-library']);
+});
+
+test('a value that only tests for require is not a require function', () => {
+  assert.deepEqual(importsOf("const hasRequire = typeof require === 'function'; hasRequire('fictional-library');", 'dist/probe.cjs'), []);
+});
+
 test('a method named require on an ordinary object is not an import', () => {
   assert.deepEqual(importsOf("const validator = { require: (f) => f }; validator.require('fictional-field');", 'dist/index.mjs'), []);
 });
