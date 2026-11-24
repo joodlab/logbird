@@ -41,6 +41,15 @@ async function normalizationStatements() {
     )
     .filter(Boolean);
 }
+// The script refuses to start while mutations are pending (as it should for an operator); wait for earlier tests' ones.
+async function mutationsSettled() {
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const [row] = await read<{ n: string }>(ch, 'SELECT count() n FROM system.mutations WHERE database = currentDatabase() AND NOT is_done');
+    if (row?.n === '0') return;
+    await new Promise((done) => setTimeout(done, 1000));
+  }
+  throw new Error('Mutations in the scratch database did not finish');
+}
 const viewPresent = async () =>
   (await read<{ n: string }>(ch, "SELECT count() n FROM system.tables WHERE database = currentDatabase() AND name = 'events_lateness_mv'"))[0]?.n ===
   '1';
@@ -67,6 +76,7 @@ it.runIf(scratch)('restore normalization keeps the lateness rollup as restored a
   });
   const before = await lateTotals();
   expect(before).toHaveLength(2);
+  await mutationsSettled();
   for (const query of await normalizationStatements()) await ch.command({ query });
   expect(await lateTotals()).toEqual(before);
   expect(await viewPresent()).toBe(true);
@@ -81,6 +91,7 @@ it.runIf(scratch)('a normalization that stops after detaching the view is repair
   const statements = await normalizationStatements();
   const detach = statements.findIndex((statement) => statement.startsWith('DETACH TABLE'));
   expect(detach).toBeGreaterThan(0);
+  await mutationsSettled();
   for (const query of statements.slice(0, detach + 1)) await ch.command({ query });
   expect(await viewPresent()).toBe(false);
   await migrate(ch);
