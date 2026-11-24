@@ -255,7 +255,7 @@ function DevelopersPage() {
         bullets={webhooks.bullets.map((bullet) => <Rich key={bullet} text={bullet} />)}
         eyebrow={webhooks.eyebrow}
         id="webhooks"
-        limit={webhooks.limit}
+        limit={<Rich text={webhooks.limit} />}
         reverse
         title={webhooks.title}
         visual={<SiteCode code={samples.webhookReceiver} language="ts" title={webhooks.codeTitle} />}
