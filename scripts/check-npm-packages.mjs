@@ -10,17 +10,18 @@
 // - every `exports` target present in the tarball, and only `dist/` code shipped (no `src/`);
 // - its `dependencies` and `peerDependencies` exactly the allowed ones, every @logbird dependency at the same version,
 //   no optional or bundled dependencies, and `zod` / `@logbird/contracts` in none of those fields;
-// - every bare import in its built JavaScript and declarations (`dist/**/*.mjs`, `*.d.mts`, `*.d.ts`), compact or
-//   spaced, static, side-effect, dynamic or `require`, declared as a dependency or peer dependency, or a Node built-in,
-//   or listed for that package below. Never `zod` and never `@logbird/contracts`: the SDK bundles what it needs from
-//   contracts, so the published packages do not depend on it;
+// - every bare import in its built JavaScript and declarations (`dist/**/*.mjs`, `*.d.mts`, `*.d.ts`), read from the
+//   parsed file (static, type, side-effect, dynamic, `require`, re-export), declared as a dependency or peer dependency,
+//   or a Node built-in, or listed for that package below. Never `zod` and never `@logbird/contracts`: the SDK bundles
+//   what it needs from contracts, so the published packages do not depend on it;
 // - no source map whose `sources` or `sourceRoot` is an absolute path (POSIX, drive, UNC or file: URL), as a local
 //   build would leave.
-// The tarballs are read here (gzip, then the tar headers), with no dependency.
+// The tarballs are read here (gzip, then the tar headers); the code is parsed with @babel/parser.
 import { readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
+import { parse } from '@babel/parser';
 
 /** Every package that may be packed, with what it may import beyond its declared dependencies and peers. */
 const PACKAGES = {
@@ -82,35 +83,74 @@ function readTarball(file) {
 const packageOf = (specifier) => (specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]);
 const builtins = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
 
+/** Keys of a Babel node that hold positions or comments, not child nodes. */
+const NOT_CHILDREN = new Set(['loc', 'start', 'end', 'range', 'extra', 'comments', 'leadingComments', 'trailingComments', 'innerComments']);
+
 /**
- * Bare specifiers imported by JavaScript or declaration text. Deliberately broad, so compact or minified code cannot
- * slip past: any `from "x"` (static imports and re-exports, with or without spaces: `import{z}from"zod"`,
- * `export*from"x"`), a side-effect `import "x"`, `import("x")` (dynamic, or a declaration's type import) and
- * `require("x")`. Text inside a string is not read as an import (`"Migrated from 'zod'"`). A commented-out import
- * (`// import … from 'zod'`) is reported, deliberately: stripping comments with a regex would also strip `//` inside a
- * string such as a URL and could hide a real import after it on the same line, so the scan fails safe instead.
+ * The module specifier a node holds ('' when it is not known without running the code): a string, or a template with
+ * no substitution (`zod`). For a template with substitutions (`zod/${name}`), the package its fixed head already names.
  */
-function importsOf(text) {
+function specifierOf(node) {
+  if (node?.type === 'StringLiteral') return node.value;
+  if (node?.type === 'TSLiteralType') return specifierOf(node.literal);
+  if (node?.type !== 'TemplateLiteral') return '';
+  const head = node.quasis[0]?.value.cooked ?? '';
+  if (node.expressions.length === 0) return head;
+  return head.split('/').length > (head.startsWith('@') ? 2 : 1) ? packageOf(head) : '';
+}
+
+/**
+ * Every module specifier a shipped file imports, read from its syntax tree (Babel, with TypeScript syntax for
+ * declarations), so the spelling cannot matter (`import{z}from"zod"`, comments between tokens, line breaks) and text in
+ * a string or a comment is never read as an import. Covered: static imports and type imports, re-exports
+ * (`export … from`, `export * from`), side-effect imports, dynamic `import()` (with or without a second argument), a
+ * declaration's `import("x").T`, `require()`, `import x = require()` and `/// <reference types="x" />`. A file that
+ * does not parse fails the check rather than being skipped.
+ */
+function importsOf(text, path) {
+  const declaration = /\.d\.m?ts$/.test(path);
+  const ast = parse(text, {
+    sourceType: path.endsWith('.mjs') || declaration ? 'module' : 'unambiguous',
+    plugins: declaration ? [['typescript', { dts: true }]] : [],
+  });
   const found = new Set();
-  // A module specifier has no whitespace; prose in a message string ("from 'a' and/or 'b'") does, so it is skipped.
-  const specifier = String.raw`["']([@#\w][^"'\s]*)["']`;
-  // Between tokens: whitespace and block or line comments (`import/* generated */"zod"`).
-  const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*`;
-  const patterns = [
-    // `from` only as part of an import or export statement: from the keyword to `from`, no quote or semicolon, so a
-    // string such as "Migrated from 'zod'" is not read as one. Compact (`import{z}from"zod"`, `export*from"x"`),
-    // multi-line and `import type` forms still match.
-    new RegExp(String.raw`\b(?:import|export)\b[^;'"\x60]*?\bfrom${gap}${specifier}`, 'g'),
-    new RegExp(String.raw`\bimport${gap}${specifier}`, 'g'),
-    // No closing parenthesis required: `import('x', { with: … })` has a second argument.
-    new RegExp(String.raw`\bimport${gap}\(${gap}${specifier}`, 'g'),
-    new RegExp(String.raw`\brequire${gap}\(${gap}${specifier}`, 'g'),
-    // A template literal without substitutions is a static specifier too: import(`zod`). Only inside these calls, so a
-    // template string of prose elsewhere is not read as one.
-    new RegExp(String.raw`\b(?:import|require)${gap}\(${gap}\x60([@#\w][^\x60\s$]*)\x60`, 'g'),
-  ];
-  for (const pattern of patterns) for (const match of text.matchAll(pattern)) found.add(match[1]);
-  return [...found];
+  const add = (node) => {
+    const specifier = specifierOf(node);
+    if (specifier) found.add(specifier);
+  };
+  const visit = (node) => {
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
+    switch (node.type) {
+      case 'ImportDeclaration':
+      case 'ExportNamedDeclaration':
+      case 'ExportAllDeclaration':
+      case 'ImportExpression':
+        add(node.source);
+        break;
+      case 'CallExpression':
+        if (node.callee.type === 'Import' || (node.callee.type === 'Identifier' && node.callee.name === 'require')) add(node.arguments[0]);
+        break;
+      case 'TSImportType':
+        add(node.argument);
+        break;
+      case 'TSExternalModuleReference':
+        add(node.expression);
+        break;
+      default:
+    }
+    for (const [key, child] of Object.entries(node)) if (!NOT_CHILDREN.has(key)) visit(child);
+  };
+  visit(ast.program);
+  for (const comment of ast.comments ?? []) {
+    const reference = /^\/\s*<reference\s+types\s*=\s*["']([^"']+)["']/.exec(comment.value);
+    if (comment.type === 'CommentLine' && reference) found.add(reference[1]);
+  }
+  // Relative and absolute paths are the package's own files.
+  return [...found].filter((specifier) => !/^[./]/.test(specifier));
 }
 
 const [folder, expected] = process.argv.slice(2);
@@ -187,7 +227,14 @@ for (const tarball of tarballs) {
   const allowed = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.peerDependencies ?? {}), ...known.alsoImports]);
   for (const [path, body] of files) {
     if (/\.(m?js|d\.m?ts)$/.test(path)) {
-      for (const specifier of importsOf(body.toString('utf8'))) {
+      let specifiers;
+      try {
+        specifiers = importsOf(body.toString('utf8'), path);
+      } catch (error) {
+        fail(`${path} cannot be parsed, so its imports cannot be checked: ${error.message}`);
+        continue;
+      }
+      for (const specifier of specifiers) {
         const name = specifier.startsWith('#') ? specifier : packageOf(specifier);
         if (FORBIDDEN.includes(name)) fail(`${path} imports ${specifier}: the published packages must not depend on ${name}`);
         else if (!builtins.has(specifier) && !allowed.has(name)) fail(`${path} imports ${specifier}, which ${manifest.name} does not declare`);

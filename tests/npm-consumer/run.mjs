@@ -48,8 +48,14 @@ function run(command, commandArgs, cwd = here) {
   console.log(`$ ${command} ${commandArgs.join(' ')}`);
   // npm and pnpm are .cmd shims on Windows and need a shell; Node itself (whose path may hold spaces) does not.
   const shell = isWindows && command !== process.execPath;
-  // Through a shell, an argument with a space (a checkout under "C:\Work Projects\…") must be quoted to stay one argument.
-  const args = shell ? commandArgs.map((arg) => (/[\s"]/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg)) : commandArgs;
+  // Through cmd, an argument with a space or a metacharacter (a checkout under "C:\Work Projects\…" or
+  // "C:\Work&Projects\…") must be quoted to stay one argument and not be read as an operator. Inside quotes cmd takes
+  // & | < > ^ ( ) literally. A % is refused outright: cmd expands %VAR% even inside quotes, and no quoting prevents it.
+  const quote = (arg) => {
+    if (arg.includes('%')) throw new Error(`cannot pass an argument containing % through cmd safely: ${arg}`);
+    return /[\s"&|<>^()]/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg;
+  };
+  const args = shell ? commandArgs.map(quote) : commandArgs;
   execFileSync(command, args, { cwd, stdio: 'inherit', shell });
 }
 
