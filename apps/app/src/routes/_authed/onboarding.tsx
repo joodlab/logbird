@@ -4,6 +4,7 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from '@tanstack/
 import { LogOutIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { BrandLockup } from '@/components/brand';
+import { LostWorkspacesAlert } from '@/components/lost-workspaces';
 import { SetupSteps } from '@/components/onboarding/setup-steps';
 import { workspaceSetupQuery } from '@/lib/api/queries';
 import { signOutFromConsole } from '@/lib/sign-out';
@@ -35,12 +36,20 @@ function OnboardingLayout() {
   useEffect(() => {
     if (pathname && me.organizations.length > 0) refetch();
   }, [pathname, me.organizations.length, refetch]);
-  const done: Record<(typeof STEPS)[number]['id'], boolean> = {
+  const server: Record<(typeof STEPS)[number]['id'], boolean> = {
     profile: hasName(me.user),
     workspace: me.organizations.length > 0,
     project: (setup.data?.projects.length ?? 0) > 0,
     first_event: setup.data?.projects.some((p) => p.firstEventAt) ?? false,
   };
+  const done = onboardingStepsDone(
+    STEPS.map((step) => step.id),
+    current,
+    server,
+  );
+  // Someone who joined an existing workspace and is only asked their name has no setup of their own to walk: a stepper
+  // would show its workspace, project and first event as theirs (#7).
+  const joining = STEPS[current]?.id === 'profile' && me.organizations.length > 0;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -61,11 +70,21 @@ function OnboardingLayout() {
         </div>
       </header>
       <main className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-4 pt-6 pb-16 sm:pt-10">
-        <SetupSteps current={current} steps={STEPS.map((step) => ({ id: step.id, label: step.label, done: done[step.id] }))} />
+        {/* Every step, not only the workspace one: someone removed from a workspace can land on any of them (#4). */}
+        <LostWorkspacesAlert me={me} />
+        {joining ? null : <SetupSteps current={current} steps={STEPS.map((step) => ({ id: step.id, label: step.label, done: done[step.id] }))} />}
         <div className="tm-fade-in">
           <Outlet />
         </div>
       </main>
     </div>
   );
+}
+
+/**
+ * Which onboarding steps read as done. A step after the one being shown is never done: in a second workspace's setup
+ * the project and first event belong to the workspace not yet created, not to the active one the server reports (#7).
+ */
+export function onboardingStepsDone<K extends string>(order: readonly K[], current: number, server: Record<K, boolean>): Record<K, boolean> {
+  return Object.fromEntries(order.map((id, index) => [id, index <= current && server[id]])) as Record<K, boolean>;
 }

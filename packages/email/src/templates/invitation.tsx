@@ -1,6 +1,6 @@
 // The server runs these through tsx with the classic JSX runtime, so React must be in scope.
 import * as React from 'react';
-import { formatDateTime, formatRelative, roleLabel, roleSummary, withArticle } from '../format';
+import { formatDateTime, formatRelative, roleInProse, roleLabel, roleSummary, withArticle } from '../format';
 import type { EmailDefinition } from '../render';
 import { plainText } from '../text';
 import { Button, DetailRows, EmailLayout, Note, Paragraph, RawLink, Spacer, Strong, Title } from './components';
@@ -24,7 +24,7 @@ const inviter = (p: InvitationEmailProps) => (p.inviterName === p.inviterEmail ?
 const expiry = (p: InvitationEmailProps) => `${formatDateTime(p.expiresAt)} (${formatRelative(p.expiresAt, p.sentAt ?? new Date())})`;
 const title = (p: InvitationEmailProps) => `Join ${p.workspace} on Logbird`;
 const lead = (p: InvitationEmailProps) =>
-  `${inviter(p)} invited you to the ${p.workspace} workspace as ${withArticle(roleLabel(p.role))}. Logbird keeps a searchable history of who did what, when and where across your team’s systems.`;
+  `${inviter(p)} invited you to the ${p.workspace} workspace as ${withArticle(roleInProse(p.role))}. Logbird keeps a searchable history of who did what, when and where across your team’s systems.`;
 
 const details = (p: InvitationEmailProps) => [
   { label: 'Workspace', value: p.workspace },
@@ -45,7 +45,7 @@ export function InvitationEmail(props: InvitationEmailProps) {
       <Paragraph>
         <Strong>{props.inviterName}</Strong>
         {props.inviterName === props.inviterEmail ? null : ` (${props.inviterEmail})`} invited you to the <Strong>{props.workspace}</Strong> workspace
-        as {withArticle(roleLabel(props.role))}. Logbird keeps a searchable history of who did what, when and where across your team’s systems.
+        as {withArticle(roleInProse(props.role))}. Logbird keeps a searchable history of who did what, when and where across your team’s systems.
       </Paragraph>
       <Spacer height={4} />
       <DetailRows rows={details(props)} />
@@ -62,7 +62,7 @@ export const invitation: EmailDefinition<InvitationEmailProps> = {
   name: 'Workspace invitation',
   recipient: 'email',
   subject: (p) => `${p.inviterName} invited you to ${p.workspace} on Logbird`,
-  preview: (p) => `Join as ${roleLabel(p.role)}. The invitation expires ${formatRelative(p.expiresAt, p.sentAt ?? new Date())}.`,
+  preview: (p) => `Join as ${withArticle(roleInProse(p.role))}. The invitation expires ${formatRelative(p.expiresAt, p.sentAt ?? new Date())}.`,
   text: (p) =>
     plainText({
       title: title(p),

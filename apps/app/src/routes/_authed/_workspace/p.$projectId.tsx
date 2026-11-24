@@ -11,7 +11,7 @@ import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { projectQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
 import { confirmedProject, PROJECT_MISSING, type ProjectElsewhere, projectElsewhere, readProject, withOpenWorkspace } from '@/lib/project-listed';
-import { rememberProject } from '@/lib/session';
+import { redirectIfWorkspaceLost, rememberProject } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // A shared URL can carry `range=0` or `range=true`, which the router decodes as a number or boolean: drop it, so the page
@@ -26,6 +26,8 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   beforeLoad: async ({ context, params, cause, preload }) => {
     if (cause === 'stay' && !preload && confirmedProject(context.queryClient) === params.projectId) return;
     const outcome = await readProject(context.queryClient, params.projectId, { visit: !preload });
+    // Missing may mean the open workspace itself is gone (removed since `me` was read): start over at `/` if so (#4).
+    if (outcome === PROJECT_MISSING && !preload) await redirectIfWorkspaceLost(context.queryClient);
     if (outcome !== 'readable') throw notFound({ data: outcome });
   },
   loader: async ({ context, params }) => {
@@ -39,7 +41,10 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
     } catch (error) {
       const elsewhere = projectElsewhere(error);
       if (elsewhere) throw notFound({ data: await withOpenWorkspace(context.queryClient, elsewhere) });
-      if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) throw notFound({ data: PROJECT_MISSING });
+      if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) {
+        await redirectIfWorkspaceLost(context.queryClient);
+        throw notFound({ data: PROJECT_MISSING });
+      }
       throw error;
     }
   },
