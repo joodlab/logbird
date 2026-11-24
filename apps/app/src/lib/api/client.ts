@@ -213,6 +213,8 @@ export const api = {
     /** The secret is returned once, here and by rotateSecret: never store the response. */
     create: (projectId: string, body: z.input<typeof createWebhookSchema>) =>
       request(createWebhookResponseSchema, 'POST', pathFor(routes.webhooks.create.path, { projectId }), { body }),
+    get: (projectId: string, id: string, signal?: AbortSignal) =>
+      request(webhookEndpointSchema, 'GET', pathFor(routes.webhooks.get.path, { projectId, id }), { signal }),
     update: (projectId: string, id: string, body: z.input<typeof updateWebhookSchema>) =>
       request(webhookEndpointSchema, 'PATCH', pathFor(routes.webhooks.update.path, { projectId, id }), { body }),
     remove: (projectId: string, id: string) => request(ok, 'DELETE', pathFor(routes.webhooks.remove.path, { projectId, id })),

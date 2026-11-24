@@ -5,7 +5,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 
-const { resend, failedPing, deliveries, pendingIds } = vi.hoisted(() => ({
+const { resend, failedPing, deliveries, pendingIds, get } = vi.hoisted(() => ({
+  // The endpoint read fresh when the log opens.
+  get: vi.fn(async (): Promise<unknown> => null),
   // What the pending list holds (the resend watcher reads it); everything else answers with the one failed ping.
   pendingIds: { current: [] as string[] },
   deliveries: vi.fn(async (_p: string, _e: string, _query: { status?: string }) => ({ data: [], nextCursor: null }) as unknown),
@@ -25,7 +27,7 @@ const { resend, failedPing, deliveries, pendingIds } = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/api/client', () => ({
-  api: { webhooks: { deliveries, resend } },
+  api: { webhooks: { deliveries, resend, get } },
 }));
 
 import { DeliveryLog } from './delivery-log';
@@ -44,7 +46,13 @@ deliveries.mockImplementation(async (_p: string, _e: string, query: { status?: s
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
 let lastClient: QueryClient | undefined;
-const endpoint = { id: 'qa-endpoint-1', url: 'https://example.com/qa-hook' } as WebhookEndpoint;
+const endpoint = {
+  id: 'qa-endpoint-1',
+  url: 'https://example.com/qa-hook',
+  deliveryWindowSeconds: 604_800,
+  lateEvents: { count: 0, since: '2026-10-25T00:00:00.000Z' },
+} as WebhookEndpoint;
+get.mockImplementation(async () => endpoint);
 
 async function open(sendBlocked: string | null) {
   const host = document.createElement('div');
@@ -167,3 +175,128 @@ it('settles a resend from a pending list longer than one page, reading every pag
   });
   expect(allReads()).toBeGreaterThan(before);
 }, 10_000);
+
+it('says how many events in the project came too late for the window', async () => {
+  await open(null);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(
+    /^Since .+, Logbird has recorded no event in this project arriving more than 7 days after it happened\.$/,
+  );
+});
+
+it('shows the late count only from a read made since the log opened, and says when that read failed', async () => {
+  // The list's copy has a 7-day window, but the fresh read fails: its sentence must not stand in as current.
+  get.mockRejectedValueOnce(new Error('offline'));
+  await open(null);
+  expect(document.querySelector('[data-testid="late-events"]')).toBeNull();
+  const failed = document.querySelector('[data-testid="late-events-error"]');
+  expect(failed?.textContent).toContain('Could not load how many events came too late');
+  const retry = [...(failed?.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Try again');
+  await act(async () => {
+    retry?.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(document.querySelector('[data-testid="late-events-error"]')).toBeNull();
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Since .+, Logbird has recorded no event in this project/);
+});
+
+it('keeps "starts counting" tied to its read, and reads again once counting has started with the log open', async () => {
+  // Counting starts 300 ms after the first read; the read after that has one event recorded.
+  const startsAt = new Date(Date.now() + 300).toISOString();
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 0, since: startsAt } }));
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 1, since: startsAt } }));
+  await open(null);
+  const sentence = () => document.querySelector('[data-testid="late-events"]')?.textContent;
+  expect(sentence()).toMatch(/^Logbird starts counting events that arrive more than 7 days late at /);
+  const reads = get.mock.calls.length;
+  // Past the start but before the re-read: a re-render (a filter click) must not turn the old read into "no event".
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  });
+  const failed = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Failed');
+  await act(async () => {
+    failed?.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(sentence()).toMatch(/^Logbird starts counting/);
+  // After the margin the endpoint is read again, and the count shows.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  });
+  expect(get.mock.calls.length).toBe(reads + 1);
+  expect(sentence()).toMatch(/^Since .+, Logbird has recorded 1 event in this project arriving more than 7 days after it happened\./);
+}, 10_000);
+
+it('judges a read that crosses the start in flight by when it started, and reads again for the count', async () => {
+  // The first read starts before counting does and answers after it; only the second read may supply a count.
+  const startsAt = new Date(Date.now() + 200).toISOString();
+  get.mockImplementationOnce(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return { ...endpoint, lateEvents: { count: 0, since: startsAt } };
+  });
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 2, since: startsAt } }));
+  await open(null);
+  const sentence = () => document.querySelector('[data-testid="late-events"]')?.textContent;
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  });
+  expect(Date.now()).toBeGreaterThan(Date.parse(startsAt));
+  expect(sentence()).toMatch(/^Logbird starts counting/);
+  const reads = get.mock.calls.length;
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  });
+  expect(get.mock.calls.length).toBe(reads + 1);
+  expect(sentence()).toMatch(/^Since .+, Logbird has recorded 2 events in this project/);
+}, 10_000);
+
+it('marks every count as approximate, zero included, but not the "starts counting" line', async () => {
+  await open(null);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Since .+, Logbird has recorded no event/);
+  expect(document.querySelector('[data-testid="late-events-approximate"]')?.textContent).toBe(
+    'Approximate. It can be off after a storage failure or a restore.',
+  );
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 0, since: new Date(Date.now() + 3_600_000).toISOString() } }));
+  await open(null);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Logbird starts counting/);
+  expect(document.querySelector('[data-testid="late-events-approximate"]')).toBeNull();
+});
+
+it('reopened while the first read is still pending, the log makes its own read and shows that count', async () => {
+  let release: (value: unknown) => void = () => undefined;
+  const before = get.mock.calls.length;
+  get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 4, since: endpoint.lateEvents.since } }));
+  await open(null);
+  const client = lastClient as QueryClient;
+  const render = (isOpen: boolean) =>
+    act(() =>
+      root?.render(
+        <QueryClientProvider client={client}>
+          <DeliveryLog endpoint={endpoint} onOpenChange={vi.fn()} open={isOpen} projectId="qa-project" sendBlocked={null} />
+        </QueryClientProvider>,
+      ),
+    );
+  // Close and reopen while the first read is still in flight.
+  render(false);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  render(true);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  // The first read lands late; it belongs to the earlier opening and must not decide this one.
+  await act(async () => {
+    release({ ...endpoint, lateEvents: { count: 9, since: endpoint.lateEvents.since } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(get.mock.calls.length - before).toBe(2);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/Logbird has recorded 4 events/);
+});
