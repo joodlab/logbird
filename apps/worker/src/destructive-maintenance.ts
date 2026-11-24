@@ -1,5 +1,5 @@
 import { type ClickHouseClient, maintenanceQueryPrefix, pendingProjectMutations, read, retentionRowsRemain } from '@logbird/clickhouse';
-import { type Prisma, prisma, purgeIngestReceipts, RETENTION_MATERIALIZING } from '@logbird/database';
+import { databaseClock, type Prisma, prisma, purgeIngestReceipts, RETENTION_MATERIALIZING } from '@logbird/database';
 
 /** Caller holds the exclusive project lock. The marker and generation may join an existing short transaction. */
 export async function beginDestructiveMaintenance(projectId: string, db: Prisma.TransactionClient = prisma) {
@@ -90,7 +90,7 @@ async function finishMaterializedRetention(ch: ClickHouseClient, projectId: stri
  */
 async function flagStuckRetention(ch: ClickHouseClient, projectId: string) {
   const run = await prisma.retentionRun.findFirst({ where: { projectId, kind: 'retention', status: RETENTION_MATERIALIZING } });
-  if (!run || Date.now() - (run.heartbeatAt ?? run.startedAt).getTime() < RETENTION_MATERIALIZATION_ALERT_MS) return;
+  if (!run || (await databaseClock()).getTime() - (run.heartbeatAt ?? run.startedAt).getTime() < RETENTION_MATERIALIZATION_ALERT_MS) return;
   const mutations = await pendingProjectMutations(ch, projectId).catch(() => []);
   const failing = mutations.find((m) => m.failReason);
   const reason = failing ? ` (${failing.table}: ${failing.failReason.split('\n')[0]?.slice(0, 200)})` : '';

@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { normalizeEvent, projectMaintenance } from '@logbird/clickhouse';
 import { ingestPendingDetailsSchema, ingestResponseSchema, parseJsonExact } from '@logbird/contracts';
-import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
+import { databaseClock, prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { logIngestRecoveryFailure, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
@@ -159,7 +159,7 @@ export async function requireProjectReadable(projectId: string) {
   if (!run) return;
   if (run.kind === 'ingest_repair' && run.status === 'failed')
     throw new ApiError(503, 'retention_unavailable', 'Project data is being rebuilt. Retry shortly.');
-  if ((run.heartbeatAt ?? run.startedAt).getTime() >= Date.now() - RETENTION_LEASE_MS)
+  if ((run.heartbeatAt ?? run.startedAt).getTime() >= (await databaseClock()).getTime() - RETENTION_LEASE_MS)
     throw new ApiError(503, 'retention_unavailable', 'Project data is being rebuilt. Retry shortly.');
   await withProjectLock(projectId, async (db) => {
     await requireRetentionReady(db, projectId);

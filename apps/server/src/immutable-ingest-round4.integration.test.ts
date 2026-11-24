@@ -163,6 +163,11 @@ it('repairs a process killed after destructive deletes without exposing an empty
     await unavailable();
     child.kill('SIGKILL');
     await exited;
+    const databaseNow = await databaseClock();
+    await prisma.retentionRun.updateMany({
+      where: { projectId: f.project, kind: 'ingest_repair', status: 'running' },
+      data: { heartbeatAt: new Date(databaseNow.getTime() - 11 * 60_000) },
+    });
     vi.useFakeTimers({ toFake: ['Date'] });
     clock = Math.max(clock, wallClock()) + 11 * 60_000;
     vi.setSystemTime(clock);

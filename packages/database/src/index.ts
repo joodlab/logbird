@@ -149,11 +149,14 @@ export async function ingestReceiptClock(db: import('./generated/client').Prisma
 /** Call only while holding the project lock. Old clients/runs fall back to startedAt. */
 export const RETENTION_LEASE_MS = 10 * 60_000;
 export async function recoverAbandonedRetention(tx: import('./generated/client').Prisma.TransactionClient, projectId: string) {
-  const expired = new Date(Date.now() - RETENTION_LEASE_MS);
-  return tx.retentionRun.updateMany({
-    where: { projectId, status: 'running', OR: [{ heartbeatAt: { lt: expired } }, { heartbeatAt: null, startedAt: { lt: expired } }] },
-    data: { status: 'failed', finishedAt: new Date(), error: 'abandoned' },
-  });
+  const count = await tx.$executeRaw`
+    WITH clock AS (SELECT clock_timestamp() AT TIME ZONE 'UTC' AS now)
+    UPDATE "RetentionRun"
+    SET status = 'failed', "finishedAt" = clock.now, error = 'abandoned'
+    FROM clock
+    WHERE "projectId" = ${projectId} AND status = 'running'
+      AND COALESCE("heartbeatAt", "startedAt") < clock.now - make_interval(secs => ${RETENTION_LEASE_MS / 1000}::float8)`;
+  return { count };
 }
 
 /**

@@ -131,10 +131,11 @@ export async function enforceProjectRetention(projectId: string) {
     // The synchronous purge also rewrites rollups. An unresolved insert must settle before any DELETE or rebuild.
     if (!(await settleProjectInserts(clickhouse, projectId, tx))) throw new ProjectBusyError();
     const run = await prisma.$transaction(async (db) => {
+      const startedAt = await databaseClock(db);
       await beginDestructiveMaintenance(projectId, db);
       await db.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
       return db.retentionRun.create({
-        data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'running', startedAt: new Date(), heartbeatAt: new Date() },
+        data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'running', startedAt, heartbeatAt: startedAt },
       });
     });
     // Short Prisma statements remain independent of the session holding the project lock.
@@ -376,11 +377,12 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       // marks it failed), a failed ingest_repair keeps every read fenced, and the next retention run rebuilds the
       // rollups. It is removed in the same transaction that records the replacement rows as written.
       repairId = await prisma.$transaction(async (db) => {
+        const heartbeatAt = await databaseClock(db);
         await beginDestructiveMaintenance(projectId, db);
         await db.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
         await db.retentionRun.update({
           where: { id: run.id },
-          data: { status: 'running', heartbeatAt: new Date(), deletedEvents, verification: verification as unknown as Prisma.InputJsonValue },
+          data: { status: 'running', heartbeatAt, deletedEvents, verification: verification as unknown as Prisma.InputJsonValue },
         });
         const repair = await db.retentionRun.create({
           data: {
@@ -389,8 +391,8 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
             retentionDays: run.retentionDays,
             cutoff,
             status: 'running',
-            startedAt: fenceB,
-            heartbeatAt: new Date(),
+            startedAt: heartbeatAt,
+            heartbeatAt,
             error: 'Retention is replacing rollup rows; if it stops here, the next retention run rebuilds them.',
           },
         });
@@ -399,9 +401,10 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       mutationsCreated = true;
       stopRepairHeartbeat = heartbeatMaintenanceRun(repairId);
       await applyRetention(session, projectId, cutoff, fenceA, fenceB, keys, hooks.afterDeletes);
+      const heartbeatAt = await databaseClock(tx);
       await prisma.$transaction([
         prisma.retentionRun.delete({ where: { id: repairId } }),
-        prisma.retentionRun.update({ where: { id: run.id }, data: { status: RETENTION_MATERIALIZING, heartbeatAt: new Date() } }),
+        prisma.retentionRun.update({ where: { id: run.id }, data: { status: RETENTION_MATERIALIZING, heartbeatAt } }),
       ]);
       repairId = undefined;
       console.log(JSON.stringify({ level: 'info', event: 'retention.materializing', runId: run.id, projectId, deletedEvents }));

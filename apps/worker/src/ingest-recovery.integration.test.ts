@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ClickHouseClient } from '@logbird/clickhouse';
-import { closeProjectLocks, databaseClock, prisma } from '@logbird/database';
+import { closeProjectLocks, databaseClock, prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { afterAll, expect, it, vi } from 'vitest';
 import { recoverProjectIngest } from './ingest-recovery';
 import { closeRetentionQueue } from './queue';
@@ -39,6 +39,36 @@ it('defers scoped and hourly recovery while another claim in the project can sti
     expect(await prisma.ingestReceipt.count({ where: { projectId, claimedAt: { not: null }, confirmedAt: null } })).toBe(2);
     expect(await prisma.retentionRun.count({ where: { projectId } })).toBe(0);
   } finally {
+    await prisma.organization.deleteMany({ where: { id: organizationId } });
+  }
+});
+
+it('recovers only expired maintenance leases even when the app clock runs ahead', async () => {
+  const projectId = `qa-lease-${randomUUID()}`;
+  const organizationId = randomUUID();
+  const now = await databaseClock();
+  const old = new Date(now.getTime() - RETENTION_LEASE_MS - 60_000);
+  await prisma.organization.create({ data: { id: organizationId, slug: organizationId, name: 'Lease QA', createdAt: now } });
+  try {
+    await prisma.project.create({ data: { id: projectId, organizationId, slug: projectId, name: 'Lease QA' } });
+    const running = { projectId, retentionDays: 30, cutoff: now, status: 'running' };
+    await prisma.retentionRun.createMany({
+      data: [
+        { ...running, startedAt: old, heartbeatAt: null },
+        { ...running, startedAt: old, heartbeatAt: now },
+      ],
+    });
+    vi.useFakeTimers({ toFake: ['Date'], now: now.getTime() + 2 * RETENTION_LEASE_MS });
+    expect(await withProjectLock(projectId, (tx) => recoverAbandonedRetention(tx, projectId))).toEqual({ count: 1 });
+    const states = await prisma.retentionRun.findMany({ where: { projectId }, select: { heartbeatAt: true, status: true } });
+    expect(states).toEqual(
+      expect.arrayContaining([
+        { heartbeatAt: null, status: 'failed' },
+        { heartbeatAt: now, status: 'running' },
+      ]),
+    );
+  } finally {
+    vi.useRealTimers();
     await prisma.organization.deleteMany({ where: { id: organizationId } });
   }
 });
