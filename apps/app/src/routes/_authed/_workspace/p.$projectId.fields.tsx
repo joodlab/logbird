@@ -173,9 +173,11 @@ function FieldsPage() {
             {CONFORMANCE_CHECKS.map(([key, hint]) => {
               const c = checkCoverage(key, coverage);
               const good = (c ?? 0) >= 0.9;
+              // A lower bound under the target cannot say whether coverage reaches it: neither a check nor a cross.
+              const unknown = c === undefined || (key === 'context.operationId' && atLeast(coverage) && !good);
               return (
                 <li className="flex items-center gap-2 rounded-md px-2 py-1 text-[13px]" key={key} title={MEASURED[key] ?? hint}>
-                  {c === undefined ? (
+                  {unknown ? (
                     <MinusIcon className="size-3.5 shrink-0 text-muted-foreground" />
                   ) : good ? (
                     <CheckIcon className="size-3.5 shrink-0 text-outcome-success" />

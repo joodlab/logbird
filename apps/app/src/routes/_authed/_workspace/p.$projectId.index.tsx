@@ -104,7 +104,7 @@ function OverviewPage() {
           title={hadEvents ? 'No events stored' : 'No events yet'}
         >
           <Button nativeButton={false} render={<Link hash="first-event" params={{ projectId }} to="/p/$projectId/setup" />} size="sm">
-            {can('testEvent.send') ? 'Send your first event' : 'View setup instructions'}
+            {can('testEvent.send') && !hadEvents ? 'Send your first event' : 'View setup instructions'}
             <ArrowRightIcon />
           </Button>
         </EmptyState>

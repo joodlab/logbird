@@ -16,6 +16,12 @@ it('keeps every bucket the server counted: a browser clock behind, the inclusive
   expect(sum(perMinuteSeries([{ ts: '2026-11-24T10:30:00Z', count: 1 }], at('2026-11-24T10:29:58Z')))).toBe(1);
   // At exactly 10:30:00 the server's window (now - 60 min, inclusive) can return 09:30.
   expect(sum(perMinuteSeries([{ ts: '2026-11-24T09:30:00Z', count: 2 }], at('2026-11-24T10:30:00Z')))).toBe(2);
+  // The browser clock ahead: at server 10:30:20 a 09:31 bucket counts toward "Last hour"; the browser reads 10:32.
+  expect(sum(perMinuteSeries([{ ts: '2026-11-24T09:31:00Z', count: 1 }], at('2026-11-24T10:32:00Z')))).toBe(1);
+  // A clock hours off is ignored: the window ends at the newest bucket.
+  const far = perMinuteSeries([{ ts: '2026-11-24T10:30:00Z', count: 4 }], at('2026-11-25T10:30:00Z'));
+  expect(sum(far)).toBe(4);
+  expect(far).toHaveLength(61);
   // Unreadable times are left out.
   expect(sum(perMinuteSeries([{ ts: 'x', count: 2 }], at('2026-11-24T10:30:00Z')))).toBe(0);
 });
