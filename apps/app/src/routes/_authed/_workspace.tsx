@@ -28,7 +28,7 @@ function WorkspaceLayout() {
     const lost = takeLostWorkspace();
     if (lost)
       toast.info(`You no longer have access to ${lost}`, {
-        description: `An owner removed you, or the workspace was deleted. You are in ${workspace.name}; ask an owner of ${lost} to invite you again.`,
+        description: `An owner removed you from it. You are in ${workspace.name}; ask an owner of ${lost} to invite you again.`,
         duration: 12_000,
       });
   }, [me, workspace]);

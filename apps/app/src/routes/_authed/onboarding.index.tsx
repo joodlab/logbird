@@ -102,7 +102,7 @@ function WorkspaceStep() {
           <Alert data-testid="lost-workspace">
             <AlertTitle>You no longer have access to {lost || 'your workspace'}</AlertTitle>
             <AlertDescription>
-              An owner removed you, or the workspace was deleted. Ask an owner to invite you again, or create a workspace of your own below.
+              An owner removed you from it. Ask an owner to invite you again, or create a workspace of your own below.
             </AlertDescription>
           </Alert>
         ) : null}
