@@ -11,6 +11,7 @@ import { DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
 import { webhookCursorClock } from '@logbird/database/webhooks';
 import { discoverWebhookDeliveries } from '../apps/worker/src/webhook-discovery';
+import { webhookWatermark } from '../apps/worker/src/webhook-policy';
 
 const pg = new URL(process.env.DATABASE_URL ?? 'postgres://invalid').pathname.slice(1);
 const chDatabase = process.env.CLICKHOUSE_DATABASE ?? '';
@@ -33,13 +34,15 @@ await prisma.organization.create({ data: { id: projectId, name: projectId, slug:
 await prisma.project.create({ data: { id: projectId, organizationId: projectId, name: projectId, slug: projectId } });
 const { now: start } = await webhookCursorClock(prisma);
 const importStarted = performance.now();
+let lastReceivedAt = start;
 for (let offset = 0; offset < TOTAL; offset += BATCH) {
   // Keep the shared server's memory clear of its limit while merges catch up.
   while ((await memoryMiB()) > 1100) await delay(2000);
   const receivedAt = new Date();
+  lastReceivedAt = receivedAt;
   await insertEvents(
     ch,
-    Array.from({ length: BATCH }, (_, i) => {
+    Array.from({ length: Math.min(BATCH, TOTAL - offset) }, (_, i) => {
       const index = offset + i;
       const normalized = normalizeEvent(
         { id: `import-${index}`, action: 'import.record', occurredAt: new Date(+receivedAt - Math.floor((index / TOTAL) * SPREAD)).toISOString() },
@@ -51,7 +54,9 @@ for (let offset = 0; offset < TOTAL; offset += BATCH) {
   );
 }
 const importSeconds = (performance.now() - importStarted) / 1000;
-await delay(5000);
+// Discovery scans only up to its watermark, which trails the clock by the async-insert flush bound and a margin. Until
+// the watermark passes the import, a pass reads nothing; wait for it (one second of slack between the two clocks).
+while (+webhookWatermark((await webhookCursorClock(prisma)).now, null) <= +lastReceivedAt + 1000) await delay(1000);
 
 const results: {
   endpoints: number;
@@ -59,6 +64,7 @@ const results: {
   passMs: number;
   perEndpointMs: number;
   passes: number;
+  scanQueries: number;
   readRows: number;
   readBytes: number;
 }[] = [];
@@ -79,29 +85,32 @@ for (const endpoints of [1, 10, 100])
       ),
     );
     await ch.command({ query: 'SYSTEM FLUSH LOGS' });
-    const before = new Date();
+    // The query-log window starts on ClickHouse's clock, not this machine's (an ISO instant: a zoneless string is local).
+    const [clockRow] = await read<{ ms: string | number }>(ch, 'SELECT toUnixTimestamp64Milli(now64(3)) ms');
+    const before = new Date(Number(clockRow?.ms)).toISOString();
     const clock = await webhookCursorClock(prisma);
     const started = performance.now();
     let passes = 0;
     for (const hook of hooks) {
-      // Each endpoint scans until it has caught up with the import, as passes would.
-      // Discovery's watermark trails the clock, so "caught up" is a pass that no longer moves the cursor.
-      for (let pass = 0; pass < 10; pass++) {
+      // Each endpoint scans, as passes would, until its cursor is past the import. A pass that reads nothing (its
+      // watermark has not reached the cursor) measures nothing, so the bench fails rather than report it.
+      for (let pass = 0; ; pass++) {
         const current = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } });
+        if (+current.cursorReceivedAt > +lastReceivedAt) break;
+        if (pass === 100) throw new Error(`Endpoint ${hook.id} did not scan past the import in 100 passes`);
         await discoverWebhookDeliveries(ch, current, { now: clock.now, rollout: new Date(+start - 1) });
         passes++;
-        const after = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } });
-        if (+after.cursorReceivedAt === +current.cursorReceivedAt && after.cursorEventId === current.cursorEventId) break;
       }
     }
     const passMs = performance.now() - started;
     await ch.command({ query: 'SYSTEM FLUSH LOGS' });
-    const [usage] = await read<{ rows: string; bytes: string }>(
+    const [usage] = await read<{ queries: string; rows: string; bytes: string }>(
       ch,
-      `SELECT sum(read_rows) rows, sum(read_bytes) bytes FROM system.query_log
+      `SELECT count() queries, sum(read_rows) rows, sum(read_bytes) bytes FROM system.query_log
         WHERE type = 'QueryFinish' AND event_time_microseconds >= {from:DateTime64(6,'UTC')} AND has(databases, currentDatabase())
-          AND query LIKE '%SELECT event_id, toUnixTimestamp64Milli(received_at)%'`,
-      { from: before.toISOString().replace('T', ' ').slice(0, -1) },
+          AND query LIKE '%SELECT event_id, toUnixTimestamp64Milli(received_at) AS received_ms FROM events%'
+          AND query NOT LIKE '%system.query_log%'`,
+      { from: before },
     );
     const result = {
       endpoints,
@@ -109,6 +118,7 @@ for (const endpoints of [1, 10, 100])
       passMs: Math.round(passMs),
       perEndpointMs: Math.round(passMs / endpoints),
       passes,
+      scanQueries: Number(usage?.queries ?? 0),
       readRows: Number(usage?.rows ?? 0),
       readBytes: Number(usage?.bytes ?? 0),
     };
