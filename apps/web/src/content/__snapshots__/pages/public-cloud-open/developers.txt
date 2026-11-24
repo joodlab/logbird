@@ -77,7 +77,7 @@ pre| // Permanent rejections don't reject flush(): they arrive through onError a
 pre| await client.flush().catch((error) => console.error('audit delivery pending', error));
 pre| // On exit: stop accepting events and drain the queue. Can reject like flush().
 pre| await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
-With .NET, Track queues the event and returns at once, and nothing the client does throws into your code. await client.FlushAsync() waits for what is queued and returns false if delivery failed; dispose the client on shutdown so queued events are sent. The package targets .NET 8 and later and .NET Standard 2.0.
+With .NET, Track queues the event and returns immediately: it never blocks on the network and never throws. await client.FlushAsync() sends what is queued and returns false only when delivery failed after retries or you cancelled; a rejected event counts as settled and goes to OnDrop. Disposing the client sends what is queued, waiting at most ShutdownTimeout (10 seconds); anything still undelivered goes to OnDrop. The package targets .NET 8 and later and .NET Standard 2.0.
 The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild.
 No SDK? Use HTTP.
 One request, one to a thousand events.

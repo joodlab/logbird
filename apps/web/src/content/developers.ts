@@ -37,6 +37,7 @@ await client.shutdown().catch((error) => console.error('audit events left undeli
  * package` takes the one nuget.org lists. Compiled against sdks/dotnet before it changes (see the PR that adds it).
  */
 const dotnetQuickstart = `// dotnet add package Logbird   (ASP.NET Core: dotnet add package Logbird.AspNetCore)
+using System;
 using Logbird;
 
 await using var audit = new LogbirdClient(new LogbirdOptions
@@ -210,9 +211,12 @@ export const developers = {
     sourceInstallTitle: 'From source (not on npm yet)',
     /** The quickstart's two tabs: the TypeScript client and the .NET package (on NuGet). */
     tabs: { typescript: 'TypeScript', dotnet: '.NET' },
-    /** Under the tabs: the .NET client's own calls (sdks/dotnet/README.md § Install, § Record events, § Flush). */
+    /**
+     * Under the tabs: the .NET client's own calls, worded from its contract (sdks/dotnet/src/Logbird/LogbirdClient.cs: the
+     * Track and FlushAsync summaries) and README § Failures, drops and shutdown (disposal waits at most ShutdownTimeout).
+     */
     dotnetNote:
-      'With .NET, `Track` queues the event and returns at once, and nothing the client does throws into your code. `await client.FlushAsync()` waits for what is queued and returns `false` if delivery failed; dispose the client on shutdown so queued events are sent. The package targets .NET 8 and later and .NET Standard 2.0.',
+      'With .NET, `Track` queues the event and returns immediately: it never blocks on the network and never throws. `await client.FlushAsync()` sends what is queued and returns `false` only when delivery failed after retries or you cancelled; a rejected event counts as settled and goes to `OnDrop`. Disposing the client sends what is queued, waiting at most `ShutdownTimeout` (10 seconds); anything still undelivered goes to `OnDrop`. The package targets .NET 8 and later and .NET Standard 2.0.',
     npmNote: byRepo(SITE, {
       public: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild.",
       private: "The packages aren't on npm yet.",
