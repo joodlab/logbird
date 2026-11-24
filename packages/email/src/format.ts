@@ -29,6 +29,8 @@ export function formatRelative(target: Date, now: Date) {
 }
 
 export const roleLabel = (role: string) => (role ? role.charAt(0).toUpperCase() + role.slice(1) : 'Member');
+/** A role inside a sentence, lower case like the console's own copy: "as an admin". Labels and subjects keep roleLabel. */
+export const roleInProse = (role: string) => roleLabel(role).toLowerCase();
 
 /** One line per role: what someone with it can actually do in Logbird. */
 export const ROLE_SUMMARY: Record<string, string> = {

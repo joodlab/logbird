@@ -193,7 +193,11 @@ describe('member joined and role changed', () => {
   it('tells the inviter who joined, with which role', async () => {
     const r = await renderEmail(emails.memberJoined, fixtures.memberJoined);
     expect(r.subject).toBe('Lina Haddad joined Acme on Logbird');
-    expect(r.text).toContain('Lina Haddad accepted your invitation and is now a member of Acme as an Admin.');
+    expect(r.text).toContain('Lina Haddad accepted your invitation and is now a member of Acme as an admin.');
+    // The action goes to the members page, named as the console's navigation names it.
+    expect(r.text).toContain('View members:\nhttps://audit.acme.test/workspace/members');
+    expect(r.html).toContain('href="https://audit.acme.test/workspace/members"');
+    expect(r.text).toContain('under Workspace settings → Members.');
     expect(r.text).toContain('you invited lina@acme.test to the Acme workspace.');
   });
 

@@ -1,11 +1,14 @@
 import type { InvitationPreview } from '@logbird/contracts';
 import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import { Button } from '@logbird/ui/components/ui/button';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { ArrowRightIcon, CircleAlertIcon, CircleCheckIcon, CircleSlashIcon, ClockIcon, Loader2Icon, LogOutIcon, MailIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { personNameSchema, useSaveName } from '@/components/account/name-form';
 import { DetailRow, LoadingCard, PublicInviteLayout, StateCard } from '@/components/invite/public-invite';
 import { PendingHint } from '@/components/pending-hint';
 import { Timestamp } from '@/components/timestamp';
@@ -15,6 +18,7 @@ import { authCall, authClient, signOut } from '@/lib/auth-client';
 import { formatFull } from '@/lib/format';
 import { ROLE_INFO, type Role, roleLabel } from '@/lib/organization';
 import { markOtpSent } from '@/lib/otp';
+import { hasName } from '@/lib/user';
 
 /**
  * Public: works signed in or out. The invitation id in the URL is the secret, so the page never gets indexed.
@@ -54,12 +58,28 @@ function AcceptInvitationPage() {
           tone="danger"
         />
       );
-  else body = <Invitation invitation={preview.data} signedInAs={session.data?.user.email ?? null} />;
+  else
+    body = (
+      <Invitation
+        invitation={preview.data}
+        needsName={Boolean(session.data) && !hasName(session.data?.user)}
+        signedInAs={session.data?.user.email ?? null}
+      />
+    );
 
   return <PublicInviteLayout>{body}</PublicInviteLayout>;
 }
 
-function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview; signedInAs: string | null }) {
+function Invitation({
+  invitation,
+  signedInAs,
+  needsName,
+}: {
+  invitation: InvitationPreview;
+  signedInAs: string | null;
+  /** Signed in without a name yet (a first sign-in by code): asked here, so the inviter is told who joined, not an address. */
+  needsName: boolean;
+}) {
   const { invitationId } = Route.useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -79,8 +99,14 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
     onError: (error) => toast.error('Could not send the sign-in code', { description: errorMessage(error) }),
   });
 
+  const saveName = useSaveName();
+  const [name, setName] = useState('');
+  const [nameError, setNameError] = useState<string | null>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
   const accept = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (newName: string | null) => {
+      // The name first: the inviter's "joined" email and the workspace activity are written when the invitation is accepted.
+      if (newName) await saveName(newName);
       await authCall(authClient.organization.acceptInvitation({ invitationId }));
       await authCall(authClient.organization.setActive({ organizationId: invitation.organization.id }));
     },
@@ -91,6 +117,17 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
     },
     onError: () => refresh(),
   });
+  const submitAccept = () => {
+    if (!needsName) return accept.mutate(null);
+    const parsed = personNameSchema.safeParse(name);
+    if (!parsed.success) {
+      setNameError(parsed.error.issues[0]?.message ?? 'Enter your name.');
+      nameInput.current?.focus();
+      return;
+    }
+    setNameError(null);
+    accept.mutate(parsed.data);
+  };
   const decline = useMutation({
     mutationFn: () => authCall(authClient.organization.rejectInvitation({ invitationId })),
     onSuccess: refresh,
@@ -167,12 +204,44 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
         </div>
       ) : (
         <div className="flex flex-col gap-2">
+          {needsName ? (
+            <div className="mb-2 flex flex-col gap-1.5" data-testid="invitation-name">
+              <Label htmlFor="invitation-name">Your name</Label>
+              <Input
+                aria-describedby="invitation-name-help"
+                aria-invalid={Boolean(nameError) || undefined}
+                autoComplete="name"
+                dir="auto"
+                disabled={accept.isPending}
+                id="invitation-name"
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (nameError) setNameError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitAccept();
+                }}
+                placeholder="Lina Haddad"
+                ref={nameInput}
+                size="lg"
+                value={name}
+              />
+              <p
+                className={nameError ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'}
+                id="invitation-name-help"
+                role={nameError ? 'alert' : undefined}
+              >
+                {nameError ??
+                  `Shown to ${invitation.inviter?.name ?? 'your teammates'} and the rest of ${invitation.organization.name}, in member lists and in workspace activity.`}
+              </p>
+            </div>
+          ) : null}
           {accept.isError ? (
             <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-destructive text-sm" role="alert">
               {errorMessage(accept.error)}
             </p>
           ) : null}
-          <Button size="lg" disabled={accept.isPending || decline.isPending} onClick={() => accept.mutate()}>
+          <Button size="lg" disabled={accept.isPending || decline.isPending} onClick={submitAccept}>
             {accept.isPending ? <Loader2Icon className="animate-spin" /> : null}
             Accept and join {invitation.organization.name}
             {accept.isPending ? null : <ArrowRightIcon />}

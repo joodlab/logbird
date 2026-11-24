@@ -41,7 +41,11 @@ function OnboardingLayout() {
     project: (setup.data?.projects.length ?? 0) > 0,
     first_event: setup.data?.projects.some((p) => p.firstEventAt) ?? false,
   };
-  const done = onboardingStepsDone(STEPS.map((step) => step.id), current, server);
+  const done = onboardingStepsDone(
+    STEPS.map((step) => step.id),
+    current,
+    server,
+  );
   // Someone who joined an existing workspace and is only asked their name has no setup of their own to walk: a stepper
   // would show its workspace, project and first event as theirs (#7).
   const joining = STEPS[current]?.id === 'profile' && me.organizations.length > 0;
@@ -65,9 +69,7 @@ function OnboardingLayout() {
         </div>
       </header>
       <main className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-4 pt-6 pb-16 sm:pt-10">
-        {joining ? null : (
-          <SetupSteps current={current} steps={STEPS.map((step) => ({ id: step.id, label: step.label, done: done[step.id] }))} />
-        )}
+        {joining ? null : <SetupSteps current={current} steps={STEPS.map((step) => ({ id: step.id, label: step.label, done: done[step.id] }))} />}
         <div className="tm-fade-in">
           <Outlet />
         </div>
