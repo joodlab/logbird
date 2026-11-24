@@ -298,8 +298,8 @@ it('cutoff cleanup preserves narrow affected-key reads without repairing retaine
   // The cutoff reaches the verified deletes intact, with p bound to this project.
   const cutoffDeletes = command.mock.calls.map(([p]) => p).filter((p) => /^DELETE FROM (events|event_ids) /.test(p.query));
   expect(cutoffDeletes.map((p) => p.query)).toEqual([
-    'DELETE FROM events WHERE project_id={p:String} AND (timestamp < {before:DateTime64(3,'UTC')})',
-    'DELETE FROM event_ids WHERE project_id={p:String} AND (timestamp < {before:DateTime64(3,'UTC')})',
+    "DELETE FROM events WHERE project_id={p:String} AND (timestamp < {before:DateTime64(3,'UTC')})",
+    "DELETE FROM event_ids WHERE project_id={p:String} AND (timestamp < {before:DateTime64(3,'UTC')})",
   ]);
   for (const p of cutoffDeletes)
     expect(p.query_params).toEqual({ p: 'qa-narrow-retention', before: '2026-11-07 00:00:00.000', bucket: '2026-11-07 00:00:00.000' });
