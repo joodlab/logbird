@@ -2,13 +2,28 @@ import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const list = vi.fn();
-vi.mock('@/lib/api/client', () => ({ api: { projects: { list: () => list() } } }));
+const get = vi.fn();
+// The session as the server has it now: Labs open (another tab switched it), member of Clinics and Labs.
+const me = vi.fn(async () => ({
+  user: { id: 'u_lina', name: 'Lina', email: 'lina@example.invalid', image: null },
+  organizations: [
+    { id: 'ws_clinics', name: 'Clinics Example', slug: 'clinics', role: 'member' },
+    { id: 'ws_labs', name: 'Labs Example', slug: 'labs', role: 'owner' },
+  ],
+  activeOrganizationId: 'ws_labs',
+}));
+vi.mock('@/lib/auth-client', () => ({ authClient: { getSession: async () => ({ data: { session: {} }, error: null }) } }));
+vi.mock('@/lib/api/client', () => ({ api: { me: () => me(), projects: { list: () => list(), get: (id: string) => get(id) } } }));
 
-const { projectIsListed } = await import('./project-listed');
+const { confirmedProject, PROJECT_MISSING, projectElsewhere, projectIsListed, readProject } = await import('./project-listed');
+const { ApiRequestError } = await import('./api/errors');
 const { keys } = await import('./api/queries');
 
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
-beforeEach(() => list.mockReset());
+beforeEach(() => {
+  list.mockReset();
+  get.mockReset();
+});
 
 it('opens a project created since the list was cached: missing from the cache, present after the refetch', async () => {
   const queryClient = client();
@@ -76,4 +91,73 @@ it('reads the cache when a refresh already in flight lands first, so a project t
   ]);
   await refresh;
   expect(await check).toBe(true);
+});
+
+const elsewhere = () =>
+  new ApiRequestError(409, 'project_in_other_workspace', 'This project is in Clinics Example.', {
+    workspaceId: 'ws_clinics',
+    workspaceName: 'Clinics Example',
+  });
+
+it('names the workspace a project is in only from a well-formed 409 project_in_other_workspace', () => {
+  expect(projectElsewhere(elsewhere())).toEqual({ kind: 'project-elsewhere', workspaceId: 'ws_clinics', workspaceName: 'Clinics Example' });
+  expect(projectElsewhere(new ApiRequestError(404, 'not_found', 'Project not found.'))).toBeNull();
+  expect(projectElsewhere(new ApiRequestError(409, 'project_in_other_workspace', 'x', { workspaceId: 'ws_clinics' }))).toBeNull();
+  expect(projectElsewhere(new ApiRequestError(409, 'webhook_secret_overlap_limit', 'x', { workspaceId: 'a', workspaceName: 'b' }))).toBeNull();
+  expect(projectElsewhere(new Error('offline'))).toBeNull();
+});
+
+it('reads a project fresh on entry: readable, in another of my workspaces, missing, or a failure to retry', async () => {
+  const qc = client();
+  const project = { id: 'p_clinics', name: 'Clinics', organizationId: 'ws_clinics' };
+  // A stale detail another workspace left in the cache never answers: the read goes to the server.
+  qc.setQueryData(keys.project('p_clinics').concat('detail'), project);
+  get.mockResolvedValueOnce(project);
+  expect(await readProject(qc, 'p_clinics')).toBe('readable');
+  expect(get).toHaveBeenCalledTimes(1);
+  // Only this project id counts as confirmed: another id is read fresh on entry, even when the router calls it 'stay'.
+  expect(confirmedProject(qc)).toBe('p_clinics');
+  get.mockRejectedValueOnce(elsewhere());
+  // The prompt names the workspace the session really has open, read fresh, not this tab's idea of it.
+  expect(await readProject(qc, 'p_clinics')).toEqual({
+    kind: 'project-elsewhere',
+    workspaceId: 'ws_clinics',
+    workspaceName: 'Clinics Example',
+    openWorkspaceName: 'Labs Example',
+  });
+  // A refused read forgets the confirmed project, so moving to it again reads it again.
+  expect(confirmedProject(qc)).toBeUndefined();
+  get.mockRejectedValueOnce(new ApiRequestError(404, 'not_found', 'Project not found.'));
+  expect(await readProject(qc, 'p_gone')).toBe(PROJECT_MISSING);
+  // Offline or a 5xx is not "not found": it is thrown for the page's retry.
+  // (Network failures are retried by the project query first, so these answers persist.)
+  vi.useFakeTimers();
+  try {
+    for (const [id, failure, text] of [
+      ['p_offline', new Error('offline'), 'offline'],
+      ['p_down', new ApiRequestError(503, 'unavailable', 'Down'), 'Down'],
+    ] as const) {
+      get.mockRejectedValue(failure);
+      const outcome = expect(readProject(qc, id)).rejects.toThrow(text);
+      await vi.runAllTimersAsync();
+      await outcome;
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('never lets a preload mark a project as visited, so a later move to it still reads it fresh', async () => {
+  const qc = client();
+  get.mockResolvedValue({ id: 'p_a', name: 'A', organizationId: 'ws_labs' });
+  expect(await readProject(qc, 'p_a')).toBe('readable');
+  expect(confirmedProject(qc)).toBe('p_a');
+  // Hovering B's link preloads it: readable, but not visited.
+  get.mockResolvedValue({ id: 'p_b', name: 'B', organizationId: 'ws_labs' });
+  expect(await readProject(qc, 'p_b', { visit: false })).toBe('readable');
+  expect(confirmedProject(qc)).toBe('p_a');
+  // A failed preload does not forget the visited project either.
+  get.mockRejectedValueOnce(new ApiRequestError(404, 'not_found', 'Project not found.'));
+  expect(await readProject(qc, 'p_c', { visit: false })).toBe(PROJECT_MISSING);
+  expect(confirmedProject(qc)).toBe('p_a');
 });

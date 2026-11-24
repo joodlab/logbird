@@ -132,7 +132,9 @@ it('real services: every console mutation by role, ADMIN-1 regressions, confirma
       }
       expect((await request(actor.cookie, `/api/projects/${outsiderProject.id}`)).status).toBe(404);
       await prisma.session.updateMany({ where: { userId: actor.id }, data: { activeOrganizationId: outsiderOrg.id } });
-      expect((await request(actor.cookie, `/api/projects/${outsiderProject.id}`, 'PATCH', { name: 'Stolen' })).status).toBe(403);
+      // A session whose active workspace the user is not a member of (a removed member's stale session): mutations get the
+      // same 404 as reads, so neither says the project exists.
+      expect((await request(actor.cookie, `/api/projects/${outsiderProject.id}`, 'PATCH', { name: 'Stolen' })).status).toBe(404);
       expect((await request(actor.cookie, `/api/projects/${outsiderProject.id}`)).status).toBe(404);
       await prisma.session.updateMany({ where: { userId: actor.id }, data: { activeOrganizationId: organization.id } });
       expect((await request(actor.cookie, `${base}/future-mutation`, 'POST')).status).toBe(403);
