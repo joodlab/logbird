@@ -287,6 +287,25 @@ test("a top-level `var require;` keeps CommonJS's require; one given a value doe
   ]);
 });
 
+test("the CommonJS wrapper's require survives only in CommonJS, and only bare redeclarations", () => {
+  // Repeated bare declarations replace nothing.
+  assert.deepEqual(importsOf("var require; var require;\nrequire('zod');", 'dist/probe.cjs'), ['zod']);
+  // A module has no wrapper: a bare `var require;` there is undefined and loads nothing.
+  assert.deepEqual(importsOf("var require;\nrequire?.('fictional-field');", 'dist/index.mjs'), []);
+  // A later declaration with a value is its own function.
+  assert.deepEqual(importsOf("var require;\nvar require = (x) => x;\nrequire('fictional-field');", 'dist/probe.cjs'), []);
+});
+
+test('.require() counts on Node objects and the modules reached from them, not on anything rooted there', () => {
+  assert.deepEqual(importsOf("module.exports = { require: (x) => x };\nmodule.exports.require('fictional-field');", 'dist/probe.cjs'), []);
+  assert.deepEqual(importsOf("module.parent.require('zod'); require.main.require('zod');", 'dist/probe.cjs'), ['zod']);
+});
+
+test('a defaulted createRequire binding is still a maker', () => {
+  const code = "const { createRequire: cr = undefined } = require('node:module');\ncr(__filename)('zod');";
+  assert.deepEqual(importsOf(code, 'dist/probe.cjs'), ['node:module', 'zod']);
+});
+
 test('require.main.require loading node:module makes createRequire available', () => {
   const code = "const { createRequire } = require.main.require('node:module');\nconst load = createRequire(__filename);\nload('zod');";
   assert.deepEqual(importsOf(code, 'dist/probe.cjs'), ['node:module', 'zod']);

@@ -137,12 +137,11 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   });
   // A top-level `var x;` that is never given a value redeclares a name without replacing it: in CommonJS, `var require;`
   // still holds the wrapper's `require`. Such a binding is read as the name itself.
+  // Only CommonJS has that wrapper; in a module a bare `var require;` is just undefined. Repeating the bare declaration
+  // (`var require; var require;`) still replaces nothing.
+  const bareVar = (path) => path.isVariableDeclarator() && path.node.init == null;
   const keepsOuter = (binding) =>
-    binding.kind === 'var' &&
-    binding.scope.path.isProgram() &&
-    binding.constantViolations.length === 0 &&
-    binding.path.isVariableDeclarator() &&
-    binding.path.node.init == null;
+    !asModule && binding.kind === 'var' && binding.scope.path.isProgram() && bareVar(binding.path) && binding.constantViolations.every(bareVar);
   /** What an identifier refers to: its binding, or `global:<name>` for a name the file does not declare. */
   const keyOf = (node) => {
     if (node?.type !== 'Identifier') return;
@@ -178,22 +177,22 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   /** A key that names a property: `a.b`, `a['b']`, ``a[`b`]`` → "b"; `a[b]` names no fixed property. */
   const keyName = (key, computed) => (!computed && key?.type === 'Identifier' ? key.name : staticName(key));
   const propertyName = (member) => keyName(member.property, member.computed);
-  // What the identifier at the root of a member chain refers to: `require` in `require.main.require`, `module` in
-  // `module.parent`.
-  const rootOf = (node) => {
-    const inner = unwrap(node);
-    if (isMember(inner)) return rootOf(inner.object);
-    if (inner?.type === 'TSNonNullExpression') return rootOf(inner.expression);
-    return keyOf(inner);
-  };
   // The bindings a require function is bound to: Node's own `require` (when the file does not declare that name), and
   // those found below.
   const requires = new Set(['global:require']);
   // `.require()` loads a module only on Node's own objects (`module.require`, `require.main.require`,
   // `globalThis.require`); on an ordinary object (`validator.require('field')`) it is a method like any other.
   const NODE_OBJECTS = new Set(['global:module', 'global:global', 'global:globalThis']);
-  const isRequireMethod = (callee) =>
-    isMember(callee) && propertyName(callee) === 'require' && (NODE_OBJECTS.has(rootOf(callee.object)) || requires.has(rootOf(callee.object)));
+  // The receiver itself must be one of Node's: `module`, `global`, `globalThis` or a require function, or the module
+  // reached from one (`require.main`, `module.parent`). Not anything rooted there: `module.exports.require` is the
+  // package's own export.
+  const isNodeReceiver = (node) => {
+    const inner = unwrap(node);
+    if (inner?.type === 'TSNonNullExpression') return isNodeReceiver(inner.expression);
+    if (inner?.type === 'Identifier') return NODE_OBJECTS.has(keyOf(inner)) || requires.has(keyOf(inner));
+    return isMember(inner) && ['main', 'parent'].includes(propertyName(inner)) && isNodeReceiver(inner.object);
+  };
+  const isRequireMethod = (callee) => isMember(callee) && propertyName(callee) === 'require' && isNodeReceiver(callee.object);
 
   // createRequire, wherever it comes from. Tracing whether a value is really Node's `module` builtin through compilers'
   // interop helpers (tsc's `__importDefault`, Babel's `_interopRequire*`, SWC's helpers, esbuild's and Rolldown's
@@ -214,12 +213,10 @@ export function importsOf(text, path, moduleType = 'commonjs') {
       }
       if (node.type === 'ObjectPattern') {
         for (const property of node.properties) {
-          if (
-            property.type === 'ObjectProperty' &&
-            keyName(property.key, property.computed) === 'createRequire' &&
-            property.value.type === 'Identifier'
-          )
-            makers.add(keyOf(property.value));
+          if (property.type !== 'ObjectProperty' || keyName(property.key, property.computed) !== 'createRequire') continue;
+          // `{ createRequire: cr }`, or with a default: `{ createRequire: cr = undefined }`.
+          const local = property.value.type === 'AssignmentPattern' ? property.value.left : property.value;
+          if (local.type === 'Identifier') makers.add(keyOf(local));
         }
       }
     });
@@ -274,10 +271,10 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   };
   // The names a require function is bound to: made by createRequire, or given one (`const r = require`, esbuild's
   // `__require`). Repeated until nothing new is found, since one binding can be given another.
-  const known = () => requires.size + makers.size;
-  for (let size = -1; size !== known(); ) {
-    size = known();
-    bindMakers();
+  // The makers depend on nothing found here, so they are collected once.
+  bindMakers();
+  for (let size = -1; size !== requires.size; ) {
+    size = requires.size;
     walk(ast.program, (node) => {
       const [target, value] =
         node.type === 'VariableDeclarator' ? [node.id, node.init] : node.type === 'AssignmentExpression' ? [node.left, node.right] : [];
