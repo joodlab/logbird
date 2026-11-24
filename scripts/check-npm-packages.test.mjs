@@ -125,6 +125,22 @@ test('require.main.require and module.parent.require load modules', () => {
   assert.deepEqual(importsOf("const r = require; r('fictional-library');", 'dist/probe.cjs'), ['fictional-library']);
 });
 
+test('a static computed property names the method: module[`require`] and module["require"]', () => {
+  assert.deepEqual(importsOf("module[`require`]('zod');", 'dist/probe.cjs'), ['zod']);
+  assert.deepEqual(importsOf("module['require']('zod');", 'dist/probe.cjs'), ['zod']);
+  // `module[name]` names no fixed property.
+  assert.deepEqual(importsOf("const name = 'other'; module[name]('fictional-field');", 'dist/probe.cjs'), []);
+});
+
+test('createRequire counts only from node:module', () => {
+  assert.deepEqual(importsOf("require('node:module').createRequire(__filename)('zod');", 'dist/probe.cjs'), ['zod', 'node:module']);
+  // An ordinary object's own method named createRequire makes nothing.
+  const factory = "const factory = { createRequire: () => (f) => f }; const validate = factory.createRequire(); validate('fictional-field');";
+  assert.deepEqual(importsOf(factory, 'dist/index.mjs'), []);
+  const ownFunction = "function createRequire() { return (f) => f; } const validate = createRequire(); validate('fictional-field');";
+  assert.deepEqual(importsOf(ownFunction, 'dist/index.mjs'), []);
+});
+
 test('a value that only tests for require is not a require function', () => {
   assert.deepEqual(importsOf("const hasRequire = typeof require === 'function'; hasRequire('fictional-library');", 'dist/probe.cjs'), []);
 });
@@ -143,6 +159,8 @@ test('each file is parsed as Node loads it: .mjs a module, .cjs a script, .js by
   assert.throws(() => importsOf('with ({}) {}', 'dist/probe.mjs'));
   assert.deepEqual(importsOf("with ({}) {}\nrequire('zod');", 'dist/probe.js', 'commonjs'), ['zod']);
   assert.deepEqual(importsOf("const z = require('zod');\nreturn;", 'dist/probe.cjs'), ['zod']);
+  // Node wraps CommonJS in a function, so `new.target` is valid at its top level.
+  assert.deepEqual(importsOf("module.exports = new.target;\nrequire('zod');", 'dist/probe.cjs'), ['zod']);
   assert.deepEqual(importsOf("import 'zod';", 'dist/probe.js', 'module'), ['zod']);
   assert.throws(() => importsOf("import 'zod';", 'dist/probe.cjs'));
   assert.deepEqual(importsOf("import type { Z } from 'zod';\nexport type { Z };", 'dist/index.d.cts'), ['zod']);
