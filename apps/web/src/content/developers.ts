@@ -213,10 +213,11 @@ export const developers = {
     tabs: { typescript: 'TypeScript', dotnet: '.NET' },
     /**
      * Under the tabs: the .NET client's own calls, worded from its contract (sdks/dotnet/src/Logbird/LogbirdClient.cs: the
-     * Track and FlushAsync summaries) and README § Failures, drops and shutdown (disposal waits at most ShutdownTimeout).
+     * Track and FlushAsync summaries) and README § Failures, drops and shutdown: OnDrop is best effort (every drop is
+     * counted), and ShutdownTimeout bounds the delivery wait, not the whole disposal. Checked by T4, who owns the SDK.
      */
     dotnetNote:
-      'With .NET, `Track` queues the event and returns immediately: it never blocks on the network and never throws. `await client.FlushAsync()` sends what is queued and returns `false` only when delivery failed after retries or you cancelled; a rejected event counts as settled and goes to `OnDrop`. Disposing the client sends what is queued, waiting at most `ShutdownTimeout` (10 seconds); anything still undelivered goes to `OnDrop`. The package targets .NET 8 and later and .NET Standard 2.0.',
+      'With .NET, `Track` queues the event and returns immediately: it never blocks on the network and never throws. `await client.FlushAsync()` sends what is queued and returns `false` when delivery failed after retries or you cancelled; a rejected event counts as settled and is reported to `OnDrop` (best effort; every drop is counted in `Stats`). Disposing the client sends what is queued, spending at most `ShutdownTimeout` (10 seconds) on delivery; anything still undelivered is dropped and reported the same way. The package targets .NET 8 and later and .NET Standard 2.0.',
     npmNote: byRepo(SITE, {
       public: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild.",
       private: "The packages aren't on npm yet.",
