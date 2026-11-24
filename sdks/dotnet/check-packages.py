@@ -16,7 +16,8 @@ It requires, reading each package's manifest as XML:
   package carries, wherever it is in the package, names its PDB under "/_/" in its one CodeView debug record (read
   through the PE debug directory, bounded by each record's declared size) and does not embed its PDB; the symbol
   package has exactly one portable PDB per DLL, the one whose PDB id matches that DLL's CodeView GUID, and that PDB's
-  one Source Link record (found by its custom debug information kind, not by searching bytes) maps only "/_/" paths,
+  one Source Link record (found by its custom debug information kind, not by searching bytes, and attached to the
+  module) maps only "/_/" paths,
   each to https://raw.githubusercontent.com/joodlab/logbird/ at a commit. A package packed without
   ContinuousIntegrationBuild (any build outside CI, unless it passes
   -p:ContinuousIntegrationBuild=true to build and pack) embeds the machine's own paths and fails here. This checks the
@@ -202,6 +203,7 @@ SOURCE_LINK_KIND = bytes.fromhex("560511CC91A0384D9FEC25AB9A351A6A")  # {CC11055
 # The type-system tables a HasCustomDebugInformation coded index can name, then the debug tables it can name.
 HAS_CDI = [0x06, 0x04, 0x01, 0x02, 0x08, 0x09, 0x0A, 0x00, 0x0E, 0x17, 0x14, 0x11, 0x1A, 0x1B, 0x20, 0x23, 0x26,
            0x27, 0x28, 0x2A, 0x2C, 0x2B, 0x30, 0x32, 0x33, 0x34, 0x35]
+MODULE_PARENT = 1 << 5 | HAS_CDI.index(0x00)  # Module row 1 as a HasCustomDebugInformation coded index: 0x27
 
 
 def blob(heap, index, label):
@@ -302,10 +304,15 @@ def portable_pdb(data, label):
         if not 1 <= kind <= len(guids) // 16:
             raise SystemExit(f"{label}: a custom debug information kind is outside the #GUID heap")
         if guids[(kind - 1) * 16:kind * 16] == SOURCE_LINK_KIND:
-            found.append(blob(heap, read(start + coded + guid, blob_index), label))
+            found.append((read(start, coded), blob(heap, read(start + coded + guid, blob_index), label)))
     if len(found) != 1:
         raise SystemExit(f"{label}: expected one Source Link record, found {len(found)}")
-    return pdb_id, found[0]
+    # Source Link applies to the whole module only when it is attached to the Module row: row 1, tag 7 in the
+    # HasCustomDebugInformation coded index (the spec puts it there). Attached to anything else, it maps nothing.
+    parent, value = found[0]
+    if parent != MODULE_PARENT:
+        raise SystemExit(f"{label}: the Source Link record belongs to coded parent {parent:#x}, not the module ({MODULE_PARENT:#x})")
+    return pdb_id, value
 
 
 def source_link(data, label):
