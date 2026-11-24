@@ -187,23 +187,26 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // The names createRequire itself is bound to: `import { createRequire as cr } from 'node:module'`,
   // `const { createRequire: cr } = require('node:module')`. An object's own `factory.createRequire()` is not one.
   const makers = new Set();
+  // A named export of node:module that is the module itself: its `default`, and the `Module` class, which carries
+  // `createRequire` as a static (Rolldown emits `import { Module } from "node:module"; Module.createRequire(…)`).
+  const SELF_EXPORTS = new Set(['default', 'Module']);
+  const bindExport = (name, local) => {
+    if (name === 'createRequire') makers.add(local);
+    else if (SELF_EXPORTS.has(name)) moduleBindings.add(local);
+  };
   walk(ast.program, (node) => {
     if (node.type === 'ImportDeclaration' && NODE_MODULE.has(node.source.value)) {
       for (const specifier of node.specifiers) {
         if (specifier.type !== 'ImportSpecifier') moduleBindings.add(specifier.local.name);
-        else if (keyName(specifier.imported, false) === 'createRequire') makers.add(specifier.local.name);
+        else bindExport(keyName(specifier.imported, false), specifier.local.name);
       }
     }
     if (node.type === 'VariableDeclarator' && loadsNodeModule(node.init)) {
       if (node.id.type === 'Identifier') moduleBindings.add(node.id.name);
       if (node.id.type === 'ObjectPattern') {
         for (const property of node.id.properties) {
-          if (
-            property.type === 'ObjectProperty' &&
-            keyName(property.key, property.computed) === 'createRequire' &&
-            property.value.type === 'Identifier'
-          )
-            makers.add(property.value.name);
+          if (property.type === 'ObjectProperty' && property.value.type === 'Identifier')
+            bindExport(keyName(property.key, property.computed), property.value.name);
         }
       }
     }

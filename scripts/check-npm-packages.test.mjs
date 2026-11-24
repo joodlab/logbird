@@ -137,6 +137,14 @@ test('createRequire counts only from node:module', () => {
   // An ordinary object's own method named createRequire makes nothing.
   const factory = "const factory = { createRequire: () => (f) => f }; const validate = factory.createRequire(); validate('fictional-field');";
   assert.deepEqual(importsOf(factory, 'dist/index.mjs'), []);
+  // Rolldown 1.2.16's output through Node's named `Module` export, and the same as an alias, `default`, and destructured.
+  const viaModule = 'import { Module } from "node:module";\nconst x = Module.createRequire(import.meta.url)("fictional-library");\nexport { x };';
+  assert.deepEqual(importsOf(viaModule, 'dist/index.mjs'), ['node:module', 'fictional-library']);
+  const aliased =
+    "import { Module as M, default as d } from 'node:module'; M.createRequire(import.meta.url)('zod'); d.createRequire(import.meta.url)('zod');";
+  assert.deepEqual(importsOf(aliased, 'dist/index.mjs'), ['node:module', 'zod']);
+  const destructured = "const { Module } = require('node:module'); Module.createRequire(__filename)('zod');";
+  assert.deepEqual(importsOf(destructured, 'dist/probe.cjs'), ['node:module', 'zod']);
   // A function merely given the string 'node:module' loads nothing.
   const given =
     "const factory = () => ({ createRequire: () => (value) => value }); const object = factory('node:module'); const validate = object.createRequire(); validate('fictional-field');";
