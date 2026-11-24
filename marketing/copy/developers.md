@@ -29,13 +29,13 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
 - **install (labelled "Install from npm", shown in every build):**
 
   ```sh
-  npm install @logbird/sdk
+  pnpm add @logbird/sdk
   ```
 
-  No version number: npm installs the one the registry lists. Small print: "`@logbird/sdk` and `@logbird/hono` are on
-  npm, ESM only. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source." While the repository is private,
-  the sentence ends at "aren't yet." Never say all the integrations are on npm.
-  <!-- source: packages/sdk/README.md (install); npm phase 1 publishes @logbird/sdk and @logbird/hono only; both verified on npmjs.com by the maintainer before this copy merged -->
+  No version number: pnpm installs the one the registry lists. Small print: "`@logbird/sdk` and `@logbird/hono` are on
+  npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet: until they are, install them from a Logbird checkout, as their READMEs describe."
+  While the repository is private, the sentence ends at "aren't on npm yet."
+  <!-- source: packages/sdk/README.md (install); npm phase 1 publishes @logbird/sdk and @logbird/hono only; T4's publication-state docs supply the source-install sentence -->
 - **code sample:**
 
   ```ts
@@ -52,6 +52,8 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
 
   client.track({
     action: 'booking.cancelled',
+    outcome: 'success',
+    description: 'Lina cancelled booking #1042',
     actor: { type: 'user', id: 'usr_42', name: 'Lina Haddad' },
     tenant: { id: 'biz_7', name: 'Azure Hotels' },
     targets: [{ type: 'booking', id: 'bk_1042', name: 'Booking #1042' }],
@@ -111,10 +113,12 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   operations each get their own page in the console. The conformance score is the
   share of nine recommended checks an event passes.
   <!-- source: docs/concepts.md; docs/SPEC.md §3 -->
-- **table:**
+- **table:** <!-- outcome and description: SPEC §3 (envelope; the nine conformance checks include both) and docs/concepts.md's worked example (same description values); Recent problems lists events with an outcome in RECENT_PROBLEM_OUTCOMES (failure, denied) or severity RECENT_PROBLEM_SEVERITY (critical): packages/contracts/src/api.ts, packages/clickhouse/src/queries.ts; the event title is eventSentence(), which uses the description unless it equals the action (apps/app/src/lib/events.ts usesDescription); free-text search covers description (SPEC § Query language). The console's first-event snippets send outcome and description too. -->
 
   | Field | Answers | Example |
   | --- | --- | --- |
+  | `outcome` | Whether it worked: success, failure, denied, partial or unknown. Failed and denied events show under Recent problems on the overview. | `"success"` |
+  | `description` | What happened, in words a person reads. The console shows it as the event's title unless it only repeats the action, and free-text search covers it. | `"Lina cancelled booking #1042"` |
   | `actor` | Who caused it | `{ type: "user", id: "usr_42", name: "Lina Haddad" }` |
   | `executor` | What did the work, and on which try | `{ type: "worker", id: "refunds-worker", jobId: "job_981", attempt: 2 }` |
   | `impersonator` | Which staff member acted for the actor | `{ id: "usr_1", name: "Support agent" }` |
@@ -140,6 +144,8 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
     {
       "id": "evt_cancel_bk_1042",
       "action": "booking.cancelled",
+      "outcome": "success",
+      "description": "Lina cancelled booking #1042",
       "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
       "executor": { "type": "api", "id": "api-server" },
       "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -149,6 +155,8 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
     },
     {
       "action": "payment.refunded",
+      "outcome": "success",
+      "description": "Refunded €240.00 for booking #1042",
       "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
       "executor": { "type": "worker", "id": "refunds-worker", "jobId": "job_981", "attempt": 2 },
       "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -175,7 +183,7 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   you call it, so identity set by a per-route auth guard is still picked up. `audit()` returns the event id straight
   away and never waits for delivery.
   <!-- source: docs/integrations.md; packages/integrations/*/README.md -->
-- **install (labelled "Install for Hono", above the tabs):** `npm install @logbird/sdk @logbird/hono`. The app imports `Logbird`
+- **install (labelled "Install for Hono", above the tabs):** `pnpm add @logbird/sdk @logbird/hono`. The app imports `Logbird`
   from `@logbird/sdk` itself, so it declares both; `hono` is a peer. <!-- source: packages/integrations/hono/package.json -->
 - **tabs:**
   - **Hono** (`@logbird/hono`):

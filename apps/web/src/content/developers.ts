@@ -1,9 +1,9 @@
 import { byRepo, SITE } from './site';
 
 /** The install from npm, with no version number (packages/sdk/README.md). Phase 1 publishes @logbird/sdk and @logbird/hono only. */
-const install = 'npm install @logbird/sdk';
+const install = 'pnpm add @logbird/sdk';
 /** @logbird/hono depends on the SDK, but the app imports Logbird from @logbird/sdk itself, so it declares both; hono is a peer. */
-const honoInstall = 'npm install @logbird/sdk @logbird/hono';
+const honoInstall = 'pnpm add @logbird/sdk @logbird/hono';
 
 const quickstart = `import { Logbird } from '@logbird/sdk';
 
@@ -18,6 +18,8 @@ const client = new Logbird({
 
 client.track({
   action: 'booking.cancelled',
+  outcome: 'success',
+  description: 'Lina cancelled booking #1042',
   actor: { type: 'user', id: 'usr_42', name: 'Lina Haddad' },
   tenant: { id: 'biz_7', name: 'Azure Hotels' },
   targets: [{ type: 'booking', id: 'bk_1042', name: 'Booking #1042' }],
@@ -46,6 +48,8 @@ const worked = `[
   {
     "id": "evt_cancel_bk_1042",
     "action": "booking.cancelled",
+    "outcome": "success",
+    "description": "Lina cancelled booking #1042",
     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
     "executor": { "type": "api", "id": "api-server" },
     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -55,6 +59,8 @@ const worked = `[
   },
   {
     "action": "payment.refunded",
+    "outcome": "success",
+    "description": "Refunded €240.00 for booking #1042",
     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
     "executor": { "type": "worker", "id": "refunds-worker", "jobId": "job_981", "attempt": 2 },
     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -119,6 +125,16 @@ const page = await readAuditTrail(
 // page.data: events; page.nextCursor: pass back as \`cursor\` for the next page`;
 
 const envelopeRows: [string, string, string][] = [
+  [
+    'outcome',
+    'Whether it worked: success, failure, denied, partial or unknown. Failed and denied events show under Recent problems on the overview.',
+    '"success"',
+  ],
+  [
+    'description',
+    "What happened, in words a person reads. The console shows it as the event's title unless it only repeats the action, and free-text search covers it.",
+    '"Lina cancelled booking #1042"',
+  ],
   ['actor', 'Who caused it', '{ type: "user", id: "usr_42", name: "Lina Haddad" }'],
   ['executor', 'What did the work, and on which try', '{ type: "worker", id: "refunds-worker", jobId: "job_981", attempt: 2 }'],
   ['impersonator', 'Which staff member acted for the actor', '{ id: "usr_1", name: "Support agent" }'],
@@ -185,8 +201,8 @@ export const developers = {
     installTitle: 'Install from npm',
     quickstartTitle: 'server.ts',
     npmNote: byRepo(SITE, {
-      public: "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source.",
-      private: "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. The Vue, Nuxt and TanStack Start packages aren't yet.",
+      public: "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet: until they are, install them from a Logbird checkout, as their READMEs describe.",
+      private: "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` aren't on npm yet.",
     }),
   },
   http: {

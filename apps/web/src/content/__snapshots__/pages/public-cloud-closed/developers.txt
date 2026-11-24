@@ -47,7 +47,7 @@ Call shutdown() from your host's own exit hook. The SDK installs no process hand
 Keep ingest keys on the server. Never ship one in a browser bundle.
 Redaction: beforeSend: redact() deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with [redacted] before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.
 Install from npm
-pre| npm install @logbird/sdk
+pre| pnpm add @logbird/sdk
 server.ts
 pre| import { Logbird } from '@logbird/sdk';
 pre|
@@ -62,6 +62,8 @@ pre| });
 pre|
 pre| client.track({
 pre|   action: 'booking.cancelled',
+pre|   outcome: 'success',
+pre|   description: 'Lina cancelled booking #1042',
 pre|   actor: { type: 'user', id: 'usr_42', name: 'Lina Haddad' },
 pre|   tenant: { id: 'biz_7', name: 'Azure Hotels' },
 pre|   targets: [{ type: 'booking', id: 'bk_1042', name: 'Booking #1042' }],
@@ -74,7 +76,7 @@ pre| // Permanent rejections don't reject flush(): they arrive through onError a
 pre| await client.flush().catch((error) => console.error('audit delivery pending', error));
 pre| // On exit: stop accepting events and drain the queue. Can reject like flush().
 pre| await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
-@logbird/sdk and @logbird/hono are on npm, ESM only. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source.
+@logbird/sdk and @logbird/hono are on npm, ESM only. @logbird/vue, @logbird/nuxt and @logbird/tanstack-start aren't on npm yet: until they are, install them from a Logbird checkout, as their READMEs describe.
 No SDK? Use HTTP.
 One request, one to a thousand events.
 POST /v1/events accepts one event, a JSON array, or { "events": [...] }. Authenticate with an ingest key. A 202 lists the stored event IDs in ids and rejected events in rejected.
@@ -91,6 +93,14 @@ Only an action string is required, and each event must fit the ingest limits. Th
 Field
 Answers
 Example
+outcome
+Whether it worked: success, failure, denied, partial or unknown. Failed and denied events show under Recent problems on the overview.
+"success"
+"success"
+description
+What happened, in words a person reads. The console shows it as the event's title unless it only repeats the action, and free-text search covers it.
+"Lina cancelled booking #1042"
+"Lina cancelled booking #1042"
 actor
 Who caused it
 { type: "user", id: "usr_42", name: "Lina Haddad" }
@@ -141,6 +151,8 @@ pre| [
 pre|   {
 pre|     "id": "evt_cancel_bk_1042",
 pre|     "action": "booking.cancelled",
+pre|     "outcome": "success",
+pre|     "description": "Lina cancelled booking #1042",
 pre|     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
 pre|     "executor": { "type": "api", "id": "api-server" },
 pre|     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -150,6 +162,8 @@ pre|     "context": { "operationId": "op_cancel_bk_1042" }
 pre|   },
 pre|   {
 pre|     "action": "payment.refunded",
+pre|     "outcome": "success",
+pre|     "description": "Refunded €240.00 for booking #1042",
 pre|     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
 pre|     "executor": { "type": "worker", "id": "refunds-worker", "jobId": "job_981", "attempt": 2 },
 pre|     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -168,7 +182,7 @@ Nuxt @logbird/nuxt
 A Nitro plugin adds event.context.audit. A built-in history route denies every request until your authorize(event, query) hook returns a trusted query.
 There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from those stacks.
 Install for Hono
-pre| npm install @logbird/sdk @logbird/hono
+pre| pnpm add @logbird/sdk @logbird/hono
 Hono
 pre| import { Hono } from 'hono';
 pre| import { Logbird } from '@logbird/sdk';

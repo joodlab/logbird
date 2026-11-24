@@ -1,0 +1,113 @@
+name: npm packages
+
+# Packs the TypeScript packages as a release does, checks the tarballs, and installs them into outside applications
+# (tests/npm-consumer, tests/npm-consumer-adapters) that type-check, run and report the public API from the tarballs,
+# never from the workspace sources. Nothing is published here.
+on:
+  pull_request:
+    paths:
+      - 'packages/sdk/**'
+      - 'packages/integrations/**'
+      - 'packages/contracts/**'
+      - 'packages/tsconfig/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tests/npm-consumer/**'
+      - 'tests/npm-consumer-adapters/**'
+      - 'scripts/check-npm-packages.mjs'
+      - 'scripts/check-npm-packages.test.mjs'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/npm-packages.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'packages/sdk/**'
+      - 'packages/integrations/**'
+      - 'packages/contracts/**'
+      - 'packages/tsconfig/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'tests/npm-consumer/**'
+      - 'tests/npm-consumer-adapters/**'
+      - 'scripts/check-npm-packages.mjs'
+      - 'scripts/check-npm-packages.test.mjs'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/npm-packages.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack:
+    name: Pack and check the npm tarballs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: pnpm
+      # The whole workspace, as the release job installs it: the SDK bundles parts of @logbird/contracts at build time.
+      - run: pnpm install --frozen-lockfile
+      - name: Test the import scan
+        run: node --test scripts/check-npm-packages.test.mjs
+      - name: Build and pack, as the release does
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm"
+          for dir in packages/sdk packages/integrations/hono packages/integrations/vue packages/integrations/nuxt packages/integrations/tanstack-start; do
+            (cd "$dir" && pnpm build && pnpm pack --pack-destination "$RUNNER_TEMP/npm")
+          done
+      - name: Check the tarballs
+        run: node scripts/check-npm-packages.mjs "$RUNNER_TEMP/npm" "$(node -p "require('./package.json').version")"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/npm
+          retention-days: 7
+
+  # @logbird/sdk and @logbird/hono (the packages published first): type-checked under TypeScript 6 and 7, run, and the
+  # API reports compared, on both Node lines engines.node admits and both ends of the hono peer range.
+  consumer:
+    name: npm consumer (Node ${{ matrix.node }}, hono ${{ matrix.hono }})
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+        hono: [floor, latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-packages
+          path: tests/npm-consumer/.packages
+      - run: node tests/npm-consumer/run.mjs --skip-pack --hono=${{ matrix.hono }}
+
+  # @logbird/vue, @logbird/nuxt and @logbird/tanstack-start (not published yet): type-checked and their API reports
+  # compared, at the framework versions tested today.
+  adapters:
+    name: npm consumer (Vue, Nuxt, TanStack Start types)
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-packages
+          path: tests/npm-consumer-adapters/.packages
+      - run: node tests/npm-consumer/run.mjs --project=adapters --skip-pack

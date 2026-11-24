@@ -13,7 +13,8 @@ export interface Audit {
   pending(): Promise<void>;
   carrier(partial?: Partial<AuditCarrier>): Promise<AuditCarrier>;
 }
-type Resolver<C, T> = (context: C) => T | Promise<T>;
+/** A capture option computed per request or job from the host's context, synchronously or not. */
+export type Resolver<C, T> = (context: C) => T | Promise<T>;
 export interface CaptureOptions<C> {
   client: Logbird;
   actor?: Resolver<C, EventInput['actor']>;
