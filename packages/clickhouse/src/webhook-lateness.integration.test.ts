@@ -17,17 +17,19 @@ afterAll(async () => {
 });
 
 it.runIf(process.env.CLICKHOUSE_URL)(
-  'counts late arrivals by whole hours, exactly at the window boundary, and deletes them with the project',
+  'counts late arrivals by whole hours, agrees with discovery at every window boundary, and deletes them with the project',
   async () => {
     // Mid-hour, so every event falls in one arrival hour.
     const receivedAt = new Date(Math.floor(Date.now() / hour) * hour + 30 * 60_000);
-    const lateness = {
+    const lateness: Record<string, number> = {
       future: -30 * 60_000,
       onTime: 0,
       halfHour: 30 * 60_000,
-      oneHour: hour,
-      justOverOneHour: hour + 1,
-      twoHours: 2 * hour,
+      exactlyOneHour: hour,
+      oneHourOneSecond: hour + 1000,
+      oneHourOneMs: hour + 1,
+      exactlyTwoHours: 2 * hour,
+      twoHoursOneMs: 2 * hour + 1,
       maximum: 3650 * 24 * hour,
     };
     const rows = Object.entries(lateness).map(([id, late]) => {
@@ -44,24 +46,25 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       'SELECT late_hours, sum(events) n FROM events_lateness_by_hour WHERE project_id = {p:String} GROUP BY late_hours ORDER BY late_hours',
       { p: projectId },
     );
-    // ceil(lateness / 1 h), floored at 0: an occurrence ahead of arrival is not late.
+    // Only events more than one hour late reach the rollup; late_hours = ceil(lateness / 1 h).
     expect(buckets.map(({ late_hours, n }) => [Number(late_hours), Number(n)])).toEqual([
-      [0, 2],
-      [1, 2],
-      [2, 2],
+      [2, 3],
+      [3, 1],
       [87_600, 1],
     ]);
     const since = new Date(+receivedAt - hour);
-    const counts = await lateEventCounts(ch, projectId, [
-      { since, windowSeconds: 3600 },
-      { since, windowSeconds: 7200 },
-      { since, windowSeconds: 87_599 * 3600 },
-      { since, windowSeconds: 87_600 * 3600 },
-      { since: new Date(+receivedAt + hour), windowSeconds: 3600 },
-    ]);
-    // A 1 h window: over one hour late (1 h + 1 ms, 2 h, 3,650 d); exactly one hour is on time. Counting starts at the
-    // arrival hour that contains `since`, so a `since` after the arrival hour counts nothing.
-    expect(counts).toEqual([3, 1, 1, 0, 0]);
+    const windowsInHours = [1, 2, 3, 87_599, 87_600];
+    const counts = await lateEventCounts(
+      ch,
+      projectId,
+      windowsInHours.map((hours) => ({ since, windowSeconds: hours * 3600 })),
+    );
+    // Discovery delivers an event when lateness <= window (inclusive); the count is exactly the events it skips.
+    const skippedByDiscovery = windowsInHours.map((hours) => Object.values(lateness).filter((late) => late > hours * hour).length);
+    expect(counts).toEqual(skippedByDiscovery);
+    expect(counts).toEqual([5, 2, 1, 1, 0]);
+    // Counting starts at the arrival hour that contains `since`: a later `since` counts nothing.
+    expect(await lateEventCounts(ch, projectId, [{ since: new Date(+receivedAt + hour), windowSeconds: 3600 }])).toEqual([0]);
     await purgeProject(ch, projectId);
     expect(await lateEventCounts(ch, projectId, [{ since, windowSeconds: 3600 }])).toEqual([0]);
   },
