@@ -16,12 +16,12 @@ const notFound = () => new ApiError(404, 'not_found', 'Project not found.');
  */
 export async function projectAccess(c: Context<AppEnv>, projectId: string) {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!project) throw notFound();
+  // The member lookup runs either way, so a missing project and one in a workspace the person is not in cost the same.
   const member = await prisma.member.findFirst({
-    where: { organizationId: project.organizationId, userId: c.get('user').id },
+    where: { organizationId: project?.organizationId ?? '', userId: c.get('user').id },
     select: { role: true },
   });
-  if (!member) throw notFound();
+  if (!project || !member) throw notFound();
   if (project.organizationId !== c.get('activeOrganizationId')) {
     const workspace = await prisma.organization.findUnique({ where: { id: project.organizationId }, select: { id: true, name: true } });
     if (!workspace) throw notFound();

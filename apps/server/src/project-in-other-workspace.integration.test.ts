@@ -97,6 +97,12 @@ it('answers 409 project_in_other_workspace only to a current member of the ownin
       }
     }
 
+    // A malformed escape in a mutation's project id is the same 404 as a missing project, not a 500.
+    const malformed = await comparable(await request('/api/projects/%E0%A4%A', 'PATCH', actor.cookie, {}));
+    const missingPatch = await comparable(await request(`/api/projects/missing-${randomUUID()}`, 'PATCH', actor.cookie, {}));
+    expect(malformed).toEqual(missingPatch);
+    expect(malformed.status).toBe(404);
+
     // With the owning workspace active the same project opens normally.
     await prisma.session.updateMany({ where: { userId: actor.id }, data: { activeOrganizationId: other.org.id } });
     const opened = await request(`/api/projects/${other.project.id}`, 'GET', actor.cookie);

@@ -280,7 +280,14 @@ app.get(
   routeDoc('OpenAPI document', { hide: true }, 'none'),
   // Generated once, then requireProjectAccess's 409 is added to every console project operation (documentProjectAccess).
   async (c) => {
-    if (!openApiDocument) openApiDocument = generateSpecs(app, openApiOptions, c).then(documentProjectAccess);
+    // A failed build is not cached: the next request tries again.
+    if (!openApiDocument)
+      openApiDocument = generateSpecs(app, openApiOptions, c)
+        .then(documentProjectAccess)
+        .catch((error) => {
+          openApiDocument = undefined;
+          throw error;
+        });
     return c.json(await openApiDocument);
   },
 );
