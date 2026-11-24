@@ -29,6 +29,7 @@ export const security = {
       { id: 'self-host', label: 'Where data lives' },
       { id: 'retention', label: 'Retention' },
       { id: 'isolation', label: 'Projects and keys' },
+      { id: 'webhooks', label: 'Webhook endpoints' },
       { id: 'sql-guard', label: 'SQL mode' },
       { id: 'roles', label: 'Roles' },
       { id: 'impersonation', label: 'Impersonation' },
@@ -41,14 +42,14 @@ export const security = {
   selfHost: {
     eyebrow: 'Where data lives',
     title: 'Self-hosted, your events stay on your servers.',
-    lead: "When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the SMTP provider you choose, and resolves a webhook endpoint's hostname when you save it.",
+    lead: "When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the SMTP provider you choose and, when you add webhook endpoints, delivers events to them; it resolves an endpoint's hostname when you save it and before each delivery.",
     diagram: {
       server: 'Your server',
       parts: ['Console', 'API', 'Worker', 'Postgres', 'ClickHouse', 'Redis'],
       arrow: 'sign-in codes, invitations',
       smtp: 'Your SMTP provider',
       caption:
-        "The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. Outbound, the server connects to your SMTP provider (sign-in codes, invitations and membership notices) and looks up a webhook endpoint's hostname when you save it. With your own databases, it also connects to them.",
+        "The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. Outbound, the server connects to your SMTP provider (sign-in codes, invitations and membership notices) and delivers webhooks to the endpoints you add, looking up each endpoint's hostname when you save it and before each delivery. With your own databases, it also connects to them.",
     },
   },
   retention: {
@@ -86,6 +87,30 @@ export const security = {
       scope: 'One account per scope',
       layers: 'Two layers',
       origins: 'Browser origins',
+    },
+    /** Code citations: marketing/copy/security.md § webhooks. */
+    webhooks: {
+      title: 'Webhook endpoints: signed, checked, and managed by admins.',
+      admins: {
+        title: 'Owners and admins only',
+        body: 'Only owners and admins can see or manage webhook endpoints: a stored URL can itself be a credential.',
+      },
+      secrets: {
+        title: 'Secrets shown once',
+        body: "Each endpoint's signing secret is encrypted at rest (AES-256-GCM) and shown once, when you create or rotate it.",
+      },
+      destinations: {
+        title: 'Public destinations only',
+        body: 'A destination must resolve only to public addresses. Logbird checks it when you save the URL and again before every delivery, and connects only to the address it checked.',
+      },
+      redirects: {
+        title: 'No redirects, no console credentials',
+        body: 'Redirects are never followed: a redirect counts as a failed attempt, retried while the 24-hour window is open. A delivery carries the event and its signature headers, never console headers or cookies.',
+      },
+      masks: {
+        title: 'Masks on every delivery',
+        body: 'Field masks set on an endpoint apply to every delivery, including retries and resends.',
+      },
     },
   },
   sqlGuard: {

@@ -2,6 +2,26 @@ import { z } from 'zod';
 import { readScopeSchema } from './api';
 
 export const MAX_WEBHOOK_ENDPOINTS = 10;
+/**
+ * The delivery window a new endpoint gets: 7 days. The single source for create, the docs and the migration that gave
+ * existing endpoints this value (a test checks the migration against it).
+ */
+export const DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS = 604_800;
+export const MIN_WEBHOOK_DELIVERY_WINDOW_SECONDS = 3600;
+/** 3,650 days: the oldest occurrence time ingest accepts. */
+export const MAX_WEBHOOK_DELIVERY_WINDOW_SECONDS = 315_360_000;
+export const webhookDeliveryWindowSchema = z
+  .number()
+  .int()
+  .min(MIN_WEBHOOK_DELIVERY_WINDOW_SECONDS)
+  .max(MAX_WEBHOOK_DELIVERY_WINDOW_SECONDS)
+  .multipleOf(3600)
+  .nullable()
+  .describe(
+    'Deliver an event only if it arrived no later than this many seconds after it occurred (receivedAt − occurredAt). ' +
+      'A whole number of hours, from 1 hour to 3,650 days; null means no limit. Later events stay stored and searchable but ' +
+      'are not delivered. Resends and test pings ignore the window. A change applies to events discovered after the save.',
+  );
 export const webhookScopeSchema = z
   .object({
     tenantId: readScopeSchema.shape.tenantId.optional(),
@@ -52,6 +72,8 @@ const webhookFields = {
     ),
   scope: webhookScopeSchema.nullable().optional(),
   enabled: z.boolean().optional(),
+  /** On create, omitted means the 7-day default. On PATCH, omitted means unchanged and null removes the limit. */
+  deliveryWindowSeconds: webhookDeliveryWindowSchema.optional(),
 };
 export const createWebhookSchema = z.object(webhookFields).strict();
 /** scope replaces the entire scope; null clears it. Omission preserves it. */
@@ -84,6 +106,22 @@ export const webhookEndpointSchema = z.object({
   disabledAt: z.iso.datetime().nullable(),
   filterQuery: z.string(),
   scope: webhookScopeResponseSchema.nullable(),
+  deliveryWindowSeconds: webhookDeliveryWindowSchema,
+  lateEvents: z
+    .object({
+      count: z.number().int().nonnegative().nullable(),
+      since: z.iso.datetime(),
+    })
+    .describe(
+      "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are " +
+        'applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the ' +
+        "endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late " +
+        'events since removed by retention or deletion and can exceed what a search finds. The count is approximate: it is ' +
+        'exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher than ' +
+        'the true number. There is no backfill: arrivals before the deployment added this count are not included. Do not use ' +
+        'it for reconciliation. 0 when the window is null. null only in a PATCH response when the count could not be read: ' +
+        'the settings were saved regardless; read the endpoint again for the count.',
+    ),
   createdById: z.string().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),

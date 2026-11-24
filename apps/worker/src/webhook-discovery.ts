@@ -93,11 +93,20 @@ async function captureScanBounds(projectId: string) {
 
 // Keep the arrival-time predicate on the stored column so ClickHouse can use an arrival-time index when present.
 function readWebhookCandidates(ch: ClickHouseClient, endpoint: WebhookEndpoint, match: Predicate, sliceEnd: Date) {
+  // The delivery window: only events that arrived no later than the window after they occurred (received_at - timestamp
+  // <= window). Every candidate arrived at or after the cursor, so its occurrence time is at least cursor - window: that
+  // bound on the sort key's timestamp column turns the scan into a primary-key range instead of ten years of parts.
+  const window = endpoint.deliveryWindowSeconds;
+  const occurredFrom =
+    window === null
+      ? `subtractDays({from:DateTime64(3,'UTC')}, ${OCCURRED_AT_PAST_DAYS})`
+      : "subtractSeconds({from:DateTime64(3,'UTC')}, {window:UInt32})";
   return read<{ event_id: string; received_ms: string | number }>(
     ch,
     `SELECT event_id, toUnixTimestamp64Milli(received_at) AS received_ms FROM events
         WHERE ${match.sql}
-          AND timestamp >= subtractDays({from:DateTime64(3,'UTC')}, ${OCCURRED_AT_PAST_DAYS})
+          AND timestamp >= ${occurredFrom}
+          ${window === null ? '' : 'AND timestamp >= subtractSeconds(received_at, {window:UInt32})'}
           AND timestamp < addDays({to:DateTime64(3,'UTC')}, ${OCCURRED_AT_FUTURE_DAYS})
           AND received_at >= {from:DateTime64(3,'UTC')} AND received_at < {to:DateTime64(3,'UTC')}
           ${endpoint.cursorEventId === null ? '' : "AND (received_at > {from:DateTime64(3,'UTC')} OR event_id > {cursorId:String})"}
@@ -107,6 +116,7 @@ function readWebhookCandidates(ch: ClickHouseClient, endpoint: WebhookEndpoint, 
       to: sliceEnd.toISOString(),
       from: endpoint.cursorReceivedAt.toISOString(),
       cursorId: endpoint.cursorEventId,
+      ...(window === null ? {} : { window }),
     },
   );
 }
@@ -135,6 +145,8 @@ export async function discoverWebhookDeliveries(
     scopeTargetId: endpoint.scopeTargetId,
     scopeMask: { equals: endpoint.scopeMask },
     filterQuery: endpoint.filterQuery,
+    // A scan read under one window must not commit after a save changed it, even within the same updatedAt millisecond.
+    deliveryWindowSeconds: endpoint.deliveryWindowSeconds,
   };
   // Scheduling records every attempt independently of cursor progress and configuration edits.
   await prisma.webhookEndpoint.updateMany({

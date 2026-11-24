@@ -1168,12 +1168,52 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
     : [];
   const cutoff = before ? "timestamp < {before:DateTime64(3,'UTC')}" : '';
   await deleteAndVerify(ch, p, 'events', cutoff, cutoffParams);
+  // Raw events are gone from here on, so any later failure (even a definite rejection, which deleteAndVerify passes
+  // through unchanged) leaves the purge partial: index, lateness counts or rollups still describe deleted events.
+  try {
+    await purgeAfterEvents(ch, p, before, cutoff, cutoffParams, affected);
+  } catch (error) {
+    throw partialPurge(error, p);
+  }
+}
+
+/**
+ * Wraps a failure after `purgeProject` deleted raw events in the retryable LOGBIRD_DELETE_UNVERIFIED contract (a
+ * verified-delete failure already carries a retryable code and passes through). Retrying is safe: every step is
+ * idempotent and the raw-event delete verifies at once when nothing matches. A retried project purge rebuilds every
+ * rollup from what survives; retention repairs a failed cutoff run with a full rebuild (apps/worker retention.ts).
+ */
+function partialPurge(error: unknown, projectId: string) {
+  const code = error && typeof error === 'object' && 'code' in error ? (error as { code?: unknown }).code : undefined;
+  if (code === 'LOGBIRD_DELETE_INCOMPLETE' || code === 'LOGBIRD_DELETE_UNVERIFIED') return error;
+  const causeCode = typeof code === 'string' || typeof code === 'number' ? code : undefined;
+  console.error(
+    JSON.stringify({ level: 'error', event: 'clickhouse.delete_unverified', table: 'events', projectId, stage: 'after_events', causeCode }),
+  );
+  return Object.assign(new Error('The project purge stopped after deleting events. Retry the operation.', { cause: error }), {
+    code: 'LOGBIRD_DELETE_UNVERIFIED',
+    table: 'events',
+  });
+}
+
+async function purgeAfterEvents(
+  ch: ClickHouseClient,
+  p: string,
+  before: Date | undefined,
+  cutoff: string,
+  cutoffParams: { before?: string; bucket?: string },
+  affected: { kind: string; id: string }[],
+) {
   await deleteAndVerify(ch, p, 'event_ids', cutoff, cutoffParams);
   // The required 007/008 migration repairs collapsed legacy pointers once before rollout.
   // Its plain MergeTree/MV keeps every raw tuple, so cutoff deletion preserves surviving
   // versions without scanning retained history under the exclusive project lock.
 
-  if (!before) return rebuildProjectRollups(ch, p, false);
+  if (!before) {
+    // Project deletion also removes its late-arrival counts (#152). A retention cutoff leaves them to the 32-day TTL.
+    await deleteAndVerify(ch, p, 'events_lateness_by_hour');
+    return rebuildProjectRollups(ch, p, false);
+  }
   const filters = {
     events_by_minute: "bucket <= {bucket:DateTime64(3,'UTC')}",
     entities: '(kind,entity_id) IN arrayZip({kinds:Array(String)},{entityIds:Array(String)})',

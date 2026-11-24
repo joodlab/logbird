@@ -231,6 +231,37 @@ Page text renders from `apps/web/src/content/product.ts` (the roadmap section fr
 - **cta:** Read API on the developer page → `/developers`
 - **visual:** code sample (see `developers.md` § read-api)
 
+## webhooks
+
+Held: this section ships with the 0.3.0 webhook delivery and merges only after 0.3.0 is deployed and checked in
+production.
+
+- **id:** `webhooks`
+- **eyebrow:** Webhooks
+- **heading:** Send matching events to your own endpoint.
+- **job:** tell an operator that matching events can be pushed to their own HTTPS endpoint, chosen with the explorer's
+  query language and narrowed by scope and masks, and state the delivery contract plainly: at least once, retried for
+  up to 24 hours, signed with the Standard Webhooks headers. Never "guaranteed delivery", "exactly once" or
+  "tamper-proof".
+- **body:** Logbird sends each matching event to an HTTPS endpoint you choose. Choose which events with the same query
+  language as the explorer, and narrow an endpoint to one tenant or one record, with field masks. The TypeScript SDK
+  can verify each delivery using the Standard Webhooks headers.
+  <!-- source: docs/SPEC.md § Webhook endpoint management (filterQuery, scope { tenantId?, target?, mask? }, Standard Webhooks headers); packages/sdk/README.md § Standard Webhooks -->
+- **bullets:**
+  - Events that arrive later than the endpoint's delivery window are skipped by that webhook and stay stored and searchable.
+    <!-- source: docs/self-hosting.md § Webhook endpoint management (deliveryWindowSeconds, #359) -->
+  - Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff for up to 24 hours. Delivery is at least once, so deduplicate by
+    `webhook-id`. <!-- source: SPEC § Webhook endpoint management (retry schedule; "Receivers use the stable webhook-id to deduplicate") -->
+  - A delivery log shows each delivery's status and its recent attempts for 30 days; resend a delivery or send a test
+    ping. <!-- source: SPEC (deliveries endpoint, five most recent retained attempts, 30-day attempt and delivery retention, resend, test); apps/app/src/components/webhooks/delivery-log.tsx -->
+  - The secret is shown once; rotate it with an overlap so receivers can switch. <!-- source: SPEC (create and rotate return the secret once; overlap default 86400 s, 0–604800) -->
+  - An endpoint is disabled at once when it answers `410 Gone`, and after 50 consecutive failed deliveries (by
+    default) or 24 hours of failures without a success. An email notice is then queued for the workspace's owners and admins. <!-- source: SPEC (gone_410, consecutive_failures, email to owners and admins); apps/worker/src/webhook-delivery.ts:503–510 (a notice row per owner or admin), apps/worker/src/webhook-notices.ts:22–30 (role checked again at send) -->
+- **limit line:** At least once, not exactly once, and in no guaranteed order. A delivery that still fails after 24
+  hours stops. Up to 10 endpoints per project. Destinations use HTTPS by default. <!-- source: SPEC (window expiry marks the delivery failed; up to 10 endpoints per project; HTTPS unless the self-host option WEBHOOKS_ALLOW_HTTP=true) -->
+- **visual:** code sample, "A delivery": the request line, the three Standard Webhooks headers (an `lb1_` id) and an
+  abbreviated event body. <!-- source: SPEC (POST body is the public event shape; lb1_ header ids) -->
+
 ## roadmap
 
 - **id:** `roadmap`
@@ -240,6 +271,6 @@ Page text renders from `apps/web/src/content/product.ts` (the roadmap section fr
 - **bullets:** <!-- source: docs/roadmap.md (Customer-facing history; Later candidates), worded no stronger than it. Only items docs/roadmap.md or a milestone lists may appear here (maintainer rule, 2026-11-22), and not items already built: tenant-scoped read tokens and scoped exports are on master, unreleased, and not presented until their production proof. -->
   - Project-level redaction controls, behind the redaction your client already does.
   - Alerts on chosen actions.
-  - Signed webhooks and archive exports.
+  - Archive exports. <!-- signed webhooks left the roadmap with the 0.3.0 webhook delivery (§ webhooks) -->
   - Single sign-on for the console.
 - **visual:** none

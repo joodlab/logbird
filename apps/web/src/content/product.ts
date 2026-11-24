@@ -22,8 +22,17 @@ const page = await readAuditTrail(
 const events = page.data.filter((event) => event.targets.some((t) => t.type === 'booking' && t.id === 'bk_1042'));
 // page.nextCursor: pass back as \`cursor\` for the next page`;
 
+/** One delivery as the receiver sees it: docs/SPEC.md § "Webhook endpoint management" (body, headers, `lb1_` ids). */
+const webhookSample = `POST https://example.com/webhooks/logbird
+Content-Type: application/json
+webhook-id: lb1_…
+webhook-timestamp: 1795430400
+webhook-signature: v1,…
+
+{ "id": "evt_cancel_bk_1042", "action": "booking.cancelled", … }`;
+
 export const product = {
-  samples: { searchSample, readSample },
+  samples: { searchSample, readSample, webhookSample },
   hero: {
     eyebrow: 'Product',
     title: 'Everything your team needs to answer "who did what".',
@@ -46,6 +55,7 @@ export const product = {
       ['setup', 'Setup'],
       ['retention', 'Retention'],
       ['read-api', 'Read API'],
+      ['webhooks', 'Webhooks'],
     ],
   },
   explorer: {
@@ -193,5 +203,20 @@ export const product = {
       'A read key can read the whole project. Your backend must check that the person asking may see that tenant or record, on every page it fetches.',
     codeTitle: 'Your backend',
     developersLink: 'Read API on the developer page',
+  },
+  webhooks: {
+    eyebrow: 'Webhooks',
+    title: 'Send matching events to your own endpoint.',
+    body: 'Logbird sends each matching event to an HTTPS endpoint you choose. Choose which events with the same query language as the explorer, and narrow an endpoint to one tenant or one record, with field masks. The TypeScript SDK can verify each delivery using the Standard Webhooks headers.',
+    bullets: [
+      "Events that arrive later than the endpoint's delivery window are skipped by that webhook and stay stored and searchable.",
+      'Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff for up to 24 hours. Delivery is at least once, so deduplicate by `webhook-id`.',
+      "A delivery log shows each delivery's status and its recent attempts for 30 days; resend a delivery or send a test ping.",
+      'The secret is shown once; rotate it with an overlap so receivers can switch.',
+      "An endpoint is disabled at once when it answers `410 Gone`, and after 50 consecutive failed deliveries (by default) or 24 hours of failures without a success. An email notice is then queued for the workspace's owners and admins.",
+    ],
+    limit:
+      'At least once, not exactly once, and in no guaranteed order. A delivery that still fails after 24 hours stops. Up to 10 endpoints per project. Destinations use HTTPS by default.',
+    codeTitle: 'A delivery',
   },
 } as const;

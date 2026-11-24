@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { compileMaskedQuery, WEBHOOK_FILTER } from '@logbird/clickhouse';
+import { compileMaskedQuery, lateEventCounts, WEBHOOK_FILTER } from '@logbird/clickhouse';
 import {
   apiErrorSchema,
   createWebhookResponseSchema,
   createWebhookSchema,
+  DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS,
   listWebhookDeliveriesQuerySchema,
   listWebhookDeliveriesResponseSchema,
   listWebhooksResponseSchema,
@@ -34,6 +35,7 @@ import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
 import { type Context, Hono } from 'hono';
 import { resolver, validator } from 'hono-openapi';
 import type { ZodType } from 'zod';
+import { clickhouse } from './clickhouse';
 import { env } from './env';
 import { ApiError } from './errors';
 import { audit } from './ingest';
@@ -42,6 +44,7 @@ import { requireProjectAccess, requireSession } from './middlewares';
 import { requireRole } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
 import type { AppEnv } from './types';
+import { lateEvents as countLateEvents, type Late, type LateInput, lateEventsSince } from './webhook-late-events';
 
 const base = '/projects/:projectId/webhooks';
 const secretKey = webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY);
@@ -73,7 +76,30 @@ const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
     },
   });
 const updateWebhookDoc = webhookUrlDoc('Update webhook endpoint', webhookEndpointSchema);
-function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
+/** Late-event counts from the lateness rollup (#152), on the internal ClickHouse client, one query per project. */
+const lateEvents = (endpoints: readonly LateInput[], now: Date) =>
+  countLateEvents(endpoints, now, (projectId, windows) => lateEventCounts(clickhouse, projectId, windows));
+const lateFor = (late: Map<string, Late>, endpoint: LateInput, now: Date) =>
+  late.get(endpoint.id) ?? { count: 0, since: lateEventsSince(endpoint, now) };
+/** `count: null`: storage could not be read. Only PATCH answers that way, so a settings change never depends on ClickHouse. */
+type ResponseLate = Omit<Late, 'count'> & { count: number | null };
+const lateOrUnknown = (endpoint: LateInput, now: Date): Promise<ResponseLate> =>
+  lateEvents([endpoint], now).then(
+    (late) => lateFor(late, endpoint, now),
+    (error: unknown) => {
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          event: 'webhook.late_events_unavailable',
+          endpointId: endpoint.id,
+          projectId: endpoint.projectId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return { count: null, since: lateEventsSince(endpoint, now) };
+    },
+  );
+function serialize(endpoint: WebhookEndpoint, late: ResponseLate, activeSecretCount = 0) {
   const scope = storedWebhookScope(endpoint);
   const responseScope = scope === undefined ? (webhookEndpointSchema.shape.scope.safeParse(webhookScopeFromColumns(endpoint)).data ?? null) : scope;
   return webhookEndpointSchema.parse({
@@ -85,6 +111,7 @@ function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
       filterWarning: endpoint.filterReviewReason === 'invalid_filter' ? 'webhook_filter_invalid' : 'webhook_filter_review_required',
     }),
     scope: responseScope,
+    lateEvents: { count: endpoint.deliveryWindowSeconds === null ? 0 : late.count, since: late.since.toISOString() },
     createdAt: endpoint.createdAt.toISOString(),
     updatedAt: endpoint.updatedAt.toISOString(),
     disabledAt: endpoint.disabledAt?.toISOString() ?? null,
@@ -182,12 +209,14 @@ export const webhookRoutes = new Hono<AppEnv>()
   // Reads are owner/admin only too: a stored URL can itself be a credential (a Slack or Zapier hook path).
   .get(base, doc('List webhook endpoints (no secrets)', listWebhooksResponseSchema), async (c) => {
     await requireRole(c);
+    const now = await databaseNow();
     const endpoints = await prisma.webhookEndpoint.findMany({
       where: { projectId: c.get('project').id },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      include: activeSecretCount(await databaseNow()),
+      include: activeSecretCount(now),
     });
-    return c.json({ data: endpoints.map((endpoint) => serialize(endpoint, endpoint._count.secrets)) });
+    const late = await lateEvents(endpoints, now);
+    return c.json({ data: endpoints.map((endpoint) => serialize(endpoint, lateFor(late, endpoint, now), endpoint._count.secrets)) });
   })
   .post(
     base,
@@ -216,6 +245,8 @@ export const webhookRoutes = new Hono<AppEnv>()
             disabledAt: input.enabled === false ? createdAt : null,
             filterQuery: input.filterQuery ?? '',
             ...scopeColumns(input.scope ?? null),
+            deliveryWindowSeconds: input.deliveryWindowSeconds === undefined ? DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS : input.deliveryWindowSeconds,
+            deliveryWindowChangedAt: createdAt,
             createdById: c.get('user').id,
             secrets: { create: { ciphertext: encryptWebhookSecret(secret, secretKey) } },
           },
@@ -224,24 +255,33 @@ export const webhookRoutes = new Hono<AppEnv>()
         return endpoint;
       });
       c.header('Cache-Control', 'no-store');
-      return c.json({ endpoint: serialize(endpoint), secret }, 201);
+      // A new endpoint counts from the next whole arrival hour, so its count is 0, as a read in this hour also reports.
+      return c.json({ endpoint: serialize(endpoint, { count: 0, since: lateEventsSince(endpoint, endpoint.createdAt) }), secret }, 201);
     },
   )
   .get(`${base}/:id`, doc('Get webhook endpoint (no secrets)', webhookEndpointSchema), async (c) => {
     await requireRole(c);
+    const now = await databaseNow();
     const endpoint = await prisma.webhookEndpoint.findFirst({
       where: { id: c.req.param('id'), projectId: c.get('project').id },
-      include: activeSecretCount(await databaseNow()),
+      include: activeSecretCount(now),
     });
     if (!endpoint) throw new ApiError(404, 'not_found', 'Webhook endpoint not found.');
-    return c.json(serialize(endpoint, endpoint._count.secrets));
+    return c.json(serialize(endpoint, lateFor(await lateEvents([endpoint], now), endpoint, now), endpoint._count.secrets));
   })
   .patch(`${base}/:id`, updateWebhookDoc, validator('json', updateWebhookSchema, webhookBody), async (c) => {
     const input = c.req.valid('json');
     // A missing endpoint is a 404 before any DNS lookup; the locked re-read below still decides.
-    if (input.url !== undefined) await findEndpoint(c);
+    const current = await findEndpoint(c);
+    // Count before saving. The count is telemetry: a failed read gives `count: null` and never blocks the save, so an
+    // endpoint can be disabled while ClickHouse is down.
+    const counted = await lateOrUnknown(current, await databaseNow());
     const url = input.url === undefined ? undefined : await allowedUrl(c, input.url);
-    const endpoint = await lockedProject(c, async (tx) => {
+    const {
+      after: endpoint,
+      savedAt,
+      windowChanged,
+    } = await lockedProject(c, async (tx) => {
       const before = await findEndpoint(c, tx);
       if (input.scope !== undefined || input.filterQuery !== undefined) {
         const scope = input.scope === undefined ? storedWebhookScope(before) : input.scope;
@@ -250,6 +290,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
       const scopeCorrected = input.scope !== undefined && (before.scopeReviewRequired || storedWebhookScope(before) === undefined);
       const filterConfirmed = input.filterQuery !== undefined && before.filterReviewRequired;
+      const windowChanged = input.deliveryWindowSeconds !== undefined && input.deliveryWindowSeconds !== before.deliveryWindowSeconds;
       const now = await databaseNow(tx);
       const after = await tx.webhookEndpoint.update({
         where: { id: before.id },
@@ -260,6 +301,8 @@ export const webhookRoutes = new Hono<AppEnv>()
           filterQuery: input.filterQuery,
           enabled: input.enabled,
           ...(input.scope !== undefined ? scopeColumns(input.scope) : {}),
+          // Applies to events discovered after this save; the cursor does not move back.
+          ...(windowChanged && { deliveryWindowSeconds: input.deliveryWindowSeconds, deliveryWindowChangedAt: now }),
           ...(scopeCorrected && { scopeReviewRequired: false }),
           ...(filterConfirmed && { filterReviewRequired: false, filterReviewReason: null }),
           ...(enabledChanged ? { disabledReason: input.enabled ? null : 'manual', disabledAt: input.enabled ? null : now } : {}),
@@ -277,9 +320,11 @@ export const webhookRoutes = new Hono<AppEnv>()
           data: { status: 'interrupted' },
         });
       }
-      const old = serialize(before),
-        current = serialize(after);
-      const fields = (['url', 'description', 'filterQuery', 'scope', 'enabled'] as const).filter(
+      // The audit diff compares stored settings only; the late count is not a setting.
+      const noLate = { count: 0, since: now };
+      const old = serialize(before, noLate),
+        current = serialize(after, noLate);
+      const fields = (['url', 'description', 'filterQuery', 'scope', 'enabled', 'deliveryWindowSeconds'] as const).filter(
         (field) =>
           (field === 'scope' && scopeCorrected) ||
           (field === 'filterQuery' && filterConfirmed) ||
@@ -287,9 +332,19 @@ export const webhookRoutes = new Hono<AppEnv>()
       );
       if (fields.length) await record(c, tx, 'webhook.updated', after, fields);
       if (enabledChanged) await record(c, tx, input.enabled ? 'webhook.enabled' : 'webhook.disabled', after, ['enabled'], 'manual');
-      return after;
+      return { after, savedAt: now, windowChanged };
     });
-    return c.json(serialize(endpoint, endpoint._count.secrets));
+    // This request changed the window: counting starts at the next whole hour after the save's own clock, so 0, with no read
+    // after the commit. Window as pre-read: that count, with the `since` it was counted from. Changed by a concurrent request
+    // between the pre-read and the lock (rare): count it now, so the response never reports a stale number.
+    const unchanged =
+      endpoint.deliveryWindowSeconds === current.deliveryWindowSeconds && +endpoint.deliveryWindowChangedAt === +current.deliveryWindowChangedAt;
+    const late = windowChanged
+      ? { count: 0, since: lateEventsSince(endpoint, savedAt) }
+      : unchanged
+        ? counted
+        : await lateOrUnknown(endpoint, savedAt);
+    return c.json(serialize(endpoint, late, endpoint._count.secrets));
   })
   .delete(`${base}/:id`, routeDoc('Delete webhook endpoint', { responses: { 204: { description: 'Deleted' }, 503: mutationBusy } }), async (c) => {
     await lockedProject(c, async (tx) => {

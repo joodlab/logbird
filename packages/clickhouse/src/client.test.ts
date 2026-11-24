@@ -33,6 +33,7 @@ it.each([
   ['25', 'Parse failed while updating VIEW logbird.events_mv: While executing WaitForAsyncInsert.', true],
   ['60', 'New failure wording for view logbird.events_mv: While executing WaitForAsyncInsert.', true],
   ['25', 'Unfamiliar wording mentioning event_ids_v3_mv: While executing WaitForAsyncInsert.', true],
+  ['241', 'Memory limit in events_lateness_mv: While executing WaitForAsyncInsert.', true],
   ['25', 'Custom database names too: analytics.events_by_minute_mv failed: While executing WaitForAsyncInsert.', true],
   ['25', 'Self-hoster view: logbird.audit_copy_mv failed: While executing WaitForAsyncInsert.', true],
 ])('classifies %s with server context %s', async (code, message, ambiguous) => {

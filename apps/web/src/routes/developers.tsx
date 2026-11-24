@@ -63,7 +63,7 @@ function OperationTree() {
 }
 
 function DevelopersPage() {
-  const { hero, toc, quickstart, http, envelope, integrations, workers, delivery, limits, read, reference } = developers;
+  const { hero, toc, quickstart, http, envelope, integrations, workers, delivery, limits, read, webhooks, reference } = developers;
   return (
     <>
       <PageHero
@@ -249,6 +249,18 @@ function DevelopersPage() {
         visual={<SiteCode code={samples.read} language="ts" title={read.codeTitle} />}
       >
         <Rich text={read.body} />
+      </FeatureRow>
+
+      <FeatureRow
+        bullets={webhooks.bullets.map((bullet) => <Rich key={bullet} text={bullet} />)}
+        eyebrow={webhooks.eyebrow}
+        id="webhooks"
+        limit={<Rich text={webhooks.limit} />}
+        reverse
+        title={webhooks.title}
+        visual={<SiteCode code={samples.webhookReceiver} language="ts" title={webhooks.codeTitle} />}
+      >
+        <Rich text={webhooks.body} />
       </FeatureRow>
 
       <Section compact id="reference" labelledBy="reference-title">

@@ -147,6 +147,20 @@ function abandonedReceipts(projectId: string, now: number, eventIds?: string[]) 
   return { readyCutoff: new Date(now - INGEST_RECEIPT_WINDOW_MS), eligible };
 }
 
+function lateRecoveryLog(projectId: string, event: string, late: readonly { receivedAt: Date }[]) {
+  if (!late.length) return;
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      event,
+      projectId,
+      lateReceipts: late.length,
+      receivedFrom: new Date(Math.min(...late.map((r) => +r.receivedAt))).toISOString(),
+      receivedTo: new Date(Math.max(...late.map((r) => +r.receivedAt))).toISOString(),
+    }),
+  );
+}
+
 /** Caller holds EXCLUSIVE and rebuilt every derived destination after the flush proof. */
 async function settleAbandonedReceipts(ch: ClickHouseClient, projectId: string, eligible: ReceiptScope, readyCutoff: Date) {
   let after: string | undefined;
@@ -171,6 +185,16 @@ async function settleAbandonedReceipts(ch: ClickHouseClient, projectId: string, 
       else missing.push(receipt.eventId);
     }
     await confirmIngestReceipts(projectId, confirmations);
+    // The webhook lateness rollup is approximate and is not rebuilt here. A late arrival confirmed from its raw row may be
+    // missing from it (the count can read low); a late arrival made ready for re-insert may already be in it, so its
+    // retry can count it again (high). Say so once per page and direction.
+    const late = (r: { receivedAt: Date; eventAt: Date }) => +r.receivedAt - +r.eventAt > 3_600_000;
+    lateRecoveryLog(projectId, 'ingest.lateness_rollup_not_rebuilt', confirmations.filter(late));
+    lateRecoveryLog(
+      projectId,
+      'ingest.lateness_count_may_be_high',
+      receipts.filter((r) => missing.includes(r.eventId) && late(r)),
+    );
     // A missing write becomes a ready receipt: the client's next exact retry replays it.
     if (missing.length)
       await prisma.ingestReceipt.updateMany({ where: { projectId, eventId: { in: missing }, confirmedAt: null }, data: { claimedAt: null } });
@@ -232,6 +256,7 @@ export async function recoverProjectIngest(
       const project = await projectInsertSettlement(projectId, tx);
       if (!project.settled || !(await flushAfter(ch, project.proofAfter))) return false;
       // A failed MV can commit any subset of destinations. Repair before confirming any page.
+      // The webhook lateness rollup is not rebuilt here; settlement logs where its approximate count may be off.
       await rebuildProjectReadModel(ch, projectId);
     }
     await settleAbandonedReceipts(ch, projectId, eligible, readyCutoff);

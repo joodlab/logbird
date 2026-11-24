@@ -131,6 +131,8 @@ describe('webhooks after delivery (#179)', () => {
     disabledAt: null,
     filterQuery: 'action:booking.*',
     scope: null,
+    deliveryWindowSeconds: 604_800,
+    lateEvents: { count: 0, since: '2026-11-22T11:00:00.000Z' },
     createdById: null,
     createdAt: '2026-11-22T10:00:00.000Z',
     updatedAt: '2026-11-22T10:00:00.000Z',

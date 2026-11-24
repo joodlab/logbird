@@ -194,6 +194,7 @@ export const LOGBIRD_MATERIALIZED_VIEWS = [
   'event_ids_v2_mv',
   'event_ids_v3_mv',
   'events_by_minute_mv',
+  'events_lateness_mv',
 ] as const;
 // A database qualifier may be backtick-quoted when it needs it (`my-db`.custom_mv).
 const QUALIFIED_VIEW_NAME = /(?:\b\w+|`[^`\s]+`)\.`?\w+_mv\b/;

@@ -453,3 +453,70 @@ it('holds an endpoint whose stored regex RE2 cannot compile after one scan, but 
   await discoverWebhookDeliveries(ch, corrected, scanClock(from));
   expect(await queuedIds(hook.id)).toEqual(['re2-size-event']);
 });
+
+it('discovers only events that arrived within the delivery window after they occurred; null delivers them all', async () => {
+  const from = new Date(Date.now() - 60_000);
+  const receivedAt = new Date(+from + 1000);
+  const hour = 3_600_000;
+  // Lateness = receivedAt - occurredAt. The window is inclusive: exactly one hour late is still delivered.
+  const lateness = { 'window-on-time': 30 * 60_000, 'window-boundary': hour, 'window-just-late': hour + 1, 'window-late': 2 * hour };
+  for (const [name, window] of [
+    ['windowed', 3600],
+    ['unlimited', null],
+  ] as const) {
+    const { hook, row } = await fixture(from, name);
+    await prisma.webhookEndpoint.update({ where: { id: hook.id }, data: { deliveryWindowSeconds: window } });
+    await insertEvents(
+      ch,
+      Object.entries(lateness).map(([id, late]) => row(`${name}-${id}`, receivedAt, new Date(+receivedAt - late))),
+    );
+    await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
+    const expected = window === null ? Object.keys(lateness) : ['window-boundary', 'window-on-time'];
+    expect(await queuedIds(hook.id)).toEqual(expected.map((id) => `${name}-${id}`).sort());
+    // The cursor moved past the skipped events, so a later scan does not pick them up either.
+    await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
+    expect(await queuedIds(hook.id)).toEqual(expected.map((id) => `${name}-${id}`).sort());
+  }
+});
+
+it('applies the window at a resumed cursor tie, moves the cursor past skipped events, and never touches what is already queued', async () => {
+  const from = new Date(Date.now() - 60_000);
+  const tie = new Date(+from + 1000);
+  const hour = 3_600_000;
+  const { hook, row } = await fixture(from, 'window-tie');
+  // Resume as if an earlier scan ended at tie-a (an endpoint that has scanned before): same received_at, ids after it are
+  // still to scan.
+  await prisma.webhookEndpoint.update({
+    where: { id: hook.id },
+    data: { deliveryWindowSeconds: 3600, cursorReceivedAt: tie, cursorEventId: 'tie-a', lastScannedAt: tie },
+  });
+  await insertEvents(ch, [
+    row('tie-a', tie),
+    row('tie-b-late', tie, new Date(+tie - 2 * hour)),
+    // Occurred after it arrived (ingest accepts up to a day ahead): never late.
+    row('tie-c-future', tie, new Date(+tie + 30 * 60_000)),
+  ]);
+  await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
+  expect(await queuedIds(hook.id)).toEqual(['tie-c-future']);
+  const scanned = await refetch(hook.id);
+  expect(+scanned.cursorReceivedAt > +tie || (+scanned.cursorReceivedAt === +tie && (scanned.cursorEventId ?? '') >= 'tie-c-future')).toBe(true);
+  // Widening applies to events discovered after the save: the skipped event is behind the cursor and stays skipped.
+  await prisma.webhookEndpoint.update({ where: { id: hook.id }, data: { deliveryWindowSeconds: null } });
+  await discoverWebhookDeliveries(ch, await refetch(hook.id), scanClock(from));
+  expect(await queuedIds(hook.id)).toEqual(['tie-c-future']);
+  // Queued under no limit, then narrowed (a second endpoint, whose cursor is still behind the event): the queued delivery is
+  // still pending and untouched by a later scan.
+  const narrowed = await fixture(from, 'window-narrow');
+  await prisma.webhookEndpoint.update({ where: { id: narrowed.hook.id }, data: { deliveryWindowSeconds: null } });
+  await insertEvents(ch, [narrowed.row('queued-late', tie, new Date(+tie - 3 * hour))]);
+  await discoverWebhookDeliveries(ch, await refetch(narrowed.hook.id), scanClock(from));
+  expect(await queuedIds(narrowed.hook.id)).toEqual(['queued-late']);
+  await prisma.webhookEndpoint.update({ where: { id: narrowed.hook.id }, data: { deliveryWindowSeconds: 3600 } });
+  await discoverWebhookDeliveries(ch, await refetch(narrowed.hook.id), scanClock(from));
+  expect(
+    await prisma.webhookDelivery.findFirstOrThrow({
+      where: { endpointId: narrowed.hook.id, eventId: 'queued-late' },
+      select: { status: true, attemptNumber: true },
+    }),
+  ).toEqual({ status: 'pending', attemptNumber: 0 });
+});

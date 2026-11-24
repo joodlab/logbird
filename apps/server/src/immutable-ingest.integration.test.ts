@@ -212,6 +212,24 @@ it('confirms a visible delayed original without reinserting it', purgeLimit(30_0
   expect((await f.post(original)).status).toBe(202);
   expect(await f.count()).toBe(1);
 });
+it('counts a late arrival once across an exact retry and a delayed original confirmed without reinsertion', purgeLimit(30_000), async () => {
+  // The webhook lateness view fires only on inserts into events, so a retry that never reaches events cannot count twice.
+  const occurredAt = new Date(Date.now() - 2 * 3_600_000 - 60_000).toISOString();
+  const retried = { ...original, id: 'late-retried', occurredAt };
+  expect((await f.post(retried)).status).toBe(202);
+  expect((await f.post(retried)).status).toBe(202);
+  // Stored, but the response was lost before the receipt was confirmed: the retry confirms it from the stored row.
+  const delayed = { ...original, id: 'late-delayed', occurredAt };
+  await insertEvents(clickhouse, [await f.pending(delayed, { expired: true })]);
+  expect((await f.post(delayed)).status).toBe(202);
+  const [counts] = await read(
+    clickhouse,
+    `SELECT (SELECT count() FROM events WHERE project_id={p:String}) raw,
+      (SELECT sum(events) FROM events_lateness_by_hour WHERE project_id={p:String}) late`,
+    { p: f.project },
+  );
+  expect(counts).toEqual({ raw: 2, late: 2 });
+});
 it('recovers old unversioned pending receipts and upgrades their stored-row fingerprints', purgeLimit(30_000), async () => {
   const old = normalizeEvent3a1541f(original, { projectId: f.project, receivedAt: new Date() });
   if (!old.ok) throw new Error(old.reason);

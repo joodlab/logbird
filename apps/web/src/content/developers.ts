@@ -125,6 +125,31 @@ const page = await readAuditTrail(
 );
 // page.data: events; page.nextCursor: pass back as \`cursor\` for the next page`;
 
+/** packages/sdk/README.md § "Standard Webhooks", byte for byte. */
+const webhookReceiver = `import { Hono } from 'hono';
+import { verifyWebhook, WebhookVerificationError } from '@logbird/sdk';
+
+const app = new Hono();
+const secret = process.env.LOGBIRD_WEBHOOK_SECRET!; // whsec_...; keep on the receiver
+
+app.post('/webhooks/logbird', async (c) => {
+  try {
+    const event = await verifyWebhook<{ id: string }>({
+      payload: await c.req.text(), // never JSON.stringify(await c.req.json())
+      headers: c.req.raw.headers,
+      secret,
+    });
+    // Durably enqueue/process event before returning 2xx. Deduplicate using
+    // webhook-id within this receiver: retries can carry the same event again.
+    console.log(event.id);
+    return c.body(null, 204);
+  } catch (error) {
+    // A bad request: answer 400. Anything else (a malformed secret is a TypeError) is your bug: let it surface.
+    if (error instanceof WebhookVerificationError) return c.text('Invalid webhook', 400);
+    throw error;
+  }
+});`;
+
 const envelopeRows: [string, string, string][] = [
   [
     'outcome',
@@ -164,7 +189,7 @@ const limits: [string, string][] = [
  * and packages/integrations READMEs. Inline marks: `code` and **bold** (components/marketing/rich.tsx).
  */
 export const developers = {
-  samples: { sourceInstall, quickstart, http, smallest, worked, hono, workers, read },
+  samples: { sourceInstall, quickstart, http, smallest, worked, hono, workers, read, webhookReceiver },
   hero: {
     eyebrow: 'Developers',
     title: 'Add an audit log in an afternoon. Keep it for years.',
@@ -184,6 +209,7 @@ export const developers = {
       ['delivery', 'Delivery'],
       ['limits', 'Limits'],
       ['read-api', 'Read API'],
+      ['webhooks', 'Webhooks'],
       ['reference', 'API reference'],
     ],
   },
@@ -300,6 +326,20 @@ export const developers = {
       'A read key can read the whole project. A query filter is not authorization: your backend must check the tenant and record on every request, including each next page. The read API accepts the query language, not SQL mode.',
     codeTitle: 'Your backend',
     body: '`GET /v1/events` with a read key returns matching events, newest first, up to 200 per page, with a `nextCursor` for the next page. `GET /v1/events/:eventId` returns one event. Without `from` and `to`, the range is the last 24 hours.',
+  },
+  webhooks: {
+    eyebrow: 'Webhooks',
+    title: 'Verify each delivery, then process it once.',
+    body: 'Each delivery is a `POST` of the event as JSON, signed with the Standard Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature`. Verify the raw body with `verifyWebhook` from `@logbird/sdk`, store or enqueue the event, then answer `2xx`.',
+    bullets: [
+      'A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect is a failure.',
+      'Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to 24 hours.',
+      'Delivery is at least once: deduplicate by `webhook-id`, which stays the same across retries and resends.',
+      'Answering `410 Gone` disables the endpoint at once, and so do 50 consecutive failed deliveries (by default) or 24 hours of failures without a success. A disabled endpoint gets no deliveries until it is enabled again.',
+    ],
+    limit:
+      'Verify the raw body before parsing it. Re-serializing parsed JSON can change the signed bytes. This example logs the event ID. In production, durably store or enqueue the event before returning `2xx`.',
+    codeTitle: 'Signature verification example',
   },
   reference: {
     eyebrow: 'API reference',
