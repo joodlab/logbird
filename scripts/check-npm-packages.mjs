@@ -139,9 +139,20 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // still holds the wrapper's `require`. Such a binding is read as the name itself.
   // Only CommonJS has that wrapper; in a module a bare `var require;` is just undefined. Repeating the bare declaration
   // (`var require; var require;`) still replaces nothing.
-  const bareVar = (path) => path.isVariableDeclarator() && path.node.init == null;
+  // A loop head is not bare: `for (var require of list)` gives it each item.
+  const bareVar = (path) =>
+    path.isVariableDeclarator() &&
+    path.node.init == null &&
+    !(path.parentPath?.key === 'left' && (path.parentPath.parentPath?.isForInStatement() || path.parentPath.parentPath?.isForOfStatement()));
+  // Only the names the CommonJS wrapper supplies; `var globalThis;` declares a new, undefined variable.
+  const WRAPPER_NAMES = new Set(['require', 'module', 'exports', '__filename', '__dirname']);
   const keepsOuter = (binding) =>
-    !asModule && binding.kind === 'var' && binding.scope.path.isProgram() && bareVar(binding.path) && binding.constantViolations.every(bareVar);
+    !asModule &&
+    WRAPPER_NAMES.has(binding.identifier.name) &&
+    binding.kind === 'var' &&
+    binding.scope.path.isProgram() &&
+    bareVar(binding.path) &&
+    binding.constantViolations.every(bareVar);
   /** What an identifier refers to: its binding, or `global:<name>` for a name the file does not declare. */
   const keyOf = (node) => {
     if (node?.type !== 'Identifier') return;

@@ -292,6 +292,12 @@ test("the CommonJS wrapper's require survives only in CommonJS, and only bare re
   assert.deepEqual(importsOf("var require; var require;\nrequire('zod');", 'dist/probe.cjs'), ['zod']);
   // A module has no wrapper: a bare `var require;` there is undefined and loads nothing.
   assert.deepEqual(importsOf("var require;\nrequire?.('fictional-field');", 'dist/index.mjs'), []);
+  // A loop head gives it each item: `require` is then a local function.
+  assert.deepEqual(importsOf("for (var require of [(x) => x]) {\n  require('fictional-field');\n}", 'dist/probe.cjs'), []);
+  assert.deepEqual(importsOf("for (var require in { a: 1 }) {\n  require('fictional-field');\n}", 'dist/probe.cjs'), []);
+  // Only the wrapper's names are kept: a bare `var globalThis;` is a new, undefined variable.
+  assert.deepEqual(importsOf("var globalThis;\nglobalThis?.require('fictional-field');", 'dist/probe.cjs'), []);
+  assert.deepEqual(importsOf("var module;\nmodule.require('zod');", 'dist/probe.cjs'), ['zod']);
   // A later declaration with a value is its own function.
   assert.deepEqual(importsOf("var require;\nvar require = (x) => x;\nrequire('fictional-field');", 'dist/probe.cjs'), []);
 });
