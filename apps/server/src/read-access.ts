@@ -144,10 +144,14 @@ export const clearTokenKeyCache = () => keyCache.clear();
 export { assertNotMasked, maskedEmail } from '@logbird/clickhouse';
 
 let maskKeyCache: Buffer | undefined;
+/** The field mask key, derived once from the auth secret: events and facets pseudonymise with the same key. */
+export function fieldMaskSecret() {
+  maskKeyCache ??= ch.fieldMaskKey(env.BETTER_AUTH_SECRET);
+  return maskKeyCache;
+}
 export function maskEvent(event: AuditEvent, mask: ReadScope['mask']): AuditEvent {
   if (!mask?.length) return event;
-  maskKeyCache ??= ch.fieldMaskKey(env.BETTER_AUTH_SECRET);
-  return ch.maskEvent(event, mask, maskKeyCache);
+  return ch.maskEvent(event, mask, fieldMaskSecret());
 }
 
 export const forbidMaskedEvidence = (scope: ReadScope | null, format: string) => {
