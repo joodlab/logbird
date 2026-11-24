@@ -45,7 +45,7 @@ Export
 CSV or JSONL from the explorer
 CSV export through the Dashboard and the API, one organization and date range at a time, covering the past three months [W10]
 Streaming to SIEM
-No built-in SIEM connectors; signed webhooks to any HTTPS endpoint
+No built-in SIEM connectors; signed webhooks to any public HTTPS endpoint
 Log Streams to seven destination types [W5]
 Retention
 Per project, 7 days to 10 years; can be lowered, with a preview and permanent deletion
@@ -96,7 +96,7 @@ WorkOS Audit Logs
 CSV export through the Dashboard and the API, one organization and date range at a time, covering the past three months [W10]
 Streaming to SIEM
 Logbird
-No built-in SIEM connectors; signed webhooks to any HTTPS endpoint
+No built-in SIEM connectors; signed webhooks to any public HTTPS endpoint
 WorkOS Audit Logs
 Log Streams to seven destination types [W5]
 Retention

@@ -248,13 +248,13 @@ production.
   signed with the Standard Webhooks headers; verify it with the TypeScript or .NET SDK.
   <!-- source: docs/SPEC.md § Webhook endpoint management (filterQuery, scope { tenantId?, target?, mask? }, Standard Webhooks headers); packages/sdk/README.md § Standard Webhooks; sdks/dotnet/README.md § Verify webhooks -->
 - **bullets:**
-  - Failed deliveries are retried with backoff for up to 24 hours. Delivery is at least once, so deduplicate by
+  - Failed attempts are retried with backoff for up to 24 hours, unless the endpoint answers `410 Gone`. Delivery is at least once, so deduplicate by
     `webhook-id`. <!-- source: SPEC § Webhook endpoint management (retry schedule; "Receivers use the stable webhook-id to deduplicate") -->
   - A delivery log shows each delivery's status and its recent attempts for 30 days; resend a delivery or send a test
     ping. <!-- source: SPEC (deliveries endpoint, five most recent retained attempts, 30-day attempt and delivery retention, resend, test); apps/app/src/components/webhooks/delivery-log.tsx -->
   - The secret is shown once; rotate it with an overlap so receivers can switch. <!-- source: SPEC (create and rotate return the secret once; overlap default 86400 s, 0–604800) -->
   - An endpoint is disabled at once when it answers `410 Gone`, and after 50 consecutive failed deliveries (by
-    default) or 24 hours of failures without a success; owners and admins are emailed. <!-- source: SPEC (gone_410, consecutive_failures, email to owners and admins) -->
+    default) or 24 hours of failures without a success. An email notice is then queued for the workspace's owners and admins. <!-- source: SPEC (gone_410, consecutive_failures, email to owners and admins); apps/worker/src/webhook-delivery.ts:503–510 (a notice row per owner or admin), apps/worker/src/webhook-notices.ts:22–30 (role checked again at send) -->
 - **limit line:** At least once, not exactly once, and in no guaranteed order. A delivery that still fails after 24
   hours stops. Up to 10 endpoints per project; HTTPS only. <!-- source: SPEC (window expiry marks the delivery failed; up to 10 endpoints per project; HTTPS unless the self-host option WEBHOOKS_ALLOW_HTTP=true) -->
 - **visual:** code sample, "A delivery": the request line, the three Standard Webhooks headers (an `lb1_` id) and an

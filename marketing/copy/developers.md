@@ -349,12 +349,12 @@ production.
 - **bullets:**
   - A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect
     is a failure. <!-- source: SPEC ("2xx succeeds"; redirects count as failures; connect and total deadlines 5 and 10 s) -->
-  - Failures are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to
+  - Failures other than `410 Gone` are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to
     24 hours. <!-- source: SPEC (retry schedule) -->
   - Delivery is at least once: deduplicate by `webhook-id`, which stays the same across retries and resends.
     <!-- source: SPEC ("Receivers use the stable webhook-id to deduplicate retries and resends") -->
   - Answering `410 Gone` disables the endpoint. <!-- source: SPEC ("HTTP 410 disables immediately") -->
-- **limit line:** Verify the raw request body before parsing it: a body re-serialized from parsed JSON won't verify.
+- **limit line:** Verify the raw request body before parsing it: re-serializing parsed JSON can change the signed bytes, and then the signature won't match.
   <!-- source: packages/sdk/README.md § Standard Webhooks ("Verify the raw body before parsing it") -->
 - **code sample:** "Your receiver": the Hono receiver from `packages/sdk/README.md` § Standard Webhooks, byte for byte
   (`webhookReceiver` in the module's samples). Re-copy it whenever the README's sample changes.

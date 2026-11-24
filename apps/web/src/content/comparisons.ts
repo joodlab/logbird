@@ -263,7 +263,7 @@ const workos: Comparison = {
     },
     {
       label: 'Streaming to SIEM',
-      logbird: 'No built-in SIEM connectors; signed webhooks to any HTTPS endpoint',
+      logbird: 'No built-in SIEM connectors; signed webhooks to any public HTTPS endpoint',
       them: 'Log Streams to seven destination types',
       sourceIds: ['W5'],
     },

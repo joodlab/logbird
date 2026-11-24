@@ -113,7 +113,7 @@ Public destinations only
 A destination must resolve only to public addresses. Logbird checks it when you save the URL and again before every delivery, and connects only to the address it checked.
 [aria-hidden: ]
 No redirects, no console credentials
-Redirects are never followed: a redirect counts as a failed attempt and is retried like any other failure. A delivery carries the event and its signature headers, never console headers or cookies.
+Redirects are never followed: a redirect counts as a failed attempt, which is retried within the 24-hour window. A delivery carries the event and its signature headers, never console headers or cookies.
 [aria-hidden: ]
 Masks on every delivery
 Field masks set on an endpoint apply to every delivery, including retries and resends.

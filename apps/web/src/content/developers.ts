@@ -317,11 +317,12 @@ export const developers = {
     body: 'Each delivery is a `POST` of the event as JSON, signed with the Standard Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature`. Verify the raw body with `verifyWebhook` from `@logbird/sdk` (the .NET package verifies them too), store or enqueue the event, then answer `2xx`.',
     bullets: [
       'A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect is a failure.',
-      'Failures are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to 24 hours.',
+      'Failures other than `410 Gone` are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to 24 hours.',
       'Delivery is at least once: deduplicate by `webhook-id`, which stays the same across retries and resends.',
       'Answering `410 Gone` disables the endpoint.',
     ],
-    limit: "Verify the raw request body before parsing it: a body re-serialized from parsed JSON won't verify.",
+    limit:
+      "Verify the raw request body before parsing it: re-serializing parsed JSON can change the signed bytes, and then the signature won't match.",
     codeTitle: 'Your receiver',
   },
   reference: {
