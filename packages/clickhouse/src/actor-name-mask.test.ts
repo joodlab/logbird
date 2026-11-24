@@ -162,7 +162,8 @@ describe('facets under the actor_email mask', () => {
   });
 
   it('never interprets text by its content: a producer string that looks masked stays as it is', async () => {
-    const forged = '\u0000logbird-masked-email:alice@example.com';
+    // No '@': the SQL flag marks any name containing one, so this is text the flag really leaves unflagged.
+    const forged = '\u0000logbird-masked-email:alice';
     const { ch } = client([[{ value: forged, masked: 0, labf: 0, labt: forged, count: 1, total: 1 }]]);
     const result = await facets(ch, 'proj_1', { ...range, field: 'actor.name', limit: 10 }, scope, undefined, key);
     expect(result.values).toEqual([{ value: forged, label: forged, count: 1 }]);

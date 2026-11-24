@@ -85,8 +85,9 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   - Free text matches such an event only through its other text.
   - A pseudonym can't be inverted, so `actor.name:"masked:…"` matches only a name a producer literally sent as that
     text. Filter by actor id instead.
-- An event id stored as several legacy versions that tie on both timestamps answers 404 under `actor_email`, and is
-  never shown as a parent: choosing between them would read the hidden fields.
+- Under `actor_email`, if an id's earliest `(received_at, timestamp)` pair holds more than one distinct stored payload
+  (legacy data), detail answers 404 and parent traversal stops at that id: choosing between them would read the hidden
+  fields. Identical copies, and an earliest version that is unique, are served as usual.
 - The mask covers the actor's own email and name. Addresses a producer writes into other fields (descriptions, target
   names, attributes) are not masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
   addresses out of those fields when scoped readers must not see them.
