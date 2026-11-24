@@ -1,10 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import {
   createClickHouseClient,
-  type EventRow,
+  eventFingerprint,
   facets,
   histogram,
+  INGEST_CLAIM_LEASE_MS,
   insertEvents,
   listEntities,
   normalizeEvent,
@@ -13,7 +14,7 @@ import {
   searchEvents,
 } from '@logbird/clickhouse';
 import type { Prisma } from '@logbird/database';
-import { Logbird } from '@logbird/sdk';
+import { type EventInput, Logbird } from '@logbird/sdk';
 import { generateEvents, SEED_PROFILES, type SeedProfile } from './index';
 
 const { values } = parseArgs({
@@ -77,20 +78,32 @@ async function fenced<T>(projectId: string, reason: string, work: (db: Prisma.Tr
     { waitMs: 60_000 },
   );
 }
-if (values.reset) {
+if (values.reset && database) {
   // In API mode the supplied project ID must belong to the ingest key. Purging
   // uses local ClickHouse credentials because the public API has no reset route.
   const projectId = values['project-id'] as string;
   let reset = false;
   try {
     await fenced(projectId, 'Seed data was reset during the run; the next run retries.', async (db) => {
+      if (values.sink === 'api') {
+        const hash = createHash('sha256')
+          .update(values.key ?? '')
+          .digest('hex');
+        const key = await db.apiKey.findFirst({
+          where: { projectId, hash, kind: 'ingest', revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+          select: { id: true },
+        });
+        if (!key) throw new Error('The ingest key must belong to the project being reset.');
+      }
       if (await db.ingestReceipt.findFirst({ where: { projectId, confirmedAt: null, claimedAt: { not: null } }, select: { eventId: true } }))
         throw new Error('A write for this project is still unresolved. Retry the reset after ingest recovery.');
       const ch = createClickHouseClient();
       try {
         await purgeProject(ch, projectId);
-        // Destructive: readers and caches keyed by the maintenance generation must not reuse facts from before it.
-        await db.project.updateMany({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
+        await database.prisma.$transaction([
+          database.prisma.ingestReceipt.deleteMany({ where: { projectId } }),
+          database.prisma.project.updateMany({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } }),
+        ]);
       } finally {
         await ch.close();
       }
@@ -130,42 +143,53 @@ if (values.sink === 'api') {
 } else if (values.sink === 'direct') {
   const p = values['project-id'];
   if (!p || !database) throw new Error('--project-id required');
-  const { claimIngestReceipts, databaseClock, prisma } = database;
+  const { claimIngestReceipts, confirmIngestReceipts, databaseClock, ingestReceiptClock, withIngestReceiptGate } = database;
   const ch = createClickHouseClient();
   let n = 0;
   try {
     await fenced(p, 'Seed data was written directly during the run; the next run retries.', async (db) => {
-      const { organizationId } = await db.project.findUniqueOrThrow({ where: { id: p }, select: { organizationId: true } });
-      let batch: EventRow[] = [];
-      // One database-clock reading per batch, as ingest stamps a batch.
-      let receivedAt = await databaseClock(db);
+      const managed = await db.project.findUnique({ where: { id: p }, select: { organizationId: true } });
+      let batch: EventInput[] = [];
+      const normalizeBatch = (receivedAt: Date) =>
+        batch.map((event) => {
+          const result = normalizeEvent(event, { projectId: p, receivedAt });
+          if (!result.ok) throw new Error(result.reason);
+          return result.row;
+        });
       const writeBatch = async () => {
         if (!batch.length) return;
-        // Keep a pending receipt until ClickHouse acknowledges every row in the batch. Recovery can then settle a
-        // lost response under the same project-wide guard as API ingest.
-        const eventId = `logbird-seed-batch-${randomUUID()}`;
-        const [claim] = await claimIngestReceipts(
-          p,
-          organizationId,
-          [{ eventId, fingerprint: 'logbird-seed-batch', receivedAt, eventAt: receivedAt, confirmedAt: null }],
-          db,
-        );
-        if (!claim) throw new Error('Could not register the direct seed batch.');
-        await insertEvents(ch, batch);
-        await prisma.$transaction([
-          prisma.project.update({ where: { id: p }, data: { maintenanceGeneration: { increment: 1 } } }),
-          prisma.ingestReceipt.deleteMany({ where: { projectId: p, eventId, confirmedAt: null } }),
-        ]);
+        // ClickHouse-only fixture IDs have no managed retention or webhook discovery.
+        if (!managed) return insertEvents(ch, normalizeBatch(await databaseClock(db)));
+        const { rows, identities, leaseExpiresAt } = await withIngestReceiptGate(p, 'shared', async (tx) => {
+          const receivedAt = await ingestReceiptClock(tx, p);
+          const rows = normalizeBatch(receivedAt);
+          const identities = rows.map((row) => ({
+            eventId: row.event_id,
+            fingerprint: eventFingerprint(row),
+            receivedAt,
+            eventAt: new Date(row.timestamp),
+          }));
+          // A delayed claim response spends the local send budget, as it does in API ingest.
+          const leaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS;
+          const claimed = await claimIngestReceipts(
+            p,
+            managed.organizationId,
+            identities.map((identity) => ({ ...identity, confirmedAt: null })),
+            tx,
+          );
+          if (claimed.length !== rows.length) throw new Error('Some seed event IDs already have receipts. Use --reset for a replacement run.');
+          await tx.project.update({ where: { id: p }, data: { maintenanceGeneration: { increment: 1 } } });
+          return { rows, identities, leaseExpiresAt };
+        });
+        await insertEvents(ch, rows, leaseExpiresAt);
+        await confirmIngestReceipts(p, identities);
       };
       for (const event of generator) {
-        const result = normalizeEvent(event, { projectId: p, receivedAt });
-        if (!result.ok) throw new Error(result.reason);
-        batch.push(result.row);
+        batch.push(event);
         n++;
         if (batch.length === 5000) {
           await writeBatch();
           batch = [];
-          receivedAt = await databaseClock(db);
         }
       }
       await writeBatch();

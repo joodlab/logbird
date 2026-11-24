@@ -21,8 +21,10 @@ for relative console ranges. IDs depend on project/seed, timestamps also depend 
 Direct writes (`--sink direct` and `--reset`) bypass the API, so they are fenced like the server's own maintenance:
 each takes the project's exclusive lock (ingest and retention for that project wait), cancels a background retention
 run staged for the project, and stamps `received_at` with the database clock. They need Postgres (`DATABASE_URL`) for
-that, and refuse with an error when it can't be reached rather than write unfenced. They still write no ingest
-receipts.
+that. For a managed project, the direct sink assigns each batch's receive time and registers one receipt per event
+under the same gate as API ingest. If a write is interrupted, recovery can look up and repair those event IDs.
+ClickHouse-only fixture IDs such as `seed-staydesk-dev` belong to no managed project and create no receipts. A
+successful reset clears receipts for the selected project so a repeated seed can restore the rows it deleted.
 
 This package is a development tool only. It is `private` (never published to npm), no app declares it, so `turbo
 prune` leaves it out of every release image, and the Compose files don't run it.
