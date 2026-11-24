@@ -1,0 +1,3 @@
+<Project>
+  <!-- Empty on purpose: no central package management from sdks/dotnet; versions are set in AotConsumer.csproj. -->
+</Project>
