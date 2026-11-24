@@ -10,7 +10,15 @@ declare module 'h3' {
 }
 export function attachAudit(event: H3Event, client: Logbird, hooks: LogbirdHooks) {
   return createAudit(
-    { client, actor: hooks.actor ?? (() => undefined), tenant: hooks.tenant ?? (() => undefined), executor: hooks.executor, onError: hooks.onError },
+    {
+      client,
+      actor: hooks.actor ?? (() => undefined),
+      tenant: hooks.tenant ?? (() => undefined),
+      executor: hooks.executor,
+      useOperationHeader: hooks.useOperationHeader,
+      useRequestIdHeader: hooks.useRequestIdHeader,
+      onError: hooks.onError,
+    },
     event,
     toWebRequest(event),
   ).then((audit) => {
