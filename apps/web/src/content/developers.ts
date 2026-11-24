@@ -2,6 +2,8 @@ import { byRepo, SITE } from './site';
 
 /** The install from npm, with no version number (packages/sdk/README.md). Phase 1 publishes @logbird/sdk and @logbird/hono only. */
 const install = 'npm install @logbird/sdk';
+/** @logbird/hono depends on the SDK, but the app imports Logbird from @logbird/sdk itself, so it declares both; hono is a peer. */
+const honoInstall = 'npm install @logbird/sdk @logbird/hono';
 
 const quickstart = `import { Logbird } from '@logbird/sdk';
 
@@ -145,7 +147,7 @@ const limits: [string, string][] = [
  * and packages/integrations READMEs. Inline marks: `code` and **bold** (components/marketing/rich.tsx).
  */
 export const developers = {
-  samples: { install, quickstart, http, smallest, worked, hono, workers, read },
+  samples: { install, honoInstall, quickstart, http, smallest, worked, hono, workers, read },
   hero: {
     eyebrow: 'Developers',
     title: 'Add an audit log in an afternoon. Keep it for years.',
@@ -171,7 +173,7 @@ export const developers = {
   quickstart: {
     eyebrow: 'SDK quickstart',
     title: 'Install, create a client, track an event.',
-    body: "The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.",
+    body: "The SDK's capture entry point has no dependencies. It runs on Node 20 or later and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.",
     bullets: [
       '`track(event)` never throws and never waits for the network.',
       "`flush()` and `shutdown()` can reject, for example when retryable delivery (network, `429`, `5xx`) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through `onError` and `onDrop` instead.",
@@ -183,8 +185,8 @@ export const developers = {
     installTitle: 'Install from npm',
     quickstartTitle: 'server.ts',
     npmNote: byRepo(SITE, {
-      public: "`@logbird/sdk` and `@logbird/hono` are on npm. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source.",
-      private: "`@logbird/sdk` and `@logbird/hono` are on npm. The Vue, Nuxt and TanStack Start packages aren't yet.",
+      public: "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source.",
+      private: "`@logbird/sdk` and `@logbird/hono` are on npm, ESM only. The Vue, Nuxt and TanStack Start packages aren't yet.",
     }),
   },
   http: {
@@ -226,6 +228,7 @@ export const developers = {
     title: 'Middleware for the stacks we run.',
     limit: 'There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from those stacks.',
     tabLabel: 'Hono',
+    honoInstallTitle: 'Install for Hono',
     body: 'First-party packages for Hono, TanStack Start, Vue and Nuxt. On the server, the Hono, TanStack Start and Nuxt packages give you an `audit(action, partialEvent)` function per request. It resolves the actor, tenant, request id and operation id when you call it, so identity set by a per-route auth guard is still picked up. `audit()` returns the event id straight away and never waits for delivery.',
     packages: [
       {

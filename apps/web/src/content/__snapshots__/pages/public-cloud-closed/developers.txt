@@ -40,7 +40,7 @@ Read API
 API reference
 SDK quickstart
 Install, create a client, track an event.
-The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.
+The SDK's capture entry point has no dependencies. It runs on Node 20 or later and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.
 track(event) never throws and never waits for the network.
 flush() and shutdown() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through onError and onDrop instead.
 Call shutdown() from your host's own exit hook. The SDK installs no process handlers.
@@ -74,7 +74,7 @@ pre| // Permanent rejections don't reject flush(): they arrive through onError a
 pre| await client.flush().catch((error) => console.error('audit delivery pending', error));
 pre| // On exit: stop accepting events and drain the queue. Can reject like flush().
 pre| await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
-@logbird/sdk and @logbird/hono are on npm. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source.
+@logbird/sdk and @logbird/hono are on npm, ESM only. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source.
 No SDK? Use HTTP.
 One request, one to a thousand events.
 POST /v1/events accepts one event, a JSON array, or { "events": [...] }. Authenticate with an ingest key. A 202 lists the stored event IDs in ids and rejected events in rejected.
@@ -167,6 +167,8 @@ useAuditTrail and a headless AuditTimeline that read history through your authen
 Nuxt @logbird/nuxt
 A Nitro plugin adds event.context.audit. A built-in history route denies every request until your authorize(event, query) hook returns a trusted query.
 There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from those stacks.
+Install for Hono
+pre| npm install @logbird/sdk @logbird/hono
 Hono
 pre| import { Hono } from 'hono';
 pre| import { Logbird } from '@logbird/sdk';
@@ -298,6 +300,7 @@ Self-host it → /self-hosting
 
 controls:
 [shell: header — see _shell.txt]
+button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"

@@ -23,7 +23,7 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
 - **id:** `quickstart`
 - **eyebrow:** SDK quickstart
 - **heading:** Install, create a client, track an event.
-- **body:** The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It
+- **body:** The SDK's capture entry point has no dependencies. It runs on Node 20 or later and in modern runtimes with Fetch and Web Crypto. It
   batches events, retries failures and gives each event an id and a timestamp if you don't.
   <!-- source: packages/sdk/README.md -->
 - **install (labelled "Install from npm", shown in every build):**
@@ -33,7 +33,7 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   ```
 
   No version number: npm installs the one the registry lists. Small print: "`@logbird/sdk` and `@logbird/hono` are on
-  npm. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source." While the repository is private,
+  npm, ESM only. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source." While the repository is private,
   the sentence ends at "aren't yet." Never say all the integrations are on npm.
   <!-- source: packages/sdk/README.md (install); npm phase 1 publishes @logbird/sdk and @logbird/hono only; both verified on npmjs.com by the maintainer before this copy merged -->
 - **code sample:**
@@ -175,6 +175,8 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   you call it, so identity set by a per-route auth guard is still picked up. `audit()` returns the event id straight
   away and never waits for delivery.
   <!-- source: docs/integrations.md; packages/integrations/*/README.md -->
+- **install (labelled "Install for Hono", above the tabs):** `npm install @logbird/sdk @logbird/hono`. The app imports `Logbird`
+  from `@logbird/sdk` itself, so it declares both; `hono` is a peer. <!-- source: packages/integrations/hono/package.json -->
 - **tabs:**
   - **Hono** (`@logbird/hono`):
 

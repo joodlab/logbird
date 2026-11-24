@@ -172,7 +172,12 @@ function DevelopersPage() {
         id="integrations"
         limit={integrations.limit}
         title={integrations.title}
-        visual={<SiteCodeTabs tabs={[{ id: 'hono', label: integrations.tabLabel, code: samples.hono, language: 'ts' }]} />}
+        visual={
+          <div className="flex flex-col gap-3">
+            <SiteCode code={samples.honoInstall} language="bash" title={integrations.honoInstallTitle} />
+            <SiteCodeTabs tabs={[{ id: 'hono', label: integrations.tabLabel, code: samples.hono, language: 'ts' }]} />
+          </div>
+        }
       >
         <p>
           <Rich text={integrations.body} />
