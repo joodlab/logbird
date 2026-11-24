@@ -10,7 +10,7 @@ import { AppShell } from '@/components/shell/app-shell';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { projectQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
-import { PROJECT_MISSING, type ProjectElsewhere, projectElsewhere, readProject } from '@/lib/project-listed';
+import { confirmedProject, PROJECT_MISSING, type ProjectElsewhere, projectElsewhere, readProject, withOpenWorkspace } from '@/lib/project-listed';
 import { rememberProject } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
@@ -22,9 +22,9 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // filled while another workspace was active (in this tab or another) never stands in for access. A project in another
   // of the person's workspaces is named, so they can switch to it (never switched silently); one that is not theirs is
   // not found; a failure to read it shows the usual error with a retry. Moving between pages of the same project reuses
-  // that read.
+  // that read; moving to another project id (which the router also calls 'stay') does not.
   beforeLoad: async ({ context, params, cause }) => {
-    if (cause === 'stay') return;
+    if (cause === 'stay' && confirmedProject(context.queryClient) === params.projectId) return;
     const outcome = await readProject(context.queryClient, params.projectId);
     if (outcome !== 'readable') throw notFound({ data: outcome });
   },
@@ -38,7 +38,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
       return { project };
     } catch (error) {
       const elsewhere = projectElsewhere(error);
-      if (elsewhere) throw notFound({ data: elsewhere });
+      if (elsewhere) throw notFound({ data: await withOpenWorkspace(context.queryClient, elsewhere) });
       if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) throw notFound({ data: PROJECT_MISSING });
       throw error;
     }
@@ -80,7 +80,6 @@ const isElsewhere = (data: unknown): data is ProjectElsewhere => (data as Projec
  * stays on this URL, search included; if it fails, the page says so and stays.
  */
 function ProjectInOtherWorkspace({ elsewhere }: { elsewhere: ProjectElsewhere }) {
-  const { workspace } = Route.useRouteContext();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [switching, setSwitching] = useState(false);
@@ -120,7 +119,11 @@ function ProjectInOtherWorkspace({ elsewhere }: { elsewhere: ProjectElsewhere })
             ) : null}
           </div>
         }
-        description={`You are a member of ${elsewhere.workspaceName}, but ${workspace.name} is the workspace open now. Switch to open this project; the link stays the same.`}
+        description={
+          elsewhere.openWorkspaceName
+            ? `You are a member of ${elsewhere.workspaceName}, but ${elsewhere.openWorkspaceName} is the workspace open now. Switch to open this project; the link stays the same.`
+            : `You are a member of ${elsewhere.workspaceName}. Switch to it to open this project; the link stays the same.`
+        }
         title={`This project is in ${elsewhere.workspaceName}`}
       />
     </AppShell>

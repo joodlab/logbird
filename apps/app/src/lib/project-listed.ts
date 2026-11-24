@@ -1,7 +1,7 @@
 import { PROJECT_IN_OTHER_WORKSPACE, projectInOtherWorkspaceErrorSchema } from '@logbird/contracts';
 import type { QueryClient } from '@tanstack/react-query';
 import { ApiRequestError } from '@/lib/api/errors';
-import { projectQuery, projectsQuery } from '@/lib/api/queries';
+import { meQuery, projectQuery, projectsQuery } from '@/lib/api/queries';
 
 /**
  * Whether the workspace lists this project, so a stale link can be not found before any of its requests runs. The
@@ -30,7 +30,13 @@ export async function projectIsListed(queryClient: QueryClient, projectId: strin
 }
 
 /** A project in another of the person's workspaces (409 project_in_other_workspace): where it is, to offer a switch. */
-export type ProjectElsewhere = { kind: 'project-elsewhere'; workspaceId: string; workspaceName: string };
+export type ProjectElsewhere = {
+  kind: 'project-elsewhere';
+  workspaceId: string;
+  workspaceName: string;
+  /** The workspace the session has open, read fresh (another tab may have switched it); null when none is. */
+  openWorkspaceName?: string | null;
+};
 const elsewhereDetails = projectInOtherWorkspaceErrorSchema.shape.error.shape.details;
 
 /** The workspace a refused project request says the project is in, when it is one of the person's; else null. */
@@ -46,13 +52,29 @@ export function projectElsewhere(error: unknown): ProjectElsewhere | null {
  * missing for them (deleted, never theirs, or a workspace they left: one answer, so nothing is revealed). Any other
  * failure (offline, 5xx) is thrown, for the page's usual retry, rather than called missing.
  */
+/** Adds the name of the workspace the session really has open (read fresh, not from this tab's cache). */
+export async function withOpenWorkspace(queryClient: QueryClient, elsewhere: ProjectElsewhere): Promise<ProjectElsewhere> {
+  try {
+    const me = await queryClient.fetchQuery({ ...meQuery(), staleTime: 0 });
+    return { ...elsewhere, openWorkspaceName: me.organizations.find((o) => o.id === me.activeOrganizationId)?.name ?? null };
+  } catch {
+    return { ...elsewhere, openWorkspaceName: null };
+  }
+}
+
+/** The project each query client last read as readable on entry: moving between its own pages reuses that read. */
+const confirmed = new WeakMap<QueryClient, string>();
+export const confirmedProject = (queryClient: QueryClient) => confirmed.get(queryClient);
+
 export async function readProject(queryClient: QueryClient, projectId: string): Promise<'readable' | ProjectElsewhere | typeof PROJECT_MISSING> {
   try {
     await queryClient.fetchQuery({ ...projectQuery(projectId), staleTime: 0 });
+    confirmed.set(queryClient, projectId);
     return 'readable';
   } catch (error) {
+    confirmed.delete(queryClient);
     const elsewhere = projectElsewhere(error);
-    if (elsewhere) return elsewhere;
+    if (elsewhere) return withOpenWorkspace(queryClient, elsewhere);
     if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) return PROJECT_MISSING;
     throw error;
   }

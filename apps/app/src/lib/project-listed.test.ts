@@ -3,9 +3,19 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 const list = vi.fn();
 const get = vi.fn();
-vi.mock('@/lib/api/client', () => ({ api: { projects: { list: () => list(), get: (id: string) => get(id) } } }));
+// The session as the server has it now: Labs open (another tab switched it), member of Clinics and Labs.
+const me = vi.fn(async () => ({
+  user: { id: 'u_lina', name: 'Lina', email: 'lina@example.invalid', image: null },
+  organizations: [
+    { id: 'ws_clinics', name: 'Clinics Example', slug: 'clinics', role: 'member' },
+    { id: 'ws_labs', name: 'Labs Example', slug: 'labs', role: 'owner' },
+  ],
+  activeOrganizationId: 'ws_labs',
+}));
+vi.mock('@/lib/auth-client', () => ({ authClient: { getSession: async () => ({ data: { session: {} }, error: null }) } }));
+vi.mock('@/lib/api/client', () => ({ api: { me: () => me(), projects: { list: () => list(), get: (id: string) => get(id) } } }));
 
-const { PROJECT_MISSING, projectElsewhere, projectIsListed, readProject } = await import('./project-listed');
+const { confirmedProject, PROJECT_MISSING, projectElsewhere, projectIsListed, readProject } = await import('./project-listed');
 const { ApiRequestError } = await import('./api/errors');
 const { keys } = await import('./api/queries');
 
@@ -105,8 +115,18 @@ it('reads a project fresh on entry: readable, in another of my workspaces, missi
   get.mockResolvedValueOnce(project);
   expect(await readProject(qc, 'p_clinics')).toBe('readable');
   expect(get).toHaveBeenCalledTimes(1);
+  // Only this project id counts as confirmed: another id is read fresh on entry, even when the router calls it 'stay'.
+  expect(confirmedProject(qc)).toBe('p_clinics');
   get.mockRejectedValueOnce(elsewhere());
-  expect(await readProject(qc, 'p_clinics')).toEqual({ kind: 'project-elsewhere', workspaceId: 'ws_clinics', workspaceName: 'Clinics Example' });
+  // The prompt names the workspace the session really has open, read fresh, not this tab's idea of it.
+  expect(await readProject(qc, 'p_clinics')).toEqual({
+    kind: 'project-elsewhere',
+    workspaceId: 'ws_clinics',
+    workspaceName: 'Clinics Example',
+    openWorkspaceName: 'Labs Example',
+  });
+  // A refused read forgets the confirmed project, so moving to it again reads it again.
+  expect(confirmedProject(qc)).toBeUndefined();
   get.mockRejectedValueOnce(new ApiRequestError(404, 'not_found', 'Project not found.'));
   expect(await readProject(qc, 'p_gone')).toBe(PROJECT_MISSING);
   // Offline or a 5xx is not "not found": it is thrown for the page's retry.
