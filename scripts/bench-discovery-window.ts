@@ -31,6 +31,8 @@ const positive = (name: string, fallback: number) => {
 };
 const TOTAL = positive('BENCH_EVENTS', 100_000);
 const SPREAD_DAYS = positive('BENCH_SPREAD_DAYS', 365);
+// Normalization accepts occurrence times up to 3,650 days old; stay inside it (each event is also checked below).
+if (SPREAD_DAYS >= 3650) throw new Error('BENCH_SPREAD_DAYS must be below 3650');
 const BATCH = 10_000;
 const SPREAD = SPREAD_DAYS * 86_400_000;
 
@@ -62,7 +64,8 @@ for (let offset = 0; offset < TOTAL; offset += BATCH) {
   while ((await memoryMiB()) > 1100) await delay(2000);
   // Arrival times come from the same (Postgres) clock as the endpoints' cursors, so no batch can fall before them.
   const { now: receivedAt } = await webhookCursorClock(prisma);
-  if (receivedAt < start) throw new Error('Postgres clock went backwards');
+  // The finish target is the latest arrival; a clock step back would let a scan stop before an earlier batch.
+  if (receivedAt < lastReceivedAt) throw new Error('Postgres clock went backwards');
   lastReceivedAt = receivedAt;
   await insertEvents(
     ch,
@@ -73,6 +76,8 @@ for (let offset = 0; offset < TOTAL; offset += BATCH) {
         { projectId, receivedAt },
       );
       if (!normalized.ok) throw new Error(normalized.reason);
+      // A warning means normalization changed the generated event (an occurrence time moved): not the workload reported.
+      if (normalized.warning) throw new Error(`Event ${index} was normalized: ${JSON.stringify(normalized.warning)}`);
       return normalized.row;
     }),
   );
@@ -117,12 +122,18 @@ for (const endpoints of [1, 10, 100])
     for (const hook of hooks) {
       // Each endpoint scans, as passes would, until its cursor is past the import, and at least once. A scan that never
       // reaches the import measured nothing, so the bench fails rather than report it.
+      let expected = start;
       for (let pass = 0; ; pass++) {
         const current = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } });
+        // Chain of custody: each tagged scan starts where this benchmark's previous scan left the cursor (the first at the
+        // start of the import), so the tagged scans cover the import. Run it where no worker scans these databases.
+        if (+current.cursorReceivedAt !== +expected || current.cursorEventId !== null)
+          throw new Error(`Endpoint ${hook.id} was scanned by something else`);
         if (pass > 0 && +current.cursorReceivedAt > +lastReceivedAt) break;
         if (pass === 100) throw new Error(`Endpoint ${hook.id} did not scan past the import in 100 passes`);
         await discoverWebhookDeliveries(scanner, current, { now: clock.now, rollout: new Date(+start - 1) });
         passes++;
+        expected = (await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).cursorReceivedAt;
       }
     }
     const passMs = performance.now() - started;
