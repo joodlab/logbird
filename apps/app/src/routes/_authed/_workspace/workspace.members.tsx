@@ -7,42 +7,53 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { NativeSelect, NativeSelectOption } from '@logbird/ui/components/ui/native-select';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
-import { createFileRoute } from '@tanstack/react-router';
-import { Loader2Icon, MailIcon, MoreHorizontalIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from 'lucide-react';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { Loader2Icon, LogOutIcon, MailIcon, MoreHorizontalIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from 'lucide-react';
+import { z } from 'zod';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { InviteForm } from '@/components/members/invite-form';
 import { InviteLinkPanel, PanelHeading } from '@/components/members/invite-link-panel';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
+import { WorkspaceLinkNotice } from '@/components/workspace-link-notice';
 import {
+  hasRole,
   invitationUrl,
   type OrgMember,
   ROLE_INFO,
   type Role,
   roleLabel,
   useInviteMember,
+  useLeaveWorkspace,
   useMemberActions,
   useOrganization,
 } from '@/lib/organization';
 import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/workspace/members')({
+  // `?workspace=<id>` from a link such as the member-joined email: the workspace it is about (#8).
+  validateSearch: z.object({ workspace: z.string().optional().catch(undefined) }),
   staticData: { crumb: 'Members' },
   head: () => ({ meta: [{ title: 'Members · Workspace settings · Logbird' }] }),
   component: MembersSettings,
 });
 
 function MembersSettings() {
+  const { workspace: linkedWorkspace } = Route.useSearch();
+  const { workspace } = Route.useRouteContext();
   const { me, org, myRole, owners, canManage, pending } = useOrganization();
   const confirm = useConfirm();
   const { cancel, remove, changeRole } = useMemberActions();
   const resend = useInviteMember();
+  const navigate = useNavigate();
+  const leave = useLeaveWorkspace(() => navigate({ to: '/' }));
+  const lastOwnerSelf = hasRole(org.data?.members.find((m) => m.userId === me.data?.user.id)?.role, 'owner') && owners <= 1;
   const members = [...(org.data?.members ?? [])].sort((a, b) => rank(a.role) - rank(b.role) || a.user.email.localeCompare(b.user.email));
 
   /** What I may do to this member. Mirrors better-auth's rules so we never offer an action it rejects. */
   const permissions = (m: OrgMember) => {
     const self = m.userId === me.data?.user.id;
-    const lastOwner = m.role === 'owner' && owners <= 1;
+    const lastOwner = hasRole(m.role, 'owner') && owners <= 1;
     const touchable = canManage && !self && (m.role !== 'owner' || myRole === 'owner');
     return { self, lastOwner, canChangeRole: touchable && !lastOwner, canRemove: touchable && !lastOwner };
   };
@@ -54,7 +65,7 @@ function MembersSettings() {
       title: `Make ${name} ${role === 'admin' || role === 'owner' ? 'an' : 'a'} ${roleLabel(role).toLowerCase()}?`,
       description:
         role === 'owner'
-          ? 'Owners can do everything, including removing other owners and deleting the workspace. You cannot undo this alone if they demote you.'
+          ? 'Owners can do everything, including removing other owners and deleting projects with their events. You cannot undo this alone if they demote you.'
           : `${ROLE_INFO[role].label}s: ${ROLE_INFO[role].description.toLowerCase()}`,
       confirmLabel: `Make ${roleLabel(role).toLowerCase()}`,
       destructive: role === 'owner',
@@ -64,6 +75,7 @@ function MembersSettings() {
 
   return (
     <div className="flex flex-col gap-5">
+      {me.data ? <WorkspaceLinkNotice active={workspace} linked={linkedWorkspace} organizations={me.data.organizations} /> : null}
       <SettingsSection
         description={
           <>
@@ -268,6 +280,41 @@ function MembersSettings() {
           ))}
         </ul>
       </SettingsSection>
+
+      {/* Any member may leave; the last owner may not, since nobody could manage the workspace after them (#2). */}
+      {org.data ? (
+        <SettingsSection
+          description={
+            lastOwnerSelf
+              ? 'You are the only owner. Make another member an owner first, so someone can still manage the workspace.'
+              : `You lose access to every project in ${org.data.name}. An owner or admin can invite you again.`
+          }
+          title="Leave this workspace"
+        >
+          <div>
+            <Button
+              data-testid="leave-workspace"
+              disabled={lastOwnerSelf || leave.isPending}
+              onClick={async () => {
+                const workspace = org.data;
+                if (!workspace) return;
+                const ok = await confirm({
+                  title: `Leave ${workspace.name}?`,
+                  description: `You lose access to every project in ${workspace.name} at once. To come back, an owner or admin has to invite you again.`,
+                  confirmLabel: 'Leave workspace',
+                  destructive: true,
+                });
+                if (ok) leave.mutate({ id: workspace.id, name: workspace.name });
+              }}
+              size="sm"
+              variant="outline"
+            >
+              {leave.isPending ? <Loader2Icon className="animate-spin" /> : <LogOutIcon />}
+              Leave workspace
+            </Button>
+          </div>
+        </SettingsSection>
+      ) : null}
     </div>
   );
 }

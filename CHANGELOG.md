@@ -17,8 +17,17 @@
 - **ClickHouse 26.9 or newer is required.** The server and worker now check it at startup and refuse to start against an older server, naming its version.
 - **Upgrade every server replica before starting the new worker.** For a rolling upgrade, first deploy a release that includes the server heartbeat and wait until every replica is on that release. Servers from 0.2.1 and earlier do not report a heartbeat. When upgrading directly from one of those releases, keep the new worker stopped until every old API replica has stopped serving traffic.
 - The worker checks for heartbeat support at both retention fences. If a server seen in the last 90 seconds lacks support, or no server recently reported a heartbeat, the run uses the synchronous method and the project's ingest waits while ClickHouse deletes. Before restoring a pre-heartbeat server, stop the new worker and let pending retention deletes finish.
-- The ClickHouse writer needs `SYSTEM FLUSH ASYNC INSERT QUEUE` to settle an unresolved claim. If the flush fails, Settings records the canceled run and the reason.
+- The ClickHouse writer needs `SYSTEM FLUSH ASYNC INSERT QUEUE` to settle an unresolved claim. If the flush fails at the first background retention fence, Settings records the canceled run and the reason. Synchronous retention and repair also require unresolved inserts to settle before they change stored rows.
 - If you rebuild a project's rollups by hand after killing a Logbird mutation, use `scripts/repair-rollups.ts PROJECT` (it refuses that project's ingest while it runs).
+- **A workspace always keeps an owner.** Migration `20261124120000_member_keep_an_owner` adds a Postgres trigger on
+  `member`: a leave, removal or role change that would leave an organization without an owner is refused with
+  409 `workspace_needs_owner` ("A workspace needs at least one owner."). The migration is additive and does not check
+  existing rows: an organization that already has no owner keeps working as before, and the trigger only stops new
+  changes from removing the last owner. Deleting an organization still removes its members.
+  **Limit:** removing or demoting an owner must run under READ COMMITTED, Postgres's default and what Logbird uses.
+  Under REPEATABLE READ or SERIALIZABLE the trigger refuses it (SQLSTATE `LB410`), even when another owner remains,
+  because a count taken on an older snapshot could not be trusted. Scripts that change owners at those levels must
+  switch to READ COMMITTED.
 
 ## 0.2.1
 

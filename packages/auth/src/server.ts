@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { SIGN_IN_CODE_TTL_SECONDS } from '@logbird/contracts';
-import { prisma } from '@logbird/database';
+import { isWorkspaceNeedsOwnerError, prisma, WORKSPACE_NEEDS_OWNER } from '@logbird/database';
 import { clientIp, primaryRole } from '@logbird/email';
 import { sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSignInCode } from '@logbird/email/send';
 import { createEnv } from '@t3-oss/env-core';
@@ -74,6 +74,22 @@ async function signupAllowed(email: string, path: string) {
   return false;
 }
 const invalidCode = () => new APIError('BAD_REQUEST', { message: 'Invalid OTP', code: 'INVALID_OTP' });
+/** The client better-auth writes through: the trigger's last-owner refusal on member writes becomes a 409 sentence. */
+const ownerGuardedPrisma = prisma.$extends({
+  query: {
+    member: {
+      async $allOperations({ args, query }) {
+        try {
+          return await query(args);
+        } catch (error) {
+          if (isWorkspaceNeedsOwnerError(error))
+            throw new APIError('CONFLICT', { message: WORKSPACE_NEEDS_OWNER.message, code: WORKSPACE_NEEDS_OWNER.code.toUpperCase() });
+          throw error;
+        }
+      },
+    },
+  },
+});
 const displayName = (user: { name?: string | null; email: string }) => user.name?.trim() || user.email;
 /** Courtesy notifications must never fail the action that triggered them. */
 async function notify(kind: string, send: () => Promise<unknown>) {
@@ -91,7 +107,9 @@ export const auth = betterAuth({
   rateLimit: { enabled: false },
   secret: env.BETTER_AUTH_SECRET,
   trustedOrigins: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
-  database: prismaAdapter(prisma, { provider: 'postgresql' }),
+  // Member writes that would leave a workspace without an owner are refused by a database trigger; better-auth would
+  // answer that with a bare 500, so it becomes a 409 with a sentence here, at the one place its writes go through.
+  database: prismaAdapter(ownerGuardedPrisma as unknown as typeof prisma, { provider: 'postgresql' }),
   advanced: {
     // Keep cookie request validation enabled in tests as well as production.
     disableOriginCheck: false,
@@ -152,6 +170,10 @@ export const auth = betterAuth({
       },
     }),
     organization({
+      // Deleting a workspace here would cascade its projects in Postgres but leave their events in ClickHouse, where
+      // nothing points at them and retention never reaches them. Closed until a deletion that purges each project first
+      // exists; an owner deletes projects one by one, which purges their events.
+      disableOrganizationDeletion: true,
       // Under AUTH_SIGNUP=restricted only approved domains may start workspaces, so admitted outsiders cannot invite strangers.
       allowUserToCreateOrganization: (user) => mayCreateWorkspace(user.email),
       organizationHooks: {
@@ -199,6 +221,7 @@ export const auth = betterAuth({
             await sendMemberJoined({
               inviterEmail: inviter.email,
               workspace: organization.name,
+              workspaceId: organization.id,
               memberName: displayName(user),
               memberEmail: user.email,
               role: primaryRole(member.role),
