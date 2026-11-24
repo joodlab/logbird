@@ -36,11 +36,13 @@ export async function reconcileDestructiveMaintenance(ch: ClickHouseClient, proj
     await flagStuckRetention(ch, projectId);
     return false;
   }
+  // Finish the runs first: if verification or the receipt purge fails, the marker stays and the reconciler retries
+  // (it selects projects by the marker). It clears only once nothing is left to finish.
+  await finishMaterializedRetention(ch, projectId);
   await prisma.project.updateMany({
     where: { id: projectId, exportDeleteStartedAt: project.exportDeleteStartedAt },
     data: { exportDeleteStartedAt: null },
   });
-  await finishMaterializedRetention(ch, projectId);
   return true;
 }
 

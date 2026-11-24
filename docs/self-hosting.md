@@ -275,7 +275,8 @@ To act:
 2. Fix the cause shown in `latest_fail_reason` (free disk, raise the memory limit for merges and mutations, or detach
    and restore a corrupted part from backup). ClickHouse retries failed mutations by itself; the runs complete within
    about ten seconds of the queue draining, and their exports reopen.
-3. Only if the cause cannot be fixed, `KILL MUTATION WHERE mutation_id = '…'`. Killing a Logbird retention DELETE leaves
+3. Only if the cause cannot be fixed, `KILL MUTATION WHERE database = currentDatabase() AND table = '…' AND mutation_id = '…' SYNC`
+   (mutation ids are unique per table only, so always name the table). Killing a Logbird retention DELETE leaves
    rows that should have been removed: the reconciler's verification then marks the run failed, and the next hourly
    run deletes them again on the synchronous path. Killing a DELETE on `entities` or `attribute_keys` also leaves the
    old rollup rows next to their replacements, so rebuild that project's rollups afterwards:
@@ -290,7 +291,7 @@ the same part (other projects' cleanups, created minutes after it) showed the *s
 `parts_to_do = 1`, because ClickHouse applies the queued mutations of a part together. The culprit is the oldest
 pending mutation with that reason whose `command` is not a Logbird statement (Logbird's DELETEs are
 `UPDATE _row_exists = 0 WHERE project_id = '…' AND …`, with literal values only). `KILL MUTATION WHERE database =
-currentDatabase() AND mutation_id = 'mutation_….txt' SYNC` on that one id was enough: the DELETEs queued behind it
+currentDatabase() AND table = 'events' AND mutation_id = 'mutation_….txt' SYNC` on that one id was enough: the DELETEs queued behind it
 finished within seconds, and the queue was empty again.
 
 **A mutation that blocks reads.** A mutation created outside Logbird whose condition calls `now()`, `rand()` or a
@@ -299,7 +300,7 @@ subquery cannot be applied on the fly, so while it is pending, console and API r
 `SELECT mutation_id, table, command, create_time FROM system.mutations WHERE database = currentDatabase() AND
 is_done = 0 AND (positionCaseInsensitive(command, 'now(') > 0 OR positionCaseInsensitive(command, 'rand') > 0 OR
 positionCaseInsensitive(command, 'select') > 0)`. Let it finish if it will finish soon; otherwise
-`KILL MUTATION WHERE database = currentDatabase() AND mutation_id = '…' SYNC` and rerun it with literal values (or
+`KILL MUTATION WHERE database = currentDatabase() AND table = '…' AND mutation_id = '…' SYNC` and rerun it with literal values (or
 with `mutations_execute_nondeterministic_on_initiator = 1` and `mutations_execute_subqueries_on_initiator = 1`).
 
 Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashtags=true`, matching brace-enclosed BullMQ prefixes such as {logbird} across producers/workers, and no queue eviction. Do not use ioredis keyPrefix.

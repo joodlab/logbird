@@ -283,7 +283,16 @@ export const managementRoutes = new Hono<AppEnv>()
         await stopMaintenance(projectId);
         await settleProjectInserts(projectId);
         await purgeProjectEvents(projectId, { settled: true });
-        await reconcileDestructiveMaintenance(projectId);
+        // The project row (and with it the fence) goes only once ClickHouse has nothing pending for it: a mutation that
+        // later fails or is cancelled must still find the fence (#268).
+        if (!(await reconcileDestructiveMaintenance(projectId)))
+          throw new ApiError(
+            503,
+            'deletion_pending',
+            "The event store is still deleting this project's events. Retry in about a minute.",
+            undefined,
+            60,
+          );
         await prisma.$transaction(async (tx) => {
           const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
           for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted', tx);

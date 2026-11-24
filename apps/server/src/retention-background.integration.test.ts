@@ -345,7 +345,9 @@ async function killHeld(project: string) {
   for (const m of await pendingProjectMutations(maintenanceClickhouse, project))
     if (m.table === 'events')
       await maintenanceClickhouse.command({
-        query: `KILL MUTATION WHERE database = currentDatabase() AND mutation_id = '${m.mutationId.replace(/[^\w.-]/g, '')}' SYNC`,
+        // Mutation ids are per table: bind the database, the table and the id (#268).
+        query: 'KILL MUTATION WHERE database = currentDatabase() AND table = {table:String} AND mutation_id = {id:String} SYNC',
+        query_params: { table: m.table, id: m.mutationId },
       });
 }
 /**
@@ -366,11 +368,12 @@ function holdCeiling(project: string, ms = 90_000) {
   };
 }
 /** Whether this exact mutation is still pending (checked at the end of each held-mutation test). */
-async function stillPending(mutationId: string) {
+async function stillPending(table: string, mutationId: string) {
   const [row] = await maintenanceClickhouse
     .query({
-      query: 'SELECT count() n FROM system.mutations WHERE database = currentDatabase() AND mutation_id = {id:String} AND is_done = 0',
-      query_params: { id: mutationId },
+      query:
+        'SELECT count() n FROM system.mutations WHERE database = currentDatabase() AND table = {table:String} AND mutation_id = {id:String} AND is_done = 0',
+      query_params: { table, id: mutationId },
       format: 'JSONEachRow',
     })
     .then((r) => r.json<{ n: string }>());
@@ -440,7 +443,7 @@ it(
       // Never leave the held mutation behind, even when an assertion failed: it would hold other mutations on its part.
       ceiling?.clear();
       await killHeld(foreign);
-      if (heldId) expect(await stillPending(heldId)).toBe(false);
+      if (heldId) expect(await stillPending('events', heldId)).toBe(false);
       for (const table of ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys'])
         await maintenanceClickhouse.command({
           query: `DELETE FROM ${table} WHERE project_id = {fp:String}`,
@@ -500,7 +503,7 @@ it(
       // Never leave the held mutation behind, even when an assertion failed.
       ceiling?.clear();
       await killHeld(f.project);
-      if (heldId) expect(await stillPending(heldId)).toBe(false);
+      if (heldId) expect(await stillPending('events', heldId)).toBe(false);
     }
   },
 );
