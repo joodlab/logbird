@@ -514,7 +514,12 @@ stable `WEBHOOK_SECRET_KEY` or HKDF-SHA256 from `BETTER_AUTH_SECRET`. See
 [self-hosting](self-hosting.md#webhook-endpoint-settings) before rotating keys.
 
 Endpoint configuration includes URL, description, enabled state/disabled reason,
-Logbird `filterQuery`, and optional `{ tenantId?, target?: { type, id }, mask? }` scope.
+Logbird `filterQuery`, optional `{ tenantId?, target?: { type, id }, mask? }` scope, and
+`deliveryWindowSeconds`: discovery queues an event for the endpoint only if it arrived no later than this after it occurred
+(whole hours, 1 hour to 3,650 days; default 7 days, `DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS`; `null` means no limit).
+A change applies to events discovered after the save: deliveries already queued stay queued, and resends and test pings
+ignore the window.
+Responses add `lateEvents { count, since }` for events that arrived later than the window, in whole arrival hours from `since`: arrivals, including any since removed by retention. The count is approximate: exact in normal operation, but after a storage failure, a retried write or a restore it can be lower or higher; no backfill; not for reconciliation.
 PATCH scope replaces the whole scope (`null` clears it); absent fields preserve
 stored values. URLs require HTTPS unless `WEBHOOKS_ALLOW_HTTP=true`; every resolved
 address must be public unicast. Save-time DNS uses a cancellable c-ares resolver
@@ -586,7 +591,7 @@ network errors are retried and never hold a filter. A PATCH with a valid `filter
 The PostgreSQL server clock must not step backwards; run a time service that slews it. After a backward step, an
 event admitted behind a committed cursor is stored and searchable but its webhook delivery can be missed until an
 operator [rewinds the cursor](self-hosting.md#rewind-a-webhook-cursor-after-a-missed-delivery).
-Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
+Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings, except the delivery window, which only discovery reads.
 If settings change while the worker prepares a request, it discards the prepared request without counting an attempt.
 
 Each POST body is the public event shape returned in `/v1/events/:id`'s

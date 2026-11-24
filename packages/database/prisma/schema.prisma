@@ -384,6 +384,9 @@ model WebhookEndpoint {
   scopeTargetId String?
   scopeMask String[] @default([])
   scopeReviewRequired Boolean @default(false)
+  // Seconds; null = no limit. Set explicitly on create (DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS).
+  deliveryWindowSeconds Int?
+  deliveryWindowChangedAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
   createdById String?
   createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
