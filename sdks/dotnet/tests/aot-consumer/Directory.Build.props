@@ -1,0 +1,6 @@
+<Project>
+  <!--
+    Empty on purpose: it stops MSBuild from picking up sdks/dotnet/Directory.Build.props, so this project builds the way
+    an application outside the repository does, with none of the SDK's own settings.
+  -->
+</Project>

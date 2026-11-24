@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!--
+    A Native AOT application that consumes the packed Logbird and Logbird.AspNetCore packages (issue #322, B02). CI
+    publishes it with the packages it just packed and runs the native binary; see .github/workflows/dotnet.yml.
+
+      dotnet publish -c Release -r linux-x64 -p:LogbirdVersion=<packed version>
+
+    with the .nupkg and .snupkg files in ./packages. Any trim or AOT warning fails the publish.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net8.0, the lowest framework the packages' AOT-compatible build targets; -p:ConsumerFramework=net10.0 for another. -->
+    <ConsumerFramework Condition="'$(ConsumerFramework)' == ''">net8.0</ConsumerFramework>
+    <TargetFramework>$(ConsumerFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!--
+      NuGet audit warnings stay visible but do not fail this job: they report advisories in the AOT toolchain the runner's
+      SDK selects (Microsoft.DotNet.ILCompiler), which this app does not ship and the SDK packages do not depend on. Trim
+      and AOT analysis warnings (IL2xxx, IL3xxx) remain errors.
+    -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <!--
+      ILC reports trim and AOT analysis warnings for the packages' own code (IL2xxx, IL3xxx) through MSBuild, where the
+      compiler's TreatWarningsAsErrors does not reach them. MSBuildTreatWarningsAsErrors turns every warning MSBuild
+      logs into an error, so a warning in Logbird.dll or Logbird.AspNetCore.dll fails the publish; the NuGet audit codes
+      above are the only ones kept as warnings.
+    -->
+    <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>
+    <MSBuildWarningsNotAsErrors>$(MSBuildWarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</MSBuildWarningsNotAsErrors>
+    <!-- Each package assembly's trim and AOT warnings are listed in full, not collapsed into one per assembly. -->
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <IsPackable>false</IsPackable>
+    <!--
+      A private package folder: NuGet's global cache keeps a package by id and version, so a Logbird 0.2.1 packed earlier
+      on the same machine would otherwise stand in for the one in ./packages. Delete obj/ before rerunning locally with
+      packages repacked under the same version; CI always starts clean.
+    -->
+    <RestorePackagesPath>$(MSBuildThisFileDirectory)obj/nuget-packages</RestorePackagesPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Logbird" Version="[$(LogbirdVersion)]" />
+    <PackageReference Include="Logbird.AspNetCore" Version="[$(LogbirdVersion)]" />
+  </ItemGroup>
+
+  <Target Name="RequireLogbirdVersion" BeforeTargets="CollectPackageReferences" Condition="'$(LogbirdVersion)' == ''">
+    <Error Text="Set LogbirdVersion to the version of the packages in ./packages (for example -p:LogbirdVersion=0.2.1)." />
+  </Target>
+</Project>

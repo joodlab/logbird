@@ -2,6 +2,7 @@ import { useCopy } from '@logbird/ui/hooks/use-copy';
 import { type CodeLanguage, highlight, TOKEN_CLASS } from '@logbird/ui/lib/highlight';
 import { CheckIcon, CopyIcon } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
+import { codeContent as words } from '../../content/code';
 import { cx as cn } from '../../lib/cx';
 
 /**
@@ -26,7 +27,7 @@ function CopyCode({ value, label }: { value: string; label: string }) {
   const { copied, copy } = useCopy();
   return (
     <button
-      aria-label={copied ? 'Copied' : label}
+      aria-label={copied ? words.copied : label}
       className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       onClick={() => copy(value)}
       title={label}
@@ -34,15 +35,15 @@ function CopyCode({ value, label }: { value: string; label: string }) {
     >
       {copied ? <CheckIcon aria-hidden="true" className="size-4 text-outcome-success" /> : <CopyIcon aria-hidden="true" className="size-4" />}
       <span aria-live="polite" className="sr-only">
-        {copied ? 'Copied to the clipboard' : ''}
+        {copied ? words.copiedAnnouncement : ''}
       </span>
     </button>
   );
 }
 
-const shell = 'site-code overflow-hidden rounded-xl border bg-[var(--surface)]';
-const bar = 'flex h-10 items-center justify-between gap-2 border-b bg-[var(--surface-sunken)] ps-3 pe-1';
-const pre = 'overflow-x-auto p-4 font-mono text-[13px] leading-[1.7]';
+const shellClass = 'site-code overflow-hidden rounded-xl border bg-[var(--surface)]';
+const barClass = 'flex h-10 items-center justify-between gap-2 border-b bg-[var(--surface-sunken)] ps-3 pe-1';
+const preClass = 'overflow-x-auto p-4 font-mono text-[13px] leading-[1.7]';
 
 /** `wrap` soft-wraps long lines instead of scrolling (short commands shown on phones). */
 export function SiteCode({
@@ -59,13 +60,13 @@ export function SiteCode({
   wrap?: boolean;
 }) {
   return (
-    <div className={cn(shell, className)}>
-      <div className={bar}>
+    <div className={cn(shellClass, className)}>
+      <div className={barClass}>
         <span className="truncate font-mono text-[11px] text-muted-foreground uppercase tracking-wider">{title ?? language}</span>
-        <CopyCode label="Copy code" value={code} />
+        <CopyCode label={words.copy} value={code} />
       </div>
       {wrap ? (
-        <pre className={cn(pre, 'whitespace-pre-wrap break-words')}>
+        <pre className={cn(preClass, 'whitespace-pre-wrap break-words')}>
           <code>
             <Highlighted code={code} language={language} />
           </code>
@@ -74,10 +75,10 @@ export function SiteCode({
         // A block that scrolls sideways is a labelled keyboard stop, so it can be scrolled without a pointer. The copy
         // button stays in the title bar above, outside the scroll area.
         <pre
-          className={cn(pre, 'focus-visible:outline-2 focus-visible:outline-brand focus-visible:-outline-offset-2')}
+          className={cn(preClass, 'focus-visible:outline-2 focus-visible:outline-brand focus-visible:-outline-offset-2')}
           // biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be focusable to scroll by keyboard (WCAG 2.1.1)
           tabIndex={0}
-          title={`${title ?? language} code`}
+          title={words.scrollTitle(title ?? language)}
         >
           <code>
             <Highlighted code={code} language={language} />
@@ -112,9 +113,9 @@ export function SiteCodeTabs({ tabs, className }: { tabs: Tab[]; className?: str
     }
   };
   return (
-    <div className={cn(shell, className)}>
-      <div className={bar}>
-        <div aria-label="Code samples" className="flex h-full items-stretch" role="tablist">
+    <div className={cn(shellClass, className)}>
+      <div className={barClass}>
+        <div aria-label={words.tabsLabel} className="flex h-full items-stretch" role="tablist">
           {tabs.map((tab) => {
             const selected = tab.id === current.id;
             return (
@@ -144,10 +145,10 @@ export function SiteCodeTabs({ tabs, className }: { tabs: Tab[]; className?: str
             );
           })}
         </div>
-        <CopyCode label="Copy code" value={current.code} />
+        <CopyCode label={words.copy} value={current.code} />
       </div>
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable tab panel must be keyboard-focusable (WAI-ARIA tabs, axe scrollable-region-focusable) */}
-      <pre aria-labelledby={`${base}-tab-${current.id}`} className={pre} id={`${base}-panel`} role="tabpanel" tabIndex={0}>
+      <pre aria-labelledby={`${base}-tab-${current.id}`} className={preClass} id={`${base}-panel`} role="tabpanel" tabIndex={0}>
         <code>
           <Highlighted code={current.code} language={current.language} />
         </code>

@@ -6,18 +6,18 @@ CREATE TABLE logbird.events_restore_staging AS logbird.events ENGINE=MergeTree O
 INSERT INTO logbird.events_restore_staging SELECT * FROM logbird.events;
 SELECT throwIf(count()!=0,'Staging differs from raw events; keep the snapshot and investigate') FROM (SELECT * FROM logbird.events EXCEPT ALL SELECT * FROM logbird.events_restore_staging);
 SELECT throwIf(count()!=0,'Staging differs from raw events; keep the snapshot and investigate') FROM (SELECT * FROM logbird.events_restore_staging EXCEPT ALL SELECT * FROM logbird.events);
+-- Migration 011 (checked before anything is cleared: a missing rollup or a leftover snapshot stops here): the webhook lateness rollup counts arrivals, including some whose raw rows have since expired, so it is
+-- kept as restored, not rebuilt. Snapshot its totals, then keep its view out of the replay. DETACH without PERMANENTLY
+-- lasts until the next server restart, and ClickHouse migrations re-attach it, so a run that stops below cannot leave the
+-- view missing.
+CREATE TABLE logbird.lateness_restore_check ENGINE=MergeTree ORDER BY tuple() AS SELECT project_id, received_hour, late_hours, sum(events) AS events FROM logbird.events_lateness_by_hour GROUP BY project_id, received_hour, late_hours;
+DETACH TABLE IF EXISTS logbird.events_lateness_mv;
 TRUNCATE TABLE logbird.events;
 TRUNCATE TABLE logbird.events_by_minute;
 TRUNCATE TABLE logbird.entities;
 TRUNCATE TABLE logbird.attribute_keys;
 -- Migration 006 / PR #62 adds this MV destination. Clear it before replaying raw rows.
 TRUNCATE TABLE IF EXISTS logbird.event_ids;
--- Migration 011: the webhook lateness rollup counts arrivals, including some whose raw rows have since expired, so it is
--- kept as restored, not rebuilt. Snapshot its totals, then keep its view out of the replay. DETACH without PERMANENTLY
--- lasts until the next server restart, and ClickHouse migrations re-attach it, so a run that stops below cannot leave the
--- view missing.
-CREATE TABLE logbird.lateness_restore_check ENGINE=MergeTree ORDER BY tuple() AS SELECT project_id, received_hour, late_hours, sum(events) AS events FROM logbird.events_lateness_by_hour GROUP BY project_id, received_hour, late_hours;
-DETACH TABLE IF EXISTS logbird.events_lateness_mv;
 -- SELECT * includes received_at and payload, and omits the recomputed MATERIALIZED category.
 -- Existing materialized views rebuild every destination exactly once.
 INSERT INTO logbird.events SELECT * FROM logbird.events_restore_staging;

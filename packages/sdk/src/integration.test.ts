@@ -144,13 +144,53 @@ it('shutdown waits for pending resolutions before closing the client', async () 
   expect(track).toHaveBeenCalledOnce();
   expect(close).toHaveBeenCalledOnce();
 });
+it('ignores inbound correlation headers unless the application opts in to each (#321)', async () => {
+  const { client, track } = fixture();
+  const uuidv7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const headers = { 'x-request-id': 'req_from_client', 'x-logbird-operation': 'op_from_client' };
+  for (const [options, request, operation] of [
+    [{}, false, false],
+    [{ useRequestIdHeader: true }, true, false],
+    [{ useOperationHeader: true }, false, true],
+    [{ useRequestIdHeader: true, useOperationHeader: true }, true, true],
+    // Only `true` opts in: strings wired from an environment variable fail closed.
+    [{ useRequestIdHeader: 'false', useOperationHeader: 'true' } as never, false, false],
+    [{ useRequestIdHeader: 1, useOperationHeader: 1 } as never, false, false],
+  ] as const) {
+    const audit = await createAudit({ client, ...(options as object) }, {}, new Request('http://host', { headers }));
+    audit('headers');
+    await audit.pending();
+    const context = track.mock.lastCall?.[0].context;
+    if (request) expect(context?.requestId).toBe('req_from_client');
+    else expect(context?.requestId).toMatch(uuidv7);
+    if (operation) expect(context?.operationId).toBe('op_from_client');
+    else expect(context?.operationId).toMatch(uuidv7);
+  }
+});
+it('takes the trace id from a well-formed traceparent only', async () => {
+  const { client, track } = fixture();
+  const trace = '4bf92f3577b34da6a3ce929d0e0e4736';
+  for (const [traceparent, expected] of [
+    [`00-${trace}-00f067aa0ba902b7-01`, trace],
+    [`ff-${trace}-00f067aa0ba902b7-01`, undefined],
+    [`00-${'0'.repeat(32)}-00f067aa0ba902b7-01`, undefined],
+    [`00-${trace}-${'0'.repeat(16)}-01`, undefined],
+    [`00-${trace.toUpperCase()}-00f067aa0ba902b7-01`, undefined],
+    ['not-a-traceparent', undefined],
+  ] as const) {
+    const audit = await createAudit({ client }, {}, new Request('http://host', { headers: { traceparent } }));
+    audit('trace');
+    await audit.pending();
+    expect(track.mock.lastCall?.[0].context?.traceId).toBe(expected);
+  }
+});
 it('uses a correlation header whole or not at all: 256 characters are kept, 257 fall back to a generated id (#206)', async () => {
   const { client, track } = fixture();
   const uuidv7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const keptRequest = 'r'.repeat(256);
   const keptOperation = 'o'.repeat(256);
   const kept = await createAudit(
-    { client },
+    { client, useRequestIdHeader: true, useOperationHeader: true },
     {},
     new Request('http://host', { headers: { 'x-request-id': keptRequest, 'x-logbird-operation': keptOperation } }),
   );
@@ -163,7 +203,7 @@ it('uses a correlation header whole or not at all: 256 characters are kept, 257 
     [`${'a'.repeat(256)}-request-tail`, `${'b'.repeat(256)}-operation-tail`],
   ] as const) {
     const audit = await createAudit(
-      { client },
+      { client, useRequestIdHeader: true, useOperationHeader: true },
       {},
       new Request('http://host', { headers: { 'x-request-id': request, 'x-logbird-operation': operation } }),
     );

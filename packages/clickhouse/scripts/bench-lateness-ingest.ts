@@ -51,7 +51,16 @@ async function rollupParts(from: Date, to: Date) {
   return Number(row?.n ?? 0);
 }
 
+// Every round starts from empty tables, so no table grows past one round and background merges stay small on the shared
+// server (a run without this reached its 1.79 GiB limit), and rounds compare like with like.
+const TABLES = ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys', 'events_lateness_by_hour'];
+async function reset() {
+  for (const table of TABLES) await ch.command({ query: `TRUNCATE TABLE IF EXISTS ${table}` });
+  await new Promise((done) => setTimeout(done, 5000));
+}
+
 async function round(withView: boolean, late: boolean) {
+  await reset();
   await ch.command({ query: 'DROP VIEW IF EXISTS events_lateness_mv' });
   if (withView) await ch.command({ query: createView });
   const projectId = `bench-lateness-${randomUUID()}`;
@@ -70,7 +79,7 @@ async function round(withView: boolean, late: boolean) {
   }
   const seconds = (performance.now() - started) / 1000;
   const parts = withView ? await rollupParts(startedAt, new Date()) : null;
-  return {
+  const result = {
     withView,
     late,
     events: PER_ROUND,
@@ -78,6 +87,9 @@ async function round(withView: boolean, late: boolean) {
     eventsPerSecond: Math.round(PER_ROUND / seconds),
     rollupPartsWritten: parts,
   };
+  // Printed as it completes, so a run stopped part-way still reports its rounds.
+  console.log(JSON.stringify({ round: result }));
+  return result;
 }
 
 type Round = Awaited<ReturnType<typeof round>>;
@@ -107,6 +119,7 @@ const summary = (late: boolean) => {
 };
 
 // Size: a ten-year historical import arriving within one hour, with the view in place.
+await reset();
 const importProject = `bench-lateness-import-${randomUUID()}`;
 const arrival = new Date();
 for (let offset = 0; offset < 100_000; offset += BATCH)
