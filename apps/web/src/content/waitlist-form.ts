@@ -1,5 +1,5 @@
 import { CONTACT_EMAIL } from '../env';
-import type { NEEDS, VOLUMES } from '../lib/waitlist-schema';
+import type { INTERESTS, NEEDS, VOLUMES } from '../lib/waitlist-options';
 import { byCloud, byRepo, SITE, type SiteState } from './site';
 
 /** Text around the contact mailbox, which the form renders as a link between `before` and `after`. */
@@ -7,9 +7,6 @@ export interface AroundMail {
   before: string;
   after: string;
 }
-
-/** The form's topics, in the order the form lists them (the values the server accepts, lib/waitlist-schema.ts). */
-export const INTERESTS = ['cloud', 'self-host', 'updates', 'correction', 'other', 'privacy'] as const;
 
 /**
  * Words of the contact and early-access form (components/waitlist-form.tsx): labels, options, the placeholder, the

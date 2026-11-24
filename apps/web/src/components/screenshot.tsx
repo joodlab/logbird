@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { shared } from '../content/shared';
 import { phoneVariantId, screenshotSrcSet, screenshotUrl } from '../lib/asset-url';
 import { imageWidths, type ScreenshotEntry, screenshots, type Variant } from '../lib/media-manifest';
 
@@ -87,7 +88,7 @@ function ThemePicture({
 export function Screenshot({ id, sizes = '100vw', zoomLabel, priority }: { id: string; sizes?: string; zoomLabel?: string; priority?: boolean }) {
   const entry = screenshots.find((item) => item.id === id);
   if (!entry) {
-    throw new Error(`Unknown screenshot: ${id}`);
+    throw new Error(shared.errors.unknownScreenshot(id));
   }
   const themed = Boolean(entry.dark || entry.phone?.dark);
   return (

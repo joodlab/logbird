@@ -33,6 +33,14 @@ export function sharedContent(site: SiteState) {
     /** The play/pause button of a looping clip (components/clip.tsx), by what it does next. */
     playVideo: 'Play video',
     pauseVideo: 'Pause video',
+    /**
+     * Developer errors: a page names a capture or clip that lib/media-manifest.ts doesn't list. The build fails on them,
+     * but an error boundary could show the message, so it is written here like any other words.
+     */
+    errors: {
+      unknownClip: (id: string) => `Unknown clip: ${id}`,
+      unknownScreenshot: (id: string) => `Unknown screenshot: ${id}`,
+    },
     /** The header's link to the repository, shown only while it is public. */
     githubNav: site.githubUrl ? { label: 'GitHub', href: site.githubUrl } : undefined,
     /** The closing call to action at the bottom of most pages. */

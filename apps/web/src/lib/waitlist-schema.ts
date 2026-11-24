@@ -1,8 +1,8 @@
 import { z } from 'zod';
+import { INTERESTS, NEEDS, VOLUMES } from './waitlist-options';
 
-/** Optional qualifying answers. The values are stored; the labels live in the form (components/waitlist-form.tsx). */
-export const VOLUMES = ['unsure', 'under-100k', '100k-1m', '1m-10m', 'over-10m'] as const;
-export const NEEDS = ['customer-audit-log', 'compliance', 'investigations', 'self-host-support', 'other'] as const;
+/** The stored values (lib/waitlist-options.ts, kept free of Zod for the browser); the labels: content/waitlist-form.ts. */
+export { INTERESTS, NEEDS, VOLUMES };
 
 // A form sends an unanswered select as "". Checkboxes always arrive as a list: the server collects repeated native
 // fields, and the enhanced form sends an array.
@@ -12,7 +12,7 @@ export const waitlistSchema = z.object({
   email: z.email().max(254),
   name: z.string().trim().max(200).optional(),
   company: z.string().trim().max(200).optional(),
-  interest: z.enum(['cloud', 'self-host', 'updates', 'correction', 'other', 'privacy']),
+  interest: z.enum(INTERESTS),
   volume: z.preprocess(blankToUndefined, z.enum(VOLUMES).optional()),
   needs: z
     .array(z.enum(NEEDS))

@@ -2,8 +2,8 @@ import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
 import { Textarea } from '@logbird/ui/components/ui/textarea';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
-import { type AroundMail, INTERESTS, waitlistForm as words } from '../content/waitlist-form';
-import { NEEDS, VOLUMES } from '../lib/waitlist-schema';
+import { type AroundMail, waitlistForm as words } from '../content/waitlist-form';
+import { INTERESTS, NEEDS, VOLUMES } from '../lib/waitlist-options';
 
 // Words: content/waitlist-form.ts (the page around the form renders content/contact.ts). Brief: marketing/copy/contact.md.
 const mail = words.mail ? (
@@ -31,7 +31,7 @@ const messageFor = (code: string | undefined) => (code ? (STATUS_MESSAGES[code] 
  * Progressive enhancement: a real form post that works without JavaScript (the server redirects back with
  * `?status=<code>#waitlist-<code>`, and a :target message shows), upgraded to fetch with inline field errors.
  */
-// Optional qualifying questions. Values: lib/waitlist-schema.ts (VOLUMES, NEEDS), in that order.
+// The topics and the optional qualifying questions. Values: lib/waitlist-options.ts (no Zod in the browser), in order.
 const VOLUME_OPTIONS = VOLUMES.map((value) => ({ value, label: words.volumes[value] }));
 const NEED_OPTIONS = NEEDS.map((value) => ({ value, label: words.needs[value] }));
 const INTEREST_OPTIONS = INTERESTS.map((value) => ({ value, label: words.interests[value] }));

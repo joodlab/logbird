@@ -38,7 +38,7 @@ export function Clip({ id }: { id: string }) {
     };
   }, [entry]);
   if (!entry) {
-    throw new Error(`Unknown clip: ${id}`);
+    throw new Error(shared.errors.unknownClip(id));
   }
   const urls = clipUrls(entry.id);
   return (
