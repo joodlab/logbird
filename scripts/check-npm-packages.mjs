@@ -201,7 +201,10 @@ export function importsOf(text, path, moduleType = 'commonjs') {
     const inner = unwrap(node);
     if (inner?.type === 'TSNonNullExpression') return isNodeReceiver(inner.expression);
     if (inner?.type === 'Identifier') return NODE_OBJECTS.has(keyOf(inner)) || requires.has(keyOf(inner));
-    return isMember(inner) && ['main', 'parent'].includes(propertyName(inner)) && isNodeReceiver(inner.object);
+    if (isMember(inner)) return ['main', 'parent'].includes(propertyName(inner)) && isNodeReceiver(inner.object);
+    // Any other expression that yields a require function, such as minified Rolldown's
+    // `e(import.meta.url).main.require(…)` with `e` imported as createRequire.
+    return yieldsRequire(inner);
   };
   const isRequireMethod = (callee) => isMember(callee) && propertyName(callee) === 'require' && isNodeReceiver(callee.object);
 

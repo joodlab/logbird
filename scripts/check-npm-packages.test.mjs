@@ -305,6 +305,10 @@ test("the CommonJS wrapper's require survives only in CommonJS, and only bare re
 test('.require() counts on Node objects and the modules reached from them, not on anything rooted there', () => {
   assert.deepEqual(importsOf("module.exports = { require: (x) => x };\nmodule.exports.require('fictional-field');", 'dist/probe.cjs'), []);
   assert.deepEqual(importsOf("module.parent.require('zod'); require.main.require('zod');", 'dist/probe.cjs'), ['zod']);
+  // Rolldown 1.2.16, minified ESM, for `require.main.require('fictional-library')`: the receiver is a createRequire call.
+  const rolldownMinified =
+    'import{createRequire as e}from"node:module";const t=(/* @__PURE__ */ e(import.meta.url)).main.require(`fictional-library`);export{t as z};';
+  assert.deepEqual(importsOf(rolldownMinified, 'dist/index.mjs'), ['node:module', 'fictional-library']);
 });
 
 test('a defaulted createRequire binding is still a maker', () => {
