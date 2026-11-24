@@ -89,7 +89,7 @@ page, this section and the customer-facing audit logs page all render; `content-
 
 Inside the keys section (`isolation`), after the scoped reads, with the same structure (an h3 and a grid of features).
 Held: this section ships with the 0.3.0 webhook delivery and merges only after 0.3.0 is deployed and checked in
-production. Code citations are pinned at master 54e70285; re-pin them at the 0.3.0 release commit.
+production. Code citations below refer to [`84a32282`](https://github.com/joodlab/logbird/tree/84a3228259d130126e3ca6312f47dee4a6fb5082).
 
 - **id:** `webhooks` (in "On this page" as "Webhook endpoints", right after "Projects and keys")
 - **heading:** Webhook endpoints: signed, checked, and managed by admins.
@@ -98,7 +98,7 @@ production. Code citations are pinned at master 54e70285; re-pin them at the 0.3
   delivery".
 - **bullets:**
   - **Owners and admins only.** Only owners and admins can see or manage webhook endpoints: a stored URL can itself be
-    a credential. <!-- source: apps/server/src/webhook-routes.ts:184, :231 (requireRole(c)); apps/server/src/middlewares/require-role.ts:39 (default roles: admins); docs/SPEC.md § Webhook endpoint management -->
+    a credential. <!-- source: apps/server/src/webhook-routes.ts:184, :231 (requireRole(c)); apps/server/src/middlewares/require-role.ts:40 (default roles: admins); docs/SPEC.md § Webhook endpoint management -->
   - **Secrets shown once.** Each endpoint's signing secret is encrypted at rest (AES-256-GCM) and shown once, when you
     create or rotate it. <!-- source: packages/database/src/webhook-secrets.ts:16–20 (aes-256-gcm, random 12-byte IV, auth tag), :6–13 (WEBHOOK_SECRET_KEY or HKDF-SHA256 from BETTER_AUTH_SECRET); apps/server/src/webhook-routes.ts:194, :226–227 (create: no-store, { endpoint, secret }), :417–418 (rotate: no-store, { secret }), :183, :230 (list and get carry no secret) -->
   - **Public destinations only.** A destination must resolve only to public addresses. Logbird checks it when you save
