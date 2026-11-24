@@ -252,6 +252,23 @@ test('a parameter or local that shadows a require function is its own binding', 
   assert.deepEqual(importsOf("function run(require) { return require('fictional-field'); }\nrequire('zod');", 'dist/probe.cjs'), ['zod']);
 });
 
+test("a top-level `var require;` keeps CommonJS's require; one given a value does not", () => {
+  assert.deepEqual(importsOf("var require;\nrequire('zod');", 'dist/probe.cjs'), ['zod']);
+  assert.deepEqual(importsOf("var require = (x) => x;\nrequire('fictional-field');", 'dist/probe.cjs'), []);
+  assert.deepEqual(importsOf("var require;\nrequire = (x) => x;\nrequire('fictional-field');", 'dist/probe.cjs'), []);
+  assert.deepEqual(importsOf("var require;\nfunction run(require) { return require('fictional-field'); }\nrequire('zod');", 'dist/probe.cjs'), [
+    'zod',
+  ]);
+});
+
+test('require.main.require loading node:module makes createRequire available', () => {
+  const code = "const { createRequire } = require.main.require('node:module');\nconst load = createRequire(__filename);\nload('zod');";
+  assert.deepEqual(importsOf(code, 'dist/probe.cjs'), ['node:module', 'zod']);
+  const ordinary =
+    "const loader = { require: () => ({ createRequire: () => (f) => f }) }; const { createRequire } = loader.require('node:module'); createRequire()('fictional-field');";
+  assert.deepEqual(importsOf(ordinary, 'dist/probe.cjs'), []);
+});
+
 test('the left of && is not what it yields', () => {
   assert.deepEqual(importsOf("const validate = require && ((field) => field); validate('fictional-field');", 'dist/probe.cjs'), []);
   assert.deepEqual(importsOf("const load = (typeof require === 'function' && require) || null; load('zod');", 'dist/probe.cjs'), ['zod']);

@@ -135,8 +135,20 @@ export function importsOf(text, path, moduleType = 'commonjs') {
       bindingOf.set(path.node, path.scope.getBinding(path.node.name) ?? null);
     },
   });
+  // A top-level `var x;` that is never given a value redeclares a name without replacing it: in CommonJS, `var require;`
+  // still holds the wrapper's `require`. Such a binding is read as the name itself.
+  const keepsOuter = (binding) =>
+    binding.kind === 'var' &&
+    binding.scope.path.isProgram() &&
+    binding.constantViolations.length === 0 &&
+    binding.path.isVariableDeclarator() &&
+    binding.path.node.init == null;
   /** What an identifier refers to: its binding, or `global:<name>` for a name the file does not declare. */
-  const keyOf = (node) => (node?.type === 'Identifier' ? (bindingOf.get(node) ?? `global:${node.name}`) : undefined);
+  const keyOf = (node) => {
+    if (node?.type !== 'Identifier') return;
+    const binding = bindingOf.get(node);
+    return binding && !keepsOuter(binding) ? binding : `global:${node.name}`;
+  };
   const found = new Set();
   const add = (node) => {
     const specifier = specifierOf(node);
@@ -177,6 +189,11 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // The bindings a require function is bound to: Node's own `require` (when the file does not declare that name), and
   // those found below.
   const requires = new Set(['global:require']);
+  // `.require()` loads a module only on Node's own objects (`module.require`, `require.main.require`,
+  // `globalThis.require`); on an ordinary object (`validator.require('field')`) it is a method like any other.
+  const NODE_OBJECTS = new Set(['global:module', 'global:global', 'global:globalThis']);
+  const isRequireMethod = (callee) =>
+    isMember(callee) && propertyName(callee) === 'require' && (NODE_OBJECTS.has(rootOf(callee.object)) || requires.has(rootOf(callee.object)));
 
   // Node's `module` builtin, where createRequire comes from: `import m from 'node:module'`, `import * as m from …`,
   // `const m = require('node:module')`, tsc's `const node_module_1 = require("node:module")` (also through
@@ -191,9 +208,7 @@ export function importsOf(text, path, moduleType = 'commonjs') {
     if (callee.type === 'Import' || (callee.type === 'Identifier' && requires.has(keyOf(callee)))) return true;
     if (!isMember(callee)) return false;
     const owner = rootOf(callee.object);
-    return (
-      (propertyName(callee) === 'require' && owner === 'global:module') || (propertyName(callee) === 'getBuiltinModule' && owner === 'global:process')
-    );
+    return isRequireMethod(callee) || (propertyName(callee) === 'getBuiltinModule' && owner === 'global:process');
   };
   // Compilers' interop wrappers, which return the module they are given (or an object holding it): tsc's
   // `__importDefault` / `__importStar`, Babel's `_interopRequireDefault` / `_interopRequireWildcard`, and esbuild's and
@@ -314,16 +329,10 @@ export function importsOf(text, path, moduleType = 'commonjs') {
       if (target?.type === 'Identifier' && !requires.has(keyOf(target)) && yieldsRequire(value)) requires.add(keyOf(target));
     });
   }
-  // `.require()` loads a module only on Node's own objects (`module.require`, `require.main.require`,
-  // `globalThis.require`); on an ordinary object (`validator.require('field')`) it is a method like any other.
-  const NODE_OBJECTS = new Set(['global:module', 'global:global', 'global:globalThis']);
   const loads = (node) => {
     const callee = unwrap(node);
     if (callee.type === 'Import' || (callee.type === 'Identifier' && requires.has(keyOf(callee)))) return true;
-    if (isMember(callee) && propertyName(callee) === 'require') {
-      const root = rootOf(callee.object);
-      return root !== undefined && (NODE_OBJECTS.has(root) || requires.has(root));
-    }
+    if (isMember(callee) && propertyName(callee) === 'require') return isRequireMethod(callee);
     // `createRequire(import.meta.url)('x')`, Rolldown's `(() => createRequire(import.meta.url))()('x')`
     return yieldsRequire(callee);
   };
