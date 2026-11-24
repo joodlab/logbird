@@ -148,10 +148,17 @@ export function deliveryWindowLine(seconds: number | null): string {
 /**
  * The delivery log's sentence about late events (#152): events in this project that arrived later than this endpoint's
  * window, before the endpoint's filter and scope are applied, counted since `since`. Null when there is no window.
- * It says what Logbird recorded, not what happened: the count can fall short after a partial storage failure during
- * ingest, so a zero is never put as "no event arrived late". Right after a window change, `since` is the next whole
- * hour, still ahead: then it says when counting starts.
+ * It says what Logbird recorded, not what happened: the count is approximate (exact in normal operation, but it can be
+ * lower or higher after a storage failure, a retried write or a restore), so the log shows LATE_EVENTS_APPROXIMATE under
+ * every count, zero included. Right after a window change, `since` is the next whole hour, still ahead: then it says
+ * when counting starts, and there is no count to qualify.
  */
+export const LATE_EVENTS_APPROXIMATE = 'Approximate. It can be off after a storage failure or a restore.';
+
+/** Whether the sentence is a count (counting has started by `now`), which then carries LATE_EVENTS_APPROXIMATE. */
+export const lateEventsCounted = (e: Pick<WebhookEndpoint, 'deliveryWindowSeconds' | 'lateEvents'>, now: Date) =>
+  e.deliveryWindowSeconds !== null && Date.parse(e.lateEvents.since) <= now.getTime();
+
 export function lateEventsSentence(
   e: Pick<WebhookEndpoint, 'deliveryWindowSeconds' | 'lateEvents'>,
   since: string,

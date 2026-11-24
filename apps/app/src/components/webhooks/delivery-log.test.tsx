@@ -248,3 +248,17 @@ it('judges a read that crosses the start in flight by when it started, and reads
   expect(get.mock.calls.length).toBe(reads + 1);
   expect(sentence()).toMatch(/^Since .+, Logbird has recorded 2 events in this project/);
 }, 10_000);
+
+it('marks every count as approximate, zero included, but not the "starts counting" line', async () => {
+  await open(null);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Since .+, Logbird has recorded no event/);
+  expect(document.querySelector('[data-testid="late-events-approximate"]')?.textContent).toBe(
+    'Approximate. It can be off after a storage failure or a restore.',
+  );
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 0, since: new Date(Date.now() + 3_600_000).toISOString() } }));
+  await open(null);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Logbird starts counting/);
+  expect(document.querySelector('[data-testid="late-events-approximate"]')).toBeNull();
+});

@@ -16,6 +16,8 @@ import {
   formFrom,
   isHoldRefusal,
   isWebhookBusy,
+  LATE_EVENTS_APPROXIMATE,
+  lateEventsCounted,
   lateEventsSentence,
   lenientDeliveriesSchema,
   scopeOf,
@@ -397,5 +399,16 @@ describe('delivery window errors from the server (#152)', () => {
   it('puts a 422 on deliveryWindowSeconds beside the window field', () => {
     const error = new ApiRequestError(422, 'validation_error', 'Invalid', [{ path: ['deliveryWindowSeconds'], message: 'Too large' }]);
     expect(fieldErrorsFromValidation(error)).toEqual({ windowAmount: 'Too large' });
+  });
+});
+
+describe('late-event count qualifier (#359: approximate by definition)', () => {
+  const ep = (since: string, window: number | null = 604_800) => ({ deliveryWindowSeconds: window, lateEvents: { count: 3, since } });
+  it('applies once counting has started, and never without a window', () => {
+    const now = new Date('2026-11-24T03:00:00.000Z');
+    expect(lateEventsCounted(ep('2026-11-24T03:00:00.000Z'), now)).toBe(true);
+    expect(lateEventsCounted(ep('2026-11-24T04:00:00.000Z'), now)).toBe(false);
+    expect(lateEventsCounted(ep('2026-11-24T02:00:00.000Z', null), now)).toBe(false);
+    expect(LATE_EVENTS_APPROXIMATE).toBe('Approximate. It can be off after a storage failure or a restore.');
   });
 });

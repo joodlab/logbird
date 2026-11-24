@@ -23,6 +23,8 @@ import {
   DELIVERY_STATUS_LABEL,
   displayUrl,
   isHoldRefusal,
+  LATE_EVENTS_APPROXIMATE,
+  lateEventsCounted,
   lateEventsSentence,
   settledResends,
   webhookErrorCopy,
@@ -166,9 +168,17 @@ export function DeliveryLog({
           </SegmentedControl>
           {/* How many events in the project came too late for this endpoint's window (#152). */}
           {lateSentence ? (
-            <p className="text-muted-foreground text-sm" data-testid="late-events">
-              {lateSentence}
-            </p>
+            <div className="flex flex-col gap-0.5">
+              <p className="text-muted-foreground text-sm" data-testid="late-events">
+                {lateSentence}
+              </p>
+              {/* The count is approximate by definition (#359): never shown as an exact figure. */}
+              {read && lateEventsCounted(read.endpoint, new Date(read.startedAt)) ? (
+                <p className="text-muted-foreground text-xs" data-testid="late-events-approximate">
+                  {LATE_EVENTS_APPROXIMATE}
+                </p>
+              ) : null}
+            </div>
           ) : fresh.isError ? (
             <p className="text-muted-foreground text-sm" data-testid="late-events-error">
               Could not load how many events came too late for this endpoint's window.{' '}
