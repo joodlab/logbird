@@ -42,6 +42,6 @@ Hook types: authorize(event, query) => false | Partial<SearchQuery> (async suppo
 tenant, executor (sync/async), onError, useOperationHeader and useRequestIdHeader. The SDK reads the inbound
 x-logbird-operation and x-request-id headers only with those two (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent.
 The flags set only the fallback: an id set on the event takes precedence (the hooks have no id resolvers); otherwise
-each id is a generated UUID. Nitro request hooks create event.context.audit, afterResponse
+the header, when its flag is on and its value is at most 256 characters, and a generated UUID last. Nitro request hooks create event.context.audit, afterResponse
 registers flush with event.waitUntil, close drains the SDK. Missing identity resolvers leave identity absent.
 See [design](../../../docs/integrations.md) and [example](../../../examples/nuxt).

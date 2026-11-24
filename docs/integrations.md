@@ -30,7 +30,8 @@ Actor means who caused the action; executor means the API or worker performing i
 actor and tenant from authenticated server state, never directly from untrusted headers.
 Each request gets an operationId and a requestId, and a W3C trace ID when it carries a valid
 traceparent. An id set on the event, then a requestId or operationId resolver that returns a
-value, take precedence; otherwise the ids are generated UUIDs. The SDK reads the inbound
+value, take precedence; otherwise the inbound header when its flag is on and its value is at most 256
+characters, and a generated UUID last. The SDK reads the inbound
 x-logbird-operation and x-request-id headers only with useOperationHeader and
 useRequestIdHeader (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent. The trace ID comes from a well-formed inbound traceparent (W3C Trace
 Context). Any caller can send one, so a trace ID is a correlation hint, not identity, and a trace: search

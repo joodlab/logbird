@@ -18,7 +18,7 @@ Options are `CaptureOptions<Request>`: client, required actor/tenant, optional e
 `useOperationHeader` / `useRequestIdHeader`: the SDK reads the inbound `x-logbird-operation` and `x-request-id` headers only
 with those (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent.
 The flags set only the fallback: an id set on the event, then a `requestId` / `operationId` resolver that returns a value, take
-precedence; otherwise each id is a generated UUID.
+precedence; otherwise the header, when its flag is on and its value is at most 256 characters, and a generated UUID last.
 Await `capture.shutdown()` in the host's lifecycle. Never return context.audit to the browser.
 For a history server function, authorize the record then return
 `readAuditTrail({ endpoint, readKey }, trailQuery({ target: { type: 'record', id }, tenant }))`.
