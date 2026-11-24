@@ -59,7 +59,10 @@ function OverviewPage() {
   // the page never mixes two answers: zeros here would read as facts (#5). A project whose setup was once complete has
   // had events that retention has since removed: it is not told to send its first one.
   const noEvents = Boolean(data && !data.ingest.lastEventAt);
-  const hadEvents = Boolean(setup.data?.completedAt);
+  // First-event wording only once Setup has said this project never completed it; while that is unknown (loading or
+  // failed), the neutral wording, which is true either way.
+  const neverSetUp = setup.data?.completedAt === null;
+  const series = perMinuteSeries(data?.ingest.perMinute ?? []);
   const can = useCan();
   const loading = awaiting(overview);
   const k = data?.kpis;
@@ -96,15 +99,17 @@ function OverviewPage() {
       {noEvents ? (
         <EmptyState
           description={
-            hadEvents
-              ? 'Retention has removed this project’s older events and nothing has arrived since. New events show here as they come in.'
-              : 'Once this project receives its first event, this page shows who did what, how it went, and how events keep arriving.'
+            neverSetUp
+              ? 'Once this project receives its first event, this page shows who did what, how it went, and how events keep arriving.'
+              : setup.data?.completedAt
+                ? 'Retention has removed this project’s older events and nothing has arrived since. New events show here as they come in.'
+                : 'No events are stored for this project. New events show here as they come in.'
           }
           icon={RadioIcon}
-          title={hadEvents ? 'No events stored' : 'No events yet'}
+          title={neverSetUp ? 'No events yet' : 'No events stored'}
         >
           <Button nativeButton={false} render={<Link hash="first-event" params={{ projectId }} to="/p/$projectId/setup" />} size="sm">
-            {can('testEvent.send') && !hadEvents ? 'Send your first event' : 'View setup instructions'}
+            {can('testEvent.send') && neverSetUp ? 'Send your first event' : 'View setup instructions'}
             <ArrowRightIcon />
           </Button>
         </EmptyState>
@@ -210,9 +215,10 @@ function OverviewPage() {
                         <span className="flex items-center gap-1">
                           <RadioIcon className="size-3" /> Events / minute
                         </span>
-                        <span>60 min</span>
+                        {/* The span actually plotted: longer than an hour only when this browser's clock is off. */}
+                        <span>{series.length - 1} min</span>
                       </div>
-                      <Sparkline height={56} values={perMinuteSeries(data?.ingest.perMinute ?? [])} />
+                      <Sparkline height={56} values={series} />
                     </div>
                     <Button
                       nativeButton={false}
