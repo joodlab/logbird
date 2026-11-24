@@ -10,8 +10,9 @@ import { PROJECT_MISSING, projectElsewhere, withOpenWorkspace } from '@/lib/proj
  */
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/members')({
   beforeLoad: async ({ context, params, search }) => {
+    let project: { organizationId: string };
     try {
-      await context.queryClient.fetchQuery({ ...projectQuery(params.projectId), staleTime: 0 });
+      project = await context.queryClient.fetchQuery({ ...projectQuery(params.projectId), staleTime: 0 });
     } catch (error) {
       // A project in another of the person's workspaces: the project page's switch prompt, not an error.
       const elsewhere = projectElsewhere(error);
@@ -19,9 +20,12 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
       if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) throw notFound({ data: PROJECT_MISSING });
       throw error;
     }
-    // The fresh read succeeded, so the project is in the workspace the session has open (the server checks that); this
-    // tab's idea of the open workspace may be older (another tab switched it), so `me` is read again before redirecting.
-    await context.queryClient.fetchQuery({ ...meQuery(), staleTime: 0 });
+    // The fresh read succeeded, so the project was in the workspace the session had open (the server checks that). This
+    // tab's idea of the open workspace may be older (another tab switched it), so `me` is read again, and the redirect
+    // runs only if the project is still in the workspace now open: a switch between the two reads is not found, never
+    // another workspace's members.
+    const me = await context.queryClient.fetchQuery({ ...meQuery(), staleTime: 0 });
+    if (me.activeOrganizationId !== project.organizationId) throw notFound({ data: PROJECT_MISSING });
     throw redirect({ to: '/workspace/members', search: (prev) => ({ ...prev, ...search }), replace: true });
   },
 });
