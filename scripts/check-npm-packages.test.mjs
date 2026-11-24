@@ -158,6 +158,24 @@ test('createRequire counts only from node:module', () => {
   assert.deepEqual(importsOf(awaited, 'dist/index.mjs'), ['node:module', 'zod']);
   const toEsm = "var import_node_module = __toESM(require('node:module')); (0, import_node_module.createRequire)(__filename)('zod');";
   assert.deepEqual(importsOf(toEsm, 'dist/probe.cjs'), ['node:module', 'zod']);
+  // A factory that takes the module and ignores it is not an interop helper either.
+  const ignoring =
+    "const factory = (m) => ({ createRequire: () => (value) => value }); const object = factory(require('node:module')); object.createRequire()('fictional-field');";
+  assert.deepEqual(importsOf(ignoring, 'dist/probe.cjs'), ['node:module']);
+  // esbuild 0.28.2, minified CommonJS: `__toESM` is renamed `b`, and known by what it does.
+  const minified =
+    'var f=Object.create;var t=Object.defineProperty;var l=Object.getOwnPropertyDescriptor;var n=Object.getOwnPropertyNames;var p=Object.getPrototypeOf,q=Object.prototype.hasOwnProperty;var _=(e,r)=>{for(var i in r)t(e,i,{get:r[i],enumerable:!0})},m=(e,r,i,a)=>{if(r&&typeof r=="object"||typeof r=="function")for(let o of n(r))!q.call(e,o)&&o!==i&&t(e,o,{get:()=>r[o],enumerable:!(a=l(r,o))||a.enumerable});return e};var b=(e,r,i)=>(i=e!=null?f(p(e)):{},m(r||!e||!e.__esModule?t(i,"default",{value:e,enumerable:!0}):i,e)),s=e=>m(t({},"__esModule",{value:!0}),e);var x={};_(x,{q:()=>u});module.exports=s(x);var c=b(require("node:module"),1),u=c.default.createRequire(__filename)("fictional-library");0&&(module.exports={q});';
+  assert.deepEqual(importsOf(minified, 'dist/probe.cjs'), ['node:module', 'fictional-library']);
+  // Rollup 4.67.5, format cjs, interop auto: the module is bound first, then wrapped.
+  const rollupInterop = [
+    "'use strict';",
+    "var m = require('node:module');",
+    'function _interopDefault (e) { return e && e.__esModule ? e : { default: e }; }',
+    'var m__default = /*#__PURE__*/_interopDefault(m);',
+    "const q = m__default.default.createRequire(__filename)('fictional-library');",
+    'exports.q = q;',
+  ].join('\n');
+  assert.deepEqual(importsOf(rollupInterop, 'dist/probe.cjs'), ['node:module', 'fictional-library']);
   // tsc 6 with esModuleInterop and importHelpers: the helper is a member of tslib.
   const tslib = [
     '"use strict";',

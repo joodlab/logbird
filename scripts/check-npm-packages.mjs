@@ -217,15 +217,37 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // (tsc's `importHelpers`: `tslib_1.__importDefault(…)`; SWC's `_interop_require_default._(…)`).
   const INTEROP =
     /^_{1,2}(?:importDefault|importStar|interopRequireDefault|interopRequireWildcard|interop_require_default|interop_require_wildcard|toESM)\d*$/;
-  const isInterop = (callee) =>
-    (callee.type === 'Identifier' && INTEROP.test(callee.name)) ||
-    (isMember(callee) && (INTEROP.test(propertyName(callee) ?? '') || (propertyName(callee) === '_' && isInterop(unwrap(callee.object)))));
-  // Whether an expression evaluates to node:module: a loader call given it, `await` of one, a member of one
-  // (`require('node:module').Module`), or an interop wrapper around one. Not any expression that merely contains one:
-  // `factory(require('node:module'))` returns whatever `factory` returns.
+  // A helper defined in the file is known by what it does rather than its name, since minifiers rename it (esbuild's
+  // `__toESM` becomes `b`): an interop helper hands on its first parameter (`function _interopDefault(e) { return e &&
+  // e.__esModule ? e : { default: e }; }`, `var b=(e,r,i)=>(…,e)`). A function that ignores what it is given
+  // (`factory = () => ({…})`) is not one.
+  const definedFunction = (callee) => {
+    const binding = callee.type === 'Identifier' ? keyOf(callee) : undefined;
+    if (!binding || typeof binding === 'string') return;
+    if (binding.path.isFunctionDeclaration()) return binding.path;
+    const init = binding.path.isVariableDeclarator() ? binding.path.get('init') : undefined;
+    return init?.isFunction() ? init : undefined;
+  };
+  const usesFirstParameter = (fn) => {
+    const first = fn.node.params[0];
+    return first?.type === 'Identifier' && (fn.scope.getOwnBinding(first.name)?.referenced ?? false);
+  };
+  const isInterop = (callee) => {
+    const fn = definedFunction(callee);
+    if (fn) return usesFirstParameter(fn);
+    return (
+      (callee.type === 'Identifier' && INTEROP.test(callee.name)) ||
+      (isMember(callee) && (INTEROP.test(propertyName(callee) ?? '') || (propertyName(callee) === '_' && isInterop(unwrap(callee.object)))))
+    );
+  };
+  // Whether an expression evaluates to node:module: a binding of it, a loader call given it, `await` of one, a member
+  // of one (`require('node:module').Module`), or an interop wrapper around one (Rollup's `_interopDefault(m)`, with `m`
+  // bound to it). Not any expression that merely contains one: `factory(require('node:module'))` returns whatever
+  // `factory` returns.
   const loadsNodeModule = (node) => {
     const value = unwrap(node);
     if (!value) return false;
+    if (value.type === 'Identifier') return moduleBindings.has(keyOf(value));
     if (value.type === 'AwaitExpression') return loadsNodeModule(value.argument);
     if (isMember(value)) return loadsNodeModule(value.object);
     if (isLoaderCall(value)) return NODE_MODULE.has(staticName(value.type === 'ImportExpression' ? value.source : value.arguments[0]));
