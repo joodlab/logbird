@@ -18,6 +18,15 @@ generator accepts an explicit `now` for reproducibility; CLI runs use current ti
 for relative console ranges. IDs depend on project/seed, timestamps also depend on
 `now`. Use `--reset` for replacement rather than appending a second run.
 
+Direct writes (`--sink direct` and `--reset`) bypass the API, so they are fenced like the server's own maintenance:
+each takes the project's exclusive lock (ingest and retention for that project wait), cancels a background retention
+run staged for the project, and stamps `received_at` with the database clock. They need Postgres (`DATABASE_URL`) for
+that, and refuse with an error when it can't be reached rather than write unfenced. They still write no ingest
+receipts.
+
+This package is a development tool only. It is `private` (never published to npm), no app declares it, so `turbo
+prune` leaves it out of every release image, and the Compose files don't run it.
+
 - `--profile neutral` (default) uses generic names for screenshots: emitting app
   `booking-engine`, booking channel `channel-manager`, and project `Hotel demo`.
   `--profile staydesk` selects the maintainers' own hospitality demo (Acme), using

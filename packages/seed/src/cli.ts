@@ -11,6 +11,7 @@ import {
   purgeProject,
   searchEvents,
 } from '@logbird/clickhouse';
+import { cancelStagedRetention, closeProjectLocks, databaseClock, type Prisma, prisma, withProjectLock } from '@logbird/database';
 import { Logbird } from '@logbird/sdk';
 import { generateEvents, SEED_PROFILES, type SeedProfile } from './index';
 
@@ -44,15 +45,43 @@ if (!Number.isInteger(Number(values.seed))) throw new Error('Invalid seed');
 if (values.reset && !values['project-id']) throw new Error('--reset requires --project-id');
 if (!['api', 'direct'].includes(values.sink)) throw new Error('sink must be api or direct');
 if (values.sink === 'api' && !values.key) throw new Error('--key is required for the api sink');
+/**
+ * Writes that bypass the API (`--reset` and `--sink direct`) are fenced like the server's own maintenance (#296):
+ * under the exclusive project lock, after canceling a background retention run staged for the project (it would not
+ * count these rows), with `received_at` from the database clock. Without Postgres there is no fence, so they refuse
+ * instead of writing unfenced.
+ */
+async function fenced<T>(projectId: string, reason: string, work: (db: Prisma.TransactionClient) => Promise<T>) {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch {
+    throw new Error(
+      'Direct writes (--sink direct, --reset) need Postgres (DATABASE_URL) to fence them against retention and ingest; refusing to write unfenced.',
+    );
+  }
+  return withProjectLock(
+    projectId,
+    async (db) => {
+      await cancelStagedRetention(projectId, db, reason);
+      return work(db);
+    },
+    { waitMs: 60_000 },
+  );
+}
 if (values.reset) {
   // In API mode the supplied project ID must belong to the ingest key. Purging
   // uses local ClickHouse credentials because the public API has no reset route.
-  const ch = createClickHouseClient();
-  try {
-    await purgeProject(ch, values['project-id'] as string);
-  } finally {
-    await ch.close();
-  }
+  const projectId = values['project-id'] as string;
+  await fenced(projectId, 'Seed data was reset during the run; the next run retries.', async (db) => {
+    const ch = createClickHouseClient();
+    try {
+      await purgeProject(ch, projectId);
+      // Destructive: readers and caches keyed by the maintenance generation must not reuse facts from before it.
+      await db.project.updateMany({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
+    } finally {
+      await ch.close();
+    }
+  });
 }
 const generator = generateEvents({
   events,
@@ -85,20 +114,25 @@ if (values.sink === 'api') {
   const p = values['project-id'];
   if (!p) throw new Error('--project-id required');
   const ch = createClickHouseClient();
-  let batch: EventRow[] = [],
-    n = 0;
+  let n = 0;
   try {
-    for (const event of generator) {
-      const result = normalizeEvent(event, { projectId: p, receivedAt: new Date() });
-      if (!result.ok) throw new Error(result.reason);
-      batch.push(result.row);
-      n++;
-      if (batch.length === 5000) {
-        await insertEvents(ch, batch);
-        batch = [];
+    await fenced(p, 'Seed data was written directly during the run; the next run retries.', async (db) => {
+      let batch: EventRow[] = [];
+      // One database-clock reading per batch, as ingest stamps a batch.
+      let receivedAt = await databaseClock(db);
+      for (const event of generator) {
+        const result = normalizeEvent(event, { projectId: p, receivedAt });
+        if (!result.ok) throw new Error(result.reason);
+        batch.push(result.row);
+        n++;
+        if (batch.length === 5000) {
+          await insertEvents(ch, batch);
+          batch = [];
+          receivedAt = await databaseClock(db);
+        }
       }
-    }
-    await insertEvents(ch, batch);
+      await insertEvents(ch, batch);
+    });
     console.log(`Inserted ${n} fictional events into project ${p}`);
     if (values.benchmark) {
       const to = until ?? new Date();
@@ -123,3 +157,6 @@ if (values.sink === 'api') {
     await ch.close();
   }
 } else throw new Error('sink must be api or direct');
+// The fence's Postgres pools would keep the process alive.
+await closeProjectLocks();
+await prisma.$disconnect();
