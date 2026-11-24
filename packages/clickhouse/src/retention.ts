@@ -215,6 +215,23 @@ export async function pendingProjectMutations(ch: ClickHouseClient, p: string) {
 }
 
 /**
+ * The committed ingest watermark after fence A: the latest `received_at` stored among rows received after it, or null
+ * when there are none. Fence B's delta (rows received between the fences) must reach every row already written, even
+ * one whose stamp is later than the database clock read at fence B (an export watermark from another clock, or the
+ * millisecond that `ingestReceiptClock` adds after a lease). Call only after the settle proof, under the exclusive
+ * lock, so no write is in flight. A plain read: a pending mutation can neither hide a row nor fail the read.
+ */
+export async function committedReceivedAfter(ch: ClickHouseClient, p: string, fenceA: Date): Promise<Date | null> {
+  const [row] = await rows<{ n: number | string; last: number | string }>(
+    projectMaintenance(ch, p),
+    `SELECT count() n, toUnixTimestamp64Milli(max(received_at)) last FROM events WHERE project_id={p:String} AND received_at > {fenceA:DateTime64(3,'UTC')}`,
+    { p, fenceA: ms(fenceA) },
+    CLICKHOUSE_PLAIN_READ,
+  );
+  return Number(row?.n ?? 0) > 0 ? new Date(Number(row?.last)) : null;
+}
+
+/**
  * After the mutations finished: whether any row this run had to delete is still stored. A deliberate plain read
  * (pending mutations not applied), so it proves the parts themselves, not what readers are shown.
  */

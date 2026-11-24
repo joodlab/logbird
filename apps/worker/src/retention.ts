@@ -1,6 +1,7 @@
 import {
   ASYNC_INSERT_FLUSH_BOUND_MS,
   applyRetention,
+  committedReceivedAfter,
   createMaintenanceClickHouseClient,
   createSessionClickHouseClient,
   hasExpiredEvents,
@@ -17,6 +18,7 @@ import {
 } from '@logbird/clickhouse';
 import {
   cancelStagedRetention,
+  databaseClock,
   type Prisma,
   prisma,
   pruneIngestReceipts,
@@ -176,11 +178,6 @@ export async function enforceProjectRetention(projectId: string) {
 
 export type BackgroundRetentionOutcome = 'nothing_expired' | 'synchronous' | 'deferred' | 'canceled' | 'materializing' | 'skipped';
 
-/** The database clock (the one ingest stamps `received_at` with), at millisecond precision as stored. */
-async function databaseClock(db: Prisma.TransactionClient) {
-  const [row] = await db.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
-  return new Date(row.now.getTime());
-}
 /**
  * A fence time F under the exclusive lock. Every insert accepted before the lock was granted was stamped at or before
  * F; we hold the lock until the clock has passed F's millisecond, so every later insert is stamped strictly after F.
@@ -327,7 +324,11 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
         await cancelRun(run.id, 'Recent writes were still settling; the next run retries.');
         return 'canceled' as const;
       }
-      const fenceB = await fenceClock(tx);
+      // Fence B's delta reaches every row already written: the database clock, or the committed ingest watermark when a
+      // row was stamped later than it (round-1 finding 3).
+      const clockB = await fenceClock(tx);
+      const committed = await committedReceivedAfter(clickhouse, projectId, fenceA);
+      const fenceB = committed && committed > clockB ? committed : clockB;
       // Durable before any DELETE exists: the destructive fence, a new read generation, and `running` (which fences
       // ingest and rollup reads, both waiting on this lock anyway, for the few statements below).
       await prisma.$transaction(async (db) => {

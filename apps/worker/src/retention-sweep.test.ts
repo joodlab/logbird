@@ -19,6 +19,8 @@ vi.mock('@logbird/database', () => ({
     project: { findMany: fake.projects, findUnique: fake.project },
     retentionRun: { findFirst: async () => null, count: async () => 0 },
   },
+  // The database clock (retention reads cutoffs from it, never the worker's clock).
+  databaseClock: async () => new Date(),
   RETENTION_LEASE_MS: 600_000,
   RETENTION_STAGING: 'staging',
   RETENTION_MATERIALIZING: 'materializing',

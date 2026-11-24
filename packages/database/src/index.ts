@@ -126,6 +126,15 @@ export function withIngestReceiptGate<T>(
   );
 }
 
+/**
+ * The database clock, the one ingest stamps `received_at` with (`ingestReceiptClock`), at the millisecond precision
+ * stored. Watermarks compared with `received_at` (export, retention fences) come from it, never an app instance clock.
+ */
+export async function databaseClock(db: Pick<import('./generated/client').Prisma.TransactionClient, '$queryRaw'> = prisma) {
+  const [row] = await db.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+  return new Date(row.now.getTime());
+}
+
 /** The separate project data lock prevents a new export fence until the insert settles. */
 export async function ingestReceiptClock(db: import('./generated/client').Prisma.TransactionClient, projectId: string) {
   const [row] = await db.$queryRaw<{ acceptedAt: Date }[]>`

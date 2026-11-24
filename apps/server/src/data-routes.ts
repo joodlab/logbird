@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as ch from '@logbird/clickhouse';
 import * as s from '@logbird/contracts';
-import { type AuditPayload, type Prisma, prisma } from '@logbird/database';
+import { type AuditPayload, databaseClock, type Prisma, prisma } from '@logbird/database';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
@@ -310,7 +310,9 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
     c.header('Allow', 'GET');
     return c.body(null, 405);
   }
-  const clock = Date.now();
+  // The export watermark (`receivedBefore`) is compared with `received_at`, which the database clock stamps: an app
+  // instance clock ahead of it would push later ingest stamps past a retention fence (#296 round-1 finding 3).
+  const clock = (await databaseClock()).getTime();
   const project = c.get('project');
   const exportId = randomUUID();
   const stream = `ws:${project.organizationId}`;
