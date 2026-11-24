@@ -349,7 +349,7 @@ production.
 - **bullets:**
   - A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect
     is a failure. <!-- source: SPEC ("2xx succeeds"; redirects count as failures; connect and total deadlines 5 and 10 s) -->
-  - Network failures, timeouts and responses other than `2xx` or `410 Gone` are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to
+  - Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to
     24 hours. <!-- source: SPEC (retry schedule) -->
   - Delivery is at least once: deduplicate by `webhook-id`, which stays the same across retries and resends.
     <!-- source: SPEC ("Receivers use the stable webhook-id to deduplicate retries and resends") -->
