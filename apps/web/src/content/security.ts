@@ -105,7 +105,7 @@ export const security = {
       },
       redirects: {
         title: 'No redirects, no console credentials',
-        body: 'Redirects are never followed and count as a failed delivery. A delivery carries the event and its signature headers, never console headers or cookies.',
+        body: 'Redirects are never followed: a redirect counts as a failed attempt and is retried like any other failure. A delivery carries the event and its signature headers, never console headers or cookies.',
       },
       masks: {
         title: 'Masks on every delivery',

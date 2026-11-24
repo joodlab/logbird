@@ -344,8 +344,8 @@ production.
   retries last. Never "guaranteed delivery", "exactly once" or "tamper-proof".
 - **body:** Each delivery is a `POST` of the event as JSON, signed with the Standard Webhooks headers `webhook-id`,
   `webhook-timestamp` and `webhook-signature`. Verify the raw body with `verifyWebhook` from `@logbird/sdk` (the .NET
-  package verifies them too; see `docs/sdk-dotnet.md`), store or enqueue the event, then answer `2xx`.
-  <!-- source: docs/SPEC.md § Webhook endpoint management (POST body, headers); packages/sdk/README.md § Standard Webhooks; docs/sdk-dotnet.md and sdks/dotnet/README.md § Verify webhooks -->
+  package verifies them too), store or enqueue the event, then answer `2xx`.
+  <!-- source: docs/SPEC.md § Webhook endpoint management (POST body, headers); packages/sdk/README.md § Standard Webhooks; sdks/dotnet/README.md § Verify webhooks -->
 - **bullets:**
   - A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect
     is a failure. <!-- source: SPEC ("2xx succeeds"; redirects count as failures; connect and total deadlines 5 and 10 s) -->

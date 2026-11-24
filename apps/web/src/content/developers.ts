@@ -314,7 +314,7 @@ export const developers = {
   webhooks: {
     eyebrow: 'Webhooks',
     title: 'Verify each delivery, then process it once.',
-    body: 'Each delivery is a `POST` of the event as JSON, signed with the Standard Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature`. Verify the raw body with `verifyWebhook` from `@logbird/sdk` (the .NET package verifies them too; see `docs/sdk-dotnet.md`), store or enqueue the event, then answer `2xx`.',
+    body: 'Each delivery is a `POST` of the event as JSON, signed with the Standard Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature`. Verify the raw body with `verifyWebhook` from `@logbird/sdk` (the .NET package verifies them too), store or enqueue the event, then answer `2xx`.',
     bullets: [
       'A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect is a failure.',
       'Failures are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to 24 hours.',
