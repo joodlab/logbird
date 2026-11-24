@@ -37,6 +37,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/fields')(
 const MEASURED: Partial<Record<string, string>> = {
   // The score credits any target entry; the share counts targets with an id, the events `target:*` finds.
   targets: 'The score counts any target. This share counts events whose targets carry an id, the ones target:* finds.',
+  occurredAt: 'Not measured here: without occurredAt, Logbird stores the time the event arrived. Setup shows how many recent events sent their own.',
 };
 const CONFORMANCE_CHECKS = [
   ['occurredAt', 'When it happened, not when we received it'],
@@ -57,15 +58,20 @@ const CONFORMANCE_CHECKS = [
  */
 function checkCoverage(key: string, coverage: Map<string, number>): number | undefined {
   switch (key) {
+    // Every stored event has a time: without occurredAt, Logbird stores when it arrived. How many events sent their own
+    // is not measured here (Setup measures it from recent payloads), so no share is claimed (#6).
     case 'occurredAt':
-      return 1;
+      return undefined;
     case 'tenant.id':
       return coverage.get('tenant');
     // The server's `target` row: events with at least one non-empty target id, the ones `target:*` finds.
     case 'targets':
       return coverage.get('target');
     case 'context.operationId':
-      return Math.max(coverage.get('operation') ?? 0, coverage.get('request') ?? 0) || undefined;
+      // Measured (0 included) when either id is reported; unmeasured only when neither is.
+      return coverage.has('operation') || coverage.has('request')
+        ? Math.max(coverage.get('operation') ?? 0, coverage.get('request') ?? 0)
+        : undefined;
     default:
       return coverage.get(key);
   }
@@ -176,7 +182,7 @@ function FieldsPage() {
                   <span className="hidden min-w-0 flex-1 truncate text-muted-foreground text-xs sm:inline">{hint}</span>
                   {MEASURED[key] ? <span className="sr-only">{MEASURED[key]}</span> : null}
                   <span className="ms-auto shrink-0 text-muted-foreground text-xs tabular-nums">
-                    {fieldsLoading || c === undefined ? '—' : formatPercent(c)}
+                    {fieldsLoading ? '—' : key === 'occurredAt' ? 'receive time if missing' : c === undefined ? '—' : formatPercent(c)}
                   </span>
                 </li>
               );
