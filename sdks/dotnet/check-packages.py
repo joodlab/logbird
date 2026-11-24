@@ -14,10 +14,11 @@ It requires, reading each package's manifest as XML:
   starting with a valid filter type 0 to 4);
 - the build paths mapped as a CI build maps them (issue #322): each package has its .snupkg next to it; every DLL a
   package carries, wherever it is in the package, names its PDB under "/_/" in its one CodeView debug record (read
-  through the PE debug directory, bounded by each record's declared size) and does not embed its PDB; the symbol
-  package has exactly one portable PDB per DLL, the one whose PDB id matches that DLL's CodeView GUID, and that PDB's
-  one Source Link record (found by its custom debug information kind, not by searching bytes, and attached to the
-  module) maps only "/_/" paths,
+  through the PE debug directory, bounded by each record's declared size) whose file name is the PDB the symbol
+  package ships, and does not embed its PDB; no archive has two entries with one name; the symbol package has exactly
+  one portable PDB per DLL, the one whose 20-byte PDB id matches that DLL's CodeView GUID and stamp, and that PDB's
+  one Source Link record (found by its custom debug information kind, not by searching bytes, attached to the module,
+  JSON without duplicate names) maps only "/_/" prefixes ending in their one "*",
   each to https://raw.githubusercontent.com/joodlab/logbird/ at a commit. A package packed without
   ContinuousIntegrationBuild (any build outside CI, unless it passes
   -p:ContinuousIntegrationBuild=true to build and pack) embeds the machine's own paths and fails here. This checks the
@@ -147,7 +148,7 @@ def unpack(fmt, data, offset, label, what):
 
 
 def codeview(data, label):
-    """The PE file's one CodeView (RSDS) debug record, as (PDB GUID bytes, PDB path), read through its debug directory.
+    """The PE file's one CodeView (RSDS) debug record, as (20-byte PDB id, PDB path), read through its debug directory.
 
     Every record is bounded by the size its directory entry declares. A file that embeds its PDB (an
     EmbeddedPortablePdb entry, type 17) is refused, since this check reads the PDB from the symbol package."""
@@ -181,7 +182,7 @@ def codeview(data, label):
         raise SystemExit(f"{label}: the debug directory lies in no section's raw data")
     records = []
     for entry in range(start, start + debug_size, 28):
-        kind, size, _, pointer = unpack("<12xIIII", data, entry, label, "a debug directory entry")
+        stamp, kind, size, _, pointer = unpack("<4xI4xIIII", data, entry, label, "a debug directory entry")
         if kind == 17:
             raise SystemExit(f"{label}: embeds its PDB, which this check does not read; ship it in the symbol package")
         if kind != 2:
@@ -192,7 +193,8 @@ def codeview(data, label):
         path = record[24:-1]
         if b"\x00" in path:
             raise SystemExit(f"{label}: the CodeView PDB path has an embedded NUL")
-        records.append((record[4:20], path.decode("utf-8")))
+        # A portable PDB's 20-byte id is the CodeView GUID followed by the CodeView entry's TimeDateStamp.
+        records.append((record[4:20] + struct.pack("<I", stamp), path.decode("utf-8")))
     if len(records) != 1:
         raise SystemExit(f"{label}: expected one CodeView debug record, found {len(records)}")
     return records[0]
@@ -248,9 +250,9 @@ def portable_pdb(data, label):
             raise SystemExit(f"{label}: the PDB has no {required} stream")
     pdb, tables, heap, guids = streams["#Pdb"], streams["#~"], streams["#Blob"], streams["#GUID"]
 
-    # #Pdb: the 20-byte PDB id (its first 16 bytes are the GUID a DLL's CodeView record names), the entry point, then
-    # the row counts of the type-system tables this PDB's rows refer to.
-    pdb_id = pdb[:16]
+    # #Pdb: the 20-byte PDB id (the GUID a DLL's CodeView record names, then the stamp of that CodeView entry), the entry
+    # point, then the row counts of the type-system tables this PDB's rows refer to.
+    pdb_id = pdb[:20]
     (referenced,) = unpack("<Q", pdb, 24, label, "the #Pdb stream")
     rows, at = {}, 32
     for table in range(64):
@@ -318,10 +320,18 @@ def portable_pdb(data, label):
 def source_link(data, label):
     """The PDB id and the Source Link document map of a portable PDB, from its Source Link record."""
     pdb_id, raw = portable_pdb(data, label)
+
+    def unique(pairs):
+        # Python keeps the last of two equal names; .NET's Source Link reader sees both. Refuse the ambiguity.
+        names = [name for name, _ in pairs]
+        if len(names) != len(set(names)):
+            raise ValueError(f"duplicate name {next(n for n in names if names.count(n) > 1)!r}")
+        return dict(pairs)
+
     try:
-        value = json.loads(raw.decode("utf-8"))
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
     except (UnicodeDecodeError, ValueError) as error:
-        raise SystemExit(f"{label}: the Source Link record is not JSON ({error})") from error
+        raise SystemExit(f"{label}: the Source Link record is not JSON without duplicate names ({error})") from error
     documents = value.get("documents") if isinstance(value, dict) else None
     if not isinstance(documents, dict) or not documents:
         raise SystemExit(f"{label}: Source Link has no documents")
@@ -329,32 +339,46 @@ def source_link(data, label):
 
 
 def check_paths(package):
-    """Every DLL names its PDB under /_/; its PDB, matched by GUID, maps only /_/ paths to this repository at a commit."""
+    """Every DLL names its PDB under /_/; its PDB, matched by name and id, maps only /_/ paths to this repository at a commit."""
+
+    def entries(archive, label):
+        # Two entries with one name would let archive.read() check only the last; refuse them.
+        names = archive.namelist()
+        if len(names) != len(set(names)):
+            raise SystemExit(f"{label}: has two entries with the same name")
+        return names
+
     with zipfile.ZipFile(package) as archive:
-        dlls = sorted(name for name in archive.namelist() if name.lower().endswith(".dll"))
+        dlls = sorted(name for name in entries(archive, package.name) if name.lower().endswith(".dll"))
         if not dlls:
             raise SystemExit(f"{package.name}: carries no DLL")
         named = {}
         for name in dlls:
-            pdb_guid, path = codeview(archive.read(name), f"{package.name} {name}")
+            pdb_id, path = codeview(archive.read(name), f"{package.name} {name}")
             if not path.startswith("/_/"):
                 raise SystemExit(f"{package.name} {name}: names its PDB at {path!r}, not under the CI path map /_/ ({CI_BUILD})")
-            named[name[:-4] + ".pdb"] = pdb_guid
+            expected = name[:-4] + ".pdb"
+            # A debugger looks for the PDB by the CodeView path's file name, so it must be the one the package ships.
+            if path.rsplit("/", 1)[-1].lower() != expected.rsplit("/", 1)[-1].lower():
+                raise SystemExit(f"{package.name} {name}: names its PDB {path!r}, not {expected.rsplit('/', 1)[-1]}")
+            named[expected] = pdb_id
     symbols = package.with_suffix(".snupkg")
     if not symbols.exists():
         raise SystemExit(f"{package.name}: its symbol package {symbols.name} is missing")
     with zipfile.ZipFile(symbols) as archive:
-        pdbs = sorted(name for name in archive.namelist() if name.lower().endswith(".pdb"))
+        pdbs = sorted(name for name in entries(archive, symbols.name) if name.lower().endswith(".pdb"))
         if pdbs != sorted(named):
             raise SystemExit(f"{symbols.name}: carries PDBs {pdbs}, expected exactly one for each DLL: {sorted(named)}")
         for name in pdbs:
             label = f"{symbols.name} {name}"
             pdb_id, documents = source_link(archive.read(name), label)
             if pdb_id != named[name]:
-                raise SystemExit(f"{label}: is not the PDB its DLL names (the PDB id does not match the DLL's CodeView GUID)")
+                raise SystemExit(f"{label}: is not the PDB its DLL names (the 20-byte PDB id does not match the DLL's CodeView GUID and stamp)")
             for mapped, target in documents.items():
-                if not mapped.startswith("/_/"):
-                    raise SystemExit(f"{label}: Source Link maps {mapped!r}, not a /_/ path ({CI_BUILD})")
+                # Every target is a /* URL, so the key must be a /_/ prefix ending in its one wildcard, as Source Link
+                # requires for a wildcard target.
+                if not mapped.startswith("/_/") or not mapped.endswith("*") or mapped.count("*") != 1:
+                    raise SystemExit(f"{label}: Source Link maps {mapped!r}, not a /_/ prefix ending in its one * ({CI_BUILD})")
                 if not isinstance(target, str) or not SOURCE_LINK.fullmatch(target):
                     raise SystemExit(f"{label}: Source Link points at {target!r}, not this repository at a commit")
     return len(dlls)
