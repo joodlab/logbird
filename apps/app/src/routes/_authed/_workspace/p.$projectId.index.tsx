@@ -23,6 +23,7 @@ import { eventSentence, personLabel } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { outcomeBandQuery, RECENT_PROBLEMS_QUERY } from '@/lib/overview-queries';
 import { perMinuteSeries, rateChange } from '@/lib/overview-series';
+import { useCan } from '@/lib/permissions';
 import { placeholderKeys } from '@/lib/placeholders';
 import { formatTerm } from '@/lib/query-language';
 import { ALL_RANGE, DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
@@ -52,10 +53,14 @@ function OverviewPage() {
   // The setup checklist scores real events only; say so here while sample data is mixed into this average.
   const setup = useQuery(projectSetupQuery(projectId));
   const hasSampleData = (setup.data?.ingest.sampleEvents ?? 0) > 0;
-  // Never received an event (sample data counts as having some): zeros here would read as facts (#5).
-  const neverReceived = Boolean(setup.data && !setup.data.ingest.firstEvent && !hasSampleData);
   // Another range's KPIs, chart and lists never show under this range's label.
   const data = current(overview);
+  // No event stored at all (any range, sample data and console tests included), from this same overview response, so
+  // the page never mixes two answers: zeros here would read as facts (#5). A project whose setup was once complete has
+  // had events that retention has since removed: it is not told to send its first one.
+  const noEvents = Boolean(data && !data.ingest.lastEventAt);
+  const hadEvents = Boolean(setup.data?.completedAt);
+  const can = useCan();
   const loading = awaiting(overview);
   const k = data?.kpis;
   const explore = (q: string) => navigate({ to: '/p/$projectId/events', params: { projectId }, search: (prev) => ({ range: prev.range, q }) });
@@ -88,14 +93,18 @@ function OverviewPage() {
         </Button>
       </div>
 
-      {neverReceived ? (
+      {noEvents ? (
         <EmptyState
-          description="Once this project receives its first event, this page shows who did what, how it went, and how events keep arriving."
+          description={
+            hadEvents
+              ? 'Retention has removed this project’s older events and nothing has arrived since. New events show here as they come in.'
+              : 'Once this project receives its first event, this page shows who did what, how it went, and how events keep arriving.'
+          }
           icon={RadioIcon}
-          title="No events yet"
+          title={hadEvents ? 'No events stored' : 'No events yet'}
         >
-          <Button nativeButton={false} render={<Link params={{ projectId }} to="/p/$projectId/setup" />} size="sm">
-            Send your first event
+          <Button nativeButton={false} render={<Link hash="first-event" params={{ projectId }} to="/p/$projectId/setup" />} size="sm">
+            {can('testEvent.send') ? 'Send your first event' : 'View setup instructions'}
             <ArrowRightIcon />
           </Button>
         </EmptyState>
@@ -128,14 +137,14 @@ function OverviewPage() {
               value={k ? formatNumber(k.tenants) : '—'}
             />
             <StatCard
-              delta={k && compare ? rateChange(k.failureRate, k.failureRatePrev, k.eventsPrev) : undefined}
+              delta={k && compare ? rateChange(k.failureRate, k.events, k.failureRatePrev, k.eventsPrev) : undefined}
               deltaKind="points"
               goodWhen="down"
               hint="failure + denied"
               label="Failure rate"
               loading={loading}
               onClick={() => explore('(outcome:failure OR outcome:denied)')}
-              value={k ? formatPercent(k.failureRate) : '—'}
+              value={k && k.events > 0 ? formatPercent(k.failureRate) : '—'}
             />
             <StatCard
               className="col-span-2 md:col-span-1"

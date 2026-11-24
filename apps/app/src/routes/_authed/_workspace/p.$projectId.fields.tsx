@@ -37,7 +37,10 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/fields')(
 const MEASURED: Partial<Record<string, string>> = {
   // The score credits any target entry; the share counts targets with an id, the events `target:*` finds.
   targets: 'The score counts any target. This share counts events whose targets carry an id, the ones target:* finds.',
-  occurredAt: 'Not measured here: without occurredAt, Logbird stores the time the event arrived. Setup shows how many recent events sent their own.',
+  occurredAt:
+    'Not measured here: without a usable occurredAt, Logbird stores the time the event arrived. Setup shows how many recent payloads included occurredAt.',
+  'context.operationId':
+    'At least this share: the larger of the operationId and requestId shares. Events with only one of the two can make the true share higher.',
 };
 const CONFORMANCE_CHECKS = [
   ['occurredAt', 'When it happened, not when we received it'],
@@ -56,6 +59,9 @@ const CONFORMANCE_CHECKS = [
  * `request`, `target`…). `occurredAt` always has a value (receive time by default); checks the
  * server does not measure per field (description) return undefined and render as "—".
  */
+/** Whether the operation-id share is only a lower bound: both ids are reported, and their union is not measured. */
+const atLeast = (coverage: Map<string, number>) => (coverage.get('operation') ?? 0) > 0 && (coverage.get('request') ?? 0) > 0;
+
 function checkCoverage(key: string, coverage: Map<string, number>): number | undefined {
   switch (key) {
     // Every stored event has a time: without occurredAt, Logbird stores when it arrived. How many events sent their own
@@ -182,7 +188,15 @@ function FieldsPage() {
                   <span className="hidden min-w-0 flex-1 truncate text-muted-foreground text-xs sm:inline">{hint}</span>
                   {MEASURED[key] ? <span className="sr-only">{MEASURED[key]}</span> : null}
                   <span className="ms-auto shrink-0 text-muted-foreground text-xs tabular-nums">
-                    {fieldsLoading ? '—' : key === 'occurredAt' ? 'receive time if missing' : c === undefined ? '—' : formatPercent(c)}
+                    {fieldsLoading
+                      ? '—'
+                      : key === 'occurredAt'
+                        ? 'receive time if missing'
+                        : c === undefined
+                          ? '—'
+                          : key === 'context.operationId' && atLeast(coverage)
+                            ? `at least ${formatPercent(c)}`
+                            : formatPercent(c)}
                   </span>
                 </li>
               );
