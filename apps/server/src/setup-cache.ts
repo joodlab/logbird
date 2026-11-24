@@ -1,13 +1,20 @@
 import { type SetupEventFacts, setupEventFacts } from '@logbird/clickhouse';
 import { clickhouse } from './clickhouse';
 
-const cache = new Map<string, { expires: number; facts: SetupEventFacts }>();
+const cache = new Map<string, { expires: number; generation: string; facts: SetupEventFacts }>();
 export function invalidateSetup(projectId: string) {
   cache.delete(projectId);
 }
-export async function setupFacts(projectId: string) {
+/**
+ * `generation` is the project's maintenance and export generations as read with the request (`setupGeneration`): any
+ * destructive change (retention, sample removal, a purge, a repair) bumps one, so facts cached before it never answer
+ * after it, in any instance, even within the 30-second window (#296 round-1 finding 11).
+ */
+export const setupGeneration = (project: { maintenanceGeneration: bigint | number; exportGeneration: bigint | number }) =>
+  `${project.maintenanceGeneration}:${project.exportGeneration}`;
+export async function setupFacts(projectId: string, generation: string) {
   const cached = cache.get(projectId);
-  if (cached && cached.expires > Date.now()) {
+  if (cached && cached.expires > Date.now() && cached.generation === generation) {
     cache.delete(projectId);
     cache.set(projectId, cached);
     return cached.facts;
@@ -19,7 +26,7 @@ export async function setupFacts(projectId: string) {
       const oldest = cache.keys().next().value;
       if (oldest) cache.delete(oldest);
     }
-    cache.set(projectId, { expires: Date.now() + 30_000, facts });
+    cache.set(projectId, { expires: Date.now() + 30_000, generation, facts });
   }
   return facts;
 }
