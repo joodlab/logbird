@@ -133,4 +133,33 @@ describe('the first-event snippets, executed', () => {
     await expect(new AsyncFunction('Logbird', 'console', body)(Unreachable, { error, log: vi.fn() })).resolves.toBeUndefined();
     expect(error).toHaveBeenCalledWith('[logbird] undelivered', failure);
   });
+
+  it('fetch: bundles for a browser or edge worker, where node:crypto does not exist', async () => {
+    const { build } = await import('esbuild');
+    const worker = `export default { async fetch() {\n${fetchSnippet('lb_ingest_test')}\nreturn new Response('ok'); } };`;
+    const result = await build({
+      stdin: { contents: worker, loader: 'js' },
+      bundle: true,
+      platform: 'browser',
+      format: 'esm',
+      write: false,
+      logLevel: 'silent',
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  it('renders every tab without a missing piece', () => {
+    for (const code of [
+      curlSnippet('k'),
+      curlSnippet(),
+      fetchSnippet('k'),
+      fetchSnippet(),
+      sdkSnippet('k'),
+      sdkSnippet(),
+      dotnetSnippet('k'),
+      dotnetSnippet(),
+      sdkInstallComment(),
+    ])
+      expect(code).not.toMatch(/undefined|\bnull\b|\[object/);
+  });
 });

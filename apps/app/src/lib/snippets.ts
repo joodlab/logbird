@@ -88,7 +88,7 @@ export function curlSnippet(key?: string): string {
   return `${comment('#', OWN_ID)}
 ${comment(
   '#',
-  [...ACK.slice(0, 1), `${ACK[1]} An empty "rejected" means stored:`].map((l) => l.replace(/`/g, '"')),
+  [...ACK, 'An empty "rejected" means it was stored:'].map((l) => l.replace(/`/g, '"')),
 )}
 #   {"accepted":1,"ids":["evt_hotel_123_policy_1"],"rejected":[],
 #    "warnings":[]}
@@ -152,7 +152,9 @@ export function fetchSnippet(key?: string): string {
   const auth = key ? `${keyNote('//', '    ')}\n    Authorization: 'Bearer ${key}',` : `    Authorization: \`Bearer \${process.env.${INGEST_ENV}}\`,`;
   return `${comment('//', [...OWN_ID, 'Keep it for retries.'])}
 // Node 18 has no global crypto without a flag; node:crypto covers it.
-const uuid = globalThis.crypto ?? (await import('node:crypto'));
+// (A variable, so bundlers for browsers and edge workers leave it alone.)
+const nodeCrypto = 'node:crypto';
+const uuid = globalThis.crypto ?? (await import(nodeCrypto));
 const id = uuid.randomUUID();
 const response = await fetch('${ingestOrigin()}/v1/events', {
   method: 'POST',
