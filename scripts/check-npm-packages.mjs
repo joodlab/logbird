@@ -7,7 +7,8 @@
 // - a known package (PACKAGES below), at the same version as the others (and the expected version, when given), with
 //   no `workspace:` specifier left anywhere in its manifest;
 // - `repository.directory` naming the package's folder, `license` MIT and a LICENSE file, `engines.node` set;
-// - every `exports` target present in the tarball, and only `dist/` code shipped (no `src/`);
+// - every `exports` target present in the tarball, and nothing shipped but `dist/` JavaScript, declarations and source
+//   maps, `package.json`, the README, LICENSE and CHANGELOG (no source anywhere: `src/`, `lib/helper.ts`, `dist/x.ts`);
 // - its `dependencies` and `peerDependencies` exactly the allowed ones, every @logbird dependency at the same version,
 //   no optional or bundled dependencies, and `zod` / `@logbird/contracts` in none of those fields;
 // - every bare import in its built JavaScript and declarations (`dist/**/*.mjs`, `*.d.mts`, `*.d.ts`), read from the
@@ -46,6 +47,10 @@ const PACKAGES = {
 const FORBIDDEN = ['zod', '@logbird/contracts'];
 /** Manifest fields that make npm install something for the consumer, or name what may be bundled with it. */
 const INSTALLED_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies'];
+/** What a tarball may carry under dist/: JavaScript and declarations, each with an optional source map. */
+const DIST_FILE = /^dist\/.+\.(?:[cm]?js|d\.[cm]?ts)(?:\.map)?$/;
+/** What it may carry outside dist/: npm always includes package.json, the readme, the licence and the changelog. */
+const TOP_LEVEL_FILE = /^(?:package\.json|(?:README|LICENSE|LICENCE|CHANGELOG)(?:\.md|\.txt)?)$/i;
 /** An absolute path: POSIX, a drive (either slash), a UNC or other backslash-rooted path, or a file: URL. */
 const ABSOLUTE = /^([A-Za-z]:[\\/]|[\\/]|file:)/;
 
@@ -238,7 +243,13 @@ function main(folder, expected) {
     if (manifest.repository?.directory !== known.dir) fail(`repository.directory is ${manifest.repository?.directory}, expected ${known.dir}`);
     if (manifest.license !== 'MIT' || !files.has('LICENSE')) fail('license must be MIT with a LICENSE file');
     if (!manifest.engines?.node) fail('engines.node is not set');
-    if ([...files.keys()].some((path) => path.startsWith('src/'))) fail('ships src/');
+    // Only built code ships: JavaScript, declarations and their source maps under dist/, plus the package's metadata,
+    // readme, licence and changelog at the top. Source (src/, lib/helper.ts, a .ts beside dist/) is refused wherever it is.
+    for (const path of files.keys()) {
+      const shipped = path.startsWith('dist/') ? DIST_FILE.test(path) : TOP_LEVEL_FILE.test(path);
+      if (!shipped)
+        fail(`ships ${path}: only dist/ JavaScript, declarations and source maps, and package.json, README, LICENSE and CHANGELOG are published`);
+    }
 
     // Every exports target exists.
     const targets = [];
