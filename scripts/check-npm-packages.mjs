@@ -194,14 +194,19 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // `.require()` loads a module only on Node's own objects (`module.require`, `require.main.require`,
   // `globalThis.require`); on an ordinary object (`validator.require('field')`) it is a method like any other.
   const NODE_OBJECTS = new Set(['global:module', 'global:global', 'global:globalThis']);
-  // The receiver itself must be one of Node's: `module`, `global`, `globalThis` or a require function, or the module
-  // reached from one (`require.main`, `module.parent`). Not anything rooted there: `module.exports.require` is the
-  // package's own export.
+  // The receiver must be one of Node's: `module`, `global`, `globalThis` or a require function, or a module reached from
+  // one. Not a path through `exports`: `module.exports.require` is the package's own export.
   const isNodeReceiver = (node) => {
     const inner = unwrap(node);
     if (inner?.type === 'TSNonNullExpression') return isNodeReceiver(inner.expression);
     if (inner?.type === 'Identifier') return NODE_OBJECTS.has(keyOf(inner)) || requires.has(keyOf(inner));
-    if (isMember(inner)) return ['main', 'parent'].includes(propertyName(inner)) && isNodeReceiver(inner.object);
+    // Any module reached from one, fail-safe: `require.main`, `module.parent`, `module.children[0]`,
+    // `module.children.at(0)`, `require.cache[id]`. Only a path through `exports` is the package's own value.
+    if (isMember(inner)) return propertyName(inner) !== 'exports' && isNodeReceiver(inner.object);
+    if ((inner?.type === 'CallExpression' || inner?.type === 'OptionalCallExpression') && isMember(unwrap(inner.callee))) {
+      const method = unwrap(inner.callee);
+      if (propertyName(method) !== 'exports' && isNodeReceiver(method.object)) return true;
+    }
     // Any other expression that yields a require function, such as minified Rolldown's
     // `e(import.meta.url).main.require(…)` with `e` imported as createRequire.
     return yieldsRequire(inner);
