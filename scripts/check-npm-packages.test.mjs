@@ -3,8 +3,8 @@ import test from 'node:test';
 import { importsOf } from './check-npm-packages.mjs';
 
 // U+2028 and U+2029 end a line comment, as LF and CR do. Built here so the source shows them.
-const LINE_SEPARATOR = String.fromCharCode(0x2028);
-const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
+const LINE_SEPARATOR = String.fromCharCode(8232); // U+2028
+const PARAGRAPH_SEPARATOR = String.fromCharCode(8233); // U+2029
 // Each shipped form of an import, in JavaScript (.mjs) or a declaration (.d.mts), and the specifier it must report.
 const IMPORTS = [
   ['import { z } from "zod";', 'zod'],
