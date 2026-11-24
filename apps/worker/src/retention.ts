@@ -34,6 +34,14 @@ import {
 import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { logIngestRecoveryFailure, prepareReceiptSettlement } from './ingest-recovery';
 import { heartbeatMaintenanceRun } from './project-repair';
+import { enqueueProjectRetention } from './queue';
+import {
+  baselineAtFenceB,
+  logBaselineDrift,
+  type RetentionVerification,
+  readDriftBetweenFences,
+  verifyRetentionRuns,
+} from './retention-verification';
 export const clickhouse = createMaintenanceClickHouseClient();
 const unfinishedRepair = (projectId: string) => ({ projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } });
 export function logReceiptPrune(result: { removed: number; batches: number; limited: boolean }, durationMs: number, projectId?: string) {
@@ -264,6 +272,11 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
   await pruneReceiptBackstop(projectId);
   const current = await prisma.project.findUnique({ where: { id: projectId } });
   if (!current) return 'skipped';
+  // Runs completed since the last pass (by any caller) get their derived-table check first, outside the lock: a run
+  // failed by it sends this pass down the synchronous repair path below.
+  await verifyRetentionRuns(clickhouse, projectId, enqueueProjectRetention).catch(() =>
+    console.warn(JSON.stringify({ level: 'warn', event: 'retention.verification_unavailable', projectId })),
+  );
   const previous = await prisma.retentionRun.findFirst({ where: { projectId, kind: 'retention' }, orderBy: { startedAt: 'desc' } });
   // Earlier DELETEs still finishing (this project's or a stuck table-wide queue): wait for them. A synchronous run would
   // queue a waiting DELETE behind them under the lock, refusing ingest for as long as they take.
@@ -331,12 +344,15 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
   let mutationsCreated = false;
   // The repair obligation recorded with fence B (round-1 finding 6), and its heartbeat while the run holds it.
   let repairId: string | undefined;
+  let verification: RetentionVerification | undefined;
   let stopRepairHeartbeat: (() => void) | undefined;
   try {
     // Between the fences, without a lock: the expensive recompute, from rows that cannot change any more.
     const keys = await retentionAffectedKeys(clickhouse, projectId, cutoff, fenceA);
     const deletedEvents = await retentionDeletedCount(clickhouse, projectId, cutoff, fenceA);
     await stageRetentionRollups(session, projectId, cutoff, fenceA, keys);
+    // The expensive derived-table drift reading, outside the lock (round-1 finding 7).
+    const driftReading = await readDriftBetweenFences(clickhouse, projectId, cutoff);
     await hooks.betweenFences?.();
     // Fence B.
     const outcome = await withProjectLock(projectId, async (tx) => {
@@ -365,6 +381,8 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       const clockB = await fenceClock(tx);
       const committed = await committedReceivedAfter(clickhouse, projectId, fenceA);
       const fenceB = committed && committed > clockB ? committed : clockB;
+      // Settled and under the lock: the exact minute-bucket drift and the allowance for the earlier reading.
+      verification = await baselineAtFenceB(clickhouse, projectId, cutoff, driftReading);
       // Durable before any DELETE exists: the destructive fence, a new read generation, and `running` (which fences
       // ingest and rollup reads, both waiting on this lock anyway, for the few statements below).
       // The repair obligation commits with them: if this process dies after a DELETE exists but before the
@@ -374,7 +392,10 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       repairId = await prisma.$transaction(async (db) => {
         await beginDestructiveMaintenance(projectId, db);
         await db.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
-        await db.retentionRun.update({ where: { id: run.id }, data: { status: 'running', heartbeatAt: new Date(), deletedEvents } });
+        await db.retentionRun.update({
+          where: { id: run.id },
+          data: { status: 'running', heartbeatAt: new Date(), deletedEvents, verification: verification as unknown as Prisma.InputJsonValue },
+        });
         const repair = await db.retentionRun.create({
           data: {
             projectId,
@@ -400,6 +421,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       console.log(JSON.stringify({ level: 'info', event: 'retention.materializing', runId: run.id, projectId, deletedEvents }));
       return 'materializing' as const;
     });
+    if (outcome === 'materializing' && verification) logBaselineDrift(projectId, run.id, verification);
     if (outcome !== 'incapable') return outcome;
     // Nothing destructive happened: this hour's retention runs on the synchronous path instead.
     await enforceProjectRetention(projectId);

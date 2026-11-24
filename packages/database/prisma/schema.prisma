@@ -236,6 +236,8 @@ model RetentionRun {
   status        String
   deletedEvents Int?
   error         String?
+  /// Background retention only: derived-table drift baselines and their check (#296). Null = not verified.
+  verification  Json?
 
   @@index([projectId, startedAt])
   @@index([projectId, kind, status])

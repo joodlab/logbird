@@ -215,6 +215,74 @@ export async function pendingProjectMutations(ch: ClickHouseClient, p: string) {
 }
 
 /**
+ * How far each derived table's totals are from what the raw rows imply (rollup minus raw; positive = the rollup counts
+ * more), for the scope a retention run rewrites: minute buckets before the cutoff, entities per kind, attribute keys.
+ * Normal ingest adds to both sides alike, so the drift only moves when a derived table and the raw rows disagree about
+ * a change: a retention run whose derived DELETE was skipped or killed leaves it larger (round-1 finding 7). Plain
+ * reads, so a pending mutation neither hides rows nor fails the read; compare two readings, never a reading with zero.
+ */
+export type RollupDrift = { minute: number; actor: number; tenant: number; executor: number; target: number; attributes: number };
+export async function retentionRollupDrift(ch: ClickHouseClient, p: string, cutoff: Date): Promise<RollupDrift> {
+  const kind = (k: string) => `(SELECT toInt64(sum(events)) FROM entities WHERE project_id={p:String} AND kind='${k}')`;
+  const [row] = await rows<Record<keyof RollupDrift, number | string>>(
+    projectMaintenance(ch, p),
+    `WITH raw AS (SELECT toInt64(countIf(timestamp < {cutoff:DateTime64(3,'UTC')})) minute, toInt64(countIf(actor_id!='')) actor,
+        toInt64(countIf(tenant_id!='')) tenant, toInt64(countIf(executor_id!='')) executor, toInt64(sum(length(target_types))) target,
+        toInt64(sum(length(attributes.keys))) attributes FROM events WHERE project_id={p:String})
+      SELECT
+        (SELECT toInt64(sum(events)) FROM events_by_minute WHERE project_id={p:String} AND bucket < {cutoff:DateTime64(3,'UTC')}) - (SELECT minute FROM raw) minute,
+        ${kind('actor')} - (SELECT actor FROM raw) actor,
+        ${kind('tenant')} - (SELECT tenant FROM raw) tenant,
+        ${kind('executor')} - (SELECT executor FROM raw) executor,
+        ${kind('target')} - (SELECT target FROM raw) target,
+        (SELECT toInt64(sum(count)) FROM attribute_keys WHERE project_id={p:String}) - (SELECT attributes FROM raw) attributes`,
+    { p, cutoff: ms(cutoff) },
+    CLICKHOUSE_PLAIN_READ,
+  );
+  const n = (key: keyof RollupDrift) => Number(row?.[key] ?? 0);
+  return { minute: n('minute'), actor: n('actor'), tenant: n('tenant'), executor: n('executor'), target: n('target'), attributes: n('attributes') };
+}
+
+/** The minute-bucket part of `retentionRollupDrift` alone: exact and cheap (the timestamp key range before the cutoff). */
+export async function retentionMinuteDrift(ch: ClickHouseClient, p: string, cutoff: Date): Promise<number> {
+  const [row] = await rows<{ d: number | string }>(
+    projectMaintenance(ch, p),
+    `SELECT (SELECT toInt64(sum(events)) FROM events_by_minute WHERE project_id={p:String} AND bucket < {cutoff:DateTime64(3,'UTC')})
+      - (SELECT toInt64(count()) FROM events WHERE project_id={p:String} AND timestamp < {cutoff:DateTime64(3,'UTC')}) d`,
+    { p, cutoff: ms(cutoff) },
+    CLICKHOUSE_PLAIN_READ,
+  );
+  return Number(row?.d ?? 0);
+}
+
+/**
+ * The in-flight allowance for a drift reading taken between `from` and `to` (database clock): what the rows received
+ * from `from - slackMs` to `to` contribute to each measure. A reading during live ingest can catch an insert after
+ * its raw part and before its materialized-view part; only rows accepted in that window can be caught like that.
+ * Call once they have all landed (after the settle proof). Uses the `received_at` index; a plain read.
+ */
+export async function retentionDriftAllowance(
+  ch: ClickHouseClient,
+  p: string,
+  cutoff: Date,
+  from: Date,
+  to: Date,
+  slackMs: number,
+): Promise<RollupDrift> {
+  const [row] = await rows<Record<keyof RollupDrift, number | string>>(
+    projectMaintenance(ch, p),
+    `SELECT toInt64(countIf(timestamp < {cutoff:DateTime64(3,'UTC')})) minute, toInt64(countIf(actor_id!='')) actor,
+        toInt64(countIf(tenant_id!='')) tenant, toInt64(countIf(executor_id!='')) executor, toInt64(sum(length(target_types))) target,
+        toInt64(sum(length(attributes.keys))) attributes
+      FROM events WHERE project_id={p:String} AND received_at >= {from:DateTime64(3,'UTC')} AND received_at <= {to:DateTime64(3,'UTC')}`,
+    { p, cutoff: ms(cutoff), from: ms(new Date(from.getTime() - slackMs)), to: ms(to) },
+    CLICKHOUSE_PLAIN_READ,
+  );
+  const n = (key: keyof RollupDrift) => Number(row?.[key] ?? 0);
+  return { minute: n('minute'), actor: n('actor'), tenant: n('tenant'), executor: n('executor'), target: n('target'), attributes: n('attributes') };
+}
+
+/**
  * The committed ingest watermark after fence A: the latest `received_at` stored among rows received after it, or null
  * when there are none. Fence B's delta (rows received between the fences) must reach every row already written, even
  * one whose stamp is later than the database clock read at fence B (an export watermark from another clock, or the

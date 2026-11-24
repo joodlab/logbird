@@ -9,7 +9,8 @@
     "./ingest-recovery": "./src/ingest-recovery.ts",
     "./project-repair": "./src/project-repair.ts",
     "./queue": "./src/queue.ts",
-    "./retention": "./src/retention.ts"
+    "./retention": "./src/retention.ts",
+    "./retention-verification": "./src/retention-verification.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

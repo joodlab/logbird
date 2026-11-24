@@ -48,6 +48,7 @@ vi.mock('@logbird/clickhouse', () => ({
 vi.mock('./ingest-recovery', () => ({ recoverProjectIngest: fake.recover, logIngestRecoveryFailure: vi.fn(), prepareReceiptSettlement: vi.fn() }));
 vi.mock('./destructive-maintenance', () => ({ beginDestructiveMaintenance: vi.fn(), reconcileDestructiveMaintenance: vi.fn() }));
 vi.mock('./project-repair', () => ({ heartbeatMaintenanceRun: vi.fn() }));
+vi.mock('./queue', () => ({ enqueueProjectRetention: vi.fn() }));
 
 import { enforceProjectRetention } from './retention';
 import { enforceRetention } from './retention-sweep';

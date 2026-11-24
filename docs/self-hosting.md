@@ -278,8 +278,14 @@ To act:
 3. Only if the cause cannot be fixed, `KILL MUTATION WHERE database = currentDatabase() AND table = '…' AND mutation_id = '…' SYNC`
    (mutation ids are unique per table only, so always name the table). Killing a Logbird retention DELETE leaves
    rows that should have been removed: the reconciler's verification then marks the run failed, and the next hourly
-   run deletes them again on the synchronous path. Killing a DELETE on `entities` or `attribute_keys` also leaves the
-   old rollup rows next to their replacements, so rebuild that project's rollups afterwards:
+   run deletes them again on the synchronous path. Killing a DELETE on a derived table (`events_by_minute`, `entities`
+   or `attribute_keys`) leaves the old rollup rows next to their replacements: the minute buckets before the cutoff
+   keep counting the expired events, and the affected entities and attribute keys count twice. Each background run
+   compares the derived tables with the stored events before and after its DELETEs. Such a run is marked failed,
+   naming the table, the worker logs `retention.verification_drift`, and a synchronous run that rebuilds the
+   project's rollups is queued. A small killed `entities` or `attribute_keys` DELETE can hide in concurrent ingest at
+   completion; the next run's baseline then finds the drift (`retention.drift_baseline`) and queues the rebuild, at
+   most once per project per day. To rebuild at once instead:
    `node --env-file=.env --import tsx scripts/repair-rollups.ts PROJECT`. The rebuild holds the project's exclusive
    lock, so its ingest is refused (503 `project_busy`, retried by the SDKs) while it runs.
 
