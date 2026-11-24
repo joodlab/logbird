@@ -1130,6 +1130,20 @@ often discovery runs, including after a worker outage. `now/d` is the UTC start 
 the arrival day. The Explorer evaluates `now` at search time, so a relative filter
 can show different results there.
 
+`deliveryWindowSeconds` limits how late an event may arrive and still be delivered:
+the endpoint delivers an event only if `receivedAt − occurredAt` is at most the window.
+Historical imports, backfills and a producer that was offline for longer than the window
+therefore don't flood the receiver; those events stay stored and searchable as usual.
+The window is a whole number of hours from 1 hour to 3,650 days. New endpoints get
+7 days (`DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS`), and `null` removes the limit.
+Endpoints that existed before this setting were given 7 days by its migration. A change
+applies to events discovered after the save; the cursor doesn't move back, and deliveries
+already queued are still sent. Resends and test pings ignore the window. The endpoint's
+`lateEvents` reports how many events in the project arrived later than its window,
+counted before its filter and scope apply, since the later of its last window change
+and 30 days ago. The window also narrows each discovery scan to recent occurrence
+times, which keeps discovery cheap on large projects.
+
 Regexes run in ClickHouse with RE2, so webhook filters are checked against RE2's
 syntax rather than JavaScript's. Create and PATCH reject a pattern that RE2 rejects,
 such as `\cK`, lookaround or backreferences, with HTTP 422 `invalid_query`. RE2
