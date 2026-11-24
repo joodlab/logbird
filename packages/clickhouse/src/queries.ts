@@ -371,17 +371,22 @@ async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: Rea
     'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1';
   if (!scope) return (await read<EventRow>(ch, canonical, { p, id }))[0];
   const s = scopePredicate(scope);
+  // Under the actor_email mask (#333), a tie on both timestamps fails closed: the hash that breaks it is unkeyed and
+  // covers the stored actor fields, so which version wins (and so a 200 or a 404, a parent or none) could be related
+  // to an address. Whether versions tie depends only on their timestamps. Other readers keep the canonical choice.
+  const failTies = Boolean(scope.mask?.includes('actor_email'));
+  const ties = 'uniqExact(sipHash64(payload)) OVER (PARTITION BY received_at,timestamp)';
   if (canonicalClient && canonicalClient !== ch) {
     // A row-policy-bound client only sees its tenant's rows, so it would pick the oldest version *of its tenant* as
     // canonical. Choose the canonical version project-wide and test the scope on it in the same lookup (a pointer and
     // a flag, nothing else). An unknown id and an out-of-scope id both end here, with one query and the same answer;
     // only an in-scope version is then fetched, exactly, through the bound client.
-    const [pointer] = await read<{ received_at: string; timestamp: string; h: string; in_scope: number }>(
+    const [pointer] = await read<{ received_at: string; timestamp: string; h: string; in_scope: number; ties: number }>(
       canonicalClient,
-      `SELECT received_at, timestamp, toString(sipHash64(payload)) h, (${s.sql}) in_scope FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1`,
+      `SELECT received_at, timestamp, toString(sipHash64(payload)) h, (${s.sql}) in_scope, ${failTies ? ties : '1'} ties FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1`,
       { p, id, ...s.params },
     );
-    if (!pointer || !Number(pointer.in_scope)) return;
+    if (!pointer || !Number(pointer.in_scope) || Number(pointer.ties) > 1) return;
     return (
       await read<EventRow>(
         ch,
@@ -392,6 +397,14 @@ async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: Rea
   }
   // Pick the canonical stored row first, then test the scope on it: a scoped caller sees exactly the row an unscoped
   // reader sees, or nothing (never a different stored version that happens to match).
+  if (failTies)
+    return (
+      await read<EventRow>(
+        ch,
+        `SELECT * EXCEPT(lb_ties) FROM (SELECT *, ${ties} lb_ties FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1) WHERE lb_ties=1 AND ${s.sql}`,
+        { p, id, ...s.params },
+      )
+    )[0];
   return (await read<EventRow>(ch, `SELECT * FROM (${canonical}) WHERE ${s.sql}`, { p, id, ...s.params }))[0];
 }
 /** With a scope, an out-of-scope id is indistinguishable from an unknown one (null → 404). */
@@ -586,19 +599,25 @@ async function maskedFacets(
 ): Promise<FacetResponse> {
   const params = { ...ACTOR_NAME_MASK_PARAMS, ...facetOrderParams(key, p) };
   const show = (flag: number | string, text: string) => (Number(flag) ? maskedEmail(p, text, key) : text);
-  const label = (lab: [number | string, string] | undefined, shown: string) => (lab?.[1] ? show(lab[0], lab[1]) : shown);
+  // The selected label leaves SQL as two scalar columns (never a tuple, whose JSON shape depends on server settings).
+  const label = (flag: number | string, text: string, shown: string) => (text ? show(flag, text) : shown);
   const w = await where(ch, p, q, compiled, scope);
   const one = facetLevel(q.field, 1, false, true);
-  type Row = { value: string; masked: number; lab: [number, string]; count: number; total: number };
+  type Row = { value: string; masked: number; labf: number; labt: string; count: number; total: number };
   const rows = await read<Row>(
     ch,
-    `SELECT ${one.expr} value,${one.flag} masked,argMaxIf(tuple(${one.labelFlag},${one.label}),received_at,${one.label}!='') lab,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value,masked ORDER BY count DESC,${facetOrderSql('masked', 'value')} LIMIT {facetLimit:UInt32}`,
+    `SELECT ${one.expr} value,${one.flag} masked,tupleElement(argMaxIf(tuple(${one.labelFlag},${one.label}),received_at,${one.label}!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value,masked ORDER BY count DESC,${facetOrderSql('masked', 'value')} LIMIT {facetLimit:UInt32}`,
     { ...w.params, ...one.params, ...params, facetLimit: q.limit },
   );
   const keyOf = (flag: number | string, text: string) => `${Number(flag)}|${text}`;
   const values = rows.map((r) => {
     const value = show(r.masked, r.value);
-    return { value, label: label(r.lab, value), count: Number(r.count), key: keyOf(r.masked, r.value) } as FacetResponse['values'][number] & {
+    return {
+      value,
+      label: label(r.labf, r.labt, value),
+      count: Number(r.count),
+      key: keyOf(r.masked, r.value),
+    } as FacetResponse['values'][number] & {
       key: string;
     };
   });
@@ -613,17 +632,17 @@ async function maskedFacets(
     : { one, two: facetLevel(q.by, 2, false, true) };
   const two = both.two;
   const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
-  type Group = { value: string; masked: number; grp: string; gmasked: number; lab: [number, string]; count: number; total: number };
+  type Group = { value: string; masked: number; grp: string; gmasked: number; labf: number; labt: string; count: number; total: number };
   const groups = await read<Group>(
     ch,
-    `SELECT value,masked,grp,gmasked,argMaxIf(tuple(glf,glabel),received_at,glabel!='') lab,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE concat(toString(masked),'|',value) IN {facetKeys:Array(String)} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
+    `SELECT value,masked,grp,gmasked,tupleElement(argMaxIf(tuple(glf,glabel),received_at,glabel!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE concat(toString(masked),'|',value) IN {facetKeys:Array(String)} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
     { ...w.params, ...one.params, ...two.params, ...params, facetKeys: values.map((v) => v.key), byLimit: q.byLimit ?? 5 },
   );
   for (const v of values) {
     const mine = groups.filter((g) => keyOf(g.masked, g.value) === v.key);
     v.groups = mine.map((g) => {
       const value = show(g.gmasked, g.grp);
-      return { value, label: label(g.lab, value), count: Number(g.count) };
+      return { value, label: label(g.labf, g.labt, value), count: Number(g.count) };
     });
     v.groupsOtherCount = Math.max(Number(mine[0]?.total ?? 0) - v.groups.reduce((n, g) => n + g.count, 0), 0);
   }

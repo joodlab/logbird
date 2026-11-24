@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { actorNameIsSensitive, actorNamePseudonymInput, facetOrderParams, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
+import {
+  ACTOR_NAME_IS_SENSITIVE_SQL,
+  actorNameIsSensitive,
+  actorNamePseudonymInput,
+  facetOrderParams,
+  maskActorNameInFilter,
+  maskedEmail,
+} from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { compileMaskedQuery } from './field-mask';
-import { facets } from './queries';
+import { facets, searchEvents } from './queries';
 import { compileQuery } from './query';
 
 // #333: under the actor_email mask, a reader cannot obtain the actor's address from the actor's own fields (email,
@@ -70,25 +77,51 @@ describe('the shared masked-filter compilation (webhook discovery and recheck co
 });
 
 describe('the filter rewrite', () => {
+  const DEFINED = `(${ACTOR_NAME_IS_SENSITIVE_SQL} AS __lb_name_carries_address)`;
   it('reads an empty name wherever the name is the address, so an actor.name probe never matches those rows', () => {
-    for (const q of ['actor.name:"carol@example.com"', 'actor.name:carol*', 'actor.name:*', 'NOT actor.name:"x"']) {
+    for (const q of ['actor.name:"carol@example.com"', 'actor.name:carol*', 'actor.name:*', 'NOT actor.name:"x"', 'actor.name:a OR actor.name:b']) {
       const sql = maskActorNameInFilter(compileQuery(q).sql);
-      expect(sql, q).toContain('if((position(');
-      // The probe compares against the guarded expression, never the bare column.
-      expect(sql.replace(/if\(\(position\([\s\S]*?,'',actor_name\)/g, 'GUARDED'), q).not.toMatch(/[=(,]\s*actor_name\b(?!\),)/);
+      // The sensitivity test is written once, as an alias; every probe compares against the guarded name.
+      expect(sql.split(DEFINED).length, q).toBe(2);
+      const rest = sql.replace(DEFINED, 'S');
+      expect(rest.match(/\bactor_name\b/g)?.length, q).toBe(rest.match(/,'',actor_name\)/g)?.length);
+      expect(rest, q).toMatch(/^[\s\S]*if\((S|__lb_name_carries_address),'',actor_name\)/);
     }
   });
 
-  it('evaluates free text on such a row only against the text an empty name would leave', () => {
-    for (const q of ['carol@example.com', 'carol', '"carol example"']) {
+  it('matches free text on a sanitised haystack only, never the stored search_text directly', () => {
+    for (const q of ['carol@example.com', 'carol', '"carol example"', 'carol bob actor.name:x']) {
       const sql = maskActorNameInFilter(compileQuery(q).sql);
-      expect(sql, q).toMatch(/\(\(NOT \(position\([\s\S]*AND \((hasToken|position)\(search_text, [\s\S]*\) OR \(\(position\(/);
-      expect(sql).toContain("lowerUTF8(concat(description,' ','',' ',tenant_name,' ',arrayStringConcat(target_names,' ')))");
+      expect(sql, q).not.toMatch(/(hasToken|position)\(search_text/);
+      expect(sql.match(/\bsearch_text\b/g)?.length, q).toBe(1);
+      // Wherever the sensitivity alias happens to be defined, the haystack is the guarded text.
+      expect(sql.replace(DEFINED, '__lb_name_carries_address'), q).toContain(
+        "if(__lb_name_carries_address,lowerUTF8(concat(description,' ','',' ',tenant_name,' ',arrayStringConcat(target_names,' '))),search_text) AS __lb_masked_haystack)",
+      );
+      expect(sql.split(DEFINED).length, q).toBe(2);
     }
   });
 
   it('fails closed on a free-text form it does not recognise', () => {
     expect(() => maskActorNameInFilter('search_text = {q0:String}')).toThrow(/cannot be masked/);
+  });
+
+  it('keeps a 64-term masked search far below the scoped key 64 KiB SQL limit', async () => {
+    const terms = Array.from({ length: 64 }, (_, i) => (i % 2 ? `actor.name:name${i}*` : `term${i}`));
+    const sent: string[] = [];
+    const query = vi.fn(async ({ query: sql }: { query: string }) => {
+      sent.push(sql);
+      return { json: async () => [] };
+    });
+    await searchEvents(
+      { query } as unknown as ClickHouseClient,
+      'proj_1',
+      { from: '2026-11-01T00:00:00.000Z', to: '2026-11-02T00:00:00.000Z', q: terms.join(' '), limit: 50, order: 'desc' },
+      undefined,
+      { tenantId: 'acme', mask: ['actor_email'] },
+    );
+    expect(sent.length).toBeGreaterThan(0);
+    for (const sql of sent) expect(Buffer.byteLength(sql)).toBeLessThan(32_768);
   });
 });
 
@@ -106,12 +139,12 @@ describe('facets under the actor_email mask', () => {
   it('shows a flagged name as the pseudonym its events carry, at both levels, and never the address', async () => {
     const { ch, query } = client([
       [
-        { value: 'usr_1', masked: 0, lab: [1, 'alice@example.com'], count: 3, total: 4 },
-        { value: 'usr_2', masked: 0, lab: [0, 'Bob'], count: 1, total: 4 },
+        { value: 'usr_1', masked: 0, labf: 1, labt: 'alice@example.com', count: 3, total: 4 },
+        { value: 'usr_2', masked: 0, labf: 0, labt: 'Bob', count: 1, total: 4 },
       ],
       [
-        { value: 'usr_1', masked: 0, grp: 'alice@example.com', gmasked: 1, lab: [1, 'alice@example.com'], count: 3, total: 3 },
-        { value: 'usr_2', masked: 0, grp: 'Bob', gmasked: 0, lab: [0, 'Bob'], count: 1, total: 1 },
+        { value: 'usr_1', masked: 0, grp: 'alice@example.com', gmasked: 1, labf: 1, labt: 'alice@example.com', count: 3, total: 3 },
+        { value: 'usr_2', masked: 0, grp: 'Bob', gmasked: 0, labf: 0, labt: 'Bob', count: 1, total: 1 },
       ],
     ]);
     const result = await facets(ch, 'proj_1', { ...range, field: 'actor', by: 'actor.name', limit: 10 }, scope, undefined, key);
@@ -121,20 +154,22 @@ describe('facets under the actor_email mask', () => {
     expect(JSON.stringify(result)).not.toMatch(/@/);
     const [first, second] = calls(query);
     // The flag is its own column, the groups are keyed by (flag, text), and the second level filters on those keys.
-    expect(first?.query).toMatch(/ masked,argMaxIf\(tuple\(/);
+    // The label leaves SQL as scalar columns, never a tuple (whose JSON shape depends on server settings).
+    expect(first?.query).toMatch(/ masked,tupleElement\(argMaxIf\(tuple\([\s\S]*\) AS lab,1\) labf,tupleElement\(lab,2\) labt,/);
+    expect(second?.query).toContain('tupleElement(lab,2) labt');
     expect(first?.query).toContain('GROUP BY value,masked');
     expect(second?.query_params.facetKeys).toEqual(['0|usr_1', '0|usr_2']);
   });
 
   it('never interprets text by its content: a producer string that looks masked stays as it is', async () => {
     const forged = '\u0000logbird-masked-email:alice@example.com';
-    const { ch } = client([[{ value: forged, masked: 0, lab: [0, forged], count: 1, total: 1 }]]);
+    const { ch } = client([[{ value: forged, masked: 0, labf: 0, labt: forged, count: 1, total: 1 }]]);
     const result = await facets(ch, 'proj_1', { ...range, field: 'actor.name', limit: 10 }, scope, undefined, key);
     expect(result.values).toEqual([{ value: forged, label: forged, count: 1 }]);
   });
 
   it('breaks ties with a keyed hash, the same on every request, so a limit cannot be related to an address', async () => {
-    const { ch, query } = client([[{ value: 'carol@example.com', masked: 1, lab: [1, 'carol@example.com'], count: 2, total: 2 }]]);
+    const { ch, query } = client([[{ value: 'carol@example.com', masked: 1, labf: 1, labt: 'carol@example.com', count: 2, total: 2 }]]);
     await facets(ch, 'proj_1', { ...range, field: 'actor.name', limit: 1 }, scope, undefined, key);
     const [first] = calls(query);
     expect(first?.query).toMatch(

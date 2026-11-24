@@ -75,24 +75,36 @@ export const facetOrderSql = (flag: string, text: string) =>
 /** The text an empty name would leave in migration 003's `search_text` (the same expression, name replaced by ''). */
 const SEARCH_TEXT_WITHOUT_NAME = "lowerUTF8(concat(description,' ','',' ',tenant_name,' ',arrayStringConcat(target_names,' ')))";
 const FREE_TEXT = /\((hasToken|position)\(search_text, (lowerUTF8\(\{q\d+:String\}\))\)( > 0)?\)/g;
+/** Aliases the rewrite defines once per filter, so a query of many terms stays far below the scoped key's 64 KiB SQL limit. */
+const NAME_CARRIES_ADDRESS = '__lb_name_carries_address';
+const MASKED_HAYSTACK = '__lb_masked_haystack';
 
 /**
  * Rewrites a compiled query-language filter so it cannot probe a masked address (#333):
- * - every `actor_name` reference reads an empty string where the name is the address, so `actor.name:"a@b"` (or a
- *   prefix or wildcard) never matches those rows;
- * - free text on such a row is evaluated only against the text it would have with an empty name, never the original
- *   `search_text`, so neither the result nor the work depends on the hidden name. (Masked free text cannot use the
- *   text index for those rows; it scans the project and range.)
+ * - every `actor_name` reference reads an empty string where the name carries an address, so `actor.name:"a@b"` (or
+ *   a prefix or wildcard) never matches those rows;
+ * - free text matches against a sanitised haystack: the stored `search_text`, or on such a row the text it would have
+ *   with an empty name. The match function only ever sees the sanitised text, so neither the result nor the work of
+ *   the match depends on the hidden name. (Masked free text cannot use the text index; it scans the project and range.)
+ * The sensitivity test and the haystack are each written once, as a ClickHouse alias, and referenced from every term.
  * Fails closed: a `search_text` use this rewrite does not recognise throws instead of passing through unmasked.
  */
 export function maskActorNameInFilter(sql: string): string {
-  // actor_name first: the free-text rewrite below adds references that must stay as they are (replace never rescans).
-  const named = sql.replace(/\bactor_name\b/g, `if(${ACTOR_NAME_IS_SENSITIVE_SQL},'',actor_name)`);
+  const defined = new Set<string>();
+  const once = (alias: string, expr: () => string) => {
+    if (defined.has(alias)) return alias;
+    defined.add(alias);
+    return `(${expr()} AS ${alias})`;
+  };
+  const carries = () => once(NAME_CARRIES_ADDRESS, () => ACTOR_NAME_IS_SENSITIVE_SQL);
+  // actor_name first: the definitions below add references that must stay as they are (replace never rescans).
+  const named = sql.replace(/\bactor_name\b/g, () => `if(${carries()},'',actor_name)`);
   const uses = (named.match(/\bsearch_text\b/g) ?? []).length;
   let rewritten = 0;
-  const out = named.replace(FREE_TEXT, (match: string, fn: string, arg: string, gt: string | undefined) => {
+  const out = named.replace(FREE_TEXT, (_match: string, fn: string, arg: string, gt: string | undefined) => {
     rewritten++;
-    return `((NOT ${ACTOR_NAME_IS_SENSITIVE_SQL} AND ${match}) OR (${ACTOR_NAME_IS_SENSITIVE_SQL} AND ${fn}(${SEARCH_TEXT_WITHOUT_NAME}, ${arg})${gt ?? ''}))`;
+    const haystack = once(MASKED_HAYSTACK, () => `if(${carries()},${SEARCH_TEXT_WITHOUT_NAME},search_text)`);
+    return `(${fn}(${haystack}, ${arg})${gt ?? ''})`;
   });
   if (rewritten !== uses) throw new Error('Free-text filter cannot be masked for this scope.');
   return out;
