@@ -198,7 +198,13 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // Compilers' interop wrappers, which return the module they are given (or an object holding it): tsc's
   // `__importDefault` / `__importStar`, Babel's `_interopRequireDefault` / `_interopRequireWildcard`, and esbuild's and
   // Rolldown's `__toESM`.
-  const INTEROP = /^_{1,2}(?:importDefault|importStar|interopRequireDefault|interopRequireWildcard|toESM)\d*$/;
+  // SWC's `_interop_require_default` / `_interop_require_wildcard` too, and each as a member when helpers are imported
+  // (tsc's `importHelpers`: `tslib_1.__importDefault(…)`; SWC's `_interop_require_default._(…)`).
+  const INTEROP =
+    /^_{1,2}(?:importDefault|importStar|interopRequireDefault|interopRequireWildcard|interop_require_default|interop_require_wildcard|toESM)\d*$/;
+  const isInterop = (callee) =>
+    (callee.type === 'Identifier' && INTEROP.test(callee.name)) ||
+    (isMember(callee) && (INTEROP.test(propertyName(callee) ?? '') || (propertyName(callee) === '_' && isInterop(unwrap(callee.object)))));
   // Whether an expression evaluates to node:module: a loader call given it, `await` of one, a member of one
   // (`require('node:module').Module`), or an interop wrapper around one. Not any expression that merely contains one:
   // `factory(require('node:module'))` returns whatever `factory` returns.
@@ -210,7 +216,7 @@ export function importsOf(text, path, moduleType = 'commonjs') {
     if (isLoaderCall(value)) return NODE_MODULE.has(staticName(value.type === 'ImportExpression' ? value.source : value.arguments[0]));
     if (value.type === 'CallExpression' || value.type === 'OptionalCallExpression') {
       const callee = unwrap(value.callee);
-      return callee.type === 'Identifier' && INTEROP.test(callee.name) && loadsNodeModule(value.arguments[0]);
+      return isInterop(callee) && loadsNodeModule(value.arguments[0]);
     }
     return false;
   };

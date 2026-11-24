@@ -158,6 +158,25 @@ test('createRequire counts only from node:module', () => {
   assert.deepEqual(importsOf(awaited, 'dist/index.mjs'), ['node:module', 'zod']);
   const toEsm = "var import_node_module = __toESM(require('node:module')); (0, import_node_module.createRequire)(__filename)('zod');";
   assert.deepEqual(importsOf(toEsm, 'dist/probe.cjs'), ['node:module', 'zod']);
+  // tsc 6 with esModuleInterop and importHelpers: the helper is a member of tslib.
+  const tslib = [
+    '"use strict";',
+    'Object.defineProperty(exports, "__esModule", { value: true });',
+    'exports.b = exports.a = void 0;',
+    'const tslib_1 = require("tslib");',
+    'const node_module_1 = require("node:module");',
+    'const node_module_2 = tslib_1.__importDefault(require("node:module"));',
+    "exports.a = (0, node_module_1.createRequire)(__filename)('fictional-a');",
+    "exports.b = node_module_2.default.createRequire(__filename)('fictional-b');",
+  ].join('\n');
+  assert.deepEqual(importsOf(tslib, 'dist/probe.cjs'), ['tslib', 'node:module', 'fictional-a', 'fictional-b']);
+  // SWC's helper, local or imported from @swc/helpers.
+  const swc =
+    'function _interop_require_default(obj) { return obj && obj.__esModule ? obj : { default: obj }; }\nconst _nodemodule = /*#__PURE__*/ _interop_require_default(require("node:module"));\n_nodemodule.default.createRequire(__filename)("zod");';
+  assert.deepEqual(importsOf(swc, 'dist/probe.cjs'), ['node:module', 'zod']);
+  const swcHelpers =
+    'const _interop_require_default = require("@swc/helpers/_/_interop_require_default");\nconst _nodemodule = /*#__PURE__*/ _interop_require_default._(require("node:module"));\n_nodemodule.default.createRequire(__filename)("zod");';
+  assert.deepEqual(importsOf(swcHelpers, 'dist/probe.cjs'), ['@swc/helpers/_/_interop_require_default', 'node:module', 'zod']);
   // tsc's esModuleInterop output and Node's getBuiltinModule are loads of node:module.
   const interop =
     'const node_module_1 = __importDefault(require("node:module")); const load = (0, node_module_1.default.createRequire)(__filename); load("zod");';
