@@ -114,7 +114,13 @@ export function logBaselineDrift(projectId: string, runId: string, verification:
 export type CompletionVerdict =
   | { outcome: 'unverified' }
   | { outcome: 'busy' }
-  | { outcome: 'verified' | 'drift'; verification: RetentionVerification & { result: NonNullable<RetentionVerification['result']> }; grew: Check[] };
+  | {
+      outcome: 'verified' | 'drift';
+      verification: RetentionVerification & { result: NonNullable<RetentionVerification['result']> };
+      grew: Check[];
+      from: Date;
+      generation: bigint;
+    };
 
 /** At completion (the run's DELETEs are done, nothing pending): read the drift again and compare. */
 export async function verifyAtCompletion(
@@ -130,25 +136,12 @@ export async function verifyAtCompletion(
   if (await prisma.ingestReceipt.findFirst({ where: { projectId, confirmedAt: null, claimedAt: { not: null } }, select: { eventId: true } }))
     return { outcome: 'busy' };
   const now = await retentionRollupDrift(ch, run.projectId, run.cutoff);
-  // A ClickHouse insert and its materialized views may become visible at different instants. Defer if any writer
-  // overlapped the scan, including a ready replay with an older receivedAt. The scan itself runs outside the lock.
-  const stable = await withProjectLock(
-    projectId,
-    async (db) => {
-      const after = await db.project.findUnique({ where: { id: projectId }, select: { maintenanceGeneration: true, exportDeleteStartedAt: true } });
-      if (!after || after.exportDeleteStartedAt || after.maintenanceGeneration !== before.maintenanceGeneration) return false;
-      return !(await db.ingestReceipt.findFirst({
-        where: { projectId, OR: [{ receivedAt: { gte: from } }, { claimedAt: { gte: from } }] },
-        select: { eventId: true },
-      }));
-    },
-    { waitMs: 100 },
-  );
-  if (!stable) return { outcome: 'busy' };
   const grew = driftGrew(verification, now);
   return {
     outcome: grew.length ? 'drift' : 'verified',
     grew,
+    from,
+    generation: before.maintenanceGeneration,
     verification: { ...verification, result: { checkedAt: (await databaseClock(prisma)).toISOString(), drift: now, grew } },
   };
 }
@@ -198,31 +191,49 @@ export async function verifyRetentionRuns(ch: ClickHouseClient, projectId: strin
     const now = verification.result.drift;
     const drift = verdict.outcome === 'drift';
     const tables = tablesOf(drift ? verdict.grew : verification.baselineOff);
-    const outcome = await prisma.$transaction(async (tx) => {
-      // Serialize daily repair reservations across verifiers of different runs for the same project.
-      await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR NO KEY UPDATE`;
-      const repair = drift || (verification.baselineOff.length > 0 && (await driftRepairAllowed(tx, projectId)));
-      const recorded = { ...verification, result: { ...verification.result, repairQueued: repair } };
-      const error = drift ? `Derived tables disagree with stored events after this run (${tables.join(', ')}); rollup repair is queued.` : null;
-      const won = await tx.$executeRaw`
+    const outcome = await withProjectLock(
+      projectId,
+      () =>
+        prisma.$transaction(
+          async (tx) => {
+            const after = await tx.project.findUnique({
+              where: { id: projectId },
+              select: { maintenanceGeneration: true, exportDeleteStartedAt: true },
+            });
+            if (!after || after.exportDeleteStartedAt || after.maintenanceGeneration !== verdict.generation) return 'busy';
+            // ClickHouse inserts and their materialized views can become visible at different instants. A receipt in the
+            // window, including a replay with an older receivedAt, means the unlocked scan could have seen partial data.
+            const concurrent = await tx.ingestReceipt.findFirst({
+              where: { projectId, OR: [{ receivedAt: { gte: verdict.from } }, { claimedAt: { gte: verdict.from } }] },
+              select: { eventId: true },
+            });
+            if (concurrent) return 'busy';
+            const repair = drift || (verification.baselineOff.length > 0 && (await driftRepairAllowed(tx, projectId)));
+            const recorded = { ...verification, result: { ...verification.result, repairQueued: repair } };
+            const error = drift ? `Derived tables disagree with stored events after this run (${tables.join(', ')}); rollup repair is queued.` : null;
+            const won = await tx.$executeRaw`
         UPDATE "RetentionRun" SET status = ${drift ? 'failed' : 'completed'}, error = ${error}, verification = ${JSON.stringify(recorded)}::jsonb
         WHERE id = ${run.id} AND status = 'completed' AND NOT (verification ? 'result')`;
-      if (!won) return 'already_checked';
-      if (!repair) return 'verified';
-      await tx.retentionRun.create({
-        data: {
-          projectId,
-          kind: 'ingest_repair',
-          retentionDays: run.retentionDays,
-          cutoff: run.cutoff,
-          status: 'failed',
-          finishedAt: new Date(),
-          error: `Rollup drift found by retention in run ${run.id} (${tables.join(', ')}); repair is queued.`,
-          ...(!drift ? { verification: { kind: BASELINE_REPAIR_KIND } } : {}),
-        },
-      });
-      return 'repair';
-    });
+            if (!won || !repair) return 'checked';
+            await tx.retentionRun.create({
+              data: {
+                projectId,
+                kind: 'ingest_repair',
+                retentionDays: run.retentionDays,
+                cutoff: run.cutoff,
+                status: 'failed',
+                finishedAt: new Date(),
+                error: `Rollup drift found by retention in run ${run.id} (${tables.join(', ')}); repair is queued.`,
+                ...(!drift ? { verification: { kind: BASELINE_REPAIR_KIND } } : {}),
+              },
+            });
+            return 'repair';
+          },
+          { maxWait: 150, timeout: 750 },
+        ),
+      { waitMs: 100 },
+    );
+    if (outcome === 'busy') break;
     if (outcome !== 'repair') continue;
     if (drift) {
       const changes = describe(verdict.grew, verification, now);
