@@ -105,7 +105,9 @@ You did not pass the user or the tenant. `IAuditLog` fills every field the event
 - **Executor**: `api:<your application name>` (set `ServiceName` to choose the name).
 - **Context**: operation, request and trace ids, client IP and user agent, from the request. The `X-Request-Id` and
   `X-Logbird-Operation` headers are used only when you turn on `UseRequestIdHeader` and `UseOperationHeader` (off by
-  default): any caller can send them, so enable them only behind an ingress that sets or strips them.
+  default): any caller can send them, so enable them only behind an ingress that sets or strips them. The trace id
+  comes from the request's trace context, which ASP.NET Core takes from an inbound, well-formed `traceparent` (W3C
+  Trace Context): any caller can send it, so it is a correlation hint, not identity.
 
 Your claims are different? Change the claim types or supply your own resolvers. These options go into your one
 `AddLogbird` call (it is registered once; a second call changes nothing):

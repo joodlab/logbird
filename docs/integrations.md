@@ -32,7 +32,8 @@ Each request gets an operationId and a requestId, and a W3C trace ID when it car
 traceparent. An id set on the event, then a requestId or operationId resolver that returns a
 value, take precedence; otherwise the ids are generated UUIDs. The SDK reads the inbound
 x-logbird-operation and x-request-id headers only with useOperationHeader and
-useRequestIdHeader (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent. Propagate operationId and parentEventId explicitly into jobs; this is correlation,
+useRequestIdHeader (off by default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent. The trace ID comes from the inbound traceparent when it is well-formed (W3C
+Trace Context): any caller can send it, so it is a correlation hint, not identity. Propagate operationId and parentEventId explicitly into jobs; this is correlation,
 not proof of identity. Forwarded IP headers are deliberately ignored: supply a trusted IP through the optional ip(context) resolver.
 
 The synchronous audit(action, partialEvent) queues an envelope through Logbird.track. It never

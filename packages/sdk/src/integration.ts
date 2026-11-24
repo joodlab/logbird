@@ -66,6 +66,11 @@ export function report(onError: CaptureOptions<unknown>['onError'], error: unkno
     /* diagnostics are best effort */
   }
 }
+/**
+ * Captures the request's correlation once and returns the request-scoped `audit` function. The operation and request
+ * ids follow `useOperationHeader` and `useRequestIdHeader`. The trace id comes from the inbound `traceparent` header
+ * when it is well-formed (W3C Trace Context): any caller can send it, so it is a correlation hint, not identity.
+ */
 export async function createAudit<C>(options: CaptureOptions<C>, context: C, request: Request): Promise<Audit> {
   if (typeof window !== 'undefined') throw new Error('Logbird ingest is server-only');
   // A correlation id is used whole or not at all (#206): cutting two long ids to 256 characters could make them one.
@@ -74,7 +79,7 @@ export async function createAudit<C>(options: CaptureOptions<C>, context: C, req
     const value = request.headers.get(name);
     return value && value.length <= 256 ? value : undefined;
   };
-  const trace = request.headers.get('traceparent')?.match(/^[\da-f]{2}-([\da-f]{32})-([\da-f]{16})-[\da-f]{2}$/);
+  const trace = request.headers.get('traceparent')?.match(/^([\da-f]{2})-([\da-f]{32})-([\da-f]{16})-[\da-f]{2}$/);
   return capture(options, context, {
     action: '',
     executor: { type: 'api' },
@@ -83,7 +88,9 @@ export async function createAudit<C>(options: CaptureOptions<C>, context: C, req
       // `true` opts in, so a value wired from an environment variable (the string 'false') fails closed.
       operationId: (options.useOperationHeader === true ? header('x-logbird-operation') : undefined) ?? uuidv7(),
       requestId: (options.useRequestIdHeader === true ? header('x-request-id') : undefined) ?? uuidv7(),
-      traceId: trace && trace[1] !== '0'.repeat(32) && trace[2] !== '0'.repeat(16) ? trace[1] : undefined,
+      // W3C Trace Context, as in the ASP.NET Core integration: version ff is forbidden, an all-zero trace or parent id is
+      // invalid.
+      traceId: trace && trace[1] !== 'ff' && trace[2] !== '0'.repeat(32) && trace[3] !== '0'.repeat(16) ? trace[2] : undefined,
       userAgent: request.headers.get('user-agent')?.slice(0, 1024) ?? undefined,
     },
   });

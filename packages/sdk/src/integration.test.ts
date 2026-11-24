@@ -155,6 +155,7 @@ it('ignores inbound correlation headers unless the application opts in to each (
     [{ useRequestIdHeader: true, useOperationHeader: true }, true, true],
     // Only `true` opts in: strings wired from an environment variable fail closed.
     [{ useRequestIdHeader: 'false', useOperationHeader: 'true' } as never, false, false],
+    [{ useRequestIdHeader: 1, useOperationHeader: 1 } as never, false, false],
   ] as const) {
     const audit = await createAudit({ client, ...(options as object) }, {}, new Request('http://host', { headers }));
     audit('headers');
@@ -164,6 +165,23 @@ it('ignores inbound correlation headers unless the application opts in to each (
     else expect(context?.requestId).toMatch(uuidv7);
     if (operation) expect(context?.operationId).toBe('op_from_client');
     else expect(context?.operationId).toMatch(uuidv7);
+  }
+});
+it('takes the trace id from a well-formed traceparent only', async () => {
+  const { client, track } = fixture();
+  const trace = '4bf92f3577b34da6a3ce929d0e0e4736';
+  for (const [traceparent, expected] of [
+    [`00-${trace}-00f067aa0ba902b7-01`, trace],
+    [`ff-${trace}-00f067aa0ba902b7-01`, undefined],
+    [`00-${'0'.repeat(32)}-00f067aa0ba902b7-01`, undefined],
+    [`00-${trace}-${'0'.repeat(16)}-01`, undefined],
+    [`00-${trace.toUpperCase()}-00f067aa0ba902b7-01`, undefined],
+    ['not-a-traceparent', undefined],
+  ] as const) {
+    const audit = await createAudit({ client }, {}, new Request('http://host', { headers: { traceparent } }));
+    audit('trace');
+    await audit.pending();
+    expect(track.mock.lastCall?.[0].context?.traceId).toBe(expected);
   }
 });
 it('uses a correlation header whole or not at all: 256 characters are kept, 257 fall back to a generated id (#206)', async () => {
