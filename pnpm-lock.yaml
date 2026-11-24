@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@babel/parser':
+        specifier: 7.29.13
+        version: 7.29.13
+      '@babel/traverse':
+        specifier: 7.29.13
+        version: 7.29.13
       '@biomejs/biome':
         specifier: 2.5.11
         version: 2.5.11
