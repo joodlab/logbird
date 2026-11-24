@@ -32,7 +32,13 @@ import {
   withProjectLock,
 } from '@logbird/database';
 import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
-import { logIngestRecoveryFailure, settleProjectInserts, settleProjectReceiptsAfterRepair } from './ingest-recovery';
+import {
+  flushProjectBeforeRetention,
+  logIngestRecoveryFailure,
+  projectInsertsSettled,
+  settleProjectInserts,
+  settleProjectReceiptsAfterRepair,
+} from './ingest-recovery';
 import { heartbeatMaintenanceRun } from './project-repair';
 import { enqueueProjectRetention } from './queue';
 import {
@@ -247,13 +253,13 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
   const previous = await prisma.retentionRun.findFirst({ where: { projectId, kind: 'retention' }, orderBy: { startedAt: 'desc' } });
   // Earlier DELETEs still finishing (this project's or a stuck table-wide queue): wait for them. A synchronous run would
   // queue a waiting DELETE behind them under the lock, refusing ingest for as long as they take.
-  if ((await pendingProjectMutations(clickhouse, projectId)).length) return 'deferred';
   if (previous?.status === RETENTION_MATERIALIZING) {
     // Finished in ClickHouse but not yet completed: complete it here too (the server's reconciler normally does; during
     // a rolling upgrade an older server's does not), then start this hour's run next time.
     await withProjectLock(projectId, () => reconcileDestructiveMaintenance(clickhouse, projectId), { waitMs: 100 }).catch(() => undefined);
     return 'deferred';
   }
+  if ((await pendingProjectMutations(clickhouse, projectId)).length) return 'deferred';
   // Repairs and interrupted runs keep today's synchronous path.
   if (
     previous?.status === 'running' ||
@@ -279,11 +285,16 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
   // fences (sample removal, a repair, a synchronous purge) bumps one of them, and fence B then refuses to publish rows
   // staged before it (#268).
   let generationsAtA: { maintenance: string; export: string } | undefined;
+  const flushError = await flushProjectBeforeRetention(clickhouse, projectId).catch((error: unknown) => {
+    if (!(error instanceof Error && 'code' in error && error.code === 'LOGBIRD_FLUSH_UNAVAILABLE')) throw error;
+    return error;
+  });
   const opened = await withProjectLock(projectId, async (tx) => {
     await recoverAbandonedRetention(tx, projectId);
+    const now = await databaseClock(tx);
     await tx.retentionRun.updateMany({
-      where: { projectId, kind: 'retention', status: RETENTION_STAGING, heartbeatAt: { lt: new Date(Date.now() - RETENTION_LEASE_MS) } },
-      data: { status: 'canceled', finishedAt: new Date(), error: 'abandoned' },
+      where: { projectId, kind: 'retention', status: RETENTION_STAGING, heartbeatAt: { lt: new Date(now.getTime() - RETENTION_LEASE_MS) } },
+      data: { status: 'canceled', finishedAt: now, error: 'abandoned' },
     });
     if (await tx.retentionRun.findFirst({ where: { projectId, status: { in: ['running', RETENTION_STAGING, RETENTION_MATERIALIZING] } } }))
       return null;
@@ -291,19 +302,17 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     if (!project || project.retentionDays !== current.retentionDays || project.exportDeleteStartedAt) return null;
     // Capability gate (#296, round-1 finding 15): every API server seen recently must support background retention.
     if (!(await backgroundRetentionAllowed(projectId, 'fence_a'))) return 'incapable' as const;
-    try {
-      if (!(await settleProjectInserts(clickhouse, projectId, tx))) return 'deferred' as const;
-    } catch (error) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'LOGBIRD_FLUSH_UNAVAILABLE')) throw error;
+    if (flushError) {
       await tx.retentionRun.create({
-        data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'canceled', finishedAt: new Date(), error: error.message },
+        data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'canceled', finishedAt: now, error: flushError.message },
       });
       return 'canceled' as const;
     }
+    if (!(await projectInsertsSettled(projectId, tx))) return 'deferred' as const;
     const fenceA = await fenceClock(tx);
     generationsAtA = { maintenance: String(project.maintenanceGeneration), export: String(project.exportGeneration) };
     return tx.retentionRun.create({
-      data: { projectId, retentionDays: project.retentionDays, cutoff, status: RETENTION_STAGING, startedAt: fenceA, heartbeatAt: new Date() },
+      data: { projectId, retentionDays: project.retentionDays, cutoff, status: RETENTION_STAGING, startedAt: fenceA, heartbeatAt: fenceA },
     });
   });
   if (opened === null) return 'skipped';
@@ -330,6 +339,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     // The expensive derived-table drift reading, outside the lock (round-1 finding 7).
     const driftReading = await readDriftBetweenFences(clickhouse, projectId, cutoff);
     await hooks.betweenFences?.();
+    await flushProjectBeforeRetention(clickhouse, projectId);
     // Fence B.
     const outcome = await withProjectLock(projectId, async (tx) => {
       const latest = await tx.retentionRun.findUnique({ where: { id: run.id } });
@@ -343,14 +353,9 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
         await cancelRun(run.id, 'Other maintenance changed the project during the run; the next run retries.');
         return 'canceled' as const;
       }
-      if (!(await settleProjectInserts(clickhouse, projectId, tx))) {
+      if (!(await projectInsertsSettled(projectId, tx))) {
         await cancelRun(run.id, 'Recent writes were still settling; the next run retries.');
         return 'canceled' as const;
-      }
-      // The gate again, right before anything destructive: a server without support may have started since fence A.
-      if (!(await backgroundRetentionAllowed(projectId, 'fence_b'))) {
-        await cancelRun(run.id, 'An API server without background retention support is running; retention runs synchronously.');
-        return 'incapable' as const;
       }
       // Fence B's delta reaches every row already written: the database clock, or the committed ingest watermark when a
       // row was stamped later than it (round-1 finding 3).
@@ -359,6 +364,11 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       const fenceB = committed && committed > clockB ? committed : clockB;
       // Settled and under the lock: the exact minute-bucket drift and the allowance for the earlier reading.
       verification = await baselineAtFenceB(clickhouse, projectId, cutoff, driftReading);
+      // Check after the ClickHouse reads, immediately before publishing the destructive fence.
+      if (!(await backgroundRetentionAllowed(projectId, 'fence_b'))) {
+        await cancelRun(run.id, 'An API server without background retention support is running; retention runs synchronously.');
+        return 'incapable' as const;
+      }
       // Durable before any DELETE exists: the destructive fence, a new read generation, and `running` (which fences
       // ingest and rollup reads, both waiting on this lock anyway, for the few statements below).
       // The repair obligation commits with them: if this process dies after a DELETE exists but before the

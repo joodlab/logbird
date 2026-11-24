@@ -7,7 +7,7 @@ import {
   retentionMinuteDrift,
   retentionRollupDrift,
 } from '@logbird/clickhouse';
-import { databaseClock, type Prisma, prisma } from '@logbird/database';
+import { databaseClock, type Prisma, prisma, withProjectLock } from '@logbird/database';
 
 /**
  * Derived-table verification for background retention (#296, round-1 finding 7, owner's ruling (d)).
@@ -34,7 +34,7 @@ const CHECKS = Object.keys(DRIFT_TABLES) as Check[];
 /** An accepted row reaches ClickHouse within its claim lease, and an async insert flushes within this bound after it. */
 const inFlightSlackMs = () => INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS;
 /** The `error` prefix of the repair a baseline drift queues: the once-per-day limit looks for it. */
-export const DRIFT_REPAIR_ERROR = 'Rollup drift found by retention';
+const BASELINE_REPAIR_KIND = 'retention_baseline_repair';
 
 export type RetentionVerification = {
   version: 1;
@@ -78,14 +78,18 @@ export async function baselineAtFenceB(
 }
 
 export function driftGrew(verification: Pick<RetentionVerification, 'baseline' | 'allowance'>, now: RollupDrift) {
-  return CHECKS.filter((check) => now[check] > verification.baseline[check] + verification.allowance[check]);
+  return CHECKS.filter((check) => Math.abs(now[check]) > Math.abs(verification.baseline[check]) + verification.allowance[check]);
 }
 
 /** A stored verification, or null: a run from before the column (or any unreadable value) is never "verified". */
 export function readVerification(value: unknown): RetentionVerification | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as Partial<RetentionVerification>;
-  if (v.version !== 1 || !v.baseline || !v.allowance || !Array.isArray(v.baselineOff)) return null;
+  if (v.version !== 1 || !Array.isArray(v.baselineOff) || v.baselineOff.some((check) => !CHECKS.includes(check))) return null;
+  if (!v.window || !Number.isFinite(Date.parse(v.window.from)) || !Number.isFinite(Date.parse(v.window.to))) return null;
+  const { baseline, allowance } = v;
+  if (!baseline || !allowance) return null;
+  if (!CHECKS.every((check) => Number.isSafeInteger(baseline[check]) && Number.isSafeInteger(allowance[check]) && allowance[check] >= 0)) return null;
   return v as RetentionVerification;
 }
 
@@ -107,7 +111,10 @@ export function logBaselineDrift(projectId: string, runId: string, verification:
   );
 }
 
-export type CompletionVerdict = { outcome: 'unverified' } | { outcome: 'verified' | 'drift'; verification: RetentionVerification; grew: Check[] };
+export type CompletionVerdict =
+  | { outcome: 'unverified' }
+  | { outcome: 'busy' }
+  | { outcome: 'verified' | 'drift'; verification: RetentionVerification & { result: NonNullable<RetentionVerification['result']> }; grew: Check[] };
 
 /** At completion (the run's DELETEs are done, nothing pending): read the drift again and compare. */
 export async function verifyAtCompletion(
@@ -116,7 +123,28 @@ export async function verifyAtCompletion(
 ): Promise<CompletionVerdict> {
   const verification = readVerification(run.verification);
   if (!verification) return { outcome: 'unverified' };
+  const { projectId } = run;
+  const from = await databaseClock(prisma);
+  const before = await prisma.project.findUnique({ where: { id: projectId }, select: { maintenanceGeneration: true, exportDeleteStartedAt: true } });
+  if (!before || before.exportDeleteStartedAt) return { outcome: 'busy' };
+  if (await prisma.ingestReceipt.findFirst({ where: { projectId, confirmedAt: null, claimedAt: { not: null } }, select: { eventId: true } }))
+    return { outcome: 'busy' };
   const now = await retentionRollupDrift(ch, run.projectId, run.cutoff);
+  // A ClickHouse insert and its materialized views may become visible at different instants. Defer if any writer
+  // overlapped the scan, including a ready replay with an older receivedAt. The scan itself runs outside the lock.
+  const stable = await withProjectLock(
+    projectId,
+    async (db) => {
+      const after = await db.project.findUnique({ where: { id: projectId }, select: { maintenanceGeneration: true, exportDeleteStartedAt: true } });
+      if (!after || after.exportDeleteStartedAt || after.maintenanceGeneration !== before.maintenanceGeneration) return false;
+      return !(await db.ingestReceipt.findFirst({
+        where: { projectId, OR: [{ receivedAt: { gte: from } }, { claimedAt: { gte: from } }] },
+        select: { eventId: true },
+      }));
+    },
+    { waitMs: 100 },
+  );
+  if (!stable) return { outcome: 'busy' };
   const grew = driftGrew(verification, now);
   return {
     outcome: grew.length ? 'drift' : 'verified',
@@ -126,10 +154,10 @@ export async function verifyAtCompletion(
 }
 
 /** At most one baseline-drift repair per project per day (database clock). */
-export async function driftRepairAllowed(projectId: string) {
-  const [row] = await prisma.$queryRaw<{ n: number }[]>`
+async function driftRepairAllowed(db: Prisma.TransactionClient, projectId: string) {
+  const [row] = await db.$queryRaw<{ n: number }[]>`
     SELECT count(*)::int AS n FROM "RetentionRun"
-    WHERE "projectId" = ${projectId} AND kind = 'ingest_repair' AND error LIKE ${`${DRIFT_REPAIR_ERROR}%`}
+    WHERE "projectId" = ${projectId} AND kind = 'ingest_repair' AND verification ->> 'kind' = ${BASELINE_REPAIR_KIND}
       AND "startedAt" > (clock_timestamp() AT TIME ZONE 'UTC') - interval '1 day'`;
   return Number(row?.n ?? 0) === 0;
 }
@@ -154,51 +182,52 @@ export async function verifyRetentionRuns(ch: ClickHouseClient, projectId: strin
   const runs = await prisma.$queryRaw<{ id: string; projectId: string; cutoff: Date; retentionDays: number; verification: Prisma.JsonValue }[]>`
     SELECT id, "projectId", cutoff, "retentionDays", verification FROM "RetentionRun"
     WHERE "projectId" = ${projectId} AND kind = 'retention' AND status = 'completed'
-      AND verification IS NOT NULL AND NOT (verification ? 'result')
+      AND verification -> 'version' = '1'::jsonb AND NOT (verification ? 'result')
     ORDER BY "startedAt" ASC LIMIT 5`;
   for (const run of runs) {
     const verdict = await verifyAtCompletion(ch, run);
-    if (verdict.outcome === 'unverified') continue;
-    const { verification } = verdict;
-    const now = verification.result?.drift as RollupDrift;
-    if (verdict.outcome === 'drift') {
-      const changes = describe(verdict.grew, verification, now);
-      const won = await prisma.$executeRaw`
-        UPDATE "RetentionRun" SET status = 'failed', "finishedAt" = clock_timestamp() AT TIME ZONE 'UTC',
-          error = ${`Derived tables disagree with the stored events after this run (${tablesOf(verdict.grew).join(', ')}); the project's rollups are being rebuilt.`},
-          verification = ${JSON.stringify(verification)}::jsonb
-        WHERE id = ${run.id} AND status = 'completed' AND NOT (verification ? 'result')`;
-      if (!won) continue;
-      console.error(
-        JSON.stringify({ level: 'error', event: 'retention.verification_drift', projectId, runId: run.id, tables: tablesOf(verdict.grew), changes }),
-      );
-      await enqueueRepair(projectId).catch(() =>
-        console.error(JSON.stringify({ level: 'error', event: 'retention.repair_enqueue_failed', projectId, runId: run.id })),
-      );
+    if (verdict.outcome === 'busy') break;
+    if (verdict.outcome === 'unverified') {
+      await prisma.$executeRaw`
+        UPDATE "RetentionRun" SET verification = verification || '{"result":{"state":"invalid"}}'::jsonb
+        WHERE id = ${run.id} AND verification = ${JSON.stringify(run.verification)}::jsonb`;
+      console.warn(JSON.stringify({ level: 'warn', event: 'retention.verification_invalid', projectId, runId: run.id }));
       continue;
     }
-    const repair = verification.baselineOff.length > 0 && (await driftRepairAllowed(projectId));
-    const recorded: RetentionVerification = {
-      ...verification,
-      result: { ...(verification.result as NonNullable<RetentionVerification['result']>), repairQueued: repair },
-    };
-    const won = await prisma.$executeRaw`
-      UPDATE "RetentionRun" SET verification = ${JSON.stringify(recorded)}::jsonb
-      WHERE id = ${run.id} AND status = 'completed' AND NOT (verification ? 'result')`;
-    if (!won || !repair) continue;
-    const tables = tablesOf(verification.baselineOff);
-    await prisma.retentionRun.create({
-      data: {
-        projectId,
-        kind: 'ingest_repair',
-        retentionDays: run.retentionDays,
-        cutoff: run.cutoff,
-        status: 'failed',
-        finishedAt: new Date(),
-        error: `${DRIFT_REPAIR_ERROR} before run ${run.id} (${tables.join(', ')}); the next retention run rebuilds the rollups.`,
-      },
+    const { verification } = verdict;
+    const now = verification.result.drift;
+    const drift = verdict.outcome === 'drift';
+    const tables = tablesOf(drift ? verdict.grew : verification.baselineOff);
+    const outcome = await prisma.$transaction(async (tx) => {
+      // Serialize daily repair reservations across verifiers of different runs for the same project.
+      await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR NO KEY UPDATE`;
+      const repair = drift || (verification.baselineOff.length > 0 && (await driftRepairAllowed(tx, projectId)));
+      const recorded = { ...verification, result: { ...verification.result, repairQueued: repair } };
+      const error = drift ? `Derived tables disagree with stored events after this run (${tables.join(', ')}); rollup repair is queued.` : null;
+      const won = await tx.$executeRaw`
+        UPDATE "RetentionRun" SET status = ${drift ? 'failed' : 'completed'}, error = ${error}, verification = ${JSON.stringify(recorded)}::jsonb
+        WHERE id = ${run.id} AND status = 'completed' AND NOT (verification ? 'result')`;
+      if (!won) return 'already_checked';
+      if (!repair) return 'verified';
+      await tx.retentionRun.create({
+        data: {
+          projectId,
+          kind: 'ingest_repair',
+          retentionDays: run.retentionDays,
+          cutoff: run.cutoff,
+          status: 'failed',
+          finishedAt: new Date(),
+          error: `Rollup drift found by retention in run ${run.id} (${tables.join(', ')}); repair is queued.`,
+          ...(!drift ? { verification: { kind: BASELINE_REPAIR_KIND } } : {}),
+        },
+      });
+      return 'repair';
     });
-    console.warn(JSON.stringify({ level: 'warn', event: 'retention.drift_repair_queued', projectId, runId: run.id, tables }));
+    if (outcome !== 'repair') continue;
+    if (drift) {
+      const changes = describe(verdict.grew, verification, now);
+      console.error(JSON.stringify({ level: 'error', event: 'retention.verification_drift', projectId, runId: run.id, tables, changes }));
+    } else console.warn(JSON.stringify({ level: 'warn', event: 'retention.drift_repair_queued', projectId, runId: run.id, tables }));
     await enqueueRepair(projectId).catch(() =>
       console.error(JSON.stringify({ level: 'error', event: 'retention.repair_enqueue_failed', projectId, runId: run.id })),
     );

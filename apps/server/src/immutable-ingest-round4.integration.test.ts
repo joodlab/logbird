@@ -197,7 +197,7 @@ it('ready-only and grace-only recovery perform no rollup DELETE and expose the r
   expect(commands.mock.calls.some(([p]) => /^DELETE FROM (events_by_minute|entities|attribute_keys)\b/.test(p.query))).toBe(false);
 });
 it('flush failures retain the pending index and store siblings with a throttled Retry-After', async () => {
-  await f.pending(pending, { expired: true });
+  await f.pending(pending, { needsFreshFlush: true });
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   const calls = vi
     .spyOn(maintenanceClickhouse, 'command')

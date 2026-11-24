@@ -61,13 +61,17 @@ export function startServerHeartbeat({
 }) {
   const instanceId = randomUUID();
   let stopped = false;
-  let inFlight: Promise<unknown> = Promise.resolve();
+  let inFlight: Promise<void> | undefined;
   const beat = () => {
-    if (stopped) return;
+    if (stopped || inFlight) return;
     inFlight = (async () => {
       await recordServerHeartbeat(instanceId, version, capabilities, db);
       await pruneServerHeartbeats(db);
-    })().catch(() => console.error(JSON.stringify({ level: 'error', event: 'server.heartbeat_failed' })));
+    })()
+      .catch(() => console.error(JSON.stringify({ level: 'error', event: 'server.heartbeat_failed' })))
+      .finally(() => {
+        inFlight = undefined;
+      });
   };
   beat();
   const timer = setInterval(beat, intervalMs);

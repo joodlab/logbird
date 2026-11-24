@@ -1,8 +1,8 @@
-import { createRequire } from 'node:module';
 import { serve } from '@hono/node-server';
 import { assertSupportedClickHouse } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, startServerHeartbeat } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
+import manifest from '../package.json' with { type: 'json' };
 import { app } from './app';
 import { backfillAuthEmailHashes, flushFailedSignIns } from './auth-failures';
 import { clickhouse, maintenanceClickhouse, queryClickhouse } from './clickhouse';
@@ -31,13 +31,12 @@ const auditDrainer = startAuditDrainer(ingest, async () => {
 });
 const maintenanceReconciler = startDestructiveMaintenanceReconciler();
 // Declares what this server supports; the worker runs background retention only while every server seen does (#296).
-const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
-const heartbeat = startServerHeartbeat({ version });
+const heartbeat = startServerHeartbeat({ version: manifest.version });
 let stopping = false;
 function shutdown() {
   if (stopping) return;
   stopping = true;
-  const drained = Promise.all([auditDrainer.stop(), maintenanceReconciler.stop(), heartbeat.stop()]);
+  const drained = Promise.all([auditDrainer.stop(), maintenanceReconciler.stop()]);
   const deadline = setTimeout(() => {
     if ('closeAllConnections' in server) server.closeAllConnections();
     process.exit(1);
@@ -45,6 +44,7 @@ function shutdown() {
   deadline.unref();
   server.close(async () => {
     await drained;
+    await heartbeat.stop();
     await drainExportAudits();
     const results = await Promise.allSettled([
       closeRetentionQueue(),

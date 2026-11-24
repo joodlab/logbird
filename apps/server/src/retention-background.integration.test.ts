@@ -166,15 +166,21 @@ function liveTraffic() {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   })();
+  // Join both promises in stop(), including if one failed before the next pause request.
+  void ingest.catch(() => undefined);
+  void probe.catch(() => undefined);
   return {
     ids,
     /** Ingest paused for a consistent snapshot (the probe keeps measuring). */
     async quiet<T>(work: () => Promise<T>) {
       paused = true;
-      await new Promise<void>((resolve) => {
-        idle = resolve;
-      });
       try {
+        await Promise.race([
+          ingest,
+          new Promise<void>((resolve) => {
+            idle = resolve;
+          }),
+        ]);
         return await work();
       } finally {
         paused = false;
@@ -184,7 +190,8 @@ function liveTraffic() {
     async stop() {
       running = false;
       paused = false;
-      await Promise.all([ingest, probe]);
+      const failed = (await Promise.allSettled([ingest, probe])).find((result) => result.status === 'rejected');
+      if (failed) throw failed.reason;
       return { statuses, ingestMaxMs: Math.max(...ingestMs), lockWaitMaxMs: Math.max(...lockWaitMs), busy, probes: lockWaitMs.length };
     },
   };
@@ -424,15 +431,15 @@ it(
     // the store applies mutations in (30,000 rows was seen), so the held mutation stays under ClickHouse's 3 s
     // background sleep cap and never fails and retries. The DELETE's normal pass over the table's parts keeps it pending
     // for the assertions. Fewer than 10,000 rows, so this fixture is not a load run by itself.
-    await insertEvents(
-      clickhouse,
-      Array.from({ length: 8000 }, (_, k) =>
-        f.row({ id: `foreign-${k}`, action: 'qa.foreign', occurredAt: new Date(Date.now() - DAY).toISOString() }),
-      ).map((row) => ({ ...row, project_id: foreign })),
-    );
     let heldId: string | undefined;
     let ceiling: ReturnType<typeof holdCeiling> | undefined;
     try {
+      await insertEvents(
+        clickhouse,
+        Array.from({ length: 8000 }, (_, k) =>
+          f.row({ id: `foreign-${k}`, action: 'qa.foreign', occurredAt: new Date(Date.now() - DAY).toISOString() }),
+        ).map((row) => ({ ...row, project_id: foreign })),
+      );
       // An operator's mutation with now() in its predicate, created without Logbird's initiator settings.
       await maintenanceClickhouse.command({
         query:
@@ -516,7 +523,12 @@ it(
       ceiling = holdCeiling(f.project);
       // The read fails because the predicate errors when applied, not because the mutation cannot be applied on the fly.
       const direct = await clickhouse
-        .query({ query: 'SELECT count() n FROM events WHERE project_id={p:String}', query_params: { p: f.project }, format: 'JSONEachRow' })
+        .query({
+          query: 'SELECT count() n FROM events WHERE project_id={p:String}',
+          query_params: { p: f.project },
+          format: 'JSONEachRow',
+          clickhouse_settings: { max_block_size: '30000' },
+        })
         .then((r) => r.json())
         .then(
           () => '',

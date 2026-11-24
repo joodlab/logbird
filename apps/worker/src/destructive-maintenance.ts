@@ -14,8 +14,7 @@ export async function reconcileDestructiveMaintenance(ch: ClickHouseClient, proj
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { exportDeleteStartedAt: true } });
   if (!project?.exportDeleteStartedAt) {
     // An older server's reconciler (rolling upgrade) clears the fence without completing background runs.
-    if (project) await finishMaterializedRetention(ch, projectId);
-    return true;
+    return project ? finishMaterializedRetention(ch, projectId) : true;
   }
   // A completed HTTP request is not enough: lightweight DELETE continues as a background mutation.
   // Unknown/unscoped commands conservatively block reconciliation; ordinary project predicates are isolated.
@@ -38,7 +37,7 @@ export async function reconcileDestructiveMaintenance(ch: ClickHouseClient, proj
   }
   // Finish the runs first: if verification or the receipt purge fails, the marker stays and the reconciler retries
   // (it selects projects by the marker). It clears only once nothing is left to finish.
-  await finishMaterializedRetention(ch, projectId);
+  if (!(await finishMaterializedRetention(ch, projectId))) return false;
   await prisma.project.updateMany({
     where: { id: projectId, exportDeleteStartedAt: project.exportDeleteStartedAt },
     data: { exportDeleteStartedAt: null },
@@ -58,7 +57,11 @@ async function finishMaterializedRetention(ch: ClickHouseClient, projectId: stri
   const runs = await prisma.retentionRun.findMany({
     where: { projectId, kind: 'retention', OR: [{ status: RETENTION_MATERIALIZING }, { status: 'failed', error: { startsWith: STUCK } }] },
   });
-  if (!runs.length || (await pendingProjectMutations(ch, projectId)).length) return;
+  if (!runs.length) return true;
+  if ((await pendingProjectMutations(ch, projectId)).length) {
+    await flagStuckRetention(ch, projectId);
+    return false;
+  }
   for (const run of runs) {
     // `startedAt` is the run's first fence: it deleted exactly the rows received by then and older than the cutoff.
     if (await retentionRowsRemain(ch, projectId, run.cutoff, run.startedAt)) {
@@ -77,6 +80,7 @@ async function finishMaterializedRetention(ch: ClickHouseClient, projectId: stri
     await prisma.retentionRun.update({ where: { id: run.id }, data: { status: 'completed', finishedAt: new Date(), error: null } });
     console.log(JSON.stringify({ level: 'info', event: 'retention.completed', runId: run.id, projectId, deletedEvents: run.deletedEvents }));
   }
+  return true;
 }
 
 /**

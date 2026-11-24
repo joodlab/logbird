@@ -260,7 +260,7 @@ it('rechecks retained evidence after a long lookup-to-claim pause without double
 });
 
 it('a failed async-queue drain keeps expired claims fenced', async () => {
-  await f.pending(input, { expired: true });
+  await f.pending(input, { needsFreshFlush: true });
   vi.spyOn(maintenanceClickhouse, 'command').mockRejectedValueOnce(new Error('queue drain timeout'));
   const response = await f.post(input);
   expect(response.status).toBe(503);

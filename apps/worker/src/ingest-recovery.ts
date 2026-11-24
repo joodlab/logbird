@@ -22,7 +22,7 @@ import { rebuildProjectReadModel } from './project-repair';
 const FLUSH_INTERVAL_MS = 60_000;
 // Old API servers stamped claims on their own clocks. Leave room for those claims during a rolling upgrade.
 export const RETENTION_CLOCK_SKEW_ALLOWANCE_MS = 30_000;
-const CLAIM_SETTLEMENT_MS = INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS + RETENTION_CLOCK_SKEW_ALLOWANCE_MS;
+export const CLAIM_SETTLEMENT_MS = INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS + RETENTION_CLOCK_SKEW_ALLOWANCE_MS;
 let flushedAt = 0;
 let flushAttemptedAt = 0;
 let flushing: Promise<void> | undefined;
@@ -59,6 +59,28 @@ async function projectInsertSettlement(projectId: string, db: Pick<Prisma.Transa
   return { proofAfter, settled: proofAfter <= open.now.getTime() };
 }
 
+function flushUnavailable(cause: unknown) {
+  return Object.assign(new Error('Retention needs the SYSTEM FLUSH ASYNC INSERT QUEUE grant on the ClickHouse writer.', { cause }), {
+    code: 'LOGBIRD_FLUSH_UNAVAILABLE',
+  });
+}
+
+/** Flush before taking a background retention fence. The locked check must confirm this proof still covers the project. */
+export async function flushProjectBeforeRetention(ch: ClickHouseClient, projectId: string) {
+  const { proofAfter, settled } = await projectInsertSettlement(projectId, prisma);
+  if (!settled || !proofAfter) return;
+  try {
+    await flushAfter(ch, proofAfter);
+  } catch (error) {
+    throw flushUnavailable(error);
+  }
+}
+
+export async function projectInsertsSettled(projectId: string, db: Pick<Prisma.TransactionClient, '$queryRaw'>) {
+  const { proofAfter, settled } = await projectInsertSettlement(projectId, db);
+  return settled && proofAfter <= flushedAt;
+}
+
 /** Retention and manual rollup repair hold EXCLUSIVE until writes are proven settled. */
 export async function settleProjectInserts(ch: ClickHouseClient, projectId: string, db: Pick<Prisma.TransactionClient, '$queryRaw'> = prisma) {
   const { proofAfter, settled } = await projectInsertSettlement(projectId, db);
@@ -67,9 +89,7 @@ export async function settleProjectInserts(ch: ClickHouseClient, projectId: stri
   try {
     await flushAsyncInserts(ch);
   } catch (error) {
-    throw Object.assign(new Error('Retention needs the SYSTEM FLUSH ASYNC INSERT QUEUE grant on the ClickHouse writer.', { cause: error }), {
-      code: 'LOGBIRD_FLUSH_UNAVAILABLE',
-    });
+    throw flushUnavailable(error);
   }
   return true;
 }

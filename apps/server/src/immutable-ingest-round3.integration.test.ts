@@ -150,7 +150,7 @@ it('recovers a missing old long-id claim using the safe stored id and its origin
 });
 
 it('throttles failed global flush attempts while healthy sibling rows still commit', async () => {
-  await f.pending(input, { expired: true });
+  await f.pending(input, { needsFreshFlush: true });
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   const calls = vi
     .spyOn(maintenanceClickhouse, 'command')

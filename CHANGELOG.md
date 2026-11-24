@@ -4,7 +4,7 @@
 
 ### Highlights
 
-- The hourly retention run no longer holds a project's lock while ClickHouse deletes expired events, so ingest is no longer refused during it (#268). It takes the lock for two short steps (milliseconds), creates its DELETEs without waiting, and readers see them applied while ClickHouse finishes them in the background.
+- Background retention releases the project lock before ClickHouse finishes deleting expired events. Readers see those deletions while ClickHouse applies them. Ingest can briefly wait for the two steps that coordinate writes and deletion, and repairs and mixed-version upgrades can use synchronous retention (#268).
 
 ### Changes
 
@@ -18,7 +18,7 @@
 - **Upgrade every server replica before starting the new worker.** A rolling upgrade requires every existing API replica to report a heartbeat. When upgrading from a release without server heartbeats, keep the new worker stopped until every old API replica has drained and stopped serving traffic.
 - The worker checks for heartbeat support at both retention fences. If a server seen in the last 90 seconds lacks support, or no server recently reported a heartbeat, the run uses the synchronous method and the project's ingest waits while ClickHouse deletes. Before restoring a pre-heartbeat server, stop the new worker and let pending retention deletes finish.
 - The ClickHouse writer needs `SYSTEM FLUSH ASYNC INSERT QUEUE` to settle an unresolved claim. If the flush fails at the first background retention fence, Settings records the canceled run and the reason. Synchronous retention and repair also require unresolved inserts to settle before they change stored rows.
-- If you rebuild a project's rollups by hand after killing a Logbird mutation, use `scripts/repair-rollups.ts PROJECT` (it refuses that project's ingest while it runs).
+- If you rebuild a project's rollups by hand after killing a Logbird mutation, run `node --env-file=.env --import tsx scripts/repair-rollups.ts PROJECT`. Ingest for that project waits during the rebuild.
 - **A workspace always keeps an owner.** Migration `20261124120000_member_keep_an_owner` adds a Postgres trigger on
   `member`: a leave, removal or role change that would leave an organization without an owner is refused with
   409 `workspace_needs_owner` ("A workspace needs at least one owner."). The migration is additive and does not check

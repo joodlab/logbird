@@ -264,7 +264,12 @@ export const managementRoutes = new Hono<AppEnv>()
         }),
       );
       invalidateSetup(project.id);
-      if (input.retentionDays !== undefined && input.retentionDays < before.retentionDays) await enforceProjectRetention(project.id);
+      // A previous lowering may have committed the policy before the purge returned a retryable error.
+      if (
+        input.retentionDays !== undefined &&
+        (input.retentionDays < before.retentionDays || (input.retentionDays === before.retentionDays && confirm === before.slug))
+      )
+        await enforceProjectRetention(project.id);
       return c.json(serializeProject(project));
     },
   )

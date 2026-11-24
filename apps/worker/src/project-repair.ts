@@ -5,9 +5,10 @@ import { enqueueProjectRetention } from './queue';
 
 export function heartbeatMaintenanceRun(runId: string) {
   const timer = setInterval(() => {
-    void prisma.retentionRun
-      .updateMany({ where: { id: runId, status: { in: ['running', 'staging'] } }, data: { heartbeatAt: new Date() } })
-      .catch(() => console.error(JSON.stringify({ level: 'error', event: 'maintenance.heartbeat_failed', runId })));
+    void prisma.$executeRaw`UPDATE "RetentionRun" SET "heartbeatAt" = clock_timestamp() AT TIME ZONE 'UTC'
+        WHERE id = ${runId} AND status IN ('running', 'staging')`.catch(() =>
+      console.error(JSON.stringify({ level: 'error', event: 'maintenance.heartbeat_failed', runId })),
+    );
   }, 30_000);
   return () => clearInterval(timer);
 }
