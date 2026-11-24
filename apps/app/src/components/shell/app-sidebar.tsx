@@ -229,7 +229,7 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
                 <EntityAvatar id={workspace?.id ?? ''} name={workspace?.name ?? ''} size="sm" square />
                 <span className="flex-1 truncate">Switch workspace</span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-max min-w-56 max-w-[min(24rem,calc(100vw-2rem))]">
+              <DropdownMenuSubContent className="w-max min-w-[min(14rem,calc(100vw-2rem))] max-w-[min(24rem,calc(100vw-2rem))]">
                 {me.data?.organizations.map((org) => (
                   <DropdownMenuItem key={org.id} onClick={() => org.id !== workspace?.id && switchWorkspace(org.id)}>
                     <EntityAvatar id={org.id} name={org.name} size="sm" square />

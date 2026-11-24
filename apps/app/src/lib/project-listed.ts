@@ -1,8 +1,7 @@
 import { PROJECT_IN_OTHER_WORKSPACE, projectInOtherWorkspaceErrorSchema } from '@logbird/contracts';
 import type { QueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api/client';
 import { ApiRequestError } from '@/lib/api/errors';
-import { projectsQuery } from '@/lib/api/queries';
+import { projectQuery, projectsQuery } from '@/lib/api/queries';
 
 /**
  * Whether the workspace lists this project, so a stale link can be not found before any of its requests runs. The
@@ -42,15 +41,19 @@ export function projectElsewhere(error: unknown): ProjectElsewhere | null {
 }
 
 /**
- * Why a project the active workspace does not list cannot open: in another workspace the person belongs to (the server
- * names it), or missing for them (deleted, never theirs, or a workspace they left: one answer, so nothing is revealed).
+ * Reads the project fresh, never from a cache another workspace filled (another tab may have switched the active one):
+ * 'readable' (and the detail cache now holds it), in another of the person's workspaces (the server names it), or
+ * missing for them (deleted, never theirs, or a workspace they left: one answer, so nothing is revealed). Any other
+ * failure (offline, 5xx) is thrown, for the page's usual retry, rather than called missing.
  */
-export async function whyProjectIsMissing(projectId: string): Promise<ProjectElsewhere | typeof PROJECT_MISSING> {
+export async function readProject(queryClient: QueryClient, projectId: string): Promise<'readable' | ProjectElsewhere | typeof PROJECT_MISSING> {
   try {
-    await api.projects.get(projectId);
-    // Listed nowhere a moment ago but readable now (created in between): the project request decides from here.
-    return PROJECT_MISSING;
+    await queryClient.fetchQuery({ ...projectQuery(projectId), staleTime: 0 });
+    return 'readable';
   } catch (error) {
-    return projectElsewhere(error) ?? PROJECT_MISSING;
+    const elsewhere = projectElsewhere(error);
+    if (elsewhere) return elsewhere;
+    if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) return PROJECT_MISSING;
+    throw error;
   }
 }

@@ -5,7 +5,7 @@ const list = vi.fn();
 const get = vi.fn();
 vi.mock('@/lib/api/client', () => ({ api: { projects: { list: () => list(), get: (id: string) => get(id) } } }));
 
-const { PROJECT_MISSING, projectElsewhere, projectIsListed, whyProjectIsMissing } = await import('./project-listed');
+const { PROJECT_MISSING, projectElsewhere, projectIsListed, readProject } = await import('./project-listed');
 const { ApiRequestError } = await import('./api/errors');
 const { keys } = await import('./api/queries');
 
@@ -97,11 +97,32 @@ it('names the workspace a project is in only from a well-formed 409 project_in_o
   expect(projectElsewhere(new Error('offline'))).toBeNull();
 });
 
-it('says why an unlisted project cannot open: another of my workspaces, or simply missing', async () => {
+it('reads a project fresh on entry: readable, in another of my workspaces, missing, or a failure to retry', async () => {
+  const qc = client();
+  const project = { id: 'p_clinics', name: 'Clinics', organizationId: 'ws_clinics' };
+  // A stale detail another workspace left in the cache never answers: the read goes to the server.
+  qc.setQueryData(keys.project('p_clinics').concat('detail'), project);
+  get.mockResolvedValueOnce(project);
+  expect(await readProject(qc, 'p_clinics')).toBe('readable');
+  expect(get).toHaveBeenCalledTimes(1);
   get.mockRejectedValueOnce(elsewhere());
-  expect(await whyProjectIsMissing('p_clinics')).toEqual({ kind: 'project-elsewhere', workspaceId: 'ws_clinics', workspaceName: 'Clinics Example' });
+  expect(await readProject(qc, 'p_clinics')).toEqual({ kind: 'project-elsewhere', workspaceId: 'ws_clinics', workspaceName: 'Clinics Example' });
   get.mockRejectedValueOnce(new ApiRequestError(404, 'not_found', 'Project not found.'));
-  expect(await whyProjectIsMissing('p_gone')).toBe(PROJECT_MISSING);
-  get.mockRejectedValueOnce(new Error('offline'));
-  expect(await whyProjectIsMissing('p_offline')).toBe(PROJECT_MISSING);
+  expect(await readProject(qc, 'p_gone')).toBe(PROJECT_MISSING);
+  // Offline or a 5xx is not "not found": it is thrown for the page's retry.
+  // (Network failures are retried by the project query first, so these answers persist.)
+  vi.useFakeTimers();
+  try {
+    for (const [id, failure, text] of [
+      ['p_offline', new Error('offline'), 'offline'],
+      ['p_down', new ApiRequestError(503, 'unavailable', 'Down'), 'Down'],
+    ] as const) {
+      get.mockRejectedValue(failure);
+      const outcome = expect(readProject(qc, id)).rejects.toThrow(text);
+      await vi.runAllTimersAsync();
+      await outcome;
+    }
+  } finally {
+    vi.useRealTimers();
+  }
 });

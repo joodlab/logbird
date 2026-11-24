@@ -38,3 +38,36 @@ it("serves the deployment's APP_URL and exports the fixed local default", async 
   expect(committedOpenApiDocument(served)).toStrictEqual(expected);
   expect(served).toStrictEqual(before);
 });
+
+it('documents the project-access 409 on every console project operation so every real conflict body still validates', async () => {
+  const spec = await (await app.request('/openapi.json')).json();
+  type Schema = { anyOf?: Schema[]; oneOf?: Schema[]; properties?: { error?: { properties?: { code?: { const?: string } } } } };
+  /** Which error codes a 409 schema admits: a branch with no `const` code admits any code. */
+  const admits = (schema: Schema, code: string) =>
+    (schema.anyOf ?? [schema]).some((branch) => {
+      const fixed = branch.properties?.error?.properties?.code?.const;
+      return fixed === undefined || fixed === code;
+    });
+  let operations = 0;
+  for (const [path, item] of Object.entries(spec.paths as Record<string, Record<string, { responses: Record<string, any> }>>)) {
+    for (const operation of Object.values(item)) {
+      const schema = operation.responses?.['409']?.content?.['application/json']?.schema as Schema | undefined;
+      if (!path.startsWith('/api/projects/{projectId}')) {
+        expect(JSON.stringify(operation.responses ?? {}), path).not.toContain('project_in_other_workspace');
+        continue;
+      }
+      operations++;
+      expect(schema?.oneOf, `${path}: oneOf would reject a body two branches match`).toBeUndefined();
+      // The named conflict, and conflicts the routes answer for their own reasons.
+      for (const code of [
+        'project_in_other_workspace',
+        'sample_data_limit',
+        'webhook_disabled',
+        'webhook_delivery_pending',
+        'webhook_secret_overlap_limit',
+      ])
+        expect(schema && admits(schema, code), `${path} admits ${code}`).toBe(true);
+    }
+  }
+  expect(operations).toBe(37);
+});

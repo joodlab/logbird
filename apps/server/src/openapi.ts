@@ -71,12 +71,15 @@ export const committedOpenApiDocument = <T extends object>(served: T) => ({ ...s
 export const PROJECT_ROUTE_PATH = /^\/api\/projects\/\{projectId\}(?:\/|$)/;
 const PROJECT_CONFLICT = 'The project is in another workspace you are a member of (details name it): switch the active workspace to open it.';
 const projectConflictSchema = (await resolver(projectInOtherWorkspaceErrorSchema).toOpenAPISchema()).schema;
+const generalErrorSchema = (await resolver(apiErrorSchema).toOpenAPISchema()).schema;
 type Operation = { responses?: Record<string, { description?: string; content?: Record<string, { schema?: unknown }> }> };
 const METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'] as const;
 
 /**
  * Documents requireProjectAccess's 409 on every console project operation, from the one middleware rather than per
- * route. A route that already answers 409 for its own reason gets both shapes (oneOf).
+ * route. anyOf, never oneOf: the general error shape also matches the named one, and a route's other conflicts (its own
+ * documented 409, or ones that fell under the default error, such as sample_data_limit or webhook_disabled) must still
+ * validate.
  */
 export function documentProjectAccess<T extends { paths?: Record<string, unknown> }>(spec: T): T {
   for (const [path, item] of Object.entries(spec.paths ?? {})) {
@@ -88,12 +91,10 @@ export function documentProjectAccess<T extends { paths?: Record<string, unknown
       const responses = operation.responses;
       const own = responses['409'];
       const ownSchema = own?.content?.['application/json']?.schema;
-      responses['409'] = own
-        ? {
-            description: `${own.description ?? 'Conflict.'} Or: ${PROJECT_CONFLICT}`,
-            content: { 'application/json': { schema: ownSchema ? { oneOf: [ownSchema, projectConflictSchema] } : projectConflictSchema } },
-          }
-        : { description: PROJECT_CONFLICT, content: { 'application/json': { schema: projectConflictSchema } } };
+      responses['409'] = {
+        description: `${own?.description ? `${own.description} Or: ` : ''}${PROJECT_CONFLICT} Other conflicts use the general error shape.`,
+        content: { 'application/json': { schema: { anyOf: [...(ownSchema ? [ownSchema] : []), projectConflictSchema, generalErrorSchema] } } },
+      };
     }
   }
   return spec;

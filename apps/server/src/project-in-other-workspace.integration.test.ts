@@ -114,6 +114,18 @@ it('answers 409 project_in_other_workspace only to a current member of the ownin
     const none = await comparable(await request(`/api/projects/missing-${randomUUID()}`, 'GET', actor.cookie));
     expect(forged).toEqual(none);
     expect(none.status).toBe(404);
+
+    // No valid active workspace (none set, or one the person no longer belongs to), and a project in a workspace they
+    // do belong to: the same 409 naming that workspace, on reads and on mutations, so the console can offer the switch.
+    // It names only a workspace the person is a member of.
+    for (const active of [null, stranger.org.id, former.org.id]) {
+      await prisma.session.updateMany({ where: { userId: actor.id }, data: { activeOrganizationId: active } });
+      for (const method of ['GET', 'PATCH'] as const) {
+        const response = await request(`/api/projects/${other.project.id}`, method, actor.cookie, method === 'PATCH' ? { name: 'x' } : undefined);
+        expect(response.status, `${method} with active ${active}`).toBe(409);
+        expect((await response.json()).error.details).toEqual({ workspaceId: other.org.id, workspaceName: 'T3 Other Example' });
+      }
+    }
   } finally {
     for (const organization of organizations) await prisma.organization.deleteMany({ where: { id: organization } });
     await prisma.user.deleteMany({ where: { id: { in: users } } });

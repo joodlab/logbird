@@ -1047,49 +1047,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -1210,49 +1238,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -1416,49 +1472,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -1648,49 +1732,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -1992,49 +2104,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -2157,49 +2297,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -2629,49 +2797,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -3307,49 +3503,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -3489,49 +3713,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "429": {
             "description": "Export capacity is in use. Finish or cancel an export, then retry."
@@ -3845,49 +4097,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -4050,49 +4330,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -4251,49 +4559,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -4556,49 +4892,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -4973,49 +5337,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -5089,49 +5481,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -5425,7 +5845,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "properties": {
                         "error": {
@@ -5490,12 +5910,36 @@
                         "error"
                       ],
                       "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     }
                   ]
                 }
               }
             },
-            "description": "key_revoked: the key is revoked. key_expired: the key has expired; retry with a future expiresAt. key_restricted: the replacement would drop the scope or expiry (database backstop). Or: The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "key_revoked: the key is revoked. key_expired: the key has expired; retry with a future expiresAt. key_restricted: the replacement would drop the scope or expiry (database backstop). Or: The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -5888,49 +6332,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -6277,49 +6749,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -6947,49 +7447,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -7162,49 +7690,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -7270,49 +7826,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -7393,49 +7977,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -8067,49 +8679,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -8284,49 +8924,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -8469,49 +9137,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -8706,49 +9402,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -9013,49 +9737,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -9129,49 +9881,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -9405,49 +10185,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -9780,49 +10588,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "422": {
             "content": {
@@ -9995,49 +10831,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "503": {
             "content": {
@@ -10306,49 +11170,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -10674,49 +11566,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "422": {
             "content": {
@@ -11081,49 +12001,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "default": {
             "content": {
@@ -11237,49 +12185,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "503": {
             "content": {
@@ -11427,7 +12403,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "properties": {
                         "error": {
@@ -11492,12 +12468,36 @@
                         "error"
                       ],
                       "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     }
                   ]
                 }
               }
             },
-            "description": "Rotation would exceed the limit of 10 active secrets. Wait for an expiry or rotate with zero overlap. Or: The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "Rotation would exceed the limit of 10 active secrets. Wait for an expiry or rotate with zero overlap. Or: The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "503": {
             "content": {
@@ -11643,49 +12643,77 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
+                      "description": "The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.",
                       "properties": {
-                        "code": {
-                          "const": "project_in_other_workspace",
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "properties": {
-                            "workspaceId": {
+                            "code": {
+                              "const": "project_in_other_workspace",
                               "type": "string"
                             },
-                            "workspaceName": {
+                            "details": {
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string"
+                                },
+                                "workspaceName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "workspaceName"
+                              ],
+                              "type": "object"
+                            },
+                            "message": {
                               "type": "string"
                             }
                           },
                           "required": [
-                            "workspaceId",
-                            "workspaceName"
+                            "code",
+                            "message",
+                            "details"
                           ],
                           "type": "object"
-                        },
-                        "message": {
-                          "type": "string"
                         }
                       },
                       "required": [
-                        "code",
-                        "message",
-                        "details"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "details": {},
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it."
+            "description": "The project is in another workspace you are a member of (details name it): switch the active workspace to open it. Other conflicts use the general error shape."
           },
           "503": {
             "content": {

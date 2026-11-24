@@ -10,7 +10,7 @@ import { AppShell } from '@/components/shell/app-shell';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { projectQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
-import { PROJECT_MISSING, type ProjectElsewhere, projectElsewhere, projectIsListed, whyProjectIsMissing } from '@/lib/project-listed';
+import { PROJECT_MISSING, type ProjectElsewhere, projectElsewhere, readProject } from '@/lib/project-listed';
 import { rememberProject } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
@@ -18,12 +18,15 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // falls back to its default range instead of failing validation.
   validateSearch: z.object({ range: z.string().optional().catch(undefined) }),
   search: { middlewares: [retainSearchParams(['range'])] },
-  // A project this workspace does not list (deleted, another workspace's, a stale bookmark) is not found before any of
-  // its requests runs: the loader and the page's own queries would each answer 404 into the console. A project the
-  // cached list lacks is checked against a fresh list first, so one created since is never shown as not found.
-  beforeLoad: async ({ context, params }) => {
-    // A project in another of the person's workspaces is named, so they can switch to it (never switched silently).
-    if (!(await projectIsListed(context.queryClient, params.projectId))) throw notFound({ data: await whyProjectIsMissing(params.projectId) });
+  // On entering a project (a link, a bookmark, another project), it is read fresh before any of its pages load: a cache
+  // filled while another workspace was active (in this tab or another) never stands in for access. A project in another
+  // of the person's workspaces is named, so they can switch to it (never switched silently); one that is not theirs is
+  // not found; a failure to read it shows the usual error with a retry. Moving between pages of the same project reuses
+  // that read.
+  beforeLoad: async ({ context, params, cause }) => {
+    if (cause === 'stay') return;
+    const outcome = await readProject(context.queryClient, params.projectId);
+    if (outcome !== 'readable') throw notFound({ data: outcome });
   },
   loader: async ({ context, params }) => {
     try {
