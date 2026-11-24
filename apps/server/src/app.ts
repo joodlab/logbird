@@ -10,7 +10,7 @@ import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import { requestId } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
-import { openAPIRouteHandler } from 'hono-openapi';
+import { generateSpecs } from 'hono-openapi';
 import { z } from 'zod';
 import { apiReferencePage } from './api-reference';
 import { queueAuditEvent } from './audit-outbox';
@@ -24,7 +24,7 @@ import { ingestReceiptFailureResponse } from './ingest-receipt-errors';
 import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
 import { authorizeMutation } from './middlewares/require-role';
-import { doc, routeDoc } from './openapi';
+import { doc, documentProjectAccess, routeDoc } from './openapi';
 import { auditDrainStatus } from './outbox-delivery';
 import { clientAddress, rateLimit } from './rate-limit';
 import { managementRoutes } from './routes';
@@ -296,27 +296,40 @@ export const routes = app
   .route('/api', managementRoutes)
   .route('/api', webhookRoutes)
   .route('/v1', publicRoutes);
+let openApiDocument: ReturnType<typeof generateSpecs> | undefined;
 app.get(
   '/openapi.json',
   routeDoc('OpenAPI document', { hide: true }, 'none'),
-  openAPIRouteHandler(app, {
-    documentation: {
-      info: { title: 'Logbird API', version: '0.2.1' },
-      servers: [{ url: env.APP_URL, description: 'This Logbird instance' }],
-      components: {
-        securitySchemes: {
-          session: { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' },
-          ingestKey: { type: 'http', scheme: 'bearer' },
-          readKey: { type: 'http', scheme: 'bearer', description: 'A read (`lb_read_…`) or scoped-read key. Scoped keys see only their scope.' },
-          viewerToken: {
-            type: 'http',
-            scheme: 'bearer',
-            bearerFormat: 'lbv1',
-            description: 'Short-lived viewer token from POST /v1/viewer-tokens (≤ 1 h). Read routes only; sees only its scope.',
-          },
+  // Generated once, then requireProjectAccess's 409 is added to every console project operation (documentProjectAccess).
+  async (c) => {
+    // A failed build is not cached: the next request tries again.
+    if (!openApiDocument)
+      openApiDocument = generateSpecs(app, openApiOptions, c)
+        .then(documentProjectAccess)
+        .catch((error) => {
+          openApiDocument = undefined;
+          throw error;
+        });
+    return c.json(await openApiDocument);
+  },
+);
+const openApiOptions: Parameters<typeof generateSpecs>[1] = {
+  documentation: {
+    info: { title: 'Logbird API', version: '0.2.1' },
+    servers: [{ url: env.APP_URL, description: 'This Logbird instance' }],
+    components: {
+      securitySchemes: {
+        session: { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' },
+        ingestKey: { type: 'http', scheme: 'bearer' },
+        readKey: { type: 'http', scheme: 'bearer', description: 'A read (`lb_read_…`) or scoped-read key. Scoped keys see only their scope.' },
+        viewerToken: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'lbv1',
+          description: 'Short-lived viewer token from POST /v1/viewer-tokens (≤ 1 h). Read routes only; sees only its scope.',
         },
       },
     },
-  }),
-);
+  },
+};
 app.get('/docs', apiReferencePage);

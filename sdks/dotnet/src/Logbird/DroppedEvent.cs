@@ -186,13 +186,18 @@ public sealed class DroppedEvent
     public string? Code { get; }
 
     /// <summary>
-    /// Whether the server may have stored this event even though the SDK dropped it. True when the event was put on the
-    /// wire at least once and no answer settled it: a request ended without an answer, or with a 5xx, or with a success
-    /// that did not acknowledge it, or it was still in flight at shutdown. False when the event was never sent, or every
-    /// answer for it said it was not stored. <see cref="DropReason.TooLarge"/> and <see cref="DropReason.Invalid"/> are
-    /// always false; <see cref="DropReason.Rejected"/> is false too, except for the codes <c>stored_event_unreadable</c>
-    /// and <c>unverified_after_parse_failure</c>, which keep an earlier unresolved outcome. A "dropped" event is not necessarily absent: when this is true,
-    /// resend <see cref="Json"/> (the server deduplicates by id) or look the id up before treating the event as lost.
+    /// Whether the server may have stored this event even though the SDK dropped it: delivery was attempted and storage
+    /// cannot be ruled out. It becomes true when a request carrying the event is started, before anything is known about
+    /// what reached the server, so it is conservative: it can be true for a request that failed before any byte left the
+    /// process. It stays true when no answer settled the event: a request ended without an answer, or with a 5xx, or with
+    /// a success that did not acknowledge it, or it was still in flight at shutdown. False when no request carrying the
+    /// event was ever started, or every request carrying it was answered "not stored" (a 4xx): once one request carrying
+    /// it had no such answer, a later "not stored" cannot clear it. <see cref="DropReason.TooLarge"/> and
+    /// <see cref="DropReason.Invalid"/> are always false; <see cref="DropReason.Rejected"/> is false too, a rejection of the
+    /// event's own content settling it, except for the codes <c>stored_event_unreadable</c> and
+    /// <c>unverified_after_parse_failure</c>, which keep an earlier unresolved outcome. A "dropped" event is not necessarily
+    /// absent: when this is true, resend <see cref="Json"/> (the server deduplicates by id while it retains the original),
+    /// or find it by id and compare its stored payload with the event as sent before treating it as lost.
     /// </summary>
     public bool MayBeStored { get; }
 

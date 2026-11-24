@@ -62,7 +62,7 @@ function HomePage() {
           <div className="flex flex-col gap-8">
             <SectionHeader eyebrow={customers.eyebrow} id="customers-title" lead={<Rich text={customers.lead} />} title={customers.title} />
             <Points items={access.points} />
-            <p className="panel border-s-2 border-s-brand p-4 text-sm leading-relaxed">
+            <p className="panel p-4 text-sm leading-relaxed">
               <strong className="font-medium">{customers.limitLabel}</strong>
               <span className="text-muted-foreground">
                 {': '}
@@ -99,7 +99,7 @@ function HomePage() {
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-center">
           <div className="flex flex-col gap-8">
             <SectionHeader eyebrow={evidence.eyebrow} id="evidence-title" lead={evidence.lead} title={evidence.title} />
-            <p className="panel border-s-2 border-s-brand p-4 text-sm leading-relaxed">
+            <p className="panel p-4 text-sm leading-relaxed">
               <strong className="font-medium">{evidence.screenshotLimit.label}</strong>
               <span className="text-muted-foreground">
                 {': '}

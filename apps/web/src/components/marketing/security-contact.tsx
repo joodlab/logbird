@@ -1,20 +1,16 @@
 import { Link } from '@tanstack/react-router';
-import { SECURITY_EMAIL } from '../../env';
+import { securityContact as words } from '../../content/security-contact';
 
-/**
- * How to report a vulnerability. With WEB_SECURITY_EMAIL set it's that mailbox; until then the site repeats
- * SECURITY.md ("request a private channel from the maintainers") and points to the contact form. It never guesses an
- * address on a domain we don't control.
- */
+/** How to report a vulnerability. Words, and when each applies: content/security-contact.ts. */
 export function SecurityContact({ onContactPage = false }: { onContactPage?: boolean }) {
-  if (SECURITY_EMAIL) {
+  if (words.email) {
     return (
       <>
-        Email{' '}
-        <a className="text-link" href={`mailto:${SECURITY_EMAIL}`}>
-          {SECURITY_EMAIL}
+        {words.email.before}{' '}
+        <a className="text-link" href={words.email.href}>
+          {words.email.label}
         </a>
-        .
+        {words.email.after}
       </>
     );
   }
@@ -22,21 +18,21 @@ export function SecurityContact({ onContactPage = false }: { onContactPage?: boo
     // Same page: point at the form section instead of navigating to ourselves (which wouldn't reset the form).
     return (
       <>
-        Use the{' '}
+        {words.onContactPage.before}{' '}
         <a className="text-link" href="#waitlist-title">
-          form
+          {words.onContactPage.link}
         </a>{' '}
-        to ask the maintainers for a private channel (choose "A question"), without any details of the issue.
+        {words.onContactPage.after}
       </>
     );
   }
   return (
     <>
-      Ask the maintainers for a private channel through the{' '}
+      {words.elsewhere.before}{' '}
       <Link className="text-link" search={{ interest: 'other' }} to="/contact">
-        contact form
+        {words.elsewhere.link}
       </Link>
-      , without any details of the issue.
+      {words.elsewhere.after}
     </>
   );
 }

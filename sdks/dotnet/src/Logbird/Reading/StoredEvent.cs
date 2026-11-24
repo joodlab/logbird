@@ -92,9 +92,15 @@ public sealed class StoredEvent
 /// <param name="Field">The field name.</param>
 /// <param name="Before">The previous value.</param>
 /// <param name="After">The new value.</param>
+/// <remarks>
+/// Its <c>ToString()</c> lists no values, so writing it as text cannot leak them. A structured logger that serializes its
+/// properties still sees them.
+/// </remarks>
 public sealed record StoredChange(string Field, string Before, string After)
 {
-    /// <summary>Lists no values (not even the field name), so logging this object cannot leak anything.</summary>
+    /// <summary>
+    /// <c>ToString()</c> lists no values (not even the field name), so writing this object as text cannot leak anything. A structured logger that serializes its properties still sees them.
+    /// </summary>
 #pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
     private bool PrintMembers(System.Text.StringBuilder builder)
     {

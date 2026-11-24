@@ -6,9 +6,15 @@ namespace Logbird;
 /// </summary>
 /// <param name="Type">The kind of actor, for example <c>user</c>, <c>api_key</c>, <c>service</c> or <c>system</c>.</param>
 /// <param name="Id">A stable identifier for the actor, such as a user id.</param>
+/// <remarks>
+/// Its <c>ToString()</c> lists no values, so writing it as text cannot leak them. A structured logger that serializes its
+/// properties still sees them.
+/// </remarks>
 public sealed record AuditActor(string Type, string Id)
 {
-    /// <summary>Lists no values (not even the type), so logging this object cannot leak anything.</summary>
+    /// <summary>
+    /// <c>ToString()</c> lists no values (not even the type), so writing this object as text cannot leak anything. A structured logger that serializes its properties still sees them.
+    /// </summary>
 #pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
@@ -48,9 +54,15 @@ public sealed record AuditActor(string Type, string Id)
 
 /// <summary>The person really operating the session when someone acts on behalf of the <see cref="AuditActor"/>, for example a support agent.</summary>
 /// <param name="Id">The impersonator's stable id.</param>
+/// <remarks>
+/// Its <c>ToString()</c> lists no values, so writing it as text cannot leak them. A structured logger that serializes its
+/// properties still sees them.
+/// </remarks>
 public sealed record AuditImpersonator(string Id)
 {
-    /// <summary>Lists no values, so logging this object cannot leak ids or names.</summary>
+    /// <summary>
+    /// <c>ToString()</c> lists no values, so writing this object as text cannot leak ids or names. A structured logger that serializes its properties still sees them.
+    /// </summary>
 #pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
@@ -68,9 +80,15 @@ public sealed record AuditImpersonator(string Id)
 /// A worker doing work a user requested keeps that user as the actor and sets itself as the executor.
 /// </summary>
 /// <param name="Type">The kind of executor, for example <c>api</c> or <c>worker</c>.</param>
+/// <remarks>
+/// Its <c>ToString()</c> lists no values, so writing it as text cannot leak them. A structured logger that serializes its
+/// properties still sees them.
+/// </remarks>
 public sealed record AuditExecutor(string Type)
 {
-    /// <summary>Lists no values (not even the type), so logging this object cannot leak anything.</summary>
+    /// <summary>
+    /// <c>ToString()</c> lists no values (not even the type), so writing this object as text cannot leak anything. A structured logger that serializes its properties still sees them.
+    /// </summary>
 #pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
@@ -107,9 +125,15 @@ public sealed record AuditExecutor(string Type)
 
 /// <summary>The business scope an event belongs to, such as a customer account or workspace. Resolve it after authorization.</summary>
 /// <param name="Id">The tenant's stable id.</param>
+/// <remarks>
+/// Its <c>ToString()</c> lists no values, so writing it as text cannot leak them. A structured logger that serializes its
+/// properties still sees them.
+/// </remarks>
 public sealed record AuditTenant(string Id)
 {
-    /// <summary>Lists no values, so logging this object cannot leak ids or names.</summary>
+    /// <summary>
+    /// <c>ToString()</c> lists no values, so writing this object as text cannot leak ids or names. A structured logger that serializes its properties still sees them.
+    /// </summary>
 #pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
@@ -125,9 +149,15 @@ public sealed record AuditTenant(string Id)
 /// <summary>A record the event affected.</summary>
 /// <param name="Type">The record type, for example <c>invoice</c>.</param>
 /// <param name="Id">The record's stable id.</param>
+/// <remarks>
+/// Its <c>ToString()</c> lists no values, so writing it as text cannot leak them. A structured logger that serializes its
+/// properties still sees them.
+/// </remarks>
 public sealed record AuditTarget(string Type, string Id)
 {
-    /// <summary>Lists no values (not even the type), so logging this object cannot leak anything.</summary>
+    /// <summary>
+    /// <c>ToString()</c> lists no values (not even the type), so writing this object as text cannot leak anything. A structured logger that serializes its properties still sees them.
+    /// </summary>
 #pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
     private bool PrintMembers(System.Text.StringBuilder builder)
     {

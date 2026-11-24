@@ -30,6 +30,15 @@ import {
   RECENT_PROBLEM_SEVERITY,
 } from '@logbird/contracts';
 import type { z } from 'zod';
+import {
+  ACTOR_NAME_IS_SENSITIVE_SQL,
+  ACTOR_NAME_MASK_PARAMS,
+  facetOrderParams,
+  facetOrderSql,
+  MASKED_ACTOR_NAME_TEXT_SQL,
+  maskActorNameInFilter,
+  maskedEmail,
+} from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { boundTenant, CLICKHOUSE_PLAIN_READ, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
@@ -157,10 +166,15 @@ export function timeRange(q: RangeQuery, now = Date.now()) {
 export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: CompiledFilter, scope?: ReadScope | null) {
   const c = compiled ?? (await filter(ch, q));
   const s = scopePredicate(scope);
+  // Under the actor_email mask, a filter cannot probe an address through a name that is the address (#333). Every
+  // scoped reader goes through here, with a filter this package compiled (scoped readers have no SQL mode).
+  const maskName = Boolean(scope?.mask?.includes('actor_email'));
+  if (maskName && q.lang === 'sql') throw new Error('SQL mode is not available to a masked scope.');
+  const userSql = maskName ? maskActorNameInFilter(c.sql) : c.sql;
   // The scope is ANDed outside the user's filter: nothing inside `(c.sql)` can widen it.
   return {
-    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql}) AND (${s.sql})`,
-    params: { project: projectId, ...timeRange(q), ...c.params, ...s.params },
+    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${userSql}) AND (${s.sql})`,
+    params: { project: projectId, ...timeRange(q), ...c.params, ...s.params, ...(maskName ? ACTOR_NAME_MASK_PARAMS : {}) },
   };
 }
 const iso = (s: string) => new Date(s.endsWith('Z') ? s : `${s.replace(' ', 'T')}Z`).toISOString();
@@ -357,17 +371,22 @@ async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: Rea
     'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1';
   if (!scope) return (await read<EventRow>(ch, canonical, { p, id }))[0];
   const s = scopePredicate(scope);
+  // Under the actor_email mask (#333), a tie on both timestamps fails closed: the hash that breaks it is unkeyed and
+  // covers the stored actor fields, so which version wins (and so a 200 or a 404, a parent or none) could be related
+  // to an address. Whether versions tie depends only on their timestamps. Other readers keep the canonical choice.
+  const failTies = Boolean(scope.mask?.includes('actor_email'));
+  const ties = 'uniqExact(sipHash64(payload)) OVER (PARTITION BY received_at,timestamp)';
   if (canonicalClient && canonicalClient !== ch) {
     // A row-policy-bound client only sees its tenant's rows, so it would pick the oldest version *of its tenant* as
     // canonical. Choose the canonical version project-wide and test the scope on it in the same lookup (a pointer and
     // a flag, nothing else). An unknown id and an out-of-scope id both end here, with one query and the same answer;
     // only an in-scope version is then fetched, exactly, through the bound client.
-    const [pointer] = await read<{ received_at: string; timestamp: string; h: string; in_scope: number }>(
+    const [pointer] = await read<{ received_at: string; timestamp: string; h: string; in_scope: number; ties: number }>(
       canonicalClient,
-      `SELECT received_at, timestamp, toString(sipHash64(payload)) h, (${s.sql}) in_scope FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1`,
+      `SELECT received_at, timestamp, toString(sipHash64(payload)) h, (${s.sql}) in_scope, ${failTies ? ties : '1'} ties FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1`,
       { p, id, ...s.params },
     );
-    if (!pointer || !Number(pointer.in_scope)) return;
+    if (!pointer || !Number(pointer.in_scope) || Number(pointer.ties) > 1) return;
     return (
       await read<EventRow>(
         ch,
@@ -378,6 +397,14 @@ async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: Rea
   }
   // Pick the canonical stored row first, then test the scope on it: a scoped caller sees exactly the row an unscoped
   // reader sees, or nothing (never a different stored version that happens to match).
+  if (failTies)
+    return (
+      await read<EventRow>(
+        ch,
+        `SELECT * EXCEPT(lb_ties) FROM (SELECT *, ${ties} lb_ties FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1) WHERE lb_ties=1 AND ${s.sql}`,
+        { p, id, ...s.params },
+      )
+    )[0];
   return (await read<EventRow>(ch, `SELECT * FROM (${canonical}) WHERE ${s.sql}`, { p, id, ...s.params }))[0];
 }
 /** With a scope, an out-of-scope id is indistinguishable from an unknown one (null → 404). */
@@ -464,11 +491,14 @@ const TARGET_COLUMNS = ['target_ids', 'target_types', 'target_names'];
 /** Two target-level facets expand ONE (id, type, name) tuple, so an id is never paired with another target's type. */
 const SHARED_TARGETS = 'ARRAY JOIN arrayZip(target_ids,target_types,target_names) AS facet_targets';
 /** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
-function facetLevel(field: string, n: number, sharedTargets = false) {
+function facetLevel(field: string, n: number, sharedTargets = false, maskName = false) {
   const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
   let expr = col ?? `attributes[{attr${n}:String}]`;
   let join = '';
   let label = expr;
+  // Under the actor_email mask: whether the value / label is a masked address (UInt8), carried beside the text (#333).
+  let flag = '0';
+  let labelFlag = '0';
   if (sharedTargets && col && TARGET_COLUMNS.includes(col)) {
     // The caller adds SHARED_TARGETS once for both levels.
     expr = `facet_targets.${TARGET_COLUMNS.indexOf(col) + 1}`;
@@ -480,8 +510,10 @@ function facetLevel(field: string, n: number, sharedTargets = false) {
   } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
-  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) label = `${field}_name`;
-  else if (!col) {
+  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) {
+    label = maskName && field === 'actor' ? MASKED_ACTOR_NAME_TEXT_SQL : `${field}_name`;
+    if (maskName && field === 'actor') labelFlag = ACTOR_NAME_IS_SENSITIVE_SQL;
+  } else if (!col) {
     // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
     // other element types keep their JSON text. An empty array contributes no group.
     const a = `attributes[{attr${n}:String}]`;
@@ -494,7 +526,14 @@ function facetLevel(field: string, n: number, sharedTargets = false) {
     expr = `toString(${expr})`;
     label = expr;
   }
-  return { expr, label, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };
+  // Under the actor_email mask a name that is the address leaves SQL as the lower-cased address plus its flag (#333).
+  if (maskName && col === 'actor_name') {
+    expr = MASKED_ACTOR_NAME_TEXT_SQL;
+    label = expr;
+    flag = ACTOR_NAME_IS_SENSITIVE_SQL;
+    labelFlag = flag;
+  }
+  return { expr, label, flag, labelFlag, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };
 }
 /** The stored column a facet field reads (undefined for attributes). */
 export const facetColumn = (field: string) => (Object.hasOwn(columns, field) ? columns[field] : undefined);
@@ -504,7 +543,13 @@ export async function facets(
   q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
   scope?: ReadScope | null,
   compiled?: CompiledFilter,
+  /** The field mask key (`fieldMaskKey`); required when the scope masks `actor_email`. */
+  maskKey?: Buffer,
 ): Promise<FacetResponse> {
+  if (scope?.mask?.includes('actor_email')) {
+    if (!maskKey) throw new Error('The actor_email mask requires a field mask key.');
+    return maskedFacets(ch, p, q, scope, compiled, maskKey);
+  }
   const w = await where(ch, p, q, compiled, scope);
   const one = facetLevel(q.field, 1);
   // Only the top `limit` groups leave ClickHouse; the window sum (computed before LIMIT) keeps otherCount exact.
@@ -535,6 +580,73 @@ export async function facets(
     v.groupsOtherCount = Math.max(Number(mine[0]?.total ?? 0) - v.groups.reduce((n, g) => n + g.count, 0), 0);
   }
   return { field: q.field, by: q.by, values, otherCount };
+}
+
+/**
+ * Facets for a scope with the actor_email mask (#333). A name that is the address leaves SQL as text plus a separate
+ * flag column (never a marker inside the text), and only flagged text becomes the address's pseudonym, the same one
+ * the scope's events carry; groups are keyed by (flag, text), so no producer string can merge with a masked address.
+ * Ties are broken by a keyed hash, so which of several equal counts a limit keeps cannot be related to any address;
+ * the order is a pure function of the project, the key and the group, so it is the same on every request.
+ */
+async function maskedFacets(
+  ch: ClickHouseClient,
+  p: string,
+  q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
+  scope: ReadScope,
+  compiled: CompiledFilter | undefined,
+  key: Buffer,
+): Promise<FacetResponse> {
+  const params = { ...ACTOR_NAME_MASK_PARAMS, ...facetOrderParams(key, p) };
+  const show = (flag: number | string, text: string) => (Number(flag) ? maskedEmail(p, text, key) : text);
+  // The selected label leaves SQL as two scalar columns (never a tuple, whose JSON shape depends on server settings).
+  const label = (flag: number | string, text: string, shown: string) => (text ? show(flag, text) : shown);
+  const w = await where(ch, p, q, compiled, scope);
+  const one = facetLevel(q.field, 1, false, true);
+  type Row = { value: string; masked: number; labf: number; labt: string; count: number; total: number };
+  const rows = await read<Row>(
+    ch,
+    `SELECT ${one.expr} value,${one.flag} masked,tupleElement(argMaxIf(tuple(${one.labelFlag},${one.label}),received_at,${one.label}!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value,masked ORDER BY count DESC,${facetOrderSql('masked', 'value')} LIMIT {facetLimit:UInt32}`,
+    { ...w.params, ...one.params, ...params, facetLimit: q.limit },
+  );
+  const keyOf = (flag: number | string, text: string) => `${Number(flag)}|${text}`;
+  const values = rows.map((r) => {
+    const value = show(r.masked, r.value);
+    return {
+      value,
+      label: label(r.labf, r.labt, value),
+      count: Number(r.count),
+      key: keyOf(r.masked, r.value),
+    } as FacetResponse['values'][number] & {
+      key: string;
+    };
+  });
+  const total = Number(rows[0]?.total ?? 0);
+  const otherCount = Math.max(total - values.reduce((n, v) => n + v.count, 0), 0);
+  const strip = () => values.map(({ key: _key, ...v }) => v);
+  if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values: strip(), otherCount };
+  const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
+  const shared = isTarget(q.field) && isTarget(q.by);
+  const both = shared
+    ? { one: facetLevel(q.field, 1, true, true), two: facetLevel(q.by, 2, true, true) }
+    : { one, two: facetLevel(q.by, 2, false, true) };
+  const two = both.two;
+  const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
+  type Group = { value: string; masked: number; grp: string; gmasked: number; labf: number; labt: string; count: number; total: number };
+  const groups = await read<Group>(
+    ch,
+    `SELECT value,masked,grp,gmasked,tupleElement(argMaxIf(tuple(glf,glabel),received_at,glabel!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE concat(toString(masked),'|',value) IN {facetKeys:Array(String)} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
+    { ...w.params, ...one.params, ...two.params, ...params, facetKeys: values.map((v) => v.key), byLimit: q.byLimit ?? 5 },
+  );
+  for (const v of values) {
+    const mine = groups.filter((g) => keyOf(g.masked, g.value) === v.key);
+    v.groups = mine.map((g) => {
+      const value = show(g.gmasked, g.grp);
+      return { value, label: label(g.labf, g.labt, value), count: Number(g.count) };
+    });
+    v.groupsOtherCount = Math.max(Number(mine[0]?.total ?? 0) - v.groups.reduce((n, g) => n + g.count, 0), 0);
+  }
+  return { field: q.field, by: q.by, values: strip(), otherCount };
 }
 async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
   const w = await where(ch, p, q);

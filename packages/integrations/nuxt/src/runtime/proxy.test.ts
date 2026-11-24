@@ -1,7 +1,7 @@
 import { Logbird } from '@logbird/sdk';
 import { trailQuery } from '@logbird/sdk/read';
 import { createApp, eventHandler, toWebHandler } from 'h3';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { attachAudit } from './capture';
 import { createReadHandler } from './proxy';
 
@@ -17,6 +17,34 @@ it('denies by default and attaches h3 audit context through the real h3 handler'
   const handle = toWebHandler(app);
   expect((await handle(new Request('http://local/events'))).status).toBe(403);
   expect(await (await handle(new Request('http://local/context'))).json()).toEqual({ audit: 'function' });
+  await client.shutdown();
+});
+
+it('reads inbound correlation headers only when the hooks opt in (#321)', async () => {
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
+  const track = vi.spyOn(client, 'track').mockReturnValue(undefined as never);
+  const headers = { 'x-request-id': 'req_from_client', 'x-logbird-operation': 'op_from_client' };
+  for (const [options, request, operation] of [
+    [{}, false, false],
+    [{ useRequestIdHeader: true }, true, false],
+    [{ useOperationHeader: true }, false, true],
+    [{ useRequestIdHeader: true, useOperationHeader: true }, true, true],
+  ] as const) {
+    const app = createApp();
+    const hooks = { authorize: () => false as const, ...options };
+    app.use(eventHandler((event) => attachAudit(event, client, hooks)));
+    app.use(
+      eventHandler(async (event) => {
+        event.context.audit('headers');
+        await event.context.audit.pending();
+        return { ok: true };
+      }),
+    );
+    await toWebHandler(app)(new Request('http://local/', { headers }));
+    const context = track.mock.lastCall?.[0].context;
+    expect(context?.requestId === 'req_from_client').toBe(request);
+    expect(context?.operationId === 'op_from_client').toBe(operation);
+  }
   await client.shutdown();
 });
 

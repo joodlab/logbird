@@ -19,8 +19,8 @@
     "lint": "ultracite check",
     "format": "biome format --write .",
     "typecheck": "turbo run typecheck",
-    "test": "node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs && turbo run test && node --test scripts/selfhost-init.test.mjs",
-    "test:unit": "turbo run test --concurrency=2 --filter=!@logbird/server -- --exclude \"**/*.integration.test.ts\" --maxWorkers=2 && pnpm --filter @logbird/server exec vitest run --config vitest.export-unit.config.ts && node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs scripts/selfhost-init.test.mjs scripts/k3s-manifests.test.mjs scripts/wait-k8s-job.test.mjs",
+    "test": "node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs scripts/check-npm-packages.test.mjs && turbo run test && node --test scripts/selfhost-init.test.mjs",
+    "test:unit": "turbo run test --concurrency=2 --filter=!@logbird/server -- --exclude \"**/*.integration.test.ts\" --maxWorkers=2 && pnpm --filter @logbird/server exec vitest run --config vitest.export-unit.config.ts && node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs scripts/selfhost-init.test.mjs scripts/k3s-manifests.test.mjs scripts/wait-k8s-job.test.mjs scripts/check-npm-packages.test.mjs",
     "db:generate": "pnpm --filter @logbird/database generate",
     "db:migrate": "pnpm --filter @logbird/database migrate:dev",
     "db:deploy": "pnpm --filter @logbird/database migrate:deploy",
@@ -40,6 +40,8 @@
     "release:notes:dry": "node scripts/release-notes.mjs --dry"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.13",
+    "@babel/traverse": "7.29.13",
     "@biomejs/biome": "2.5.11",
     "@logbird/clickhouse": "workspace:*",
     "@logbird/contracts": "workspace:*",

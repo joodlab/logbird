@@ -19,6 +19,8 @@ const client = new Logbird({
 
 client.track({
   action: 'booking.cancelled',
+  outcome: 'success',
+  description: 'Lina cancelled booking #1042',
   actor: { type: 'user', id: 'usr_42', name: 'Lina Haddad' },
   tenant: { id: 'biz_7', name: 'Azure Hotels' },
   targets: [{ type: 'booking', id: 'bk_1042', name: 'Booking #1042' }],
@@ -47,6 +49,8 @@ const worked = `[
   {
     "id": "evt_cancel_bk_1042",
     "action": "booking.cancelled",
+    "outcome": "success",
+    "description": "Lina cancelled booking #1042",
     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
     "executor": { "type": "api", "id": "api-server" },
     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -56,6 +60,8 @@ const worked = `[
   },
   {
     "action": "payment.refunded",
+    "outcome": "success",
+    "description": "Refunded €240.00 for booking #1042",
     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
     "executor": { "type": "worker", "id": "refunds-worker", "jobId": "job_981", "attempt": 2 },
     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -120,6 +126,16 @@ const page = await readAuditTrail(
 // page.data: events; page.nextCursor: pass back as \`cursor\` for the next page`;
 
 const envelopeRows: [string, string, string][] = [
+  [
+    'outcome',
+    'Whether it worked: success, failure, denied, partial or unknown. Failed and denied events show under Recent problems on the overview.',
+    '"success"',
+  ],
+  [
+    'description',
+    "What happened, in words a person reads. The console shows it as the event's title unless it only repeats the action, and free-text search covers it.",
+    '"Lina cancelled booking #1042"',
+  ],
   ['actor', 'Who caused it', '{ type: "user", id: "usr_42", name: "Lina Haddad" }'],
   ['executor', 'What did the work, and on which try', '{ type: "worker", id: "refunds-worker", jobId: "job_981", attempt: 2 }'],
   ['impersonator', 'Which staff member acted for the actor', '{ id: "usr_1", name: "Support agent" }'],

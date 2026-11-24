@@ -2,8 +2,8 @@
 
 Logbird records who did what, to which record, and when: an audit trail you can search, show to customers and export.
 This guide takes a C# backend from nothing to its first stored audit event and explains what happens when things go
-wrong. It assumes ASP.NET Core on .NET 8 or newer; a plain client for other hosts (including .NET Framework 4.6.2+) is
-at the end.
+wrong. It assumes ASP.NET Core on .NET 8 or newer; a plain client for other hosts (including .NET Framework, tested on
+4.8) is at the end.
 
 Two packages:
 
@@ -105,7 +105,10 @@ You did not pass the user or the tenant. `IAuditLog` fills every field the event
 - **Executor**: `api:<your application name>` (set `ServiceName` to choose the name).
 - **Context**: operation, request and trace ids, client IP and user agent, from the request. The `X-Request-Id` and
   `X-Logbird-Operation` headers are used only when you turn on `UseRequestIdHeader` and `UseOperationHeader` (off by
-  default): any caller can send them, so enable them only behind an ingress that sets or strips them.
+  default): any caller can send them, so enable them only behind an ingress that sets or strips them. The trace id
+  comes from the request's trace context, which ASP.NET Core builds from a well-formed inbound `traceparent` (W3C
+  Trace Context). Any caller can send one, so a trace id is a correlation hint, not identity, and a `trace:` search
+  should be read that way; an ingress that must not trust it should strip or overwrite the header.
 
 Your claims are different? Change the claim types or supply your own resolvers. These options go into your one
 `AddLogbird` call (it is registered once; a second call changes nothing):
@@ -154,23 +157,25 @@ Audit logging never takes your application down with it:
 - **`Record` never throws and never waits for the network.** It queues the event in memory and returns. A background
   loop sends batches every second.
 - **Failures are retried** with backoff (network errors, 429, 5xx). Each retried event keeps its exact bytes and id, so
-  the server never stores an event twice.
+  the server stores it once (it deduplicates by id while it retains the event).
 - **The queue is bounded** (`MaxQueueSize`, 10,000 events by default, counting the events waiting to be sent; the batch
   being sent comes on top, and `Stats.QueueLength` counts both). If Logbird stays unreachable long enough to fill
-  it, the oldest events are dropped and each drop is reported.
+  it, events are dropped by `QueueFullBehavior`: by default (`DropOldest`) the oldest queued ones. Each drop is
+  counted, and reported to `OnDrop` on a best-effort basis (below).
 - **Every event the running client gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`,
   `Rejected`, `Shutdown`, …): rejections by the server on the `logbird.events.rejected` counter, everything else on
-  `logbird.events.dropped`. A client being disposed leaves the meter, so a collection after shutdown may miss its last
-  drops. `OnDrop` and the log are told about them on the background thread, and both reports are best effort: disposal
-  waits at most five seconds for pending callbacks, and when the callback backlog is full (next point) the notifications
-  are skipped, so a slow callback (or a process that exits right after shutdown) can miss them. Events lost
-  in a crash are not reported at all (see the outbox below).
+  `logbird.events.dropped`. These are process totals: they keep every client's counts after it is disposed (only the
+  queue-length gauge leaves with the client). `OnDrop` and the log are told about them on the background thread, and
+  both reports are best effort: disposal waits at most five seconds for pending callbacks, and when the callback
+  backlog is full (next point) the notifications are skipped, so a slow callback (or a process that exits right after
+  shutdown) can miss them. Events lost in a crash are not reported at all (see the outbox below).
 - **`OnDrop` is told about each one** on a background thread; if your callback falls far behind (more than
   `MaxQueueSize` notifications, and at least 1,000), further notifications are skipped and counted on
   `logbird.notifications.lost`, so keep it fast.
 - **Some of those events are unconfirmed rather than lost**: when a request times out, a response's acknowledgement is
   lost on the way back, or shutdown ends while a batch is in flight, the server may already have stored the event.
-  Treat `HttpError`, `Unacknowledged` and `Shutdown` drops as "not confirmed".
+  `DroppedEvent.MayBeStored` says so for each one, whatever its reason (a `QueueFull` event sent before it was evicted
+  can be one): decide by it, not by the reason.
 - **On shutdown** the host sends what is queued, within `ShutdownTimeout` (10 seconds) and the host's own shutdown
   budget.
 
@@ -180,20 +185,27 @@ Wire the reports into your logs or alerting, in the same `AddLogbird` call as th
 builder.Services.AddLogbird(
     builder.Configuration.GetSection("Logbird"),
     configure: o => o.OnDrop = dropped =>
-        Console.Error.WriteLine($"audit event {dropped.Id} ({dropped.Action}) not confirmed: {dropped.Reason}"),
+        Console.Error.WriteLine($"audit event dropped: {dropped.Reason} {dropped.Code} (may be stored: {dropped.MayBeStored})"),
     configureRequests: r => r.ServiceName = "billing-api");
 ```
 
 The queue lives in memory, so a crash loses what is queued. For events that must survive a crash, write them to your
 own database in the same transaction as the change (an outbox), with their id, their `OccurredAt` and their content,
-and send them from there exactly as stored on every attempt. A resend is then always an exact retry; an event rebuilt
-with a new timestamp would conflict with the copy the server already has. If you use a `BeforeSend` hook, make sure it
-changes an outbox event the same way on every attempt (or leaves it alone) and keeps its id, so each resend carries
-the same id and content and you can confirm it by the id you stored.
+and send them from there exactly as stored on every attempt. A resend is then an exact retry while the server retains
+the original; an event rebuilt with a new timestamp would conflict with the copy the server already has. If you use a
+`BeforeSend` hook, make sure it changes an outbox event the same way on every attempt (or leaves it alone) and keeps its
+id, so each resend carries the same id and content.
+
+The example logs the reason and code, not the event's id or action: those can name a customer or a record, so log
+them only where your policy allows (keep them in your outbox instead).
 
 `Track` only queues an event, and a successful `FlushAsync` means each event was stored *or* given up on, so neither
-proves an event was stored. Keep each outbox row until you have confirmed its event, for example by reading it back by
-id with `LogbirdReadClient.GetEventAsync`, and resend it, exactly as stored, until then. Resending an event the server
+proves an event was stored. Keep each outbox row until you have confirmed its event: find it by id with
+`LogbirdReadClient.GetEventAsync(id)` and check that its stored payload (`EventDetail.Payload`, not null) matches the
+event as sent, that is the row after your `BeforeSend` and redaction. The id alone does not confirm it, because after a
+`duplicate_id_conflict` a different event owns that id; and a read through a masked viewer token or scope cannot confirm
+it either, because it returns no payload. Resend the row, exactly as stored,
+until it is confirmed. Resending an event the server
 still holds is always safe (an exact retry), but do not resend rows older than the project's retention period: once
 retention has deleted an event, a resend would store it again. Decide yourself what happens to a row that is never
 confirmed (for example alert and keep it); Logbird cannot make that choice for you.
