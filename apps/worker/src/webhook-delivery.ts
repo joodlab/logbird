@@ -35,21 +35,12 @@ type DeliveryOptions = {
   beforeRequest?: (tx: Prisma.TransactionClient, delivery: WebhookDelivery) => Promise<void>;
   /** Internal: statement timeout of each claim statement, including the fallback's endpoint listing. Default 2 s. */
   claimTimeoutMs?: number;
-  /** Internal: total time one pass may spend claiming before it stops and dispatches what it has claimed. Default 10 s. */
-  claimBudgetMs?: number;
   /**
    * Tests only, ignored outside Vitest: make the claim scans of these endpoints slow (with `listing`, the fallback's
    * endpoint listing too), to force statement timeouts there.
    */
   claimScanDelay?: { endpointIds: string[]; seconds: number; listing?: boolean };
-  /** Tests only, ignored outside Vitest: the clock the claim budget reads (default `performance.now`). */
-  claimBudgetClock?: () => number;
-  /** Tests only, ignored outside Vitest: called once the fair statement's claims are collected. */
-  claimAfterFair?: () => void;
 };
-
-/** The most a pass spends claiming. Normal passes take milliseconds; this bounds a pass whose statements keep timing out. */
-const CLAIM_BUDGET_MS = 10_000;
 
 const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }: ScopeColumns) => ({
   scopeTenantId,
@@ -67,9 +58,6 @@ type PassScope = {
   perEndpoint: number;
   excludeEndpoints: string[];
   timeoutMs: number;
-  /** Budget-clock time after which the pass starts no further claim statement. */
-  claimDeadline: number;
-  budgetClock: () => number;
   scanDelay?: DeliveryOptions['claimScanDelay'];
 };
 
@@ -80,35 +68,6 @@ function sqlState(error: unknown) {
     | undefined;
   const code = meta?.code ?? meta?.driverAdapterError?.cause?.originalCode;
   return typeof code === 'string' ? code : undefined;
-}
-
-/**
- * Projects whose last turn in this worker ended with a failed claim and nothing claimed. They rank after every other project
- * until they are tried again, even when their rotation stamp could not be written (`moveToBack`).
- */
-const failedTurns = new Set<string>();
-
-/**
- * Give a project its turn without a claim: stamp its rotation strictly after every other project's (a claim stamps the
- * current time), so ranking puts it behind all of them, ties included. Used when its claim failed and nothing was claimed. A
- * failure here is logged; `failedTurns` keeps the project last in this worker until it is tried again.
- */
-async function moveToBack(scope: PassScope, projectId: string) {
-  try {
-    await prisma.$transaction([
-      prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', ${`${scope.timeoutMs}ms`}, true)`,
-      prisma.$executeRaw`
-        INSERT INTO "WebhookClaimRotation" ("projectId", "lastClaimedAt")
-        VALUES (${projectId}, greatest(
-          (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3),
-          (SELECT max("lastClaimedAt") + interval '1 millisecond' FROM "WebhookClaimRotation")
-        ))
-        ON CONFLICT ("projectId") DO UPDATE
-          SET "lastClaimedAt" = greatest("WebhookClaimRotation"."lastClaimedAt", EXCLUDED."lastClaimedAt")`,
-    ]);
-  } catch (error) {
-    console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_rotation_failed', projectId, sqlState: sqlState(error) }));
-  }
 }
 
 const scanSleep = (scope: PassScope) =>
@@ -277,16 +236,16 @@ async function projectEndpoints(scope: PassScope, projectId: string) {
   const [, rows] = await prisma.$transaction([
     prisma.$queryRaw`SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', ${`${scope.timeoutMs}ms`}, true)`,
     prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT e.id FROM "WebhookEndpoint" e
-    CROSS JOIN LATERAL (
-      SELECT "nextAttemptAt" FROM "WebhookDelivery"
-      WHERE "endpointId" = e.id AND status = 'pending'
-        AND "nextAttemptAt" <= ${at(now)} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${at(now)})
-      ORDER BY "nextAttemptAt", id LIMIT 1
-    ) due
-    WHERE e."projectId" = ${projectId} AND ${eligibleEndpoint(scope.excludeEndpoints)}
-      ${scope.scanDelay?.listing ? scanSleep(scope) : Prisma.empty}
-    ORDER BY due."nextAttemptAt", e.id`),
+      SELECT e.id FROM "WebhookEndpoint" e
+      CROSS JOIN LATERAL (
+        SELECT "nextAttemptAt" FROM "WebhookDelivery"
+        WHERE "endpointId" = e.id AND status = 'pending'
+          AND "nextAttemptAt" <= ${at(now)} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${at(now)})
+        ORDER BY "nextAttemptAt", id LIMIT 1
+      ) due
+      WHERE e."projectId" = ${projectId} AND ${eligibleEndpoint(scope.excludeEndpoints)}
+        ${scope.scanDelay?.listing ? scanSleep(scope) : Prisma.empty}
+      ORDER BY due."nextAttemptAt", e.id`),
   ]);
   return rows.map(({ id }) => id);
 }
@@ -346,29 +305,17 @@ async function invalidScopedEndpoints(now: Date, projects?: string[]) {
  * Implementation: the fair phase is one statement per pass (`claimFair`) and the fill phase claims per project. A failed
  * fair-phase statement rolls back as a whole (no lease, attempt or rotation change), and the pass then retries the fair
  * phase one project at a time. A project whose claim fails or times out is retried one endpoint at a time (at most its
- * 10 endpoints, oldest due row first), so one endpoint's scan cannot block a sibling. The fallback's endpoint listing has
- * the same statement timeout. A pass starts no claim statement after its claim budget (10 s; normal passes take
- * milliseconds), so statements that keep timing out cannot use up the dispatch budget of rows already claimed; the budget
- * typically binds only when claim statements fail or time out, outside the conditions of the bound above. A project
- * whose claim failed and that claimed nothing is moved to the back of the rotation (stamped after every other project), and
- * this worker tries it after all other projects until it is tried again, so a failing project cannot starve the others:
- * it is never tried before a project that is not failing, and the rest of its pass is used by the others first. Only a failure before any claim
+ * 10 endpoints, oldest due row first), so one endpoint's scan cannot block a sibling; the endpoint listing for that retry
+ * has the same statement timeout. Only a failure before any claim
  * (holding scopes, ranking) fails the pass. These bounds hold for row locks Logbird itself creates; see the self-hosting
  * guide for transactions held by other clients.
  */
 export async function claimWebhookDeliveries(
-  options: Pick<
-    DeliveryOptions,
-    'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimBudgetMs' | 'claimScanDelay' | 'claimBudgetClock' | 'claimAfterFair'
-  >,
+  options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint' | 'claimTimeoutMs' | 'claimScanDelay'>,
   projectId?: string | readonly string[],
 ) {
   const projects = projectId === undefined ? undefined : typeof projectId === 'string' ? [projectId] : [...projectId];
   // Sample before PostgreSQL's clock so the local retry deadline is conservative and immune to host clock skew.
-  const testing = process.env.VITEST === 'true';
-  // The claim budget runs on the lease clock: time spent before and during claims comes out of the dispatch budget.
-  const budgetClock = (testing && options.claimBudgetClock) || (() => performance.now());
-  const claimDeadline = budgetClock() + (options.claimBudgetMs ?? CLAIM_BUDGET_MS);
   const leaseDeadline = performance.now() + LEASE_MS;
   const now = await webhookDatabaseTime();
   // The delivery queue's global concurrency is one. Limit each endpoint independently and exclude live leases
@@ -384,39 +331,21 @@ export async function claimWebhookDeliveries(
     perEndpoint: options.perEndpoint,
     excludeEndpoints: [],
     timeoutMs: options.claimTimeoutMs ?? 2000,
-    claimDeadline,
-    budgetClock,
-    // The pg_sleep hook exists only for the timeout regressions; no production caller can turn it on.
-    scanDelay: testing ? options.claimScanDelay : undefined,
+    // The pg_sleep hook exists only for the timeout regression; no production caller can turn it on.
+    scanDelay: process.env.VITEST === 'true' ? options.claimScanDelay : undefined,
   };
   // An endpoint with an invalid stored scope gets the existing scope hold before it can take a slot.
   for (const { id, scope: columns, updatedAt } of await invalidScopedEndpoints(now, projects)) {
     scope.excludeEndpoints.push(id);
     await holdInvalidScope(id, columns, updatedAt);
   }
-  const due = (await rankProjects(scope, projects)).map(({ projectId: id }) => id);
-  // A project whose last turn here failed with nothing claimed goes after all others until it is tried again, so it cannot
-  // spend the budget of consecutive passes while others wait, whatever its rotation stamp says.
-  for (const id of [...failedTurns]) if (!due.includes(id)) failedTurns.delete(id);
-  const ranked = [...due.filter((id) => !failedTurns.has(id)), ...due.filter((id) => failedTurns.has(id))];
+  const ranked = (await rankProjects(scope, projects)).map(({ projectId: id }) => id);
   const claims: Claim[] = [];
   const claimable = new Set<string>();
-  let budgetLogged = false;
-  const spent = () => {
-    if (scope.budgetClock() < scope.claimDeadline) return false;
-    if (!budgetLogged) {
-      budgetLogged = true;
-      // The rest waits for the next pass; what is claimed so far is dispatched now.
-      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_budget_spent', claimed: claims.length, projects: ranked.length }));
-    }
-    return true;
-  };
   const claim = async (project: string, limit: number) => {
-    if (spent()) return 0;
     try {
       const claimed = await claimProject(scope, project, limit);
       claims.push(...claimed);
-      failedTurns.delete(project);
       return claimed.length;
     } catch (error) {
       // A failed claim cannot hold up the other projects; claims committed so far are still dispatched.
@@ -424,30 +353,17 @@ export async function claimWebhookDeliveries(
         JSON.stringify({ level: 'error', event: 'webhook.claim_failed', projectId: project, claimed: claims.length, sqlState: sqlState(error) }),
       );
     }
-    const count = await claimByEndpoint(project, limit);
-    // A claim advances the project's rotation. A project whose claim failed and whose retries claimed nothing (they failed,
-    // timed out or ran into the budget) moves to the back as well, so it cannot be tried first again, and use the budget
-    // again, before every other project with due rows has had its turn.
-    if (count) failedTurns.delete(project);
-    else {
-      failedTurns.add(project);
-      await moveToBack(scope, project);
-    }
-    return count;
-  };
-  // Retry the project one endpoint at a time, each in its own statement and with its own timeout, so an endpoint whose
-  // scan fails or times out (for example behind rows another transaction holds) cannot keep its siblings from claiming.
-  const claimByEndpoint = async (project: string, limit: number) => {
+    // Retry the project one endpoint at a time, each in its own statement and with its own timeout, so an endpoint whose
+    // scan fails or times out (for example behind rows another transaction holds) cannot keep its siblings from claiming.
     let count = 0;
     let endpoints: string[] = [];
-    if (spent()) return count;
     try {
       endpoints = await projectEndpoints(scope, project);
     } catch (error) {
       console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_endpoints_failed', projectId: project, sqlState: sqlState(error) }));
     }
     for (const endpointId of endpoints) {
-      if (count >= limit || claims.length >= capacity || spent()) break;
+      if (count >= limit || claims.length >= capacity) break;
       try {
         const claimed = await claimProject(scope, project, Math.min(limit - count, capacity - claims.length), endpointId);
         claims.push(...claimed);
@@ -460,28 +376,21 @@ export async function claimWebhookDeliveries(
     }
     return count;
   };
-  // Every claim statement, the first included, starts only within the budget: slow pre-claim work (clock, leases,
-  // scopes, ranking) also comes out of the lease clock.
-  if (!spent())
-    try {
-      const fair = await claimFair(scope, ranked, capacity);
-      claims.push(...fair.claims);
-      for (const project of fair.projects) {
-        claimable.add(project);
-        failedTurns.delete(project);
-      }
-      if (testing) options.claimAfterFair?.();
-    } catch {
-      // The statement rolled back as a whole. Retry the fair phase one project at a time, so a failing project cannot
-      // hold up the others in this pass.
-      console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_fair_failed', projects: ranked.length }));
-      for (const project of ranked) {
-        if (claims.length >= capacity || spent()) break;
-        if (await claim(project, 1)) claimable.add(project);
-      }
+  try {
+    const fair = await claimFair(scope, ranked, capacity);
+    claims.push(...fair.claims);
+    for (const project of fair.projects) claimable.add(project);
+  } catch {
+    // The statement rolled back as a whole. Retry the fair phase one project at a time, so a failing project cannot
+    // hold up the others in this pass.
+    console.error(JSON.stringify({ level: 'error', event: 'webhook.claim_fair_failed', projects: ranked.length }));
+    for (const project of ranked) {
+      if (claims.length >= capacity) break;
+      if (await claim(project, 1)) claimable.add(project);
     }
+  }
   for (const project of ranked) {
-    if (claims.length >= capacity || spent()) break;
+    if (claims.length >= capacity) break;
     if (claimable.has(project)) await claim(project, capacity - claims.length);
   }
   return claims;
