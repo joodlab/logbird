@@ -262,3 +262,41 @@ it('marks every count as approximate, zero included, but not the "starts countin
   expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Logbird starts counting/);
   expect(document.querySelector('[data-testid="late-events-approximate"]')).toBeNull();
 });
+
+it('reopened while the first read is still pending, the log makes its own read and shows that count', async () => {
+  let release: (value: unknown) => void = () => undefined;
+  const before = get.mock.calls.length;
+  get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 4, since: endpoint.lateEvents.since } }));
+  await open(null);
+  const client = lastClient as QueryClient;
+  const render = (isOpen: boolean) =>
+    act(() =>
+      root?.render(
+        <QueryClientProvider client={client}>
+          <DeliveryLog endpoint={endpoint} onOpenChange={vi.fn()} open={isOpen} projectId="qa-project" sendBlocked={null} />
+        </QueryClientProvider>,
+      ),
+    );
+  // Close and reopen while the first read is still in flight.
+  render(false);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  render(true);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  // The first read lands late; it belongs to the earlier opening and must not decide this one.
+  await act(async () => {
+    release({ ...endpoint, lateEvents: { count: 9, since: endpoint.lateEvents.since } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(get.mock.calls.length - before).toBe(2);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/Logbird has recorded 4 events/);
+});

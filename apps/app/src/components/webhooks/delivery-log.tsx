@@ -83,8 +83,13 @@ export function DeliveryLog({
   // list's copy, or one from an earlier opening, could describe a window that no longer applies.
   // Each read keeps the time it started: the server counted no later than that, so it is the time the read describes.
   // (When the answer was stored is later, and can fall after counting started even though the count was taken before.)
+  // When the log last opened, set during render so an earlier opening's copy never shows for a frame.
+  const [opening, setOpening] = useState(() => ({ open, at: Date.now() }));
+  if (opening.open !== open) setOpening({ open, at: Date.now() });
+  // One read per opening (keyed by when it opened): a read still pending from an earlier opening is never reused for
+  // this one, where its start time would disqualify it and leave the section blank.
   const fresh = useQuery({
-    queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'detail'],
+    queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'detail', opening.at],
     queryFn: async ({ signal }) => {
       const startedAt = Date.now();
       return { endpoint: await api.webhooks.get(projectId, endpoint.id, signal), startedAt };
@@ -92,9 +97,6 @@ export function DeliveryLog({
     enabled: open,
     staleTime: 0,
   });
-  // When the log last opened, set during render so an earlier opening's copy never shows for a frame.
-  const [opening, setOpening] = useState(() => ({ open, at: Date.now() }));
-  if (opening.open !== open) setOpening({ open, at: Date.now() });
   const read = fresh.data && !fresh.isError && fresh.data.startedAt >= opening.at ? fresh.data : null;
   // Judged at the time of the read that produced it, never at render time: a read made before counting began says when
   // it starts, even if the log is still open after that.
