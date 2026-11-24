@@ -164,10 +164,22 @@ export function importsOf(text, path, moduleType = 'commonjs') {
   // `const m = require('node:module')`, tsc's `const node_module_1 = require("node:module")` (also through
   // `__importDefault(…)`), or the call itself: `require('node:module').createRequire`.
   const NODE_MODULE = new Set(['module', 'node:module']);
+  // A call that loads a module: `require(…)`, `import(…)`, `module.require(…)`, `process.getBuiltinModule(…)`. Not an
+  // ordinary function that happens to be given the string (`factory('node:module')`).
+  const isLoaderCall = (node) => {
+    if (node.type === 'ImportExpression') return true;
+    if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return false;
+    const callee = unwrap(node.callee);
+    if (callee.type === 'Import' || (callee.type === 'Identifier' && callee.name === 'require')) return true;
+    if (!isMember(callee)) return false;
+    const owner = rootOf(callee.object);
+    return (propertyName(callee) === 'require' && owner === 'module') || (propertyName(callee) === 'getBuiltinModule' && owner === 'process');
+  };
   const loadsNodeModule = (value) => {
     let found = false;
     walk(value, (node) => {
-      if ((node.type === 'CallExpression' || node.type === 'OptionalCallExpression') && NODE_MODULE.has(staticName(node.arguments[0]))) found = true;
+      const argument = node.type === 'ImportExpression' ? node.source : node.arguments?.[0];
+      if (isLoaderCall(node) && NODE_MODULE.has(staticName(argument))) found = true;
     });
     return found;
   };

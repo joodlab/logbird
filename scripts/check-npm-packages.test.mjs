@@ -137,6 +137,16 @@ test('createRequire counts only from node:module', () => {
   // An ordinary object's own method named createRequire makes nothing.
   const factory = "const factory = { createRequire: () => (f) => f }; const validate = factory.createRequire(); validate('fictional-field');";
   assert.deepEqual(importsOf(factory, 'dist/index.mjs'), []);
+  // A function merely given the string 'node:module' loads nothing.
+  const given =
+    "const factory = () => ({ createRequire: () => (value) => value }); const object = factory('node:module'); const validate = object.createRequire(); validate('fictional-field');";
+  assert.deepEqual(importsOf(given, 'dist/index.mjs'), []);
+  // tsc's esModuleInterop output and Node's getBuiltinModule are loads of node:module.
+  const interop =
+    'const node_module_1 = __importDefault(require("node:module")); const load = (0, node_module_1.default.createRequire)(__filename); load("zod");';
+  assert.deepEqual(importsOf(interop, 'dist/probe.cjs'), ['node:module', 'zod']);
+  const builtin = "const { createRequire } = process.getBuiltinModule('node:module'); createRequire(__filename)('zod');";
+  assert.deepEqual(importsOf(builtin, 'dist/probe.cjs'), ['zod']);
   const ownFunction = "function createRequire() { return (f) => f; } const validate = createRequire(); validate('fictional-field');";
   assert.deepEqual(importsOf(ownFunction, 'dist/index.mjs'), []);
 });
