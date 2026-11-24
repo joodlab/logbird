@@ -276,7 +276,10 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     return 'deferred';
   }
 
-  // Fence A.
+  // Fence A. The project's maintenance and export generations are recorded here: any destructive work between the
+  // fences (sample removal, a repair, a synchronous purge) bumps one of them, and fence B then refuses to publish rows
+  // staged before it (#268).
+  let generationsAtA: { maintenance: string; export: string } | undefined;
   const opened = await withProjectLock(projectId, async (tx) => {
     await recoverAbandonedRetention(tx, projectId);
     await tx.retentionRun.updateMany({
@@ -289,6 +292,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     if (!project || project.retentionDays !== current.retentionDays || project.exportDeleteStartedAt) return null;
     if (!(await settleProjectInserts(projectId))) return 'deferred' as const;
     const fenceA = await fenceClock(tx);
+    generationsAtA = { maintenance: String(project.maintenanceGeneration), export: String(project.exportGeneration) };
     return tx.retentionRun.create({
       data: { projectId, retentionDays: project.retentionDays, cutoff, status: RETENTION_STAGING, startedAt: fenceA, heartbeatAt: new Date() },
     });
@@ -313,6 +317,10 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       const project = await tx.project.findUnique({ where: { id: projectId } });
       if (!project || project.retentionDays !== run.retentionDays) {
         await cancelRun(run.id, 'The retention period changed during the run; the next run uses the new period.');
+        return 'canceled' as const;
+      }
+      if (String(project.maintenanceGeneration) !== generationsAtA?.maintenance || String(project.exportGeneration) !== generationsAtA?.export) {
+        await cancelRun(run.id, 'Other maintenance changed the project during the run; the next run retries.');
         return 'canceled' as const;
       }
       if (!(await settleProjectInserts(projectId))) {
