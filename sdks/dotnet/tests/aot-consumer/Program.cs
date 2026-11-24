@@ -69,11 +69,15 @@ async Task TrackAndFlush()
         .Target("invoice", "inv_1", "INV-1")
         .Change("status", "draft", "sent"));
         Expect(await client.FlushAsync(), "FlushAsync to report every event settled");
+        // FlushAsync is also true when an event was given up on, so the acknowledgement must have delivered it.
+        var stats = client.Stats;
+        Expect(stats.Delivered == 1 && stats.Dropped == 0 && stats.Rejected == 0, $"one delivered event and no drop (delivered {stats.Delivered}, dropped {stats.Dropped}, rejected {stats.Rejected})");
     }
 
     var sent = server.Events.Single();
     Expect(sent.GetProperty("action").GetString() == "invoice.updated", "the action to be sent");
     Expect(sent.GetProperty("actor").GetProperty("id").GetString() == "user_42", "the actor id to be sent");
+    Expect(sent.GetProperty("tenant").GetProperty("id").GetString() == "tenant_7", "the tenant id to be sent");
     Expect(sent.GetProperty("targets")[0].GetProperty("id").GetString() == "inv_1", "the target to be sent");
     Expect(sent.GetProperty("changes")[0].GetProperty("after").GetString() == "sent", "the change to be sent");
     var metadata = sent.GetProperty("metadata");
@@ -138,7 +142,10 @@ async Task AspNetCoreRequest()
         var carrier = AuditCarrier.FromJson(await response.Content.ReadAsStringAsync());
         Expect(!string.IsNullOrEmpty(carrier.OperationId) && !string.IsNullOrEmpty(carrier.ParentEventId), "the carrier to round-trip with its ids");
 
-        Expect(await app.Services.GetRequiredService<ILogbirdClient>().FlushAsync(), "the hosted client to flush");
+        var hosted = app.Services.GetRequiredService<ILogbirdClient>();
+        Expect(await hosted.FlushAsync(), "the hosted client to flush");
+        var stats = hosted.Stats;
+        Expect(stats.Delivered == 1 && stats.Dropped == 0 && stats.Rejected == 0, $"one delivered event and no drop (delivered {stats.Delivered}, dropped {stats.Dropped}, rejected {stats.Rejected})");
         var sent = server.Events.Single();
         Expect(sent.GetProperty("action").GetString() == "invoice.sent", "the recorded action to be sent");
         Expect(sent.GetProperty("targets")[0].GetProperty("id").GetString() == "inv_9", "the route value to reach the event");

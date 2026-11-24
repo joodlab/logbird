@@ -23,7 +23,15 @@
       and AOT analysis warnings (IL2xxx, IL3xxx) remain errors.
     -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
-    <!-- Trim and AOT analysis warnings in the packages' code are reported per assembly, not collapsed into one. -->
+    <!--
+      ILC reports trim and AOT analysis warnings for the packages' own code (IL2xxx, IL3xxx) through MSBuild, where the
+      compiler's TreatWarningsAsErrors does not reach them. MSBuildTreatWarningsAsErrors turns every warning MSBuild
+      logs into an error, so a warning in Logbird.dll or Logbird.AspNetCore.dll fails the publish; the NuGet audit codes
+      above are the only ones kept as warnings.
+    -->
+    <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>
+    <MSBuildWarningsNotAsErrors>$(MSBuildWarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</MSBuildWarningsNotAsErrors>
+    <!-- Each package assembly's trim and AOT warnings are listed in full, not collapsed into one per assembly. -->
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
     <IsPackable>false</IsPackable>
     <!--
