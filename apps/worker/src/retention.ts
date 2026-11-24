@@ -17,6 +17,7 @@ import {
   stageRetentionRollups,
 } from '@logbird/clickhouse';
 import {
+  BACKGROUND_RETENTION_CAPABILITY,
   cancelStagedRetention,
   databaseClock,
   type Prisma,
@@ -27,6 +28,7 @@ import {
   RETENTION_MATERIALIZING,
   RETENTION_STAGING,
   recoverAbandonedRetention,
+  serversSupport,
   withProjectLock,
 } from '@logbird/database';
 import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
@@ -235,6 +237,26 @@ async function underPendingBound() {
   }
   return true;
 }
+/**
+ * The capability gate (#296, round-1 finding 15), checked at fence A and again right before the first DELETE. Every
+ * API server seen in the heartbeat window must declare background retention; a server without it, or no server seen
+ * at all (an older server does not heartbeat), selects the synchronous path. A rollback is covered by the same rule.
+ */
+async function backgroundRetentionAllowed(projectId: string, phase: 'fence_a' | 'fence_b') {
+  const support = await serversSupport(BACKGROUND_RETENTION_CAPABILITY);
+  if (!support.capable)
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: 'retention.capability_gate',
+        projectId,
+        phase,
+        serversSeen: support.seen,
+        serversMissing: support.missing,
+      }),
+    );
+  return support.capable;
+}
 /** Test seams: run between the fences, and right after the DELETE mutations exist (before the replacement rows). */
 export type BackgroundRetentionHooks = { betweenFences?: () => Promise<void>; afterDeletes?: () => Promise<void> };
 /** The hourly sweep's per-project run. Unusual states fall back to (or wait for) the synchronous path. */
@@ -287,6 +309,8 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       return null;
     const project = await tx.project.findUnique({ where: { id: projectId } });
     if (!project || project.retentionDays !== current.retentionDays || project.exportDeleteStartedAt) return null;
+    // Capability gate (#296, round-1 finding 15): every API server seen recently must support background retention.
+    if (!(await backgroundRetentionAllowed(projectId, 'fence_a'))) return 'incapable' as const;
     if (!(await settleProjectInserts(projectId))) return 'deferred' as const;
     const fenceA = await fenceClock(tx);
     generationsAtA = { maintenance: String(project.maintenanceGeneration), export: String(project.exportGeneration) };
@@ -296,6 +320,10 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
   });
   if (opened === null) return 'skipped';
   if (opened === 'deferred') return 'deferred';
+  if (opened === 'incapable') {
+    await enforceProjectRetention(projectId);
+    return 'synchronous';
+  }
   const run = opened;
   const fenceA = run.startedAt;
   const stopHeartbeat = heartbeatMaintenanceRun(run.id);
@@ -311,7 +339,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     await stageRetentionRollups(session, projectId, cutoff, fenceA, keys);
     await hooks.betweenFences?.();
     // Fence B.
-    return await withProjectLock(projectId, async (tx) => {
+    const outcome = await withProjectLock(projectId, async (tx) => {
       const latest = await tx.retentionRun.findUnique({ where: { id: run.id } });
       if (latest?.status !== RETENTION_STAGING) return 'canceled' as const;
       const project = await tx.project.findUnique({ where: { id: projectId } });
@@ -326,6 +354,11 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       if (!(await settleProjectInserts(projectId))) {
         await cancelRun(run.id, 'Recent writes were still settling; the next run retries.');
         return 'canceled' as const;
+      }
+      // The gate again, right before anything destructive: a server without support may have started since fence A.
+      if (!(await backgroundRetentionAllowed(projectId, 'fence_b'))) {
+        await cancelRun(run.id, 'An API server without background retention support is running; retention runs synchronously.');
+        return 'incapable' as const;
       }
       // Fence B's delta reaches every row already written: the database clock, or the committed ingest watermark when a
       // row was stamped later than it (round-1 finding 3).
@@ -367,6 +400,10 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       console.log(JSON.stringify({ level: 'info', event: 'retention.materializing', runId: run.id, projectId, deletedEvents }));
       return 'materializing' as const;
     });
+    if (outcome !== 'incapable') return outcome;
+    // Nothing destructive happened: this hour's retention runs on the synchronous path instead.
+    await enforceProjectRetention(projectId);
+    return 'synchronous';
   } catch (error) {
     const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
     console.error(JSON.stringify({ level: 'error', event: 'retention.run_failed', runId: run.id, projectId, errorCode, background: true }));

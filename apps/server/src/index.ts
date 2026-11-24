@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server';
 import { assertSupportedClickHouse } from '@logbird/clickhouse';
-import { closeProjectLocks, prisma } from '@logbird/database';
+import { closeProjectLocks, prisma, startServerHeartbeat } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
 import { backfillAuthEmailHashes, flushFailedSignIns } from './auth-failures';
@@ -29,11 +29,13 @@ const auditDrainer = startAuditDrainer(ingest, async () => {
   await flushFailedSignIns();
 });
 const maintenanceReconciler = startDestructiveMaintenanceReconciler();
+// Declares what this server supports; the worker runs background retention only while every server seen does (#296).
+const heartbeat = startServerHeartbeat();
 let stopping = false;
 function shutdown() {
   if (stopping) return;
   stopping = true;
-  const drained = Promise.all([auditDrainer.stop(), maintenanceReconciler.stop()]);
+  const drained = Promise.all([auditDrainer.stop(), maintenanceReconciler.stop(), heartbeat.stop()]);
   const deadline = setTimeout(() => {
     if ('closeAllConnections' in server) server.closeAllConnections();
     process.exit(1);

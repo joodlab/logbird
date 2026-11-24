@@ -21,6 +21,9 @@ vi.mock('@logbird/database', () => ({
   },
   // The database clock (retention reads cutoffs from it, never the worker's clock).
   databaseClock: async () => new Date(),
+  // Every API server supports background retention (the capability gate, #296).
+  BACKGROUND_RETENTION_CAPABILITY: 'background-retention-v1',
+  serversSupport: async () => ({ capable: true, seen: 1, missing: 0 }),
   RETENTION_LEASE_MS: 600_000,
   RETENTION_STAGING: 'staging',
   RETENTION_MATERIALIZING: 'materializing',

@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { CLICKHOUSE_PLAIN_READ, insertEvents, pendingProjectMutations, read } from '@logbird/clickhouse';
-import { closeProjectLocks, ProjectBusyError, prisma, withProjectLock } from '@logbird/database';
+import { closeProjectLocks, ProjectBusyError, prisma, SERVER_CAPABILITIES, withProjectLock } from '@logbird/database';
 import { RETENTION_CLOCK_SKEW_ALLOWANCE_MS, runBackgroundRetention } from '@logbird/worker/retention';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
@@ -13,12 +14,23 @@ import { purgeLimit, slowStore } from './slow-store';
 // two short fences, and nothing deleted or refused is counted or shown wrongly at any phase.
 const DAY = 86_400_000;
 let f: ImmutableFixture;
+// The capability gate (#296): background retention runs only while a server that supports it is seen.
+const serverInstance = `qa-retention-bg-${randomUUID()}`;
 beforeEach(async () => {
   f = await immutableFixture('qa-retention-bg');
   await prisma.project.update({ where: { id: f.project }, data: { retentionDays: 30 } });
+  // Seen an hour ahead, so a slow test never outlives the 90-second window before its fence B.
+  const seenAt = new Date(Date.now() + 3_600_000);
+  const capabilities = [...SERVER_CAPABILITIES];
+  await prisma.serverHeartbeat.upsert({
+    where: { instanceId: serverInstance },
+    create: { instanceId: serverInstance, capabilities, seenAt },
+    update: { seenAt },
+  });
 });
 afterEach(async () => {
   vi.useRealTimers();
+  await prisma.serverHeartbeat.deleteMany({ where: { instanceId: serverInstance } });
   await f.cleanup();
 }, slowStore(60_000));
 afterAll(() => closeProjectLocks());
