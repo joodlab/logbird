@@ -11,7 +11,7 @@ export {
 } from './webhooks';
 
 // Keep in sync with packages/sdk/package.json (verified by index.test.ts).
-const SDK_VERSION = '0.2.1';
+const SDK_VERSION = '0.3.0';
 const MAX_SEND_MS = 5 * 60_000;
 
 /**

@@ -1,6 +1,6 @@
 {
   "name": "logbird-npm-consumer-adapters",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Type-checks the packed @logbird/vue, @logbird/nuxt and @logbird/tanstack-start tarballs like an outside application. See ../npm-consumer/README.md.",
   "type": "module",
