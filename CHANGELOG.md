@@ -21,6 +21,13 @@ stays the same on retries and resends. In webhook filters, relative times are ba
 on each event's arrival, and regexes use RE2. See the
 [webhook guide](docs/self-hosting.md#webhook-endpoint-settings). (#179, #248, #255, #343)
 
+Each endpoint has a delivery window, which defaults to seven days and can be
+set to no limit. Events that arrive after the window stay stored and searchable.
+Changing the window applies to discovery after the save. Already queued
+deliveries, resends and test pings are unaffected. The console shows an approximate
+late-arrival count for completed arrival hours, starting after the latest
+window change or 30 days ago, whichever is later. (#359, #360)
+
 **Console.** Explorer filters, chips and Query-to-SQL conversion preserve the
 meaning of quoted fields, literals and negated groups. Jump to keeps the server's
 result order, and the Explorer offers to retry an incomplete ID lookup or failed
@@ -29,6 +36,12 @@ before the first event, and Fields reports target coverage. First-event examples
 explain how to run the source SDK and how to check whether ingest rejected an event.
 Members who follow a project link from another workspace can switch to it from the
 project page. (#276, #281, #283, #290, #324, #335, #340, #346, #372, #379, #381)
+
+Members can leave a workspace from its settings after confirming. The last
+owner must make another member an owner before leaving. A removed member sees
+a one-time notice, and an invitee without a name is prompted to enter one.
+Workspace deletion through the auth API is disabled because it could leave
+events behind. (#375)
 
 **SDK breaking changes.**
 
@@ -79,6 +92,11 @@ and support investigations. Console captures open full size, and the developer
 examples include outcome and description. The optional site deploys separately.
 (#266, #282, #289, #291, #376)
 
+**Retention.** The hourly purge releases the project lock while ClickHouse
+applies its deletes. Ingest and reads can continue while the deletes are
+pending, and exports wait for them to finish. An immediate purge after lowering
+retention still uses the synchronous path. (#296)
+
 ### Self-hoster actions
 
 Follow [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups) to
@@ -111,6 +129,18 @@ reads and writes. `SHARE` and `SHARE ROW EXCLUSIVE` block ordinary writes.
 | `20261122210000_webhook_scan_attempted_at` | Additive. Adds the attempt timestamp and its scheduling index. | `ACCESS EXCLUSIVE` for the new column and `SHARE` for the non-concurrent index build on `WebhookEndpoint`. |
 | `20261123100000_webhook_filter_review_reason` | Additive. Adds a nullable reason for a filter hold. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`. |
 | `20261123120000_webhook_claim_rotation` | Additive. Adds the per-project claim rotation table and its foreign key. | `SHARE ROW EXCLUSIVE` on `Project` and `WebhookClaimRotation` for the foreign key. |
+| `20261124100000_webhook_delivery_window` | Additive. Adds window columns and a check constraint. Existing endpoints get seven days. | `ACCESS EXCLUSIVE` on `WebhookEndpoint`. PostgreSQL validates the new constraint against existing rows. |
+| `20261124120000_member_keep_an_owner` | Additive schema. Adds functions and triggers that enforce the owner rule on future writes. Existing memberships are preserved. | `SHARE ROW EXCLUSIVE` on `member` when installing the triggers. The triggers also take a transaction advisory lock per workspace when deleting or updating an owner row. |
+
+Workspaces that already have no owner keep working. The migration does not
+assign owners. If a workspace later gains an owner, the triggers prevent removal
+or demotion of its last owner.
+
+ClickHouse migration `011_events_lateness.sql` is additive. It uses DDL locks
+to create the lateness rollup table and its materialized view, with no backfill
+or mutation of existing events. Counts start when the view is created. A storage
+failure, retried write or restore can make the count higher or lower than the
+actual count.
 
 ## 0.2.1
 
