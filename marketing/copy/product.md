@@ -248,7 +248,7 @@ production.
   signed with the Standard Webhooks headers; verify it with the TypeScript or .NET SDK.
   <!-- source: docs/SPEC.md § Webhook endpoint management (filterQuery, scope { tenantId?, target?, mask? }, Standard Webhooks headers); packages/sdk/README.md § Standard Webhooks; sdks/dotnet/README.md § Verify webhooks -->
 - **bullets:**
-  - Failed attempts are retried with backoff for up to 24 hours, unless the endpoint answers `410 Gone`. Delivery is at least once, so deduplicate by
+  - Network failures, timeouts and responses other than `2xx` or `410 Gone` are retried with backoff for up to 24 hours. Delivery is at least once, so deduplicate by
     `webhook-id`. <!-- source: SPEC § Webhook endpoint management (retry schedule; "Receivers use the stable webhook-id to deduplicate") -->
   - A delivery log shows each delivery's status and its recent attempts for 30 days; resend a delivery or send a test
     ping. <!-- source: SPEC (deliveries endpoint, five most recent retained attempts, 30-day attempt and delivery retention, resend, test); apps/app/src/components/webhooks/delivery-log.tsx -->

@@ -177,7 +177,7 @@ pre| // page.nextCursor: pass back as `cursor` for the next page
 Webhooks
 Send matching events to your own endpoint.
 Logbird sends each matching event to an HTTPS endpoint you choose. Choose which events with the same query language as the explorer, and narrow an endpoint to one tenant or one record, with field masks. Every delivery is signed with the Standard Webhooks headers; verify it with the TypeScript or .NET SDK.
-Failed attempts are retried with backoff for up to 24 hours, unless the endpoint answers 410 Gone. Delivery is at least once, so deduplicate by webhook-id.
+Network failures, timeouts and responses other than 2xx or 410 Gone are retried with backoff for up to 24 hours. Delivery is at least once, so deduplicate by webhook-id.
 A delivery log shows each delivery's status and its recent attempts for 30 days; resend a delivery or send a test ping.
 The secret is shown once; rotate it with an overlap so receivers can switch.
 An endpoint is disabled at once when it answers 410 Gone, and after 50 consecutive failed deliveries (by default) or 24 hours of failures without a success. An email notice is then queued for the workspace's owners and admins.

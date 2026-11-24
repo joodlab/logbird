@@ -105,7 +105,7 @@ export const security = {
       },
       redirects: {
         title: 'No redirects, no console credentials',
-        body: 'Redirects are never followed: a redirect counts as a failed attempt, which is retried within the 24-hour window. A delivery carries the event and its signature headers, never console headers or cookies.',
+        body: 'Redirects are never followed: a redirect counts as a failed attempt, retried while the 24-hour window is open. A delivery carries the event and its signature headers, never console headers or cookies.',
       },
       masks: {
         title: 'Masks on every delivery',
