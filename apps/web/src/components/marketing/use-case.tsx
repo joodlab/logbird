@@ -70,7 +70,7 @@ function UseCaseBlock({ section, sunken }: { section: UseCaseSection; sunken: bo
         </ol>
       ) : null}
       {section.limit ? (
-        <p className="panel border-s-2 border-s-brand p-4 text-sm leading-relaxed">
+        <p className="panel p-4 text-sm leading-relaxed">
           <strong className="font-medium">{section.limit.label}</strong>
           <span className="text-muted-foreground">
             {': '}
