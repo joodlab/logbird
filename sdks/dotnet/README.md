@@ -69,8 +69,9 @@ audit.Track(new AuditEvent("invoice.updated") { Actor = AuditActor.User(user.Id)
     .Change("status", "draft", "sent"));
 ```
 
-For ASP.NET Core, a `Logbird.AspNetCore` package is on the way. It registers the client, fills the actor, tenant,
-IP, user agent and request and trace ids from each request, and flushes when the host stops.
+For ASP.NET Core, add [`Logbird.AspNetCore`](https://www.nuget.org/packages/Logbird.AspNetCore) instead
+(`dotnet add package Logbird.AspNetCore`). It registers the client, fills the actor, tenant, IP, user agent and
+request and trace ids from each request, and flushes when the host stops.
 
 ### What goes in an event
 

@@ -14,9 +14,8 @@ Two packages:
 
 ## 1. Install
 
-> The packages are not on nuget.org yet. Until they are, build against the source: clone this repository and reference
-> `sdks/dotnet/src/Logbird.AspNetCore/Logbird.AspNetCore.csproj` from your project, as
-> [`examples/aspnetcore`](../examples/aspnetcore) does. Once published, it is one command:
+Both packages are on nuget.org ([`Logbird.AspNetCore`](https://www.nuget.org/packages/Logbird.AspNetCore),
+[`Logbird`](https://www.nuget.org/packages/Logbird)). One command adds the companion package and, with it, `Logbird`:
 
 ```sh
 dotnet add package Logbird.AspNetCore
