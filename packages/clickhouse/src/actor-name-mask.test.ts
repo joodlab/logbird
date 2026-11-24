@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { actorNameIsEmail, facetOrderParams, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
+import { actorNameIsSensitive, actorNamePseudonymInput, facetOrderParams, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
+import { compileMaskedQuery } from './field-mask';
 import { facets } from './queries';
 import { compileQuery } from './query';
 
@@ -13,11 +14,18 @@ describe('the name rule shared by events and SQL', () => {
     [' alice@example.com\t', 'alice@example.com', true],
     ['alice @example.com', 'alice@example.com', true],
     ['alice @ example.com', 'alice@example.com', true],
+    // Round 2: a name that carries an address in any form, with or without a matching email.
+    ['Ada <ada@example.org>', 'ada@example.org', true],
+    ['contact@acme.example', '', true],
+    ['Bob (bob at example)', 'bob@example.com', false],
+    ['bob@other.example', 'alice@example.com', true],
+    // The stored email cut at its cap ("ada" plus whitespace), a short name that is the full address.
+    ['ada@example.org', `ada${' '.repeat(509)}`, true],
     ['Alice', 'alice@example.com', false],
-    ['alice@example.com', '', false],
+    ['Alice', '', false],
     ['', '', false],
   ])('%j is the address %j: %s', (name, email, expected) => {
-    expect(actorNameIsEmail(name, email)).toBe(expected);
+    expect(actorNameIsSensitive(name, email)).toBe(expected);
   });
 
   // A name padded past normalize.ts's 512-unit cap is stored cut: at the cap, a normalised prefix of the email counts.
@@ -29,9 +37,35 @@ describe('the name rule shared by events and SQL', () => {
     const email = 'alice@example.com';
     const name = `alice${' '.repeat(units - 5)}`;
     expect(name.length).toBe(units);
-    expect(actorNameIsEmail(name, email)).toBe(expected);
+    expect(actorNameIsSensitive(name, email)).toBe(expected);
     // A prefix that is not the address's start never counts, at any length.
-    expect(actorNameIsEmail(`bob${' '.repeat(units - 3)}`, email)).toBe(false);
+    expect(actorNameIsSensitive(`bob${' '.repeat(units - 3)}`, email)).toBe(false);
+  });
+});
+
+describe('the pseudonym a sensitive name shows', () => {
+  it.each([
+    ['ada@example.org', 'ada@example.org', 'ada@example.org'],
+    ['Ada <ada@example.org>', 'ada@example.org', 'ada@example.org'],
+    ['contact@acme.example', '', 'contact@acme.example'],
+    ['bob@other.example', 'alice@example.com', 'bob@other.example'],
+    ['ada@example.org', `ada${' '.repeat(509)}`, `ada${' '.repeat(509)}`],
+  ])('%j with email %j hashes %j', (name, email, input) => {
+    expect(actorNamePseudonymInput(name, email)).toBe(input);
+  });
+});
+
+describe('the shared masked-filter compilation (webhook discovery and recheck compile here)', () => {
+  it('rewrites actor.name and free text for the actor_email mask, with its parameters, and still refuses actor.email', () => {
+    for (const q of ['actor.name:"ada@example.org"', 'ada@example.org']) {
+      const compiled = compileMaskedQuery(q, ['actor_email']);
+      expect(compiled.sql, q).toContain("position(lowerUTF8(replaceRegexpAll(actor_name,{actorMaskSpaces:String},'')),'@')>0");
+      expect(compiled.params).toMatchObject({ actorMaskSpaces: expect.any(String), actorMaskAstral: expect.any(String) });
+    }
+    expect(() => compileMaskedQuery('actor.email:"ada@example.org"', ['actor_email'])).toThrow(/masked/);
+    // Other masks and no mask compile as before.
+    expect(compileMaskedQuery('actor.name:"x"', ['ip']).sql).not.toContain('actorMaskSpaces');
+    expect(compileMaskedQuery('actor.name:"x"', undefined).sql).not.toContain('actorMaskSpaces');
   });
 });
 
@@ -39,16 +73,16 @@ describe('the filter rewrite', () => {
   it('reads an empty name wherever the name is the address, so an actor.name probe never matches those rows', () => {
     for (const q of ['actor.name:"carol@example.com"', 'actor.name:carol*', 'actor.name:*', 'NOT actor.name:"x"']) {
       const sql = maskActorNameInFilter(compileQuery(q).sql);
-      expect(sql, q).toContain("if((actor_email!=''");
+      expect(sql, q).toContain('if((position(');
       // The probe compares against the guarded expression, never the bare column.
-      expect(sql.replace(/if\(\(actor_email!=''[\s\S]*?,'',actor_name\)/g, 'GUARDED'), q).not.toMatch(/[=(,]\s*actor_name\b(?!\),)/);
+      expect(sql.replace(/if\(\(position\([\s\S]*?,'',actor_name\)/g, 'GUARDED'), q).not.toMatch(/[=(,]\s*actor_name\b(?!\),)/);
     }
   });
 
   it('evaluates free text on such a row only against the text an empty name would leave', () => {
     for (const q of ['carol@example.com', 'carol', '"carol example"']) {
       const sql = maskActorNameInFilter(compileQuery(q).sql);
-      expect(sql, q).toMatch(/\(\(NOT \(actor_email!=''[\s\S]*AND \((hasToken|position)\(search_text, [\s\S]*\) OR \(\(actor_email!=''/);
+      expect(sql, q).toMatch(/\(\(NOT \(position\([\s\S]*AND \((hasToken|position)\(search_text, [\s\S]*\) OR \(\(position\(/);
       expect(sql).toContain("lowerUTF8(concat(description,' ','',' ',tenant_name,' ',arrayStringConcat(target_names,' ')))");
     }
   });

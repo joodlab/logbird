@@ -31,7 +31,7 @@ import {
 } from '@logbird/contracts';
 import type { z } from 'zod';
 import {
-  ACTOR_NAME_IS_EMAIL_SQL,
+  ACTOR_NAME_IS_SENSITIVE_SQL,
   ACTOR_NAME_MASK_PARAMS,
   facetOrderParams,
   facetOrderSql,
@@ -499,7 +499,7 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     label = expr;
   } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) {
     label = maskName && field === 'actor' ? MASKED_ACTOR_NAME_TEXT_SQL : `${field}_name`;
-    if (maskName && field === 'actor') labelFlag = ACTOR_NAME_IS_EMAIL_SQL;
+    if (maskName && field === 'actor') labelFlag = ACTOR_NAME_IS_SENSITIVE_SQL;
   } else if (!col) {
     // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
     // other element types keep their JSON text. An empty array contributes no group.
@@ -517,7 +517,7 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
   if (maskName && col === 'actor_name') {
     expr = MASKED_ACTOR_NAME_TEXT_SQL;
     label = expr;
-    flag = ACTOR_NAME_IS_EMAIL_SQL;
+    flag = ACTOR_NAME_IS_SENSITIVE_SQL;
     labelFlag = flag;
   }
   return { expr, label, flag, labelFlag, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };

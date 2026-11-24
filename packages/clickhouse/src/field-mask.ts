@@ -1,6 +1,6 @@
 import { hkdfSync } from 'node:crypto';
 import type { AuditEvent, ReadScope } from '@logbird/contracts';
-import { actorNameIsEmail, maskedEmail } from './actor-name-mask';
+import { ACTOR_NAME_MASK_PARAMS, actorNameIsSensitive, actorNamePseudonymInput, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
 import { facetColumn } from './queries';
 import { type CompileOptions, compileQuery, QueryError } from './query';
 import { MASKED_ATTRIBUTES, MASKED_COLUMNS } from './scope';
@@ -23,7 +23,12 @@ export function maskEvent(event: AuditEvent, mask: Masks, secret?: Buffer): Audi
       const hidden = maskedEmail(event.projectId, email, secret);
       // A producer that used the address as the display name too: the name would show what the mask hides. Same value,
       // and the same rule facets and filters apply in SQL (actor-name-mask.ts).
-      masked.actor = { ...masked.actor, email: hidden, name: actorNameIsEmail(name, email) ? hidden : name };
+      const sensitive = actorNameIsSensitive(name, email);
+      masked.actor = {
+        ...masked.actor,
+        email: hidden,
+        name: sensitive ? maskedEmail(event.projectId, actorNamePseudonymInput(name, email), secret) : name,
+      };
     }
   }
   for (const preset of mask) for (const key of MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];
@@ -48,6 +53,9 @@ export function compileMaskedQuery(q: string, mask: Masks, clock?: number, optio
   const hiddenPaths = mask.flatMap((preset) => MASKED_ATTRIBUTES[preset]);
   for (const [, key] of compiled.sql.matchAll(/(?:attributes\[|mapContains\(attributes,)\{(q\d+):String\}/g))
     if (key && hiddenPaths.includes(String(compiled.params[key]))) maskedFieldError(0, q.length);
+  // After the checks above (the rewrite itself reads actor_email): a filter cannot select on a name that carries the
+  // address, wherever it runs (webhook discovery and its send-time recheck compile here too) (#333).
+  if (mask.includes('actor_email')) return { sql: maskActorNameInFilter(compiled.sql), params: { ...compiled.params, ...ACTOR_NAME_MASK_PARAMS } };
   return compiled;
 }
 

@@ -1,10 +1,13 @@
 /**
- * The `actor_email` mask also hides an actor name that is the address (#333): a producer that used the address as the
- * display name too. One rule everywhere, in TypeScript for events (`maskEvent`) and in SQL for facets and filters:
- * - lower-cased, with every whitespace character removed, the name equals the email; or
- * - the name was cut at its 512-unit storage cap (511 or more UTF-16 units stored) and, normalised the same way, is a
- *   non-empty prefix of the email (a name padded with whitespace past the cap is still the address).
- * Removing all whitespace masks a little more than plain equality would; it never shows more.
+ * The `actor_email` mask also hides an actor name that carries an address (#333): a producer that used the address as
+ * the display name, put it inside the name ("Ada <ada@example.org>"), or sent an address only as the name. One rule
+ * everywhere, in TypeScript for events (`maskEvent`) and in SQL for facets and filters. Normalised (lower-cased, every
+ * whitespace character removed), the name is sensitive when it:
+ * - contains `@`; or
+ * - equals the email; or
+ * - was cut at its 512-unit storage cap (511 or more UTF-16 units stored) and is a non-empty prefix of the email.
+ * A sensitive name shows as a pseudonym: of the stored email when the name contains it (or is that capped prefix), so
+ * it matches the email's own pseudonym; otherwise of the normalised name. It masks more than strictly needed; never less.
  */
 import { createHmac } from 'node:crypto';
 
@@ -24,12 +27,18 @@ const ASTRAL_RE2 = '[\\x{10000}-\\x{10FFFF}]';
 const NAME_CAP_REACHED = 511;
 
 const normalized = (value: string) => value.replace(SPACES, '').toLowerCase();
-/** Whether a name is the actor's address under the mask rule. An empty email never matches. */
-export function actorNameIsEmail(name: string, email: string) {
-  if (!email) return false;
+const cappedPrefix = (name: string, n: string, e: string) => name.length >= NAME_CAP_REACHED && n !== '' && e.startsWith(n);
+/** Whether an actor name carries an address under the mask rule. */
+export function actorNameIsSensitive(name: string, email: string) {
   const n = normalized(name);
   const e = normalized(email);
-  return n === e || (name.length >= NAME_CAP_REACHED && n !== '' && e.startsWith(n));
+  return n.includes('@') || (e !== '' && (n === e || cappedPrefix(name, n, e)));
+}
+/** What a sensitive name's pseudonym hashes: the stored email when the name contains it, else the normalised name. */
+export function actorNamePseudonymInput(name: string, email: string) {
+  const n = normalized(name);
+  const e = normalized(email);
+  return e !== '' && (n.includes(e) || cappedPrefix(name, n, e)) ? email : n;
 }
 
 /** Query parameters every masked expression below needs; merge them into the query's params. */
@@ -37,14 +46,19 @@ export const ACTOR_NAME_MASK_PARAMS = { actorMaskSpaces: SPACES_RE2, actorMaskAs
 
 const sqlNormalized = (column: string) => `lowerUTF8(replaceRegexpAll(${column},{actorMaskSpaces:String},''))`;
 const sqlUtf16Length = (column: string) => `(lengthUTF8(${column})+countMatches(${column},{actorMaskAstral:String}))`;
-/** SQL form of `actorNameIsEmail` over the stored columns (UInt8). */
-export const ACTOR_NAME_IS_EMAIL_SQL = `(actor_email!='' AND (${sqlNormalized('actor_name')}=${sqlNormalized('actor_email')} OR (${sqlUtf16Length('actor_name')}>=${NAME_CAP_REACHED} AND ${sqlNormalized('actor_name')}!='' AND startsWith(${sqlNormalized('actor_email')},${sqlNormalized('actor_name')}))))`;
+const N = sqlNormalized('actor_name');
+const E = sqlNormalized('actor_email');
+const SQL_CAPPED_PREFIX = `(${sqlUtf16Length('actor_name')}>=${NAME_CAP_REACHED} AND ${N}!='' AND startsWith(${E},${N}))`;
+/** SQL form of `actorNameIsSensitive` over the stored columns (UInt8). */
+export const ACTOR_NAME_IS_SENSITIVE_SQL = `(position(${N},'@')>0 OR (${E}!='' AND (${N}=${E} OR ${SQL_CAPPED_PREFIX})))`;
+/** SQL form of `actorNamePseudonymInput`, lower-cased as `maskedEmail` lower-cases its input. */
+const PSEUDONYM_INPUT_SQL = `if(${E}!='' AND (position(${N},${E})>0 OR ${SQL_CAPPED_PREFIX}),lowerUTF8(actor_email),${N})`;
 /**
- * The actor name's facet text under the mask: a name that is the address becomes the lower-cased address, and the
- * separate flag column (`ACTOR_NAME_IS_EMAIL_SQL`) says so. facets() turns flagged text into the address's pseudonym
+ * The actor name's facet text under the mask: a sensitive name becomes its pseudonym's input, and the separate flag
+ * column (`ACTOR_NAME_IS_SENSITIVE_SQL`) says so. facets() turns flagged text into the address's pseudonym
  * before returning; text is never interpreted by its content, so no producer string can pass for a masked address.
  */
-export const MASKED_ACTOR_NAME_TEXT_SQL = `if(${ACTOR_NAME_IS_EMAIL_SQL},lowerUTF8(actor_email),actor_name)`;
+export const MASKED_ACTOR_NAME_TEXT_SQL = `if(${ACTOR_NAME_IS_SENSITIVE_SQL},${PSEUDONYM_INPUT_SQL},actor_name)`;
 
 /**
  * Keys for ordering tied facet groups under the mask: a keyed hash of each group, so which of several equal counts is
@@ -73,12 +87,12 @@ const FREE_TEXT = /\((hasToken|position)\(search_text, (lowerUTF8\(\{q\d+:String
  */
 export function maskActorNameInFilter(sql: string): string {
   // actor_name first: the free-text rewrite below adds references that must stay as they are (replace never rescans).
-  const named = sql.replace(/\bactor_name\b/g, `if(${ACTOR_NAME_IS_EMAIL_SQL},'',actor_name)`);
+  const named = sql.replace(/\bactor_name\b/g, `if(${ACTOR_NAME_IS_SENSITIVE_SQL},'',actor_name)`);
   const uses = (named.match(/\bsearch_text\b/g) ?? []).length;
   let rewritten = 0;
   const out = named.replace(FREE_TEXT, (match: string, fn: string, arg: string, gt: string | undefined) => {
     rewritten++;
-    return `((NOT ${ACTOR_NAME_IS_EMAIL_SQL} AND ${match}) OR (${ACTOR_NAME_IS_EMAIL_SQL} AND ${fn}(${SEARCH_TEXT_WITHOUT_NAME}, ${arg})${gt ?? ''}))`;
+    return `((NOT ${ACTOR_NAME_IS_SENSITIVE_SQL} AND ${match}) OR (${ACTOR_NAME_IS_SENSITIVE_SQL} AND ${fn}(${SEARCH_TEXT_WITHOUT_NAME}, ${arg})${gt ?? ''}))`;
   });
   if (rewritten !== uses) throw new Error('Free-text filter cannot be masked for this scope.');
   return out;
