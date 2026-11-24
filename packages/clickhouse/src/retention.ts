@@ -22,6 +22,8 @@ import { rollupSql } from './rollup-sql';
  *   delta: those buckets are deleted and only the delta is re-inserted.
  */
 
+// Bounds are written as UTC wall-clock text and every placeholder is typed DateTime64(3,'UTC'), so a session time zone
+// other than UTC cannot shift what retention selects, stages or deletes (#268).
 const ms = (d: Date) => d.toISOString().replace('T', ' ').slice(0, -1);
 // Parameters are bound exactly as given (UTC `YYYY-MM-DD hh:mm:ss.sss`), never re-parsed in the local time zone.
 async function rows<T>(ch: ClickHouseClient, query: string, query_params: Record<string, unknown>, settings?: ClickHouseSettings) {
@@ -34,7 +36,7 @@ type Staged = keyof typeof STAGE_TABLES;
 export const retentionCutoff = (now: number, retentionDays: number) => new Date(Math.floor((now - retentionDays * 86_400_000) / 60_000) * 60_000);
 
 export type RetentionKeys = { kinds: string[]; entityIds: string[]; keys: string[] };
-const deleted = '(timestamp < {cutoff:DateTime64(3)} AND received_at <= {fenceA:DateTime64(3)})';
+const deleted = '(timestamp < {cutoff:DateTime64(3,'UTC')} AND received_at <= {fenceA:DateTime64(3,'UTC')})';
 
 /** The rollup keys the rows this run deletes contributed to. */
 export async function retentionAffectedKeys(ch: ClickHouseClient, p: string, cutoff: Date, fenceA: Date): Promise<RetentionKeys> {
@@ -67,7 +69,7 @@ export async function retentionDeletedCount(ch: ClickHouseClient, p: string, cut
 }
 
 const keyFilters = {
-  events_by_minute: 'bucket < {cutoff:DateTime64(3)}',
+  events_by_minute: 'bucket < {cutoff:DateTime64(3,'UTC')}',
   entities: '(kind,entity_id) IN arrayZip({kinds:Array(String)},{entityIds:Array(String)})',
   attribute_keys: 'key IN {keys:Array(String)}',
 } as const;
@@ -108,7 +110,7 @@ export async function stageRetentionRollups(session: ClickHouseClient, p: string
     await ch.command({ query: `DROP TEMPORARY TABLE IF EXISTS ${stage}` });
     await ch.command({ query: `CREATE TEMPORARY TABLE ${stage} AS ${table}` });
   }
-  const surviving = '(received_at <= {fenceA:DateTime64(3)} AND timestamp >= {cutoff:DateTime64(3)})';
+  const surviving = '(received_at <= {fenceA:DateTime64(3,'UTC')} AND timestamp >= {cutoff:DateTime64(3,'UTC')})';
   for (const { table, select } of recomputeSelects(surviving)) {
     if (!(table in STAGE_TABLES)) continue;
     await ch.command({ query: `INSERT INTO ${STAGE_TABLES[table as Staged]} ${select}`, query_params: params(p, cutoff, fenceA, keys) });
@@ -150,7 +152,7 @@ export async function applyRetention(
   await afterDeletes?.();
   for (const [table, stage] of Object.entries(STAGE_TABLES)) await ch.command({ query: `INSERT INTO ${table} SELECT * FROM ${stage}` });
   // Rows received between the fences, whatever their timestamp, survive this run: their contribution comes back.
-  const between = '(received_at > {fenceA:DateTime64(3)} AND received_at <= {fenceB:DateTime64(3)})';
+  const between = '(received_at > {fenceA:DateTime64(3,'UTC')} AND received_at <= {fenceB:DateTime64(3,'UTC')})';
   for (const { table, select } of recomputeSelects(between)) {
     if (table === 'entities' && !keys.entityIds.length) continue;
     if (table === 'attribute_keys' && !keys.keys.length) continue;

@@ -930,7 +930,7 @@ export async function projectStats(
 export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: Date) {
   const rows = await read<{ n: number }>(
     ch,
-    'SELECT (SELECT count() FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)) + (SELECT count() FROM (SELECT 1 FROM event_ids WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)) n',
+    'SELECT (SELECT count() FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} LIMIT 1)) + (SELECT count() FROM (SELECT 1 FROM event_ids WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} LIMIT 1)) n',
     { p, before: before.toISOString().replace('T', ' ').slice(0, -1) },
   );
   return Number(rows[0]?.n ?? 0) > 0;
@@ -1046,15 +1046,15 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
     ? await read<{ kind: string; id: string }>(
         ch,
         `SELECT DISTINCT kind,id FROM (
-    SELECT 'actor' kind,actor_id id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND actor_id!=''
-    UNION ALL SELECT 'tenant',tenant_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND tenant_id!=''
-    UNION ALL SELECT 'executor',executor_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND executor_id!=''
-    UNION ALL SELECT 'target',concat(t.1,':',t.2) FROM events ARRAY JOIN arrayZip(target_types,target_ids) AS t WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)}
-    UNION ALL SELECT 'attribute',arrayJoin(mapKeys(attributes)) FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)})`,
+    SELECT 'actor' kind,actor_id id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} AND actor_id!=''
+    UNION ALL SELECT 'tenant',tenant_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} AND tenant_id!=''
+    UNION ALL SELECT 'executor',executor_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')} AND executor_id!=''
+    UNION ALL SELECT 'target',concat(t.1,':',t.2) FROM events ARRAY JOIN arrayZip(target_types,target_ids) AS t WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')}
+    UNION ALL SELECT 'attribute',arrayJoin(mapKeys(attributes)) FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3,'UTC')})`,
         params,
       )
     : [];
-  const cutoff = before ? 'timestamp < {before:DateTime64(3)}' : '';
+  const cutoff = before ? 'timestamp < {before:DateTime64(3,'UTC')}' : '';
   await deleteAndVerify(ch, p, 'events', cutoff, cutoffParams);
   await deleteAndVerify(ch, p, 'event_ids', cutoff, cutoffParams);
   // The required 007/008 migration repairs collapsed legacy pointers once before rollout.
@@ -1108,7 +1108,7 @@ export async function rebuildProjectRollups(client: ClickHouseClient, p: string,
 export async function retentionStats(ch: ClickHouseClient, p: string, days?: number) {
   const rows = await read<{ oldest: string | null; n: string }>(
     ch,
-    'SELECT minOrNull(timestamp) oldest,countIf(timestamp < {cutoff:DateTime64(3)}) n FROM events WHERE project_id={p:String}',
+    'SELECT minOrNull(timestamp) oldest,countIf(timestamp < {cutoff:DateTime64(3,'UTC')}) n FROM events WHERE project_id={p:String}',
     { p, cutoff: new Date(Date.now() - (days ?? 3650) * 86_400_000).toISOString() },
   );
   return { oldestEventAt: rows[0]?.oldest ? iso(rows[0].oldest) : null, previewDeletedEvents: days === undefined ? null : Number(rows[0]?.n ?? 0) };
