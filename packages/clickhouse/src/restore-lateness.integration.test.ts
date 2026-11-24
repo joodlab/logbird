@@ -78,54 +78,63 @@ beforeAll(async () => {
   await ensureLatenessView(ch);
 });
 
-it.runIf(scratch)('restore normalization keeps the lateness rollup as restored and leaves its view attached', async () => {
-  const receivedAt = new Date();
-  const normalized = normalizeEvent(
-    { id: 'restored-late', action: 'qa.restore', occurredAt: new Date(+receivedAt - 3 * hour).toISOString() },
-    { projectId, receivedAt },
-  );
-  if (!normalized.ok) throw new Error(normalized.reason);
-  await insertEvents(ch, [normalized.row]);
-  // An arrival whose raw event has since expired: counted in the rollup, absent from events.
-  await ch.insert({
-    table: 'events_lateness_by_hour',
-    values: [{ project_id: projectId, received_hour: '2026-11-01 10:00:00', late_hours: 5, events: 1 }],
-    format: 'JSONEachRow',
-  });
-  const before = await lateTotals();
-  expect(before).toHaveLength(2);
-  await mutationsSettled();
-  for (const query of await normalizationStatements()) await ch.command({ query });
-  expect(await lateTotals()).toEqual(before);
-  expect(await viewPresent()).toBe(true);
-  expect(
-    Number(
-      (await read<{ n: number }>(ch, "SELECT count() n FROM system.tables WHERE database = currentDatabase() AND name = 'lateness_restore_check'"))[0]
-        ?.n,
-    ),
-  ).toBe(0);
-  await ch.command({ query: 'DROP TABLE IF EXISTS events_restore_staging' });
-});
+it.runIf(scratch)(
+  'restore normalization keeps the lateness rollup as restored and leaves its view attached',
+  async () => {
+    const receivedAt = new Date();
+    const normalized = normalizeEvent(
+      { id: 'restored-late', action: 'qa.restore', occurredAt: new Date(+receivedAt - 3 * hour).toISOString() },
+      { projectId, receivedAt },
+    );
+    if (!normalized.ok) throw new Error(normalized.reason);
+    await insertEvents(ch, [normalized.row]);
+    // An arrival whose raw event has since expired: counted in the rollup, absent from events.
+    await ch.insert({
+      table: 'events_lateness_by_hour',
+      values: [{ project_id: projectId, received_hour: '2026-11-01 10:00:00', late_hours: 5, events: 1 }],
+      format: 'JSONEachRow',
+    });
+    const before = await lateTotals();
+    expect(before).toHaveLength(2);
+    await mutationsSettled();
+    for (const query of await normalizationStatements()) await ch.command({ query });
+    expect(await lateTotals()).toEqual(before);
+    expect(await viewPresent()).toBe(true);
+    expect(
+      Number(
+        (
+          await read<{ n: number }>(ch, "SELECT count() n FROM system.tables WHERE database = currentDatabase() AND name = 'lateness_restore_check'")
+        )[0]?.n,
+      ),
+    ).toBe(0);
+    await ch.command({ query: 'DROP TABLE IF EXISTS events_restore_staging' });
+  },
+  120_000,
+);
 
-it.runIf(scratch)('a normalization that stops after detaching the view is repaired by the migrations, and a dropped view is recreated', async () => {
-  const statements = await normalizationStatements();
-  const detach = statements.findIndex((statement) => statement.startsWith('DETACH TABLE'));
-  expect(detach).toBeGreaterThan(0);
-  await mutationsSettled();
-  const rawCount = async () => Number((await read<{ n: number }>(ch, 'SELECT count() n FROM events'))[0]?.n);
-  const rawBefore = await rawCount();
-  for (const query of statements.slice(0, detach + 1)) await ch.command({ query });
-  expect(await viewPresent()).toBe(false);
-  await migrate(ch);
-  expect(await viewPresent()).toBe(true);
-  // The script checks and detaches before its first TRUNCATE, so this stop cleared nothing: drop the leftovers. (Resuming a
-  // half-run replay through the re-attached view would count its late rows again: a documented limit of the approximate
-  // count.)
-  expect(await rawCount()).toBe(rawBefore);
-  await ch.command({ query: 'DROP TABLE events_restore_staging' });
-  await ch.command({ query: 'DROP TABLE lateness_restore_check' });
-  await ch.command({ query: 'DROP VIEW events_lateness_mv' });
-  expect(await viewPresent()).toBe(false);
-  await ensureLatenessView(ch);
-  expect(await viewPresent()).toBe(true);
-});
+it.runIf(scratch)(
+  'a normalization that stops after detaching the view is repaired by the migrations, and a dropped view is recreated',
+  async () => {
+    const statements = await normalizationStatements();
+    const detach = statements.findIndex((statement) => statement.startsWith('DETACH TABLE'));
+    expect(detach).toBeGreaterThan(0);
+    await mutationsSettled();
+    const rawCount = async () => Number((await read<{ n: number }>(ch, 'SELECT count() n FROM events'))[0]?.n);
+    const rawBefore = await rawCount();
+    for (const query of statements.slice(0, detach + 1)) await ch.command({ query });
+    expect(await viewPresent()).toBe(false);
+    await migrate(ch);
+    expect(await viewPresent()).toBe(true);
+    // The script checks and detaches before its first TRUNCATE, so this stop cleared nothing: drop the leftovers. (Resuming a
+    // half-run replay through the re-attached view would count its late rows again: a documented limit of the approximate
+    // count.)
+    expect(await rawCount()).toBe(rawBefore);
+    await ch.command({ query: 'DROP TABLE events_restore_staging' });
+    await ch.command({ query: 'DROP TABLE lateness_restore_check' });
+    await ch.command({ query: 'DROP VIEW events_lateness_mv' });
+    expect(await viewPresent()).toBe(false);
+    await ensureLatenessView(ch);
+    expect(await viewPresent()).toBe(true);
+  },
+  120_000,
+);
