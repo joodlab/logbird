@@ -1141,7 +1141,8 @@ applies to events discovered after the save; the cursor doesn't move back, and d
 already queued are still sent. Resends and test pings ignore the window. The endpoint's
 `lateEvents` reports how many events in the project arrived later than its window,
 counted before its filter and scope apply, since the later of its last window change
-and 30 days ago. The window also narrows each discovery scan to recent occurrence
+and 30 days ago, by arrival hour. It counts arrivals, so it includes late events since
+removed by retention or deletion, and can be higher than what a search finds. The window also narrows each discovery scan to recent occurrence
 times, which keeps discovery cheap on large projects.
 
 Regexes run in ClickHouse with RE2, so webhook filters are checked against RE2's

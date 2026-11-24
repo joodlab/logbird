@@ -1,8 +1,10 @@
 -- Late arrivals for the webhook delivery window (#152): events per project, arrival hour and lateness in whole hours.
 -- late_hours = ceil((received_at - timestamp) / 1 hour), floored at 0 (an occurrence time ahead of arrival is not late)
 -- and capped at 87601, one past the largest window (3,650 days = 87,600 hours). A window of k hours counts exactly the
--- rows with late_hours > k. Counting starts when the view is created (no backfill). Rows live 32 days, a little past the
--- 30 days the count looks back, so retention never has to delete them. Project deletion deletes them (purgeProject).
+-- rows with late_hours > k. Counting starts when the view is created (no backfill). Rows expire 32 days after their
+-- arrival hour, a little past the 30 days the count looks back, so retention never has to delete them. The TTL drops whole
+-- monthly parts, so expired rows can linger until their part expires, which reads bounded by `since` never see. Project
+-- deletion deletes them (purgeProject).
 -- Only the internal user reads this table: logbird_query has no grant on it.
 CREATE TABLE IF NOT EXISTS events_lateness_by_hour
 (
@@ -14,7 +16,8 @@ CREATE TABLE IF NOT EXISTS events_lateness_by_hour
 ENGINE = SummingMergeTree(events)
 PARTITION BY toYYYYMM(received_hour)
 ORDER BY (project_id, received_hour, late_hours)
-TTL received_hour + INTERVAL 32 DAY DELETE;
+TTL received_hour + INTERVAL 32 DAY DELETE
+SETTINGS ttl_only_drop_parts = 1;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS events_lateness_mv TO events_lateness_by_hour AS
 SELECT
