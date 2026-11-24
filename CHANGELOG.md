@@ -92,11 +92,6 @@ and support investigations. Console captures open full size, and the developer
 examples include outcome and description. The optional site deploys separately.
 (#266, #282, #289, #291, #376)
 
-**Retention.** The hourly purge releases the project lock while ClickHouse
-applies its deletes. Ingest and reads can continue while the deletes are
-pending, and exports wait for them to finish. An immediate purge after lowering
-retention still uses the synchronous path. (#296)
-
 ### Self-hoster actions
 
 Follow [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups) to
@@ -135,6 +130,10 @@ reads and writes. `SHARE` and `SHARE ROW EXCLUSIVE` block ordinary writes.
 Workspaces that already have no owner keep working. The migration does not
 assign owners. If a workspace later gains an owner, the triggers prevent removal
 or demotion of its last owner.
+Removing or demoting an owner must run under READ COMMITTED, PostgreSQL's
+default and what Logbird uses. Under REPEATABLE READ or SERIALIZABLE the trigger
+refuses it with SQLSTATE `LB410`, even when another owner remains. Scripts that
+change owners at those isolation levels must switch to READ COMMITTED.
 
 ClickHouse migration `011_events_lateness.sql` is additive. It uses DDL locks
 to create the lateness rollup table and its materialized view, with no backfill
