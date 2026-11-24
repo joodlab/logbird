@@ -43,7 +43,7 @@ one fails `tsc`.
 
 | State | What changes | Module keys |
 | --- | --- | --- |
-| Repository private | The hero lead and self-host card say "once the source opens"; the description, Cloud card and footer never call the source open-source; the status line has the "coming soon" prefix; no GitHub links; the .NET line names the folder without a link; the self-host CTA leads to the waitlist | `hero.lead`, `hero.status`, `hero.github`, `hosting.selfHost.body`, `developers.otherStacks`, `shared.selfHostCta`, `shared.githubNav`, `homeMetaFor` |
+| Repository private | The hero lead and self-host card say "once the source opens"; the description, Cloud card and footer never call the source open-source; the status line has the "coming soon" prefix; no GitHub links; the self-host CTA leads to the waitlist | `hero.lead`, `hero.status`, `hero.github`, `hosting.selfHost.body`, `shared.selfHostCta`, `shared.githubNav`, `homeMetaFor` |
 | Cloud open (`WEB_APP_URL`) | The primary CTA asks for access; the lead and the Cloud card say early access; a sign-in link appears | `shared.accessCta`, `hero.lead`, `hero.signIn`, `hosting.cloud.body`, `homeMetaFor` |
 | Scoped read access proven on production (`SCOPED_READ_LIVE`) | Job 1 swaps "read through your backend" for viewer tokens and scoped keys, each state with its own limit | `customers.now`, `customers.scoped` |
 

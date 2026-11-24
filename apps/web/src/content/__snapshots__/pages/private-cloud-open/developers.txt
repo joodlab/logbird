@@ -40,12 +40,12 @@ Read API
 API reference
 SDK quickstart
 Install, create a client, track an event.
-The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.
-track(event) never throws and never waits for the network.
+The TypeScript SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.
+In TypeScript, track(event) never throws and never waits for the network.
 flush() and shutdown() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through onError and onDrop instead.
 Call shutdown() from your host's own exit hook. The SDK installs no process handlers.
 Keep ingest keys on the server. Never ship one in a browser bundle.
-Redaction: beforeSend: redact() deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with [redacted] before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.
+Redaction: in TypeScript, beforeSend: redact() deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with [redacted] before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.
 TypeScript
 .NET
 pre| import { Logbird } from '@logbird/sdk';
@@ -73,6 +73,7 @@ pre| // Permanent rejections don't reject flush(): they arrive through onError a
 pre| await client.flush().catch((error) => console.error('audit delivery pending', error));
 pre| // On exit: stop accepting events and drain the queue. Can reject like flush().
 pre| await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
+With .NET, Track queues the event and returns at once, and nothing the client does throws into your code. await client.FlushAsync() waits for what is queued and returns false if delivery failed; dispose the client on shutdown so queued events are sent. The package targets .NET 8 and later and .NET Standard 2.0.
 The packages aren't on npm yet.
 No SDK? Use HTTP.
 One request, one to a thousand events.

@@ -198,18 +198,21 @@ export const developers = {
   quickstart: {
     eyebrow: 'SDK quickstart',
     title: 'Install, create a client, track an event.',
-    body: "The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.",
+    body: "The TypeScript SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.",
     bullets: [
-      '`track(event)` never throws and never waits for the network.',
+      'In TypeScript, `track(event)` never throws and never waits for the network.',
       "`flush()` and `shutdown()` can reject, for example when retryable delivery (network, `429`, `5xx`) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through `onError` and `onDrop` instead.",
       "Call `shutdown()` from your host's own exit hook. The SDK installs no process handlers.",
       'Keep ingest keys on the server. Never ship one in a browser bundle.',
     ],
     limit:
-      '**Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.',
+      '**Redaction:** in TypeScript, `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.',
     sourceInstallTitle: 'From source (not on npm yet)',
     /** The quickstart's two tabs: the TypeScript client and the .NET package (on NuGet). */
     tabs: { typescript: 'TypeScript', dotnet: '.NET' },
+    /** Under the tabs: the .NET client's own calls (sdks/dotnet/README.md § Install, § Record events, § Flush). */
+    dotnetNote:
+      'With .NET, `Track` queues the event and returns at once, and nothing the client does throws into your code. `await client.FlushAsync()` waits for what is queued and returns `false` if delivery failed; dispose the client on shutdown so queued events are sent. The package targets .NET 8 and later and .NET Standard 2.0.',
     npmNote: byRepo(SITE, {
       public: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild.",
       private: "The packages aren't on npm yet.",

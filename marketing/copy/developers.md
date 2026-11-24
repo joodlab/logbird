@@ -23,7 +23,7 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
 - **id:** `quickstart`
 - **eyebrow:** SDK quickstart
 - **heading:** Install, create a client, track an event.
-- **body:** The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It
+- **body:** The TypeScript SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It
   batches events, retries failures and gives each event an id and a timestamp if you don't.
   <!-- source: packages/sdk/README.md -->
 - **install (labelled "From source (not on npm yet)", shown once `WEB_GITHUB_PUBLIC=true`):**
@@ -72,7 +72,7 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   ```
 
 - **bullets:**
-  - `track(event)` never throws and never waits for the network.
+  - In TypeScript, `track(event)` never throws and never waits for the network.
   - `flush()` and `shutdown()` can reject, for example when retryable delivery (network, `429`, `5xx`) runs out of
     retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows.
     Permanent rejections arrive through `onError` and `onDrop` instead.
@@ -80,7 +80,7 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   - Call `shutdown()` from your host's own exit hook. The SDK installs no process handlers.
   - Keep ingest keys on the server. Never ship one in a browser bundle.
   <!-- source: packages/sdk/README.md; docs/integrations.md §Design -->
-- **side note ("Redaction"):** **Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys,
+- **side note ("Redaction"):** **Redaction:** in TypeScript, `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys,
   cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the
   default list covers secrets, not all personal data.
   <!-- source: packages/sdk/README.md §Host context options -->

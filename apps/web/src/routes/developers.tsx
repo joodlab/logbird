@@ -110,6 +110,9 @@ function DevelopersPage() {
                 { id: 'dotnet', label: quickstart.tabs.dotnet, code: samples.dotnetQuickstart, language: 'csharp' },
               ]}
             />
+            <p className="text-muted-foreground text-sm">
+              <Rich text={quickstart.dotnetNote} />
+            </p>
             <p className="text-muted-foreground text-sm">{quickstart.npmNote}</p>
           </div>
         }
