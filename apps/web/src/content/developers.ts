@@ -32,6 +32,31 @@ await client.flush().catch((error) => console.error('audit delivery pending', er
 // On exit: stop accepting events and drain the queue. Can reject like flush().
 await client.shutdown().catch((error) => console.error('audit events left undelivered', error));`;
 
+/**
+ * The same event with the .NET package (sdks/dotnet/README.md § Install, § Record events). No version: `dotnet add
+ * package` takes the one nuget.org lists. Compiled against sdks/dotnet before it changes (see the PR that adds it).
+ */
+const dotnetQuickstart = `// dotnet add package Logbird   (ASP.NET Core: dotnet add package Logbird.AspNetCore)
+using System;
+using Logbird;
+
+await using var audit = new LogbirdClient(new LogbirdOptions
+{
+    Endpoint = new Uri("https://audit.example.com"), // your Logbird origin, without /v1/events
+    IngestKey = Environment.GetEnvironmentVariable("LOGBIRD_INGEST_KEY"), // lb_ingest_...
+    Environment = "production",
+});
+
+// After the change is committed:
+audit.Track(new AuditEvent("booking.cancelled")
+{
+    Actor = AuditActor.User("usr_42", name: "Lina Haddad"),
+    Tenant = new AuditTenant("biz_7") { Name = "Azure Hotels" },
+    Targets = { new AuditTarget("booking", "bk_1042") { Name = "Booking #1042" } },
+    Changes = { new AuditChange("status", "confirmed", "cancelled") },
+});
+// Disposing the client (await using) sends what is still queued.`;
+
 const http = `curl https://audit.example.com/v1/events \\
   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \\
   -H 'Content-Type: application/json' \\
@@ -148,7 +173,7 @@ const limits: [string, string][] = [
  * and packages/integrations READMEs. Inline marks: `code` and **bold** (components/marketing/rich.tsx).
  */
 export const developers = {
-  samples: { sourceInstall, quickstart, http, smallest, worked, hono, workers, read },
+  samples: { sourceInstall, quickstart, dotnetQuickstart, http, smallest, worked, hono, workers, read },
   hero: {
     eyebrow: 'Developers',
     title: 'Add an audit log in an afternoon. Keep it for years.',
@@ -174,17 +199,25 @@ export const developers = {
   quickstart: {
     eyebrow: 'SDK quickstart',
     title: 'Install, create a client, track an event.',
-    body: "The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.",
+    body: "The TypeScript SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and gives each event an id and a timestamp if you don't.",
     bullets: [
-      '`track(event)` never throws and never waits for the network.',
+      'In TypeScript, `track(event)` never throws and never waits for the network.',
       "`flush()` and `shutdown()` can reject, for example when retryable delivery (network, `429`, `5xx`) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through `onError` and `onDrop` instead.",
       "Call `shutdown()` from your host's own exit hook. The SDK installs no process handlers.",
       'Keep ingest keys on the server. Never ship one in a browser bundle.',
     ],
     limit:
-      '**Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.',
+      '**Redaction:** in TypeScript, `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.',
     sourceInstallTitle: 'From source (not on npm yet)',
-    quickstartTitle: 'server.ts',
+    /** The quickstart's two tabs: the TypeScript client and the .NET package (on NuGet). */
+    tabs: { typescript: 'TypeScript', dotnet: '.NET' },
+    /**
+     * Under the tabs: the .NET client's own calls, worded from its contract (sdks/dotnet/src/Logbird/LogbirdClient.cs: the
+     * Track and FlushAsync summaries) and README § Failures, drops and shutdown: OnDrop is best effort (every drop is
+     * counted), and ShutdownTimeout bounds the delivery wait, not the whole disposal. Checked by T4, who owns the SDK.
+     */
+    dotnetNote:
+      'With .NET, `Track` queues the event and returns immediately: it never blocks on the network and never throws. `await client.FlushAsync()` sends what is queued and returns `false` when delivery failed after retries or you cancelled; a rejected event counts as settled and is reported to `OnDrop` (best effort; every drop is counted in `Stats`). Disposing the client sends what is queued, spending at most `ShutdownTimeout` (10 seconds) on delivery; anything still undelivered is dropped and reported the same way. The package targets .NET 8 and later and .NET Standard 2.0.',
     npmNote: byRepo(SITE, {
       public: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild.",
       private: "The packages aren't on npm yet.",

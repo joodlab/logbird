@@ -87,7 +87,7 @@ TypeScript SDK with batching, retries and an explicit flush and shutdown.
 Middleware for Hono, TanStack Start and Nuxt; a Vue read composable.
 jobAudit for queue workers: the job keeps the original actor and joins the request's operation.
 A conformance score on every event: the share of nine recommended checks it passes. The setup page shows which fields your events miss.
-Not on TypeScript? Any language that can POST JSON over HTTP works. A .NET package is in the repository and not yet on NuGet: sdks/dotnet, once the source opens.
+Not on TypeScript? Any language that can POST JSON over HTTP works. For .NET, the packages are on NuGet: dotnet add package Logbird, or dotnet add package Logbird.AspNetCore for ASP.NET Core.
 Read the developer guide
 Route
 Worker

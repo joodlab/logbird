@@ -236,12 +236,12 @@ export function homeContent(site: SiteState) {
           body: ' on every event: the share of nine recommended checks it passes. The setup page shows which fields your events miss.',
         },
       ] satisfies Item[],
-      /** Other stacks, and the .NET package: in the repository, not on NuGet. No C# code or install command until it is. */
+      /**
+       * Other stacks, and the .NET packages on NuGet (sdks/dotnet/README.md § Install). No version: `dotnet add package`
+       * takes the one nuget.org lists. Merged only after the maintainer confirms the packages are on nuget.org.
+       */
       otherStacks: {
-        text: 'Not on TypeScript? Any language that can POST JSON over HTTP works. A .NET package is in the repository and not yet on NuGet:',
-        /** The package folder while the repository is public; a note while it is private. */
-        link: site.githubUrl ? { label: 'sdks/dotnet', href: `${site.githubUrl.replace(/\/+$/, '')}/tree/master/sdks/dotnet` } : undefined,
-        privateNote: '`sdks/dotnet`, once the source opens.',
+        text: 'Not on TypeScript? Any language that can POST JSON over HTTP works. For .NET, the packages are on NuGet: `dotnet add package Logbird`, or `dotnet add package Logbird.AspNetCore` for ASP.NET Core.',
       },
       cta: { label: 'Read the developer guide', to: '/developers' } satisfies Cta,
       code: [

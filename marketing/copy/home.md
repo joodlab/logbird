@@ -43,7 +43,7 @@ one fails `tsc`.
 
 | State | What changes | Module keys |
 | --- | --- | --- |
-| Repository private | The hero lead and self-host card say "once the source opens"; the description, Cloud card and footer never call the source open-source; the status line has the "coming soon" prefix; no GitHub links; the .NET line names the folder without a link; the self-host CTA leads to the waitlist | `hero.lead`, `hero.status`, `hero.github`, `hosting.selfHost.body`, `developers.otherStacks`, `shared.selfHostCta`, `shared.githubNav`, `homeMetaFor` |
+| Repository private | The hero lead and self-host card say "once the source opens"; the description, Cloud card and footer never call the source open-source; the status line has the "coming soon" prefix; no GitHub links; the self-host CTA leads to the waitlist | `hero.lead`, `hero.status`, `hero.github`, `hosting.selfHost.body`, `shared.selfHostCta`, `shared.githubNav`, `homeMetaFor` |
 | Cloud open (`WEB_APP_URL`) | The primary CTA asks for access; the lead and the Cloud card say early access; a sign-in link appears | `shared.accessCta`, `hero.lead`, `hero.signIn`, `hosting.cloud.body`, `homeMetaFor` |
 | Scoped read access proven on production (`SCOPED_READ_LIVE`) | Job 1 swaps "read through your backend" for viewer tokens and scoped keys, each state with its own limit | `customers.now`, `customers.scoped` |
 
@@ -59,7 +59,7 @@ other one.
 | `customers` | Job 1: show each customer account its own history, with the limit as its own visible line | `tenant-summary-{light,dark}.webp` (a crop of the tenant page: counts and "who did it"), opens full size |
 | `evidence` | Job 2: what you can show an auditor, each row with where it ends | `export-record-{light,dark}.webp`: a real completed evidence export's record in Workspace activity (docs/media/README.md), with "What a match shows" (`evidenceLimits.exportMatch`) beside it; the caption says only what the image shows. Opens full size. Then the limits table. |
 | `operators` | Support investigations: one search, entity pages, operation trees | `event-sheet-{light,dark}.webp`, opens full size |
-| `developers` | One call per action; TypeScript tabs; one sentence for every other stack and .NET | The Route and Worker tabs |
+| `developers` | One call per action; TypeScript tabs; one sentence for every other stack and the .NET install commands | The Route and Worker tabs |
 | `hosting` | Self-host or Cloud, in the current state, with no prices | Two cards |
 | `guarantees` | Delivery, SDK, validation, retention and import promises with their limits | Two-column table |
 | closing band (`closing`, `shared.ctaBand`) | Start with one event; the brand line; the design-partner line | `LogStack` |
@@ -93,14 +93,14 @@ Every claim on the page, with its source. Update the source and the module toget
 | Workspace activity: project and retention changes, keys, members and roles, saved views, invite links, exports, sign-ins, sign-outs and revoked sessions (not sessions that simply expire); it doesn't record reads (`evidence.rows[3]`) | `docs/workspace-audit.md` § Activity action catalogue (no search or view action is listed) |
 | Search syntax and guarded SQL, entity pages, operation trees (`operators.features`) | `docs/SPEC.md` §5.1; `docs/concepts.md` |
 | SDK, middleware, `jobAudit`, the conformance score (`developers.items`, `developers.code`) | `packages/sdk/README.md`; `docs/integrations.md`; `docs/SPEC.md` §3 (`conformance`); `packages/clickhouse/src/normalize.ts` |
-| Any language that can POST JSON works; a .NET package is in the repository, not on NuGet (`developers.otherStacks`) | `docs/SPEC.md` §5 (`POST /v1/events`); `sdks/dotnet/README.md`; `CHANGELOG.md` on the `chore/release-0.2.0` branch, 0.2.0 § .NET; NuGet has no `Logbird` or `Logbird.AspNetCore` package (checked 2026-11-22) |
+| Any language that can POST JSON works; the .NET packages are on NuGet: `dotnet add package Logbird`, or `Logbird.AspNetCore` for ASP.NET Core (`developers.otherStacks`) | `docs/SPEC.md` §5 (`POST /v1/events`); `sdks/dotnet/README.md` § Install; the packages on nuget.org, verified by the maintainer before this copy went live |
 | The guarantees table (`guarantees`) | `docs/SPEC.md` §2 (including `Logbird-Retry: subset`: only the unsettled events are resent when a `503` lists them), §3; `docs/concepts.md`; `packages/sdk/README.md`; `docs/integrations.md` § Outage backpressure (per-event validation; the bounded SDK queue and its drop policy) |
 
 ## Owner notes
 
 - **Wording near the export digest.** Never "verify integrity", "tamper", "proof" or "certified" near the SHA-256 line.
   The comparison pages' "Tamper evidence: None" stays.
-- **.NET.** No C# code and no install command until the maintainer confirms the packages are on NuGet.
+- **.NET.** Install commands carry no version number. The C# sample lives on /developers, not here.
 - **Prices.** None, until the owner approves the pricing proposal.
 - **Design partner.** The design-partner line (`closing.note`, from `lib/copy-flags.ts`) never names the partner.
 - **Stars.** The GitHub links show no star count: it's a number with no measurement date.

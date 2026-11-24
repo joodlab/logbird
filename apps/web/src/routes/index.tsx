@@ -170,17 +170,7 @@ function HomePage() {
               ))}
             </ul>
             <p className="text-muted-foreground text-sm leading-relaxed">
-              {developers.otherStacks.text}{' '}
-              {developers.otherStacks.link ? (
-                <>
-                  <a className="text-link font-mono" href={developers.otherStacks.link.href}>
-                    {developers.otherStacks.link.label}
-                  </a>
-                  .
-                </>
-              ) : (
-                <Rich text={developers.otherStacks.privateNote} />
-              )}
+              <Rich text={developers.otherStacks.text} />
             </p>
             <div>
               <CtaButton cta={developers.cta} />

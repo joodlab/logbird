@@ -104,7 +104,15 @@ function DevelopersPage() {
         visual={
           <div className="flex flex-col gap-3">
             {GITHUB_PUBLIC ? <SiteCode code={samples.sourceInstall} language="bash" title={quickstart.sourceInstallTitle} /> : null}
-            <SiteCode code={samples.quickstart} language="ts" title={quickstart.quickstartTitle} />
+            <SiteCodeTabs
+              tabs={[
+                { id: 'typescript', label: quickstart.tabs.typescript, code: samples.quickstart, language: 'ts' },
+                { id: 'dotnet', label: quickstart.tabs.dotnet, code: samples.dotnetQuickstart, language: 'csharp' },
+              ]}
+            />
+            <p className="text-muted-foreground text-sm">
+              <Rich text={quickstart.dotnetNote} />
+            </p>
             <p className="text-muted-foreground text-sm">{quickstart.npmNote}</p>
           </div>
         }

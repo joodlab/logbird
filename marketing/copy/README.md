@@ -176,8 +176,9 @@ These variants are **not** used anywhere on the site. The owner may approve them
   <!-- owner-gated: cloud-clause. "…and run it on your own servers or ours." (docs/brand.md) -->
 - **Scoped read access:** shown since 2026-11-23 (`SCOPED_READ_LIVE` in `apps/web/src/content/site.ts`): v0.2.0 runs on
   production and the maintainer confirmed the production proof of scoped read keys and viewer tokens (31/31, #138).
-- **.NET:** one sentence on home (in the repository, not yet on NuGet). No C# code or install command until the packages
-  are on NuGet.
+- **.NET:** the packages are on NuGet (`Logbird`, `Logbird.AspNetCore`). The site gives install commands with no version
+  number (`dotnet add package` takes the one nuget.org lists): one sentence on home and a .NET tab in the /developers
+  quickstart. That copy went live only after the maintainer verified the packages on nuget.org.
 - **Repository link:** comes from `WEB_GITHUB_URL`. Until the repository is public, every mention reads
   "Source on GitHub — coming soon".
   <!-- owner-gated: org-name. Repository: https://github.com/joodlab/logbird ; publisher: Joodlab -->
