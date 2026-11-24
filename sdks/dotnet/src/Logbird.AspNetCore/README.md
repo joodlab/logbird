@@ -43,7 +43,7 @@ app.MapPut("/invoices/{id}", (string id, IAuditLog audit) =>
   `AuditEvent` passed to `Record` is copied and never changed.
 - **Correlation headers**: `traceparent` always: the trace id comes from the request's trace context, which ASP.NET
   Core takes from an inbound, well-formed `traceparent` (W3C Trace Context). Any caller can send it, so it is a
-  correlation hint, not identity. `X-Logbird-Operation` and `X-Request-Id` (up to 256 characters; a longer
+  correlation hint, not identity, and events found by a `trace:` search should be read that way. `X-Logbird-Operation` and `X-Request-Id` (up to 256 characters; a longer
   value is ignored, never cut) only when you turn on `UseOperationHeader` and `UseRequestIdHeader`, both off by default:
   any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or
   overwrites what a client sent. Otherwise each request gets a new operation id and its `TraceIdentifier` as request
