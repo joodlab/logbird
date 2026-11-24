@@ -157,7 +157,7 @@ describe('invitation', () => {
   it('names inviter, workspace, role with its meaning, invited address, expiry, button and raw link', async () => {
     const r = await renderEmail(emails.invitation, fixtures.invitation);
     expect(r.subject).toBe('Sami Nasser invited you to Acme on Logbird');
-    expect(r.preview).toBe('Join as Admin. The invitation expires in 2 days.');
+    expect(r.preview).toBe('Join as an admin. The invitation expires in 2 days.');
     for (const part of [r.html, r.text]) {
       expect(part).toContain('Join Acme on Logbird');
       expect(part).toContain('Sami Nasser');
@@ -193,7 +193,11 @@ describe('member joined and role changed', () => {
   it('tells the inviter who joined, with which role', async () => {
     const r = await renderEmail(emails.memberJoined, fixtures.memberJoined);
     expect(r.subject).toBe('Lina Haddad joined Acme on Logbird');
-    expect(r.text).toContain('Lina Haddad accepted your invitation and is now a member of Acme as an Admin.');
+    expect(r.text).toContain('Lina Haddad accepted your invitation and is now a member of Acme as an admin.');
+    // The action goes to the members page, named as the console's navigation names it.
+    expect(r.text).toContain('View members:\nhttps://audit.acme.test/workspace/members?workspace=org_acme');
+    expect(r.html).toContain('href="https://audit.acme.test/workspace/members?workspace=org_acme"');
+    expect(r.text).toContain('under Workspace settings → Members.');
     expect(r.text).toContain('you invited lina@acme.test to the Acme workspace.');
   });
 
