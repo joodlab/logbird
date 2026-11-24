@@ -1,5 +1,15 @@
 # @logbird/hono
 
+## Requirements
+
+- **hono 4.12.3 or later in 4.x** (peer `^4.12.3`), Node 20 or later. The floor is the lowest hono with which this
+  package's published types check under `strict` and `skipLibCheck: false` (tested at the floor and at the latest 4.x):
+  - below 4.5.0, this package's `MiddlewareHandler<{ Variables: AuditVariables }>` fails hono's `Env` constraint;
+  - from 4.5.0 to 4.12.2, hono's own declarations need DOM types (`RequestInfo`) that a Node project without the DOM
+    library lacks;
+  - 4.12.3 and later pass.
+- Install `@logbird/sdk` too: your code imports the `Logbird` client from it.
+
 ```ts
 import { Hono } from 'hono';
 import { Logbird } from '@logbird/sdk';
