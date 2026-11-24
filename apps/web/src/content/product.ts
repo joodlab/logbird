@@ -216,7 +216,7 @@ export const product = {
       "An endpoint is disabled at once when it answers `410 Gone`, and after 50 consecutive failed deliveries (by default) or 24 hours of failures without a success. An email notice is then queued for the workspace's owners and admins.",
     ],
     limit:
-      'At least once, not exactly once, and in no guaranteed order. A delivery that still fails after 24 hours stops. Up to 10 endpoints per project; HTTPS only.',
+      'At least once, not exactly once, and in no guaranteed order. A delivery that still fails after 24 hours stops. Up to 10 endpoints per project. Destinations use HTTPS by default.',
     codeTitle: 'A delivery',
   },
 } as const;

@@ -338,8 +338,8 @@ export const developers = {
       'Answering `410 Gone` disables the endpoint at once, and so do 50 consecutive failed deliveries (by default) or 24 hours of failures without a success. A disabled endpoint gets no deliveries until it is enabled again.',
     ],
     limit:
-      "Verify the raw request body before parsing it: re-serializing parsed JSON can change the signed bytes, and then the signature won't match.",
-    codeTitle: 'Your receiver',
+      'Verify the raw body before parsing it. Re-serializing parsed JSON can change the signed bytes. This example logs the event ID. In production, durably store or enqueue the event before returning `2xx`.',
+    codeTitle: 'Signature verification example',
   },
   reference: {
     eyebrow: 'API reference',

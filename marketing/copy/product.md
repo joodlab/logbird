@@ -258,7 +258,7 @@ production.
   - An endpoint is disabled at once when it answers `410 Gone`, and after 50 consecutive failed deliveries (by
     default) or 24 hours of failures without a success. An email notice is then queued for the workspace's owners and admins. <!-- source: SPEC (gone_410, consecutive_failures, email to owners and admins); apps/worker/src/webhook-delivery.ts:503–510 (a notice row per owner or admin), apps/worker/src/webhook-notices.ts:22–30 (role checked again at send) -->
 - **limit line:** At least once, not exactly once, and in no guaranteed order. A delivery that still fails after 24
-  hours stops. Up to 10 endpoints per project; HTTPS only. <!-- source: SPEC (window expiry marks the delivery failed; up to 10 endpoints per project; HTTPS unless the self-host option WEBHOOKS_ALLOW_HTTP=true) -->
+  hours stops. Up to 10 endpoints per project. Destinations use HTTPS by default. <!-- source: SPEC (window expiry marks the delivery failed; up to 10 endpoints per project; HTTPS unless the self-host option WEBHOOKS_ALLOW_HTTP=true) -->
 - **visual:** code sample, "A delivery": the request line, the three Standard Webhooks headers (an `lb1_` id) and an
   abbreviated event body. <!-- source: SPEC (POST body is the public event shape; lb1_ header ids) -->
 

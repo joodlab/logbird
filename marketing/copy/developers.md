@@ -362,9 +362,10 @@ production.
   - Delivery is at least once: deduplicate by `webhook-id`, which stays the same across retries and resends.
     <!-- source: SPEC ("Receivers use the stable webhook-id to deduplicate retries and resends") -->
   - Answering `410 Gone` disables the endpoint at once, and so do 50 consecutive failed deliveries (by default) or 24 hours of failures without a success. A disabled endpoint gets no deliveries until it is enabled again. <!-- source: SPEC ("HTTP 410 disables immediately"; consecutive_failures after 50 by default or 24 hours; "Disabled endpoints pause scanning and sending"); apps/worker/src/webhook-delivery.ts:79, :285 (only enabled endpoints are claimed) -->
-- **limit line:** Verify the raw request body before parsing it: re-serializing parsed JSON can change the signed bytes, and then the signature won't match.
+- **limit line:** Verify the raw body before parsing it. Re-serializing parsed JSON can change the signed bytes.
+  This example logs the event ID. In production, durably store or enqueue the event before returning `2xx`.
   <!-- source: packages/sdk/README.md § Standard Webhooks ("Verify the raw body before parsing it") -->
-- **code sample:** "Your receiver": the Hono receiver from `packages/sdk/README.md` § Standard Webhooks, byte for byte
+- **code sample:** "Signature verification example", the Hono receiver from `packages/sdk/README.md` § Standard Webhooks, byte for byte
   (`webhookReceiver` in the module's samples). Re-copy it whenever the README's sample changes.
 - **visual:** code sample
 
