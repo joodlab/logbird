@@ -37,13 +37,14 @@ export async function rebuildProjectReadModel(client: ClickHouseClient, projectI
   if (projectId.startsWith('ws:')) return rebuildProjectRollups(ch, projectId);
   const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
   const run = await prisma.$transaction(async (tx) => {
+    const [clock] = await tx.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
     await tx.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
     return tx.retentionRun.create({
       data: {
         projectId,
         kind: 'ingest_repair',
         retentionDays: project.retentionDays,
-        cutoff: new Date(Date.now() - project.retentionDays * 86_400_000),
+        cutoff: new Date(clock.now.getTime() - project.retentionDays * 86_400_000),
         status: 'running',
         startedAt: new Date(),
         heartbeatAt: new Date(),

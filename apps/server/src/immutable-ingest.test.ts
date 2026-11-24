@@ -42,7 +42,7 @@ it.each(['452', '60', '62', '81', '164', '497', '516', 'parse', 'mixed', 'held']
   vi.useFakeTimers({ toFake: ['Date'] });
   const receivedAt = new Date();
   vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+    values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
   );
   vi.mocked(insertEvents).mockImplementation(async (_client, rows) => {
     if (failure === 'held') throw new AmbiguousInsertError();
@@ -78,7 +78,7 @@ it.each(['452', '60', '62', '81', '164', '497', '516', 'parse', 'mixed', 'held']
 it('waits 5 s when storage refused rows, even with unchecked rows in the same response', async () => {
   const input = candidates();
   vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+    values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
   );
   vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
     written: [input[0]!.row],
@@ -98,7 +98,7 @@ it('keeps the composed outcome when confirmation and the claim release both fail
   vi.useFakeTimers({ toFake: ['Date'] });
   const input = candidates();
   vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+    values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
   );
   vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
     written: [input[0]!.row],
@@ -146,7 +146,7 @@ it.each([true, false])('composes all unresolved/pending combinations for subset 
     for (const pending of [false, true]) {
       const input = candidates();
       vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-        values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+        values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
       );
       vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
         written: input.filter((_, index) => index === 0 || (index === 2 && !unresolved) || (index === 3 && !pending)).map((c) => c.row),
@@ -185,7 +185,7 @@ it('keeps rows deferred before any statement ran retryable for clients without t
   expect(uncheckedIngestPolicy(false, false, true)).toBe('reject');
   const input = candidates();
   vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
-    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+    values.map((value) => ({ ...value, claimedAt: new Date(), projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
   );
   vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
     written: [],

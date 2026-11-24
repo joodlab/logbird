@@ -92,7 +92,8 @@ export async function enforceProjectRetention(projectId: string) {
   await pruneReceiptBackstop(projectId);
   const current = await prisma.project.findUnique({ where: { id: projectId } });
   if (!current) return;
-  const previewCutoff = new Date(Date.now() - current.retentionDays * 86_400_000);
+  // The database clock, not this worker's: an instance whose clock runs ahead must not delete inside the window (#268).
+  const previewCutoff = new Date((await databaseClock(prisma)).getTime() - current.retentionDays * 86_400_000);
   if (
     !(await hasExpiredEvents(clickhouse, projectId, previewCutoff)) &&
     (await recordNothingExpired(projectId, current.retentionDays, previewCutoff))
@@ -107,7 +108,7 @@ export async function enforceProjectRetention(projectId: string) {
     if (!project) return;
     // Derived repair completion cannot settle an older raw DELETE: the independent destructive fence survives it.
     const previous = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
-    const cutoff = new Date(Date.now() - project.retentionDays * 86_400_000);
+    const cutoff = new Date((await databaseClock(tx)).getTime() - project.retentionDays * 86_400_000);
     const run = await prisma.$transaction(async (db) => {
       await beginDestructiveMaintenance(projectId, db);
       await db.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
@@ -202,13 +203,14 @@ export const RETENTION_CLOCK_SKEW_ALLOWANCE_MS = 30_000;
  * may still be in flight.
  */
 async function settleProjectInserts(projectId: string) {
-  const claim = await prisma.ingestReceipt.findFirst({
-    where: { projectId, confirmedAt: null, claimedAt: { not: null } },
-    orderBy: { claimedAt: 'desc' },
-    select: { claimedAt: true },
-  });
-  if (!claim?.claimedAt) return true;
-  if (claim.claimedAt.getTime() + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS + RETENTION_CLOCK_SKEW_ALLOWANCE_MS > Date.now()) return false;
+  // One clock: claimedAt is stamped by the database and compared with the database clock here, so no instance clock
+  // can make an unresolved claim look settled. The allowance remains for claims stamped by an older server's own
+  // clock during a rolling upgrade.
+  const settleMs = INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS + RETENTION_CLOCK_SKEW_ALLOWANCE_MS;
+  const [open] = await prisma.$queryRaw<[{ unsettled: boolean }]>`
+    SELECT EXISTS (SELECT 1 FROM "IngestReceipt" WHERE "projectId"=${projectId} AND "confirmedAt" IS NULL AND "claimedAt" IS NOT NULL
+      AND "claimedAt" > (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(secs => ${settleMs / 1000}::float8)) AS unsettled`;
+  if (open?.unsettled) return false;
   try {
     await clickhouse.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE', clickhouse_settings: { max_execution_time: 30 } });
   } catch (error) {
@@ -263,7 +265,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     await enforceProjectRetention(projectId);
     return 'synchronous';
   }
-  const cutoff = retentionCutoff(Date.now(), current.retentionDays);
+  const cutoff = retentionCutoff((await databaseClock(prisma)).getTime(), current.retentionDays);
   if (!(await hasExpiredEvents(clickhouse, projectId, cutoff))) {
     if (await recordNothingExpired(projectId, current.retentionDays, cutoff)) return 'nothing_expired';
     await enforceProjectRetention(projectId);

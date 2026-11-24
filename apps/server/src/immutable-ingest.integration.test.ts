@@ -327,7 +327,6 @@ it('typed-array claim dates round-trip in a non-UTC Postgres session', async () 
           receivedAt,
           eventAt: new Date(row.timestamp),
           confirmedAt: receivedAt,
-          claimedAt: receivedAt,
         },
       ],
       tx,
@@ -348,20 +347,24 @@ it('typed-array claims arbitrate 1000 overlapping ids with lossless strings and 
     receivedAt,
     eventAt,
     confirmedAt: null,
-    claimedAt: receivedAt,
   }));
+  const dbNow = async () => (await prisma.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`)[0].now.getTime();
+  const before = await dbNow();
   const [a, b] = await Promise.all([claimIngestReceipts(f.project, f.org, claims), claimIngestReceipts(f.project, f.org, [...claims].reverse())]);
+  const after = await dbNow();
   expect(a.length + b.length).toBe(1000);
   expect(new Set([...a, ...b].map((r) => r.eventId)).size).toBe(1000);
   expect(a.some((r) => b.some((other) => other.eventId === r.eventId))).toBe(false);
   for (const receipt of [...a, ...b]) {
     expect(receipt.receivedAt.toISOString()).toBe(receivedAt.toISOString());
     expect(receipt.eventAt.toISOString()).toBe(eventAt.toISOString());
-    expect(receipt.claimedAt?.toISOString()).toBe(receivedAt.toISOString());
+    // claimedAt is the database clock at claim time, never the caller's (#268).
+    expect(receipt.claimedAt?.getTime()).toBeGreaterThanOrEqual(before - 1);
+    expect(receipt.claimedAt?.getTime()).toBeLessThanOrEqual(after + 1);
     expect(receipt.confirmedAt).toBeNull();
   }
   expect(await claimIngestReceipts(f.project, f.org, claims)).toHaveLength(0);
-  const confirmed = { eventId: 'already-stored', fingerprint: 'v1:stored', receivedAt, eventAt, claimedAt: receivedAt, confirmedAt: receivedAt };
+  const confirmed = { eventId: 'already-stored', fingerprint: 'v1:stored', receivedAt, eventAt, confirmedAt: receivedAt };
   expect((await claimIngestReceipts(f.project, f.org, [confirmed]))[0]?.confirmedAt?.toISOString()).toBe(receivedAt.toISOString());
 });
 

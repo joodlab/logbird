@@ -200,7 +200,6 @@ async function claimPhase(
             receivedAt: legacy?.receivedAt ?? acceptedAt,
             eventAt: legacy?.eventAt ?? new Date(row.timestamp),
             confirmedAt: legacy ? new Date() : null,
-            claimedAt: new Date(),
           },
         ];
       });

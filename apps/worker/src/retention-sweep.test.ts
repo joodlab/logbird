@@ -13,6 +13,8 @@ const fake = vi.hoisted(() => ({
 }));
 vi.mock('@logbird/database', () => ({
   prisma: {
+    // The database clock (retention reads cutoffs from it, never the worker's clock).
+    $queryRaw: async () => [{ now: new Date() }],
     ingestReceipt: { findMany: fake.pending },
     project: { findMany: fake.projects, findUnique: fake.project },
     retentionRun: { findFirst: async () => null, count: async () => 0 },
