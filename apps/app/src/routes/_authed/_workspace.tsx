@@ -26,7 +26,7 @@ function WorkspaceLayout() {
   useEffect(() => {
     if (lost.length)
       toast.info(lostTitle(lost), {
-        description: `You are in ${workspace.name}. To return, ask an owner or admin there to invite you again.`,
+        description: `To return, ask one of its owners or admins to invite you again. ${workspace.name} is open now.`,
         duration: 12_000,
       });
   }, [lost, workspace.name]);
