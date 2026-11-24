@@ -9,7 +9,7 @@ export type Role = 'owner' | 'admin' | 'member';
 export const INVITE_ROLES: Role[] = ['member', 'admin'];
 
 export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
-  owner: { label: 'Owner', description: 'Everything, including other owners and deleting the workspace.' },
+  owner: { label: 'Owner', description: 'Everything, including other owners and deleting projects with their events.' },
   admin: { label: 'Admin', description: 'Projects, API keys, retention and members.' },
   member: { label: 'Member', description: 'Explore events, follow entities, save views.' },
 };

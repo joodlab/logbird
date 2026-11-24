@@ -58,7 +58,7 @@ function MembersSettings() {
       title: `Make ${name} ${role === 'admin' || role === 'owner' ? 'an' : 'a'} ${roleLabel(role).toLowerCase()}?`,
       description:
         role === 'owner'
-          ? 'Owners can do everything, including removing other owners and deleting the workspace. You cannot undo this alone if they demote you.'
+          ? 'Owners can do everything, including removing other owners and deleting projects with their events. You cannot undo this alone if they demote you.'
           : `${ROLE_INFO[role].label}s: ${ROLE_INFO[role].description.toLowerCase()}`,
       confirmLabel: `Make ${roleLabel(role).toLowerCase()}`,
       destructive: role === 'owner',

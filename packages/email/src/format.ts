@@ -34,7 +34,7 @@ export const roleInProse = (role: string) => roleLabel(role).toLowerCase();
 
 /** One line per role: what someone with it can actually do in Logbird. */
 export const ROLE_SUMMARY: Record<string, string> = {
-  owner: 'Full control of the workspace, including deleting it and managing other owners.',
+  owner: 'Full control of the workspace, including managing other owners and deleting projects with their events.',
   admin: 'Manages projects, API keys, retention and members.',
   member: 'Explores events, follows actors and records, and saves views.',
 };

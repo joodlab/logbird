@@ -152,6 +152,10 @@ export const auth = betterAuth({
       },
     }),
     organization({
+      // Deleting a workspace here would cascade its projects in Postgres but leave their events in ClickHouse, where
+      // nothing points at them and retention never reaches them. Closed until a deletion that purges each project first
+      // exists; an owner deletes projects one by one, which purges their events.
+      disableOrganizationDeletion: true,
       // Under AUTH_SIGNUP=restricted only approved domains may start workspaces, so admitted outsiders cannot invite strangers.
       allowUserToCreateOrganization: (user) => mayCreateWorkspace(user.email),
       organizationHooks: {
