@@ -319,7 +319,7 @@ export const developers = {
       'A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect is a failure.',
       'Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to 24 hours.',
       'Delivery is at least once: deduplicate by `webhook-id`, which stays the same across retries and resends.',
-      'Answering `410 Gone` disables the endpoint.',
+      'Answering `410 Gone` disables the endpoint at once, and so do 50 consecutive failed deliveries (by default) or 24 hours of failures without a success. A disabled endpoint gets no deliveries until it is enabled again.',
     ],
     limit:
       "Verify the raw request body before parsing it: re-serializing parsed JSON can change the signed bytes, and then the signature won't match.",
