@@ -62,17 +62,25 @@ export async function withOpenWorkspace(queryClient: QueryClient, elsewhere: Pro
   }
 }
 
-/** The project each query client last read as readable on entry: moving between its own pages reuses that read. */
+/**
+ * The project each query client last read as readable on a real visit (never a preload: hovering a link must not mark a
+ * project as visited): moving between that project's own pages reuses the read.
+ */
 const confirmed = new WeakMap<QueryClient, string>();
 export const confirmedProject = (queryClient: QueryClient) => confirmed.get(queryClient);
 
-export async function readProject(queryClient: QueryClient, projectId: string): Promise<'readable' | ProjectElsewhere | typeof PROJECT_MISSING> {
+export async function readProject(
+  queryClient: QueryClient,
+  projectId: string,
+  { visit = true }: { visit?: boolean } = {},
+): Promise<'readable' | ProjectElsewhere | typeof PROJECT_MISSING> {
   try {
-    await queryClient.fetchQuery({ ...projectQuery(projectId), staleTime: 0 });
-    confirmed.set(queryClient, projectId);
+    // networkMode always: offline, the read fails (for the retry UI) instead of pausing the navigation indefinitely.
+    await queryClient.fetchQuery({ ...projectQuery(projectId), staleTime: 0, networkMode: 'always' });
+    if (visit) confirmed.set(queryClient, projectId);
     return 'readable';
   } catch (error) {
-    confirmed.delete(queryClient);
+    if (visit) confirmed.delete(queryClient);
     const elsewhere = projectElsewhere(error);
     if (elsewhere) return withOpenWorkspace(queryClient, elsewhere);
     if (error instanceof ApiRequestError && (error.status === 404 || error.status === 403)) return PROJECT_MISSING;

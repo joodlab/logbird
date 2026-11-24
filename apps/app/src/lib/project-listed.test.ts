@@ -146,3 +146,18 @@ it('reads a project fresh on entry: readable, in another of my workspaces, missi
     vi.useRealTimers();
   }
 });
+
+it('never lets a preload mark a project as visited, so a later move to it still reads it fresh', async () => {
+  const qc = client();
+  get.mockResolvedValue({ id: 'p_a', name: 'A', organizationId: 'ws_labs' });
+  expect(await readProject(qc, 'p_a')).toBe('readable');
+  expect(confirmedProject(qc)).toBe('p_a');
+  // Hovering B's link preloads it: readable, but not visited.
+  get.mockResolvedValue({ id: 'p_b', name: 'B', organizationId: 'ws_labs' });
+  expect(await readProject(qc, 'p_b', { visit: false })).toBe('readable');
+  expect(confirmedProject(qc)).toBe('p_a');
+  // A failed preload does not forget the visited project either.
+  get.mockRejectedValueOnce(new ApiRequestError(404, 'not_found', 'Project not found.'));
+  expect(await readProject(qc, 'p_c', { visit: false })).toBe(PROJECT_MISSING);
+  expect(confirmedProject(qc)).toBe('p_a');
+});

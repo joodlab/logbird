@@ -1,4 +1,4 @@
-import { apiErrorSchema, projectInOtherWorkspaceErrorSchema } from '@logbird/contracts';
+import { apiErrorSchema, PROJECT_IN_OTHER_WORKSPACE, projectInOtherWorkspaceErrorSchema } from '@logbird/contracts';
 import { type DescribeRouteOptions, describeRoute, resolver } from 'hono-openapi';
 import type { z } from 'zod';
 
@@ -71,7 +71,16 @@ export const committedOpenApiDocument = <T extends object>(served: T) => ({ ...s
 export const PROJECT_ROUTE_PATH = /^\/api\/projects\/\{projectId\}(?:\/|$)/;
 const PROJECT_CONFLICT = 'The project is in another workspace you are a member of (details name it): switch the active workspace to open it.';
 const projectConflictSchema = (await resolver(projectInOtherWorkspaceErrorSchema).toOpenAPISchema()).schema;
-const generalErrorSchema = (await resolver(apiErrorSchema).toOpenAPISchema()).schema;
+/** The general error shape, minus the reserved code: a project_in_other_workspace body must carry its workspace details. */
+const generalErrorSchema = withoutReservedCode((await resolver(apiErrorSchema).toOpenAPISchema()).schema);
+/** A copy of an error schema that no longer admits the reserved code, unless it already fixes a code of its own. */
+function withoutReservedCode(schema: unknown) {
+  const copy = structuredClone(schema) as { properties?: { error?: { properties?: { code?: Record<string, unknown> } } } };
+  const code = copy.properties?.error?.properties?.code;
+  if (!code) throw new Error('An error schema has no error.code to restrict.');
+  if (code.const === undefined) code.not = { const: PROJECT_IN_OTHER_WORKSPACE };
+  return copy;
+}
 type Operation = { responses?: Record<string, { description?: string; content?: Record<string, { schema?: unknown }> }> };
 const METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'] as const;
 
@@ -93,7 +102,11 @@ export function documentProjectAccess<T extends { paths?: Record<string, unknown
       const ownSchema = own?.content?.['application/json']?.schema;
       responses['409'] = {
         description: `${own?.description ? `${own.description} Or: ` : ''}${PROJECT_CONFLICT} Other conflicts use the general error shape.`,
-        content: { 'application/json': { schema: { anyOf: [...(ownSchema ? [ownSchema] : []), projectConflictSchema, generalErrorSchema] } } },
+        content: {
+          'application/json': {
+            schema: { anyOf: [...(ownSchema ? [withoutReservedCode(ownSchema)] : []), projectConflictSchema, generalErrorSchema] },
+          },
+        },
       };
     }
   }

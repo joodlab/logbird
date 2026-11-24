@@ -123,7 +123,10 @@ it('answers 409 project_in_other_workspace only to a current member of the ownin
       for (const method of ['GET', 'PATCH'] as const) {
         const response = await request(`/api/projects/${other.project.id}`, method, actor.cookie, method === 'PATCH' ? { name: 'x' } : undefined);
         expect(response.status, `${method} with active ${active}`).toBe(409);
-        expect((await response.json()).error.details).toEqual({ workspaceId: other.org.id, workspaceName: 'T3 Other Example' });
+        const { error } = await response.json();
+        // The exact code: the console offers the switch only for this one.
+        expect(error.code).toBe('project_in_other_workspace');
+        expect(error.details).toEqual({ workspaceId: other.org.id, workspaceName: 'T3 Other Example' });
       }
     }
   } finally {

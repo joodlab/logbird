@@ -41,13 +41,18 @@ it("serves the deployment's APP_URL and exports the fixed local default", async 
 
 it('documents the project-access 409 on every console project operation so every real conflict body still validates', async () => {
   const spec = await (await app.request('/openapi.json')).json();
-  type Schema = { anyOf?: Schema[]; oneOf?: Schema[]; properties?: { error?: { properties?: { code?: { const?: string } } } } };
-  /** Which error codes a 409 schema admits: a branch with no `const` code admits any code. */
-  const admits = (schema: Schema, code: string) =>
-    (schema.anyOf ?? [schema]).some((branch) => {
-      const fixed = branch.properties?.error?.properties?.code?.const;
-      return fixed === undefined || fixed === code;
-    });
+  type Code = { const?: string; not?: { const?: string } };
+  type Schema = {
+    anyOf?: Schema[];
+    oneOf?: Schema[];
+    properties?: { error?: { required?: string[]; properties?: { code?: Code; details?: { required?: string[] } } } };
+  };
+  /** Whether one branch admits a code: unless it fixes another code or excludes this one. */
+  const branchAdmits = (branch: Schema, code: string) => {
+    const rule = branch.properties?.error?.properties?.code;
+    return (rule?.const === undefined || rule.const === code) && rule?.not?.const !== code;
+  };
+  const admits = (schema: Schema, code: string) => (schema.anyOf ?? [schema]).some((branch) => branchAdmits(branch, code));
   let operations = 0;
   for (const [path, item] of Object.entries(spec.paths as Record<string, Record<string, { responses: Record<string, any> }>>)) {
     for (const operation of Object.values(item)) {
@@ -58,6 +63,12 @@ it('documents the project-access 409 on every console project operation so every
       }
       operations++;
       expect(schema?.oneOf, `${path}: oneOf would reject a body two branches match`).toBeUndefined();
+      // The named branch is there, and it alone admits the reserved code, which must carry the workspace details.
+      const named = (schema?.anyOf ?? []).filter((branch) => branchAdmits(branch, 'project_in_other_workspace'));
+      expect(named, `${path}: branches admitting project_in_other_workspace`).toHaveLength(1);
+      expect(named[0]?.properties?.error?.properties?.code?.const, path).toBe('project_in_other_workspace');
+      expect(named[0]?.properties?.error?.required, path).toContain('details');
+      expect(named[0]?.properties?.error?.properties?.details?.required, path).toEqual(expect.arrayContaining(['workspaceId', 'workspaceName']));
       // The named conflict, and conflicts the routes answer for their own reasons.
       for (const code of [
         'project_in_other_workspace',

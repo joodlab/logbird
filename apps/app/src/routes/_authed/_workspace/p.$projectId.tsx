@@ -23,9 +23,9 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
   // of the person's workspaces is named, so they can switch to it (never switched silently); one that is not theirs is
   // not found; a failure to read it shows the usual error with a retry. Moving between pages of the same project reuses
   // that read; moving to another project id (which the router also calls 'stay') does not.
-  beforeLoad: async ({ context, params, cause }) => {
-    if (cause === 'stay' && confirmedProject(context.queryClient) === params.projectId) return;
-    const outcome = await readProject(context.queryClient, params.projectId);
+  beforeLoad: async ({ context, params, cause, preload }) => {
+    if (cause === 'stay' && !preload && confirmedProject(context.queryClient) === params.projectId) return;
+    const outcome = await readProject(context.queryClient, params.projectId, { visit: !preload });
     if (outcome !== 'readable') throw notFound({ data: outcome });
   },
   loader: async ({ context, params }) => {

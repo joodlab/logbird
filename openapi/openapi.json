@@ -1094,6 +1094,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -1285,6 +1288,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -1519,6 +1525,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -1779,6 +1788,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -2151,6 +2163,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -2344,6 +2359,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -2844,6 +2862,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -3550,6 +3571,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -3760,6 +3784,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -4144,6 +4171,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -4377,6 +4407,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -4606,6 +4639,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -4939,6 +4975,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -5384,6 +5423,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -5528,6 +5570,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -5851,6 +5896,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -5916,6 +5964,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -6379,6 +6430,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -6796,6 +6850,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -7494,6 +7551,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -7737,6 +7797,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -7873,6 +7936,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -8024,6 +8090,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -8726,6 +8795,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -8971,6 +9043,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -9184,6 +9259,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -9449,6 +9527,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -9784,6 +9865,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -9928,6 +10012,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -10232,6 +10319,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -10635,6 +10725,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -10878,6 +10971,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -11217,6 +11313,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -11613,6 +11712,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -12048,6 +12150,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -12232,6 +12337,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -12474,6 +12582,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
@@ -12690,6 +12801,9 @@
                         "error": {
                           "properties": {
                             "code": {
+                              "not": {
+                                "const": "project_in_other_workspace"
+                              },
                               "type": "string"
                             },
                             "details": {},
