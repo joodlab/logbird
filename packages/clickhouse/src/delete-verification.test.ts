@@ -303,4 +303,7 @@ it('cutoff cleanup preserves narrow affected-key reads without repairing retaine
   ]);
   for (const p of cutoffDeletes)
     expect(p.query_params).toEqual({ p: 'qa-narrow-retention', before: '2026-11-07 00:00:00.000', bucket: '2026-11-07 00:00:00.000' });
+  const minuteCommands = command.mock.calls.map(([p]) => p.query).filter((sql) => /^(DELETE FROM|INSERT INTO) events_by_minute\b/.test(sql));
+  expect(minuteCommands).toHaveLength(2);
+  for (const sql of minuteCommands) expect(sql).toContain("bucket <= {bucket:DateTime64(3,'UTC')}");
 });

@@ -1,3 +1,4 @@
+import { ProjectBusyError } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const fake = vi.hoisted(() => ({
@@ -10,6 +11,8 @@ const fake = vi.hoisted(() => ({
   recover: vi.fn(),
   expired: vi.fn(),
   recoverRetention: vi.fn(),
+  purge: vi.fn(),
+  command: vi.fn(),
 }));
 vi.mock('@logbird/database', () => ({
   prisma: {
@@ -21,6 +24,7 @@ vi.mock('@logbird/database', () => ({
   },
   // The database clock (retention reads cutoffs from it, never the worker's clock).
   databaseClock: async () => new Date(),
+  ProjectBusyError: class extends Error {},
   // Every API server supports background retention (the capability gate, #296).
   BACKGROUND_RETENTION_CAPABILITY: 'background-retention-v1',
   serversSupport: async () => ({ capable: true, seen: 1, missing: 0 }),
@@ -34,18 +38,23 @@ vi.mock('@logbird/database', () => ({
   recoverAbandonedRetention: fake.recoverRetention,
   purgeIngestReceipts: vi.fn(),
 }));
-vi.mock('@logbird/clickhouse', () => ({
-  createMaintenanceClickHouseClient: () => ({}),
+vi.mock('@logbird/clickhouse', async (original) => ({
+  ...(await original<typeof import('@logbird/clickhouse')>()),
+  createMaintenanceClickHouseClient: () => ({ command: fake.command }),
   projectMaintenance: (client: unknown) => client,
   hasExpiredEvents: fake.expired,
   pendingProjectMutations: async () => [],
   pendingEventMutations: async () => 0,
   retentionCutoff: (now: number, days: number) => new Date(now - days * 86_400_000),
   createSessionClickHouseClient: () => ({ close: async () => undefined }),
-  purgeProject: vi.fn(),
+  purgeProject: fake.purge,
   rebuildProjectRollups: vi.fn(),
 }));
-vi.mock('./ingest-recovery', () => ({ recoverProjectIngest: fake.recover, logIngestRecoveryFailure: vi.fn(), prepareReceiptSettlement: vi.fn() }));
+vi.mock('./ingest-recovery', () => ({
+  recoverProjectIngest: fake.recover,
+  logIngestRecoveryFailure: vi.fn(),
+  settleProjectReceiptsAfterRepair: vi.fn(),
+}));
 vi.mock('./destructive-maintenance', () => ({ beginDestructiveMaintenance: vi.fn(), reconcileDestructiveMaintenance: vi.fn() }));
 vi.mock('./project-repair', () => ({ heartbeatMaintenanceRun: vi.fn() }));
 vi.mock('./queue', () => ({ enqueueProjectRetention: vi.fn() }));
@@ -70,7 +79,7 @@ afterEach(() => vi.restoreAllMocks());
 
 it('continues global recovery and project fan-out after prune timeout without running compaction', async () => {
   await enforceRetention();
-  expect(fake.recover).toHaveBeenCalledWith({}, 'qa-pending');
+  expect(fake.recover).toHaveBeenCalledWith(expect.objectContaining({ command: fake.command }), 'qa-pending');
   expect(fake.lock).toHaveBeenCalledWith('qa-project', expect.any(Function));
   expect(fake.recoverRetention).toHaveBeenCalled();
   expect(fake.recover.mock.invocationCallOrder[0]).toBeLessThan(fake.lock.mock.invocationCallOrder[0] as number);
@@ -84,6 +93,22 @@ it('continues on-demand project retention after prune timeout', async () => {
   expect(fake.project).toHaveBeenCalled();
   expect(fake.lock).toHaveBeenCalledWith('qa-project', expect.any(Function));
   expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"projectId":"qa-project","code":"57014"'));
+});
+
+it.each(['recent', 'flush failed'])('holds a failed repair read fence when claim settlement is %s', async (condition) => {
+  const now = new Date();
+  fake.lock.mockImplementation(async (_id, work) =>
+    work({
+      project: { findUnique: fake.project },
+      retentionRun: { findFirst: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ status: 'failed' }) },
+      $queryRaw: async () => [{ claimedAt: condition === 'recent' ? now : new Date(0), settledBefore: new Date(now.getTime() - 100_000) }],
+    }),
+  );
+  fake.command.mockRejectedValue(new Error('QA flush denied'));
+  const result = enforceProjectRetention('qa-project');
+  if (condition === 'recent') await expect(result).rejects.toBeInstanceOf(ProjectBusyError);
+  else await expect(result).rejects.toMatchObject({ code: 'LOGBIRD_FLUSH_UNAVAILABLE' });
+  expect(fake.purge).not.toHaveBeenCalled();
 });
 
 it('preserves essential failures across retries without running compaction', async () => {
@@ -107,7 +132,7 @@ it('preserves recovery after the project-list query fails', async () => {
   const error = Object.assign(new Error('qa pool unavailable'), { code: 'P2024' });
   fake.projects.mockRejectedValueOnce(error);
   await expect(enforceRetention()).rejects.toMatchObject({ errors: [error] });
-  expect(fake.recover).toHaveBeenCalledWith({}, 'qa-pending');
+  expect(fake.recover).toHaveBeenCalledWith(expect.objectContaining({ command: fake.command }), 'qa-pending');
   expect(fake.lock).not.toHaveBeenCalled();
   expect(fake.compact).not.toHaveBeenCalled();
   expect(console.error).toHaveBeenCalledWith(JSON.stringify({ level: 'error', event: 'retention.projects_failed', code: 'P2024' }));

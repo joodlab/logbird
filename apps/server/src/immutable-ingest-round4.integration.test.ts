@@ -104,6 +104,10 @@ it('fences readers after all rollup DELETEs, excludes repair from settings, and 
 it('keeps failed repairs read-fenced while healthy siblings commit, then retention restores every destination', purgeLimit(90_000), async () => {
   await populated();
   await f.pending(pending, { expired: true });
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: pending.id },
+    data: { claimedAt: new Date(wallClock() - 120_000) },
+  });
   const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   const spy = vi.spyOn(maintenanceClickhouse, 'command').mockImplementation(async (params) => {
     const result = await command(params);
@@ -138,7 +142,7 @@ it('repairs a process killed after destructive deletes without exposing an empty
   await f.pending(pending);
   await prisma.ingestReceipt.updateMany({
     where: { projectId: f.project, eventId: pending.id },
-    data: { claimedAt: new Date(wallClock() - 80_000) },
+    data: { claimedAt: new Date(wallClock() - 120_000) },
   });
   const child = fork(fileURLToPath(new URL('./ingest-crash-fixture.ts', import.meta.url)), [], {
     execArgv: ['--import', 'tsx'],

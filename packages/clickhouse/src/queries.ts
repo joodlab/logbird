@@ -1175,7 +1175,7 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
 
   if (!before) return rebuildProjectRollups(ch, p, false);
   const filters = {
-    events_by_minute: 'bucket <= {bucket:DateTime64(3)}',
+    events_by_minute: "bucket <= {bucket:DateTime64(3,'UTC')}",
     entities: '(kind,entity_id) IN arrayZip({kinds:Array(String)},{entityIds:Array(String)})',
     attribute_keys: 'key IN {keys:Array(String)}',
   };

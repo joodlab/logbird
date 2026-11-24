@@ -2,65 +2,86 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from './index';
 
 /**
- * What an API server supports, declared in its heartbeat (#296). The worker runs background retention (two short
- * fences, staged rollups, DELETE mutations that readers apply on the fly) only while every server seen recently
- * declares `background-retention-v1`: a server without it reads and ingests as if retention held the lock throughout,
- * and would count rows a background run is replacing.
+ * Each API server records a heartbeat: its instance id, version and capabilities, every SERVER_HEARTBEAT_INTERVAL_MS.
  *
- * Remove the gate, this capability and the synchronous fallback it selects in the release after every supported
- * upgrade path passes through a version that heartbeats (see the PR and CHANGELOG for the release named).
+ * Retention uses background deletes only while every server recently seen declares support. Heartbeat-only servers
+ * select the synchronous path until they are replaced. A server from before the heartbeat release is invisible.
  */
+export const SERVER_HEARTBEAT_CAPABILITY = 'heartbeat-v1';
 export const BACKGROUND_RETENTION_CAPABILITY = 'background-retention-v1';
-export const SERVER_CAPABILITIES = [BACKGROUND_RETENTION_CAPABILITY] as const;
+export const SERVER_CAPABILITIES: readonly string[] = [SERVER_HEARTBEAT_CAPABILITY, BACKGROUND_RETENTION_CAPABILITY];
 export const SERVER_HEARTBEAT_INTERVAL_MS = 30_000;
-/** A server not seen for this long no longer counts: it stopped, or rolled back to a version that does not heartbeat. */
-export const SERVER_HEARTBEAT_WINDOW_MS = 90_000;
-const PRUNE_AFTER = '1 day';
+const SERVER_HEARTBEAT_WINDOW_MS = 90_000;
+/** Rows not seen for this long are deleted by the next heartbeat of any server. */
+export const SERVER_HEARTBEAT_PRUNE_AFTER = '1 day';
 
-type Db = Pick<typeof prisma, '$executeRaw' | '$queryRaw'>;
+type Db = Pick<typeof prisma, '$executeRaw'>;
 
-/** One cheap upsert stamped by the database clock, then a pruning delete of rows not seen for a day (indexed). */
-export async function recordServerHeartbeat(instanceId: string, capabilities: readonly string[], db: Db = prisma) {
-  await db.$executeRaw`
-    INSERT INTO "ServerHeartbeat" ("instanceId", "capabilities", "seenAt")
-    VALUES (${instanceId}, ${[...capabilities]}::text[], clock_timestamp() AT TIME ZONE 'UTC')
-    ON CONFLICT ("instanceId") DO UPDATE SET "capabilities" = EXCLUDED."capabilities", "seenAt" = EXCLUDED."seenAt"`;
-  await db.$executeRaw`DELETE FROM "ServerHeartbeat" WHERE "seenAt" < (clock_timestamp() AT TIME ZONE 'UTC') - ${PRUNE_AFTER}::interval`;
-}
-
-/**
- * Whether every API server seen in the last SERVER_HEARTBEAT_WINDOW_MS declares `capability`. A window with no server
- * seen counts as not capable: an older server does not heartbeat at all, so silence never means support.
- */
-export async function serversSupport(capability: string, db: Db = prisma) {
+/** Silence never counts as support. */
+export async function serversSupport(capability: string, db: Pick<typeof prisma, '$queryRaw'> = prisma) {
   const [row] = await db.$queryRaw<{ seen: number; missing: number }[]>`
     SELECT count(*)::int AS seen, (count(*) FILTER (WHERE NOT (${capability} = ANY("capabilities"))))::int AS missing
     FROM "ServerHeartbeat"
     WHERE "seenAt" > (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(secs => ${SERVER_HEARTBEAT_WINDOW_MS / 1000})`;
-  const seen = Number(row?.seen ?? 0),
-    missing = Number(row?.missing ?? 0);
+  const seen = row?.seen ?? 0;
+  const missing = row?.missing ?? 0;
   return { capable: seen > 0 && missing === 0, seen, missing };
 }
 
+/** One upsert, stamped by the database clock (so no instance clock can make a row look fresh or stale). */
+export async function recordServerHeartbeat(instanceId: string, version: string, capabilities: readonly string[], db: Db = prisma) {
+  await db.$executeRaw`
+    INSERT INTO "ServerHeartbeat" ("instanceId", "version", "capabilities", "seenAt")
+    VALUES (${instanceId}, ${version}, ${[...capabilities]}::text[], clock_timestamp() AT TIME ZONE 'UTC')
+    ON CONFLICT ("instanceId") DO UPDATE
+      SET "version" = EXCLUDED."version", "capabilities" = EXCLUDED."capabilities", "seenAt" = EXCLUDED."seenAt"`;
+}
+
+/** Deletes rows not seen for SERVER_HEARTBEAT_PRUNE_AFTER (a crashed or removed server). Indexed on `seenAt`. */
+export async function pruneServerHeartbeats(db: Db = prisma) {
+  return db.$executeRaw`
+    DELETE FROM "ServerHeartbeat" WHERE "seenAt" < (clock_timestamp() AT TIME ZONE 'UTC') - ${SERVER_HEARTBEAT_PRUNE_AFTER}::interval`;
+}
+
 /**
- * Heartbeats this server every SERVER_HEARTBEAT_INTERVAL_MS, starting now. A failed beat is logged and retried at the
- * next interval (the worker then sees the row age out, which only selects the synchronous path). `stop` removes this
- * server's row, so a stopped server stops counting at once.
+ * Heartbeats this server now and every SERVER_HEARTBEAT_INTERVAL_MS, pruning stale rows each time. A failed beat is
+ * logged and retried at the next interval. `stop` ends the beats and removes this server's row, so a cleanly stopped
+ * server disappears at once; a crashed one leaves its row to age out and be pruned.
  */
-export function startServerHeartbeat(capabilities: readonly string[] = SERVER_CAPABILITIES, db: Db = prisma) {
+export function startServerHeartbeat({
+  version,
+  capabilities = SERVER_CAPABILITIES,
+  db = prisma,
+  intervalMs = SERVER_HEARTBEAT_INTERVAL_MS,
+}: {
+  version: string;
+  capabilities?: readonly string[];
+  db?: Db;
+  intervalMs?: number;
+}) {
   const instanceId = randomUUID();
-  const beat = () =>
-    recordServerHeartbeat(instanceId, capabilities, db).catch(() =>
-      console.error(JSON.stringify({ level: 'error', event: 'server.heartbeat_failed' })),
-    );
-  void beat();
-  const timer = setInterval(beat, SERVER_HEARTBEAT_INTERVAL_MS);
+  let stopped = false;
+  let inFlight: Promise<unknown> = Promise.resolve();
+  const beat = () => {
+    if (stopped) return;
+    inFlight = (async () => {
+      await recordServerHeartbeat(instanceId, version, capabilities, db);
+      await pruneServerHeartbeats(db);
+    })().catch(() => console.error(JSON.stringify({ level: 'error', event: 'server.heartbeat_failed' })));
+  };
+  beat();
+  const timer = setInterval(beat, intervalMs);
   timer.unref();
   return {
     instanceId,
     async stop() {
+      stopped = true;
       clearInterval(timer);
-      await db.$executeRaw`DELETE FROM "ServerHeartbeat" WHERE "instanceId" = ${instanceId}`.catch(() => undefined);
+      // A beat still in flight must not re-insert the row after it was removed.
+      await inFlight;
+      await db.$executeRaw`DELETE FROM "ServerHeartbeat" WHERE "instanceId" = ${instanceId}`.catch(() =>
+        console.error(JSON.stringify({ level: 'error', event: 'server.heartbeat_remove_failed' })),
+      );
     },
   };
 }

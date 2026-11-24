@@ -38,6 +38,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it.each([-25_000, 25_000])('sends a fresh claim with database clock offset %i ms', async (offset) => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
+    values.map((value) => ({ ...value, claimedAt: new Date(Date.now() + offset), projectId, organizationId })),
+  );
+  vi.mocked(insertEvents).mockResolvedValue(undefined);
+  const input = candidates();
+  await expect(insertImmutableEvents('qa91-unit', 'qa-clock-org', input, true)).resolves.toMatchObject({
+    ids: input.map(({ row }) => row.event_id),
+  });
+  expect(vi.mocked(insertEvents).mock.calls[0]?.[2]).toBe(Date.now() + INGEST_CLAIM_LEASE_MS);
+});
+
 it.each(['452', '60', '62', '81', '164', '497', '516', 'parse', 'mixed', 'held'])('composes retry timing for %s failures', async (failure) => {
   vi.useFakeTimers({ toFake: ['Date'] });
   const receivedAt = new Date();

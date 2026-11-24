@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { serve } from '@hono/node-server';
 import { assertSupportedClickHouse } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, startServerHeartbeat } from '@logbird/database';
@@ -30,7 +31,8 @@ const auditDrainer = startAuditDrainer(ingest, async () => {
 });
 const maintenanceReconciler = startDestructiveMaintenanceReconciler();
 // Declares what this server supports; the worker runs background retention only while every server seen does (#296).
-const heartbeat = startServerHeartbeat();
+const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
+const heartbeat = startServerHeartbeat({ version });
 let stopping = false;
 function shutdown() {
   if (stopping) return;

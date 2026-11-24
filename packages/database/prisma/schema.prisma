@@ -251,6 +251,7 @@ model RetentionRun {
 /// while every server seen recently declares it; rows not seen for a day are pruned.
 model ServerHeartbeat {
   instanceId   String   @id
+  version      String   @default("")
   capabilities String[] @default([])
   seenAt       DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
 

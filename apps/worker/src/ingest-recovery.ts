@@ -135,19 +135,10 @@ async function settleAbandonedReceipts(ch: ClickHouseClient, projectId: string, 
   }
 }
 
-/**
- * Caller holds EXCLUSIVE and is about to rebuild every derived destination itself (retention completing a
- * failed repair). Proving the abandoned writes flushed BEFORE that rebuild lets the same rebuild cover them,
- * so the returned step settles their receipts without a second full rebuild by a later retry.
- * Undefined when nothing is abandoned or the flush throttle refuses proof; retries and the hourly sweep remain.
- */
-export async function prepareReceiptSettlement(client: ClickHouseClient, projectId: string) {
-  // Tagged as this project's maintenance (idempotent if the caller already tagged it): deletion can stop it.
-  const ch = projectMaintenance(client, projectId);
-  const { expiredAt, readyCutoff, eligible } = abandonedReceipts(projectId, Date.now());
-  if (!(await prisma.ingestReceipt.findFirst({ where: eligible, select: { eventId: true } }))) return;
-  if (!(await proveAbandonedWrites(ch, eligible, expiredAt))) return;
-  return () => settleAbandonedReceipts(ch, projectId, eligible, readyCutoff);
+/** Caller holds EXCLUSIVE, proved every claim settled, and rebuilt the derived tables afterward. */
+export async function settleProjectReceiptsAfterRepair(client: ClickHouseClient, projectId: string, now: number) {
+  const { readyCutoff, eligible } = abandonedReceipts(projectId, now);
+  await settleAbandonedReceipts(projectMaintenance(client, projectId), projectId, eligible, readyCutoff);
 }
 
 /** Run outside a shared lock. Only matching retries, terminal grace cleanup and operators enter recovery. */
