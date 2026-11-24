@@ -229,11 +229,12 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
                 <EntityAvatar id={workspace?.id ?? ''} name={workspace?.name ?? ''} size="sm" square />
                 <span className="flex-1 truncate">Switch workspace</span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-56">
+              <DropdownMenuSubContent className="w-max min-w-56 max-w-[min(24rem,calc(100vw-2rem))]">
                 {me.data?.organizations.map((org) => (
                   <DropdownMenuItem key={org.id} onClick={() => org.id !== workspace?.id && switchWorkspace(org.id)}>
                     <EntityAvatar id={org.id} name={org.name} size="sm" square />
-                    <span className="flex-1 truncate">{org.name}</span>
+                    {/* Wraps instead of truncating: two workspaces can share a long prefix (#19). */}
+                    <span className="min-w-0 flex-1 break-words">{org.name}</span>
                     {org.id === workspace?.id ? <CheckIcon className="size-4 text-brand" /> : null}
                   </DropdownMenuItem>
                 ))}
