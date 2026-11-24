@@ -68,9 +68,9 @@ export function report(onError: CaptureOptions<unknown>['onError'], error: unkno
 }
 /**
  * Captures the request's correlation once and returns the request-scoped `audit` function. The operation and request
- * ids follow `useOperationHeader` and `useRequestIdHeader`. The trace id comes from the inbound `traceparent` header
- * when it is well-formed (W3C Trace Context): any caller can send it, so it is a correlation hint, not identity, and
- * events found by a `trace:` search should be read that way.
+ * ids follow `useOperationHeader` and `useRequestIdHeader`. The trace id comes from a well-formed inbound `traceparent`
+ * header (W3C Trace Context). Any caller can send one, so a trace id is a correlation hint, not identity, and a
+ * `trace:` search should be read that way; an ingress that must not trust it should strip or overwrite the header.
  */
 export async function createAudit<C>(options: CaptureOptions<C>, context: C, request: Request): Promise<Audit> {
   if (typeof window !== 'undefined') throw new Error('Logbird ingest is server-only');
