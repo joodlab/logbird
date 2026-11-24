@@ -244,10 +244,12 @@ production.
   up to 24 hours, signed with the Standard Webhooks headers. Never "guaranteed delivery", "exactly once" or
   "tamper-proof".
 - **body:** Logbird sends each matching event to an HTTPS endpoint you choose. Choose which events with the same query
-  language as the explorer, and narrow an endpoint to one tenant or one record, with field masks. Every delivery is
-  signed with the Standard Webhooks headers; verify it with the TypeScript or .NET SDK.
-  <!-- source: docs/SPEC.md § Webhook endpoint management (filterQuery, scope { tenantId?, target?, mask? }, Standard Webhooks headers); packages/sdk/README.md § Standard Webhooks; sdks/dotnet/README.md § Verify webhooks -->
+  language as the explorer, and narrow an endpoint to one tenant or one record, with field masks. The TypeScript SDK
+  can verify each delivery using the Standard Webhooks headers.
+  <!-- source: docs/SPEC.md § Webhook endpoint management (filterQuery, scope { tenantId?, target?, mask? }, Standard Webhooks headers); packages/sdk/README.md § Standard Webhooks -->
 - **bullets:**
+  - Events that arrive later than the endpoint's delivery window are skipped by that webhook and stay stored and searchable.
+    <!-- source: docs/self-hosting.md § Webhook endpoint management (deliveryWindowSeconds, #359) -->
   - Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff for up to 24 hours. Delivery is at least once, so deduplicate by
     `webhook-id`. <!-- source: SPEC § Webhook endpoint management (retry schedule; "Receivers use the stable webhook-id to deduplicate") -->
   - A delivery log shows each delivery's status and its recent attempts for 30 days; resend a delivery or send a test
@@ -259,9 +261,6 @@ production.
   hours stops. Up to 10 endpoints per project; HTTPS only. <!-- source: SPEC (window expiry marks the delivery failed; up to 10 endpoints per project; HTTPS unless the self-host option WEBHOOKS_ALLOW_HTTP=true) -->
 - **visual:** code sample, "A delivery": the request line, the three Standard Webhooks headers (an `lb1_` id) and an
   abbreviated event body. <!-- source: SPEC (POST body is the public event shape; lb1_ header ids) -->
-- **owner note:** before this merges, add one sentence from T2's merged delivery-window docs (#359): events that arrive
-  later than the window are skipped by the webhook and stay stored and searchable. A code comment marks the place in
-  `apps/web/src/content/product.ts`.
 
 ## roadmap
 

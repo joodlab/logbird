@@ -19,6 +19,8 @@ const client = new Logbird({
 
 client.track({
   action: 'booking.cancelled',
+  outcome: 'success',
+  description: 'Lina cancelled booking #1042',
   actor: { type: 'user', id: 'usr_42', name: 'Lina Haddad' },
   tenant: { id: 'biz_7', name: 'Azure Hotels' },
   targets: [{ type: 'booking', id: 'bk_1042', name: 'Booking #1042' }],
@@ -47,6 +49,8 @@ const worked = `[
   {
     "id": "evt_cancel_bk_1042",
     "action": "booking.cancelled",
+    "outcome": "success",
+    "description": "Lina cancelled booking #1042",
     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
     "executor": { "type": "api", "id": "api-server" },
     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -56,6 +60,8 @@ const worked = `[
   },
   {
     "action": "payment.refunded",
+    "outcome": "success",
+    "description": "Refunded €240.00 for booking #1042",
     "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
     "executor": { "type": "worker", "id": "refunds-worker", "jobId": "job_981", "attempt": 2 },
     "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -145,6 +151,16 @@ app.post('/webhooks/logbird', async (c) => {
 });`;
 
 const envelopeRows: [string, string, string][] = [
+  [
+    'outcome',
+    'Whether it worked: success, failure, denied, partial or unknown. Failed and denied events show under Recent problems on the overview.',
+    '"success"',
+  ],
+  [
+    'description',
+    "What happened, in words a person reads. The console shows it as the event's title unless it only repeats the action, and free-text search covers it.",
+    '"Lina cancelled booking #1042"',
+  ],
   ['actor', 'Who caused it', '{ type: "user", id: "usr_42", name: "Lina Haddad" }'],
   ['executor', 'What did the work, and on which try', '{ type: "worker", id: "refunds-worker", jobId: "job_981", attempt: 2 }'],
   ['impersonator', 'Which staff member acted for the actor', '{ id: "usr_1", name: "Support agent" }'],
@@ -314,7 +330,7 @@ export const developers = {
   webhooks: {
     eyebrow: 'Webhooks',
     title: 'Verify each delivery, then process it once.',
-    body: 'Each delivery is a `POST` of the event as JSON, signed with the Standard Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature`. Verify the raw body with `verifyWebhook` from `@logbird/sdk` (the .NET package verifies them too), store or enqueue the event, then answer `2xx`.',
+    body: 'Each delivery is a `POST` of the event as JSON, signed with the Standard Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature`. Verify the raw body with `verifyWebhook` from `@logbird/sdk`, store or enqueue the event, then answer `2xx`.',
     bullets: [
       'A `2xx` response is success. Anything else, a timeout (5 seconds to connect, 10 seconds in total) or a redirect is a failure.',
       'Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff (roughly 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h) for up to 24 hours.',

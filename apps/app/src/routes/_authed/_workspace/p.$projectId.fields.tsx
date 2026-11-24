@@ -37,6 +37,10 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/fields')(
 const MEASURED: Partial<Record<string, string>> = {
   // The score credits any target entry; the share counts targets with an id, the events `target:*` finds.
   targets: 'The score counts any target. This share counts events whose targets carry an id, the ones target:* finds.',
+  occurredAt:
+    'Not measured here: without a usable occurredAt, Logbird stores the time the event arrived. Setup shows how many recent payloads included occurredAt.',
+  'context.operationId':
+    'At least this share: the larger of the operationId and requestId shares. Events with only one of the two can make the true share higher.',
 };
 const CONFORMANCE_CHECKS = [
   ['occurredAt', 'When it happened, not when we received it'],
@@ -55,17 +59,25 @@ const CONFORMANCE_CHECKS = [
  * `request`, `target`…). `occurredAt` always has a value (receive time by default); checks the
  * server does not measure per field (description) return undefined and render as "—".
  */
+/** Whether the operation-id share is only a lower bound: both ids are reported, and their union is not measured. */
+const atLeast = (coverage: Map<string, number>) => (coverage.get('operation') ?? 0) > 0 && (coverage.get('request') ?? 0) > 0;
+
 function checkCoverage(key: string, coverage: Map<string, number>): number | undefined {
   switch (key) {
+    // Every stored event has a time: without occurredAt, Logbird stores when it arrived. How many events sent their own
+    // is not measured here (Setup measures it from recent payloads), so no share is claimed (#6).
     case 'occurredAt':
-      return 1;
+      return undefined;
     case 'tenant.id':
       return coverage.get('tenant');
     // The server's `target` row: events with at least one non-empty target id, the ones `target:*` finds.
     case 'targets':
       return coverage.get('target');
     case 'context.operationId':
-      return Math.max(coverage.get('operation') ?? 0, coverage.get('request') ?? 0) || undefined;
+      // Measured (0 included) when either id is reported; unmeasured only when neither is.
+      return coverage.has('operation') || coverage.has('request')
+        ? Math.max(coverage.get('operation') ?? 0, coverage.get('request') ?? 0)
+        : undefined;
     default:
       return coverage.get(key);
   }
@@ -161,9 +173,11 @@ function FieldsPage() {
             {CONFORMANCE_CHECKS.map(([key, hint]) => {
               const c = checkCoverage(key, coverage);
               const good = (c ?? 0) >= 0.9;
+              // A lower bound under the target cannot say whether coverage reaches it: neither a check nor a cross.
+              const unknown = c === undefined || (key === 'context.operationId' && atLeast(coverage) && !good);
               return (
                 <li className="flex items-center gap-2 rounded-md px-2 py-1 text-[13px]" key={key} title={MEASURED[key] ?? hint}>
-                  {c === undefined ? (
+                  {unknown ? (
                     <MinusIcon className="size-3.5 shrink-0 text-muted-foreground" />
                   ) : good ? (
                     <CheckIcon className="size-3.5 shrink-0 text-outcome-success" />
@@ -176,7 +190,15 @@ function FieldsPage() {
                   <span className="hidden min-w-0 flex-1 truncate text-muted-foreground text-xs sm:inline">{hint}</span>
                   {MEASURED[key] ? <span className="sr-only">{MEASURED[key]}</span> : null}
                   <span className="ms-auto shrink-0 text-muted-foreground text-xs tabular-nums">
-                    {fieldsLoading || c === undefined ? '—' : formatPercent(c)}
+                    {fieldsLoading
+                      ? '—'
+                      : key === 'occurredAt'
+                        ? 'receive time if missing'
+                        : c === undefined
+                          ? '—'
+                          : key === 'context.operationId' && atLeast(coverage)
+                            ? `at least ${formatPercent(c)}`
+                            : formatPercent(c)}
                   </span>
                 </li>
               );

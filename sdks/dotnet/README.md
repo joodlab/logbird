@@ -190,10 +190,11 @@ var options = new LogbirdOptions
   It never throws. Without a generic host (console apps, .NET Framework services), call
   `client.Flush(TimeSpan.FromSeconds(10))` or `Dispose()` before the process exits. Both run on the thread pool and
   cannot deadlock on a UI or ASP.NET synchronization context.
-- Disposing sends what is queued, waiting at most `ShutdownTimeout` (10 seconds). Events not yet delivered
-  afterwards, including a batch whose request has not returned, go to `OnDrop` once each with `DropReason.Shutdown`
-  (`MayBeStored` is true for that batch). A late
-  response is then ignored. If that event did reach the server, replaying it from `OnDrop` is still safe while the
+- Disposing sends what is queued, spending at most `ShutdownTimeout` (10 seconds) on delivery (`Dispose` and
+  `DisposeAsync` can take a few seconds more; their full budgets are under "The contract with your code"). Events
+  not yet delivered afterwards, including a batch whose request has not returned, are dropped as
+  `DropReason.Shutdown`, each counted and reported to `OnDrop` once, on a best-effort basis (`MayBeStored` is true for
+  that batch). A late response is then ignored. If that event did reach the server, replaying it from `OnDrop` is still safe while the
   server retains it, because its id is the same.
 
 ### What a dropped event means

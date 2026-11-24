@@ -204,12 +204,12 @@ export const product = {
     codeTitle: 'Your backend',
     developersLink: 'Read API on the developer page',
   },
-  // DELIVERY WINDOW (T2 #359): before this PR merges, add one sentence from T2's merged docs here, saying events that arrive later than the window are skipped by the webhook and stay stored and searchable.
   webhooks: {
     eyebrow: 'Webhooks',
     title: 'Send matching events to your own endpoint.',
-    body: 'Logbird sends each matching event to an HTTPS endpoint you choose. Choose which events with the same query language as the explorer, and narrow an endpoint to one tenant or one record, with field masks. Every delivery is signed with the Standard Webhooks headers; verify it with the TypeScript or .NET SDK.',
+    body: 'Logbird sends each matching event to an HTTPS endpoint you choose. Choose which events with the same query language as the explorer, and narrow an endpoint to one tenant or one record, with field masks. The TypeScript SDK can verify each delivery using the Standard Webhooks headers.',
     bullets: [
+      "Events that arrive later than the endpoint's delivery window are skipped by that webhook and stay stored and searchable.",
       'Unless the endpoint answers `410 Gone`, network failures, timeouts and non-`2xx` responses are retried with backoff for up to 24 hours. Delivery is at least once, so deduplicate by `webhook-id`.',
       "A delivery log shows each delivery's status and its recent attempts for 30 days; resend a delivery or send a test ping.",
       'The secret is shown once; rotate it with an overlap so receivers can switch.',

@@ -1,11 +1,11 @@
-FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS prune
+FROM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS prune
 ARG NODE_OPTIONS
 WORKDIR /source
 RUN npm install --global pnpm@10.30.3 turbo@2.10.12
 COPY . .
 RUN turbo prune @logbird/worker --docker
 
-FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS build
+FROM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS build
 ARG NODE_OPTIONS
 ARG BUILD_CONCURRENCY=1
 ARG DOWNLOAD_CONCURRENCY=4
@@ -19,7 +19,7 @@ RUN DATABASE_URL=postgresql://build:build@localhost:5432/logbird pnpm --filter @
 RUN pnpm --workspace-concurrency="$BUILD_CONCURRENCY" --filter @logbird/worker... build
 
 RUN pnpm --child-concurrency="$BUILD_CONCURRENCY" --network-concurrency="$DOWNLOAD_CONCURRENCY" --filter @logbird/worker deploy --legacy --prod /runtime
-FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS runtime
+FROM node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS runtime
 WORKDIR /workspace
 ENV NODE_ENV=production
 LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird"       org.opencontainers.image.licenses="MIT"       org.opencontainers.image.title="Logbird"

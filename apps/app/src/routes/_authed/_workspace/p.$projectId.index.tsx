@@ -22,6 +22,8 @@ import { overviewQuery, projectQuery, projectSetupQuery } from '@/lib/api/querie
 import { eventSentence, personLabel } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { outcomeBandQuery, RECENT_PROBLEMS_QUERY } from '@/lib/overview-queries';
+import { perMinuteSeries, rateChange } from '@/lib/overview-series';
+import { useCan } from '@/lib/permissions';
 import { placeholderKeys } from '@/lib/placeholders';
 import { formatTerm } from '@/lib/query-language';
 import { ALL_RANGE, DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
@@ -53,6 +55,15 @@ function OverviewPage() {
   const hasSampleData = (setup.data?.ingest.sampleEvents ?? 0) > 0;
   // Another range's KPIs, chart and lists never show under this range's label.
   const data = current(overview);
+  // No event stored at all (any range, sample data and console tests included), from this same overview response, so
+  // the page never mixes two answers: zeros here would read as facts (#5). A project whose setup was once complete has
+  // had events that retention has since removed: it is not told to send its first one.
+  const noEvents = Boolean(data && !data.ingest.lastEventAt);
+  // First-event wording only once Setup has said this project never completed it; while that is unknown (loading or
+  // failed), the neutral wording, which is true either way.
+  const neverSetUp = setup.data?.completedAt === null;
+  const series = perMinuteSeries(data?.ingest.perMinute ?? []);
+  const can = useCan();
   const loading = awaiting(overview);
   const k = data?.kpis;
   const explore = (q: string) => navigate({ to: '/p/$projectId/events', params: { projectId }, search: (prev) => ({ range: prev.range, q }) });
@@ -85,223 +96,247 @@ function OverviewPage() {
         </Button>
       </div>
 
-      <SampleDataBanner className="rounded-lg border" projectId={projectId} />
-      <SetupChecklistCard projectId={projectId} projectName={project.data?.name} />
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-        <StatCard
-          delta={k && compare ? delta(k.events, k.eventsPrev) : undefined}
-          label="Events"
-          loading={loading}
-          onClick={() => explore('')}
-          value={k ? formatNumber(k.events) : '—'}
-        />
-        <StatCard
-          delta={k && compare ? delta(k.actors, k.actorsPrev) : undefined}
-          // A count of distinct actor ids: an actor recorded by a name or email alone is in the events, not here (#333).
-          hint="Distinct actor IDs"
-          label="Active actors"
-          loading={loading}
-          onClick={() => navigate({ to: '/p/$projectId/actors', params: { projectId } })}
-          value={k ? formatNumber(k.actors) : '—'}
-        />
-        <StatCard
-          label="Tenants"
-          loading={loading}
-          onClick={() => navigate({ to: '/p/$projectId/tenants', params: { projectId } })}
-          value={k ? formatNumber(k.tenants) : '—'}
-        />
-        <StatCard
-          delta={k && compare ? k.failureRate - k.failureRatePrev : undefined}
-          deltaKind="points"
-          goodWhen="down"
-          hint="failure + denied"
-          label="Failure rate"
-          loading={loading}
-          onClick={() => explore('(outcome:failure OR outcome:denied)')}
-          value={k ? formatPercent(k.failureRate) : '—'}
-        />
-        <StatCard
-          className="col-span-2 md:col-span-1"
-          footer={
-            // The empty track shows while loading, so the card (and the row of cards) keeps its height.
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${k ? Math.round(k.avgConformance) : 0}%` }} />
-            </div>
+      {noEvents ? (
+        <EmptyState
+          description={
+            neverSetUp
+              ? 'Once this project receives its first event, this page shows who did what, how it went, and how events keep arriving.'
+              : setup.data?.completedAt
+                ? 'Retention has removed this project’s older events and nothing has arrived since. New events show here as they come in.'
+                : 'No events are stored for this project. New events show here as they come in.'
           }
-          hint={hasSampleData ? 'in range · includes sample data' : undefined}
-          label="Avg conformance"
-          loading={loading}
-          onClick={() => navigate({ to: '/p/$projectId/fields', params: { projectId } })}
-          value={k ? `${Math.round(k.avgConformance)}%` : '—'}
-        />
-      </div>
-
-      <div className="grid gap-3 xl:grid-cols-[1fr_300px]">
-        <Panel description="Click a band to open those events" title="Events by outcome">
-          <div className="p-3 pb-2">
-            {loading ? (
-              // The chart (240 px), the gap and the one-row legend below it.
-              <Skeleton className="h-[276px] w-full" />
-            ) : (
-              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(outcomeBandQuery(o))} />
-            )}
-          </div>
-        </Panel>
-        <Panel title="Ingestion">
-          <div className="flex flex-col gap-4 p-4">
-            {loading ? (
-              // Status line, the two figures, the sparkline and the button.
-              <Skeleton className="h-[216px] w-full" />
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  {data?.ingest.lastEventAt && Date.now() - Date.parse(data.ingest.lastEventAt) < 5 * 60_000 ? (
-                    <>
-                      <span className="tm-pulse-dot size-2 rounded-full bg-outcome-success text-outcome-success" />
-                      <span className="font-medium text-sm">Receiving events</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="size-2 rounded-full bg-outcome-unknown" />
-                      <span className="font-medium text-sm">Quiet</span>
-                    </>
-                  )}
-                </div>
-                <dl className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="flex flex-col gap-0.5">
-                    <dt className="text-muted-foreground text-xs">Last event</dt>
-                    <dd className="font-medium">
-                      <Timestamp fallback="never" format="relative" iso={data?.ingest.lastEventAt} />
-                    </dd>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <dt className="text-muted-foreground text-xs">Last hour</dt>
-                    <dd className="font-medium tabular-nums">{formatNumber(data?.ingest.eventsLastHour ?? 0)}</dd>
-                  </div>
-                </dl>
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between text-muted-foreground text-xs">
-                    <span className="flex items-center gap-1">
-                      <RadioIcon className="size-3" /> Events / minute
-                    </span>
-                    <span>60 min</span>
-                  </div>
-                  <Sparkline height={56} values={data?.ingest.perMinute.map((p) => p.count) ?? []} />
-                </div>
-                <Button
-                  nativeButton={false}
-                  render={<Link params={{ projectId }} search={{ live: true }} to="/p/$projectId/events" />}
-                  size="sm"
-                  variant="outline"
-                >
-                  Open live tail
-                </Button>
-              </>
-            )}
-          </div>
-        </Panel>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Panel title="Top actions">
-          <RankList
-            items={(data?.topActions ?? []).map((a) => ({
-              key: a.id,
-              label: <ActionName action={a.id} />,
-              count: a.count,
-              render: (children, className) => (
-                <button className={className} onClick={() => explore(formatTerm('action', a.id))} type="button">
-                  {children}
-                </button>
-              ),
-            }))}
-            loading={loading}
-          />
-        </Panel>
-        <Panel title="Top actors">
-          <RankList
-            items={(data?.topActors ?? []).map((a) => ({
-              key: a.id,
-              label: <span className="truncate">{a.label}</span>,
-              count: a.count,
-              render: (children, className) => (
-                <EntityProfileLink className={className} id={a.id} kind="actor" projectId={projectId}>
-                  {children}
-                </EntityProfileLink>
-              ),
-            }))}
-            loading={loading}
-          />
-        </Panel>
-        <Panel title="Top tenants">
-          <RankList
-            items={(data?.topTenants ?? []).map((a) => ({
-              key: a.id,
-              label: <span className="truncate">{a.label}</span>,
-              count: a.count,
-              render: (children, className) => (
-                <EntityProfileLink className={className} id={a.id} kind="tenant" projectId={projectId}>
-                  {children}
-                </EntityProfileLink>
-              ),
-            }))}
-            loading={loading}
-          />
-        </Panel>
-        <Panel title="Top executors">
-          <RankList
-            items={(data?.topExecutors ?? []).map((a) => ({
-              key: a.id,
-              label: (
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate">{a.label}</span>
-                  <span className="font-mono text-[11px] text-muted-foreground">{a.type}</span>
-                </span>
-              ),
-              count: a.count,
-              render: (children, className) => (
-                <EntityProfileLink className={className} id={a.id} kind="executor" projectId={projectId}>
-                  {children}
-                </EntityProfileLink>
-              ),
-            }))}
-            loading={loading}
-          />
-        </Panel>
-      </div>
-
-      <Panel
-        actions={
-          <Button
-            nativeButton={false}
-            render={<Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: RECENT_PROBLEMS_QUERY })} to="/p/$projectId/events" />}
-            size="xs"
-            variant="ghost"
-          >
-            View all
+          icon={RadioIcon}
+          title={neverSetUp ? 'No events yet' : 'No events stored'}
+        >
+          <Button nativeButton={false} render={<Link hash="first-event" params={{ projectId }} to="/p/$projectId/setup" />} size="sm">
+            {can('testEvent.send') && neverSetUp ? 'Send your first event' : 'View setup instructions'}
             <ArrowRightIcon />
           </Button>
-        }
-        description="Latest failures, denials and critical events"
-        title="Recent problems"
-      >
-        {loading ? (
-          <div className="flex flex-col gap-2 p-3">
-            {placeholderKeys(4).map((k) => (
-              <Skeleton className="h-10 w-full" key={k} />
-            ))}
+        </EmptyState>
+      ) : (
+        <>
+          <SampleDataBanner className="rounded-lg border" projectId={projectId} />
+          <SetupChecklistCard projectId={projectId} projectName={project.data?.name} />
+
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            <StatCard
+              delta={k && compare ? delta(k.events, k.eventsPrev) : undefined}
+              label="Events"
+              loading={loading}
+              onClick={() => explore('')}
+              value={k ? formatNumber(k.events) : '—'}
+            />
+            <StatCard
+              delta={k && compare ? delta(k.actors, k.actorsPrev) : undefined}
+              // A count of distinct actor ids: an actor recorded by a name or email alone is in the events, not here (#333).
+              hint="Distinct actor IDs"
+              label="Active actors"
+              loading={loading}
+              onClick={() => navigate({ to: '/p/$projectId/actors', params: { projectId } })}
+              value={k ? formatNumber(k.actors) : '—'}
+            />
+            <StatCard
+              label="Tenants"
+              loading={loading}
+              onClick={() => navigate({ to: '/p/$projectId/tenants', params: { projectId } })}
+              value={k ? formatNumber(k.tenants) : '—'}
+            />
+            <StatCard
+              delta={k && compare ? rateChange(k.failureRate, k.events, k.failureRatePrev, k.eventsPrev) : undefined}
+              deltaKind="points"
+              goodWhen="down"
+              hint="failure + denied"
+              label="Failure rate"
+              loading={loading}
+              onClick={() => explore('(outcome:failure OR outcome:denied)')}
+              value={k && k.events > 0 ? formatPercent(k.failureRate) : '—'}
+            />
+            <StatCard
+              className="col-span-2 md:col-span-1"
+              footer={
+                // The empty track shows while loading, so the card (and the row of cards) keeps its height.
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${k ? Math.round(k.avgConformance) : 0}%` }} />
+                </div>
+              }
+              hint={hasSampleData ? 'in range · includes sample data' : undefined}
+              label="Avg conformance"
+              loading={loading}
+              onClick={() => navigate({ to: '/p/$projectId/fields', params: { projectId } })}
+              value={k ? `${Math.round(k.avgConformance)}%` : '—'}
+            />
           </div>
-        ) : (data?.recentProblems.length ?? 0) === 0 ? (
-          <EmptyState description="No failures, denials or critical events in this range." icon={CheckCircle2Icon} size="sm" title="All clear" />
-        ) : (
-          <ul className="divide-y">
-            {data?.recentProblems.map((e) => (
-              <ProblemRow event={e} key={e.id} projectId={projectId} />
-            ))}
-          </ul>
-        )}
-      </Panel>
+
+          <div className="grid gap-3 xl:grid-cols-[1fr_300px]">
+            <Panel description="Click a band to open those events" title="Events by outcome">
+              <div className="p-3 pb-2">
+                {loading ? (
+                  // The chart (240 px), the gap and the one-row legend below it.
+                  <Skeleton className="h-[276px] w-full" />
+                ) : (
+                  <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(outcomeBandQuery(o))} />
+                )}
+              </div>
+            </Panel>
+            <Panel title="Ingestion">
+              <div className="flex flex-col gap-4 p-4">
+                {loading ? (
+                  // Status line, the two figures, the sparkline and the button.
+                  <Skeleton className="h-[216px] w-full" />
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      {data?.ingest.lastEventAt && Date.now() - Date.parse(data.ingest.lastEventAt) < 5 * 60_000 ? (
+                        <>
+                          <span className="tm-pulse-dot size-2 rounded-full bg-outcome-success text-outcome-success" />
+                          <span className="font-medium text-sm">Receiving events</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="size-2 rounded-full bg-outcome-unknown" />
+                          <span className="font-medium text-sm">Quiet</span>
+                        </>
+                      )}
+                    </div>
+                    <dl className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="flex flex-col gap-0.5">
+                        <dt className="text-muted-foreground text-xs">Last event</dt>
+                        <dd className="font-medium">
+                          <Timestamp fallback="never" format="relative" iso={data?.ingest.lastEventAt} />
+                        </dd>
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        <dt className="text-muted-foreground text-xs">Last hour</dt>
+                        <dd className="font-medium tabular-nums">{formatNumber(data?.ingest.eventsLastHour ?? 0)}</dd>
+                      </div>
+                    </dl>
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between text-muted-foreground text-xs">
+                        <span className="flex items-center gap-1">
+                          <RadioIcon className="size-3" /> Events / minute
+                        </span>
+                        {/* The span actually plotted: longer than an hour only when this browser's clock is off. */}
+                        <span>{series.length - 1} min</span>
+                      </div>
+                      <Sparkline height={56} values={series} />
+                    </div>
+                    <Button
+                      nativeButton={false}
+                      render={<Link params={{ projectId }} search={{ live: true }} to="/p/$projectId/events" />}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Open live tail
+                    </Button>
+                  </>
+                )}
+              </div>
+            </Panel>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Panel title="Top actions">
+              <RankList
+                items={(data?.topActions ?? []).map((a) => ({
+                  key: a.id,
+                  label: <ActionName action={a.id} />,
+                  count: a.count,
+                  render: (children, className) => (
+                    <button className={className} onClick={() => explore(formatTerm('action', a.id))} type="button">
+                      {children}
+                    </button>
+                  ),
+                }))}
+                loading={loading}
+              />
+            </Panel>
+            <Panel title="Top actors">
+              <RankList
+                items={(data?.topActors ?? []).map((a) => ({
+                  key: a.id,
+                  label: <span className="truncate">{a.label}</span>,
+                  count: a.count,
+                  render: (children, className) => (
+                    <EntityProfileLink className={className} id={a.id} kind="actor" projectId={projectId}>
+                      {children}
+                    </EntityProfileLink>
+                  ),
+                }))}
+                loading={loading}
+              />
+            </Panel>
+            <Panel title="Top tenants">
+              <RankList
+                items={(data?.topTenants ?? []).map((a) => ({
+                  key: a.id,
+                  label: <span className="truncate">{a.label}</span>,
+                  count: a.count,
+                  render: (children, className) => (
+                    <EntityProfileLink className={className} id={a.id} kind="tenant" projectId={projectId}>
+                      {children}
+                    </EntityProfileLink>
+                  ),
+                }))}
+                loading={loading}
+              />
+            </Panel>
+            <Panel title="Top executors">
+              <RankList
+                items={(data?.topExecutors ?? []).map((a) => ({
+                  key: a.id,
+                  label: (
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate">{a.label}</span>
+                      <span className="font-mono text-[11px] text-muted-foreground">{a.type}</span>
+                    </span>
+                  ),
+                  count: a.count,
+                  render: (children, className) => (
+                    <EntityProfileLink className={className} id={a.id} kind="executor" projectId={projectId}>
+                      {children}
+                    </EntityProfileLink>
+                  ),
+                }))}
+                loading={loading}
+              />
+            </Panel>
+          </div>
+
+          <Panel
+            actions={
+              <Button
+                nativeButton={false}
+                render={
+                  <Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: RECENT_PROBLEMS_QUERY })} to="/p/$projectId/events" />
+                }
+                size="xs"
+                variant="ghost"
+              >
+                View all
+                <ArrowRightIcon />
+              </Button>
+            }
+            description="Latest failures, denials and critical events"
+            title="Recent problems"
+          >
+            {loading ? (
+              <div className="flex flex-col gap-2 p-3">
+                {placeholderKeys(4).map((k) => (
+                  <Skeleton className="h-10 w-full" key={k} />
+                ))}
+              </div>
+            ) : (data?.recentProblems.length ?? 0) === 0 ? (
+              <EmptyState description="No failures, denials or critical events in this range." icon={CheckCircle2Icon} size="sm" title="All clear" />
+            ) : (
+              <ul className="divide-y">
+                {data?.recentProblems.map((e) => (
+                  <ProblemRow event={e} key={e.id} projectId={projectId} />
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </>
+      )}
     </div>
   );
 }

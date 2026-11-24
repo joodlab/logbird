@@ -195,7 +195,7 @@ function SelfHostingPage() {
             </section>
           ))}
         </div>
-        <p className="mt-6 border-s-2 ps-3 text-muted-foreground text-sm">
+        <p className="mt-6 text-muted-foreground text-sm">
           {options.guide ? (
             <>
               {options.guide.before}

@@ -26,7 +26,7 @@ import { doc as responseDoc, routeDoc } from './openapi';
 import { deliverOutboxEvent, waitForAuditDelivery } from './outbox-delivery';
 import { beginRollupRead, finishRollupRead } from './project-read';
 import { clientAddress, publicRateLimits } from './rate-limit';
-import { assertNotMasked, forbidMaskedEvidence, maskEvent, mintViewerToken, scopeWithin } from './read-access';
+import { assertNotMasked, fieldMaskSecret, forbidMaskedEvidence, maskEvent, mintViewerToken, scopeWithin } from './read-access';
 import type { AppEnv } from './types';
 
 const ingestRequestSchema = (await resolver(s.ingestBodySchema).toOpenAPISchema()).schema;
@@ -204,7 +204,9 @@ export const publicRoutes = new Hono<AppEnv>()
       const input = c.req.valid('query');
       const { scope } = c.get('reader');
       assertNotMasked(scope, input);
-      return c.json(s.facetResponseSchema.parse(await ch.facets(readerClient(scope), c.get('project').id, input, scope)));
+      // The mask key lets facets show a name that is the address as the same pseudonym the scope's events carry (#333).
+      const key = scope?.mask?.length ? fieldMaskSecret() : undefined;
+      return c.json(s.facetResponseSchema.parse(await ch.facets(readerClient(scope), c.get('project').id, input, scope, undefined, key)));
     },
   )
   .get(
