@@ -10,7 +10,7 @@ export const roadmap = {
   items: [
     'Project-level redaction controls, behind the redaction your client already does.', // § Customer-facing history
     'Alerts on chosen actions.', // § Later candidates: "Action alerts"
-    'Signed webhooks and archive exports.', // § Later candidates
+    'Archive exports.', // § Later candidates
     'Single sign-on for the console.', // § Later candidates: "Console SSO"
   ],
 };
