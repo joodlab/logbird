@@ -7,7 +7,7 @@ import {
   retentionMinuteDrift,
   retentionRollupDrift,
 } from '@logbird/clickhouse';
-import { databaseClock, type Prisma, prisma, withProjectLock } from '@logbird/database';
+import { databaseClock, INGEST_RECEIPT_WINDOW_MS, type Prisma, prisma, withProjectLock } from '@logbird/database';
 
 /**
  * Derived-table verification for background retention (#296, round-1 finding 7, owner's ruling (d)).
@@ -201,6 +201,10 @@ export async function verifyRetentionRuns(ch: ClickHouseClient, projectId: strin
               select: { maintenanceGeneration: true, exportDeleteStartedAt: true },
             });
             if (!after || after.exportDeleteStartedAt || after.maintenanceGeneration !== verdict.generation) return 'busy';
+            // Once overlapping receipts can be pruned, absence is no longer evidence of a stable read. Leave half
+            // the receipt window as margin because confirmation timestamps may be stamped by another instance.
+            const evidenceDeadline = verdict.from.getTime() + INGEST_RECEIPT_WINDOW_MS / 2;
+            if ((await databaseClock(tx)).getTime() >= evidenceDeadline) return 'busy';
             // ClickHouse inserts and their materialized views can become visible at different instants. A receipt in the
             // window, including a replay with an older receivedAt, means the unlocked scan could have seen partial data.
             const concurrent = await tx.ingestReceipt.findFirst({

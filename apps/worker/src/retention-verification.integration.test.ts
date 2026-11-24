@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ClickHouseClient } from '@logbird/clickhouse';
-import { closeProjectLocks, databaseClock, prisma } from '@logbird/database';
+import { closeProjectLocks, databaseClock, INGEST_RECEIPT_WINDOW_MS, prisma } from '@logbird/database';
 import { afterAll, expect, it, vi } from 'vitest';
 import { verifyRetentionRuns } from './retention-verification';
 
@@ -43,6 +43,20 @@ it('persists a repair when an older completed run disagrees with ClickHouse and 
     expect(await prisma.retentionRun.findUnique({ where: { id: older.id } })).toMatchObject({ status: 'completed', verification });
 
     await prisma.ingestReceipt.deleteMany({ where: { projectId, eventId: 'concurrent' } });
+    const queryRaw = prisma.$queryRaw.bind(prisma);
+    const clock = vi
+      .spyOn(prisma, '$queryRaw')
+      .mockImplementationOnce(queryRaw)
+      .mockResolvedValueOnce([{ now: new Date(now.getTime() - INGEST_RECEIPT_WINDOW_MS) }]);
+    try {
+      await verifyRetentionRuns(store, projectId, enqueue);
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(await prisma.retentionRun.findUnique({ where: { id: older.id } })).toMatchObject({ status: 'completed', verification });
+    } finally {
+      clock.mockRestore();
+    }
+
     await verifyRetentionRuns(store, projectId, enqueue);
     expect(enqueue).toHaveBeenCalledExactlyOnceWith(projectId);
     expect(await prisma.retentionRun.findUnique({ where: { id: older.id } })).toMatchObject({
