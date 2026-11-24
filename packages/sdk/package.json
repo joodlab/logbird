@@ -2,6 +2,19 @@
   "name": "@logbird/sdk",
   "version": "0.2.1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joodlab/logbird.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/joodlab/logbird/tree/master/packages/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/joodlab/logbird/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
   "type": "module",
   "private": false,
   "exports": {
@@ -27,6 +40,8 @@
     "dist"
   ],
   "publishConfig": {
+    "access": "public",
+    "provenance": true,
     "exports": {
       ".": {
         "types": "./dist/index.d.mts",

@@ -246,7 +246,10 @@ const headers = {
 ## Requests and workers
 
 `createAudit(options, hostContext, request)` from `@logbird/sdk/integration` captures
-stable header/UUID correlation fallbacks once. actor/impersonator/tenant/executor/ip/requestId/operationId
+stable correlation ids once. Unless an id set on the event or a `requestId` / `operationId`
+resolver supplies one, each is a generated UUID, or the inbound `x-logbird-operation` and
+`x-request-id` header when you set `useOperationHeader` and `useRequestIdHeader` (both off by
+default): any caller can send these headers, so enable them only behind a trusted ingress that sets them itself or strips or overwrites what a client sent. actor/impersonator/tenant/executor/ip/requestId/operationId
 resolvers run at each audit call, including after route authentication. Explicit partial
 fields skip their resolver, even when undefined. Resolver failures report onError and omit
 only that field. audit(action, partial?) synchronously returns the stamped event id and

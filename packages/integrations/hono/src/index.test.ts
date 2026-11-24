@@ -7,7 +7,15 @@ it('isolates concurrent requests, merges causation and auto-tracks mutations', a
   const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
   const track = vi.spyOn(client, 'track').mockImplementation(() => undefined);
   const app = new Hono<{ Variables: AuditVariables }>();
-  app.use(logbird({ client, actor: (c) => ({ id: c.req.header('user') }), tenant: () => ({ id: 'tenant' }), autoTrack: {} }));
+  app.use(
+    logbird({
+      client,
+      actor: (c) => ({ id: c.req.header('user') }),
+      tenant: () => ({ id: 'tenant' }),
+      useOperationHeader: true,
+      autoTrack: {},
+    }),
+  );
   app.post('/', async (c) => {
     await Promise.resolve();
     c.var.audit('record.updated', { context: { parentEventId: 'parent' } });

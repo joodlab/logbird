@@ -57,6 +57,39 @@ jobs:
           path: ${{ runner.temp }}/nupkg
           retention-days: 7
 
+  # A Native AOT application built from the packages the job above packed, not from source (#322): any trim or AOT
+  # warning fails the publish, and the native binary runs its checks against an in-process stand-in for the server. It
+  # waits for those packages, so it never slows that job; it adds its own run time after it.
+  aot-consumer:
+    name: Native AOT consumer of the packed packages
+    needs: dotnet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: sdks/dotnet/tests/aot-consumer
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages
+          path: sdks/dotnet/tests/aot-consumer/packages
+      - name: Publish with Native AOT
+        run: |
+          version="$(basename packages/Logbird.[0-9]*.nupkg .nupkg)"
+          version="${version#Logbird.}"
+          echo "Logbird packages: $version"
+          dotnet publish -c Release -r linux-x64 -p:LogbirdVersion="$version" -o "$RUNNER_TEMP/aot"
+      - name: Run the native binary
+        run: |
+          file "$RUNNER_TEMP/aot/AotConsumer"
+          "$RUNNER_TEMP/aot/AotConsumer"
+
   dotnet-framework:
     name: .NET Framework 4.8 tests
     runs-on: windows-latest

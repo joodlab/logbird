@@ -9,9 +9,11 @@ export interface StackedRow {
   cells: ReactNode[];
 }
 
+const smTableClass = 'hidden sm:block';
+const mdTableClass = 'hidden md:block';
 const breakpoints = {
-  sm: { table: 'hidden sm:block', cards: 'sm:hidden' },
-  md: { table: 'hidden md:block', cards: 'md:hidden' },
+  sm: { table: smTableClass, cards: 'sm:hidden' },
+  md: { table: mdTableClass, cards: 'md:hidden' },
 } as const;
 
 /**

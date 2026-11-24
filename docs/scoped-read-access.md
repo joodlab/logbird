@@ -74,6 +74,26 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 - `ip` empties `context.ip`; `user_agent` empties `context.userAgent`.
 - `actor_email` replaces `actor.email` with `masked:<24 hex>`, a keyed hash that is stable per project, so a viewer
   can still group by person without seeing the address.
+- It also hides an actor **name that carries an address**: lower-cased with all whitespace removed, the name contains
+  `@`, equals the email, or (cut at its 512-character cap) is a prefix of it. That covers a producer that used the
+  address as the display name, put it inside the name (`Ada <ada@example.org>`), or sent an address only as the name.
+  Events, facets (values, groups and labels), filters and masked webhook filters treat such a name the same way:
+  - It shows as a pseudonym (the email's own when the name contains it).
+  - Filters read it as an empty name. An `actor.name` filter for the address, a prefix of it or a wildcard never
+    matches it, but a filter that an empty name satisfies does (for example `NOT actor.name:"x"`, or a regex that
+    accepts an empty string).
+  - Free text matches such an event only through its other text.
+  - A pseudonym can't be inverted, so `actor.name:"masked:…"` matches only a name a producer literally sent as that
+    text. Filter by actor id instead.
+- Under `actor_email`, if an id's earliest `(received_at, timestamp)` pair holds more than one distinct stored payload
+  (legacy data), detail answers 404 and parent traversal stops at that id: choosing between them would read the hidden
+  fields. Identical copies, and an earliest version that is unique, are served as usual.
+- The mask covers the actor's own email and name. Addresses a producer writes into other fields (descriptions, target
+  names, attributes) are not masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
+  addresses out of those fields when scoped readers must not see them.
+- Case-insensitive matching follows the Unicode case tables of the server's Node.js runtime and of ClickHouse. A test
+  pins their agreement for the examples it lists (ASCII, Latin-1, Greek, Cyrillic, Turkish and German). Case pairs
+  added in Unicode 17 can differ between them (#365).
 - **Any mask also drops the original payload:** detail returns `payload: null`, and `jsonl-evidence` exports answer
   422 `masked_export`.
 - A masked scope can't filter or facet on a masked field or on the matching attribute paths (`context.ip`,

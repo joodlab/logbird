@@ -389,6 +389,35 @@ describe.runIf(enabled)('#138 phase 2: database-enforced tenant binding for scop
     }
     const ofChild = await getEvent(withTenant(restricted!, 'tB'), tenantProject, child.row.event_id, { tenantId: 'tB' }, main!);
     expect(ofChild?.parents.map((e) => e.tenant?.id)).toEqual(owner === 'tB' ? ['tB'] : []);
+    // #333: under the actor_email mask the payload hash that breaks the tie covers the actor fields, so a tied id
+    // fails closed for every tenant, on both lookup paths, and is never a parent; the child itself is still served.
+    for (const tenant of ['tA', 'tB']) {
+      const masked = { tenantId: tenant, mask: ['actor_email' as const] };
+      expect(await getEvent(withTenant(restricted!, tenant), tenantProject, tied, masked, main!), tenant).toBeNull();
+      expect(await getEvent(main!, tenantProject, tied, masked), tenant).toBeNull();
+    }
+    const maskedChild = await getEvent(
+      withTenant(restricted!, 'tB'),
+      tenantProject,
+      child.row.event_id,
+      { tenantId: 'tB', mask: ['actor_email'] },
+      main!,
+    );
+    expect(maskedChild?.event.id).toBe(child.row.event_id);
+    expect(maskedChild?.parents).toEqual([]);
+  });
+
+  it('a masked search of the maximum 64 terms runs through the restricted client within its SQL limits (#333)', async () => {
+    const terms = Array.from({ length: 63 }, (_, i) => (i % 2 ? `actor.name:name${i}*` : `term${i}`));
+    const q = [...terms, 'action:row.policy.tenant'].join(' OR ');
+    const page = await searchEvents(
+      withTenant(restricted!, 't1'),
+      tenantProject,
+      { from: range.from, to: new Date(now.getTime() + 60_000).toISOString(), q, limit: 10, order: 'desc' },
+      undefined,
+      { tenantId: 't1', mask: ['actor_email'] },
+    );
+    expect(page.data.map((e) => e.id)).toEqual(['tenant-0']);
   });
 
   it('an out-of-scope id answers like an unknown id without touching the restricted client', async () => {
