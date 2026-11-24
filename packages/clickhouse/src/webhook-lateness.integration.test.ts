@@ -77,4 +77,5 @@ it.runIf(process.env.CLICKHOUSE_URL)(
     await purgeProject(ch, projectId);
     expect(await lateEventCounts(ch, projectId, [{ since, windowSeconds: 3600 }])).toEqual([0]);
   },
+  60_000,
 );
