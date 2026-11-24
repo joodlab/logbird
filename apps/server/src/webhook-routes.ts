@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { compileMaskedQuery, WEBHOOK_FILTER } from '@logbird/clickhouse';
+import { compileMaskedQuery, lateEventCounts, WEBHOOK_FILTER } from '@logbird/clickhouse';
 import {
   apiErrorSchema,
   createWebhookResponseSchema,
@@ -35,6 +35,7 @@ import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
 import { type Context, Hono } from 'hono';
 import { resolver, validator } from 'hono-openapi';
 import type { ZodType } from 'zod';
+import { clickhouse } from './clickhouse';
 import { env } from './env';
 import { ApiError } from './errors';
 import { audit } from './ingest';
@@ -79,9 +80,25 @@ const lateEventsSince = (endpoint: Pick<WebhookEndpoint, 'deliveryWindowChangedA
   new Date(Math.max(+endpoint.deliveryWindowChangedAt, +now - WEBHOOK_LOG_RETENTION_MS));
 type Late = { count: number; since: Date };
 type LateInput = Pick<WebhookEndpoint, 'id' | 'projectId' | 'deliveryWindowSeconds' | 'deliveryWindowChangedAt'>;
-/** Late-event counts per endpoint. The lateness rollup fills the counts (#152); until then they read 0. */
+/**
+ * Late-event counts per endpoint from the lateness rollup (#152), one ClickHouse query per project on the internal client.
+ * An endpoint without a window counts 0.
+ */
 async function lateEvents(endpoints: LateInput[], now: Date): Promise<Map<string, Late>> {
-  return new Map(endpoints.map((endpoint) => [endpoint.id, { count: 0, since: lateEventsSince(endpoint, now) }]));
+  const late = new Map(endpoints.map((endpoint) => [endpoint.id, { count: 0, since: lateEventsSince(endpoint, now) }]));
+  const windowed = endpoints.filter((endpoint) => endpoint.deliveryWindowSeconds !== null);
+  const projectId = windowed[0]?.projectId;
+  if (!projectId) return late;
+  const counts = await lateEventCounts(
+    clickhouse,
+    projectId,
+    windowed.map((endpoint) => ({ since: lateEventsSince(endpoint, now), windowSeconds: endpoint.deliveryWindowSeconds ?? 0 })),
+  );
+  for (const [index, endpoint] of windowed.entries()) {
+    const entry = late.get(endpoint.id);
+    if (entry) entry.count = counts[index] ?? 0;
+  }
+  return late;
 }
 const lateFor = (late: Map<string, Late>, endpoint: LateInput, now: Date) =>
   late.get(endpoint.id) ?? { count: 0, since: lateEventsSince(endpoint, now) };
