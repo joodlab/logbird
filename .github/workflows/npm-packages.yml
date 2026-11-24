@@ -15,6 +15,7 @@ on:
       - 'tests/npm-consumer/**'
       - 'tests/npm-consumer-adapters/**'
       - 'scripts/check-npm-packages.mjs'
+      - 'scripts/check-npm-packages.test.mjs'
       - 'pnpm-lock.yaml'
       - '.github/workflows/npm-packages.yml'
   push:
@@ -29,6 +30,7 @@ on:
       - 'tests/npm-consumer/**'
       - 'tests/npm-consumer-adapters/**'
       - 'scripts/check-npm-packages.mjs'
+      - 'scripts/check-npm-packages.test.mjs'
       - 'pnpm-lock.yaml'
       - '.github/workflows/npm-packages.yml'
 
@@ -53,6 +55,8 @@ jobs:
           cache: pnpm
       # The whole workspace, as the release job installs it: the SDK bundles parts of @logbird/contracts at build time.
       - run: pnpm install --frozen-lockfile
+      - name: Test the import scan
+        run: node --test scripts/check-npm-packages.test.mjs
       - name: Build and pack, as the release does
         run: |
           mkdir -p "$RUNNER_TEMP/npm"
