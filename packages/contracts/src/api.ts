@@ -507,6 +507,26 @@ export const apiErrorSchema = z.object({
 export type ApiError = z.infer<typeof apiErrorSchema>;
 
 /**
+ * 409 from a console project route (session only): the project belongs to another workspace that the signed-in person
+ * is a current member of, so the console can offer to switch to it. A project in a workspace the person is not a member
+ * of, or no such project, is the same 404 `not_found`, so a project id never reveals a workspace.
+ */
+export const PROJECT_IN_OTHER_WORKSPACE = 'project_in_other_workspace';
+export const projectInOtherWorkspaceErrorSchema = z
+  .object({
+    error: z.object({
+      code: z.literal(PROJECT_IN_OTHER_WORKSPACE),
+      message: z.string(),
+      details: z.object({ workspaceId: z.string(), workspaceName: z.string() }),
+    }),
+  })
+  .describe(
+    'The project is in another workspace you are a member of (details name it). Switch the active workspace to open it. ' +
+      'A project in a workspace you are not a member of returns 404 not_found, like a project that does not exist.',
+  );
+export type ProjectInOtherWorkspaceError = z.infer<typeof projectInOtherWorkspaceErrorSchema>;
+
+/**
  * `GET /api/onboarding/workspace-name` — what the onboarding workspace step pre-fills. `name` is null when the email
  * domain is a personal mailbox provider, or a workspace member or pending invitation already uses that domain (a
  * teammate should join that workspace instead of creating a look-alike).

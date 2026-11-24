@@ -1,4 +1,4 @@
-import { apiErrorSchema } from '@logbird/contracts';
+import { apiErrorSchema, projectInOtherWorkspaceErrorSchema } from '@logbird/contracts';
 import { type DescribeRouteOptions, describeRoute, resolver } from 'hono-openapi';
 import type { z } from 'zod';
 
@@ -66,3 +66,35 @@ export const doc = (summary: string, schema: z.ZodType, status = 200, security =
  */
 export const EXPORT_SERVERS = [{ url: 'http://localhost:4600', description: 'This Logbird instance' }];
 export const committedOpenApiDocument = <T extends object>(served: T) => ({ ...served, servers: EXPORT_SERVERS });
+
+/** Every console project route: mounted under requireProjectAccess, so each can answer 409 project_in_other_workspace. */
+export const PROJECT_ROUTE_PATH = /^\/api\/projects\/\{projectId\}(?:\/|$)/;
+const PROJECT_CONFLICT = 'The project is in another workspace you are a member of (details name it): switch the active workspace to open it.';
+const projectConflictSchema = (await resolver(projectInOtherWorkspaceErrorSchema).toOpenAPISchema()).schema;
+type Operation = { responses?: Record<string, { description?: string; content?: Record<string, { schema?: unknown }> }> };
+const METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'] as const;
+
+/**
+ * Documents requireProjectAccess's 409 on every console project operation, from the one middleware rather than per
+ * route. A route that already answers 409 for its own reason gets both shapes (oneOf).
+ */
+export function documentProjectAccess<T extends { paths?: Record<string, unknown> }>(spec: T): T {
+  for (const [path, item] of Object.entries(spec.paths ?? {})) {
+    if (!PROJECT_ROUTE_PATH.test(path)) continue;
+    for (const method of METHODS) {
+      const operation = (item as Partial<Record<(typeof METHODS)[number], Operation>>)[method];
+      if (!operation) continue;
+      if (!operation.responses) operation.responses = {};
+      const responses = operation.responses;
+      const own = responses['409'];
+      const ownSchema = own?.content?.['application/json']?.schema;
+      responses['409'] = own
+        ? {
+            description: `${own.description ?? 'Conflict.'} Or: ${PROJECT_CONFLICT}`,
+            content: { 'application/json': { schema: ownSchema ? { oneOf: [ownSchema, projectConflictSchema] } : projectConflictSchema } },
+          }
+        : { description: PROJECT_CONFLICT, content: { 'application/json': { schema: projectConflictSchema } } };
+    }
+  }
+  return spec;
+}
