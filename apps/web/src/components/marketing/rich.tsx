@@ -14,7 +14,7 @@ import { THIRD_PARTY_QUOTE_ATTRIBUTE } from '../../lib/source-state';
 export function Rich({
   text,
   thirdPartyQuotes = false,
-  strongClassName = DEFAULT_STRONG,
+  strongClassName = defaultStrongClass,
 }: {
   text: string;
   thirdPartyQuotes?: boolean;
@@ -41,7 +41,7 @@ export function Rich({
   );
 }
 
-const DEFAULT_STRONG = 'font-semibold text-foreground';
+const defaultStrongClass = 'font-semibold text-foreground';
 
 function Marks({ text, strongClassName }: { text: string; strongClassName: string }) {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g);

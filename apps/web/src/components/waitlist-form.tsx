@@ -2,67 +2,39 @@ import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
 import { Textarea } from '@logbird/ui/components/ui/textarea';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
-import { CONTACT_EMAIL, GITHUB_PUBLIC } from '../env';
-import { CLOUD_OPEN } from '../lib/cloud';
-import type { NEEDS, VOLUMES } from '../lib/waitlist-schema';
+import { type AroundMail, waitlistForm as words } from '../content/waitlist-form';
+import { INTERESTS, NEEDS, VOLUMES } from '../lib/waitlist-options';
 
-// Words: the form's labels, options and states are in this file (the page around it renders content/contact.ts).
-// Brief: marketing/copy/contact.md.
-// No mailbox is named unless WEB_CONTACT_EMAIL is configured (never a guessed address).
-const mail = CONTACT_EMAIL ? (
-  <a className="text-link" href={`mailto:${CONTACT_EMAIL}`}>
-    {CONTACT_EMAIL}
+// Words: content/waitlist-form.ts (the page around the form renders content/contact.ts). Brief: marketing/copy/contact.md.
+const mail = words.mail ? (
+  <a className="text-link" href={words.mail.href}>
+    {words.mail.label}
   </a>
 ) : null;
-export const STATUS_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: ReactNode }> = {
-  // One message for every topic: a privacy request must not be told it joined a waitlist.
-  ok: { tone: 'ok', text: "Thanks, we've got it. We'll reply by email." },
-  validation_error: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
-  invalid_body: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
-  rate_limited: { tone: 'error', text: 'Too many attempts. Wait a minute, then try again.' },
-  waitlist_unavailable: {
-    tone: 'error',
-    text: mail ? <>The form isn't available right now. Email us at {mail} instead.</> : "The form isn't available right now. Please try again later.",
-  },
-  error: {
-    tone: 'error',
-    text: mail ? (
-      <>We couldn't send that. Check your connection and try again, or email {mail}.</>
-    ) : (
-      "We couldn't send that. Check your connection and try again."
-    ),
-  },
-};
+/** A status message, with the contact mailbox linked where the words leave room for it. */
+const withMail = (text: string | AroundMail): ReactNode =>
+  typeof text === 'string' ? (
+    text
+  ) : (
+    <>
+      {text.before}
+      {mail}
+      {text.after}
+    </>
+  );
+export const STATUS_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: ReactNode }> = Object.fromEntries(
+  Object.entries(words.status).map(([code, text]) => [code, { tone: code === 'ok' ? 'ok' : 'error', text: withMail(text) }]),
+);
 const messageFor = (code: string | undefined) => (code ? (STATUS_MESSAGES[code] ?? STATUS_MESSAGES.error) : undefined);
-
-const INTERESTS = [
-  { value: 'cloud', label: CLOUD_OPEN ? 'Access to Logbird Cloud' : 'The Logbird Cloud waitlist' },
-  { value: 'self-host', label: GITHUB_PUBLIC ? 'Self-hosting' : 'Self-hosting, when the source opens' },
-  { value: 'updates', label: 'Product updates only' },
-  { value: 'correction', label: 'A correction to one of our pages' },
-  { value: 'other', label: 'A question, or support and enterprise' },
-  { value: 'privacy', label: 'A privacy request (access, deletion or another right)' },
-] as const;
 
 /**
  * Progressive enhancement: a real form post that works without JavaScript (the server redirects back with
  * `?status=<code>#waitlist-<code>`, and a :target message shows), upgraded to fetch with inline field errors.
  */
-// Optional qualifying questions. Values: lib/waitlist-schema.ts (VOLUMES, NEEDS).
-const VOLUME_OPTIONS: { value: (typeof VOLUMES)[number]; label: string }[] = [
-  { value: 'unsure', label: 'Not sure yet' },
-  { value: 'under-100k', label: 'Under 100,000' },
-  { value: '100k-1m', label: '100,000 to under 1 million' },
-  { value: '1m-10m', label: '1 million to under 10 million' },
-  { value: 'over-10m', label: '10 million or more' },
-];
-const NEED_OPTIONS: { value: (typeof NEEDS)[number]; label: string }[] = [
-  { value: 'customer-audit-log', label: 'Show our customers their own audit log' },
-  { value: 'compliance', label: 'Compliance evidence and retention' },
-  { value: 'investigations', label: 'Support investigations' },
-  { value: 'self-host-support', label: 'Help running it ourselves' },
-  { value: 'other', label: 'Something else' },
-];
+// The topics and the optional qualifying questions. Values: lib/waitlist-options.ts (no Zod in the browser), in order.
+const VOLUME_OPTIONS = VOLUMES.map((value) => ({ value, label: words.volumes[value] }));
+const NEED_OPTIONS = NEEDS.map((value) => ({ value, label: words.needs[value] }));
+const INTEREST_OPTIONS = INTERESTS.map((value) => ({ value, label: words.interests[value] }));
 /** The form as JSON: every field once, except the repeated `needs` checkboxes, sent as a list. */
 export const formFields = (data: FormData) => ({ ...Object.fromEntries(data), needs: data.getAll('needs') });
 
@@ -122,7 +94,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
   const fieldError = (name: string) =>
     errors[name] ? (
       <p className="field-error" id={`${name}-error`}>
-        {name === 'email' ? 'Enter a valid email address.' : errors[name].join(' ')}
+        {name === 'email' ? words.emailInvalid : errors[name].join(' ')}
       </p>
     ) : null;
   return (
@@ -135,13 +107,13 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
         ))}
       </noscript>
       <div className="form-field">
-        <Label htmlFor="email">Email</Label>
+        <Label htmlFor="email">{words.labels.email}</Label>
         <Input
           autoComplete="email"
           id="email"
           maxLength={254}
           name="email"
-          placeholder="you@example.test"
+          placeholder={words.emailPlaceholder}
           required
           type="email"
           {...field('email')}
@@ -150,20 +122,20 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       </div>
       <div className="grid gap-5 sm:grid-cols-2">
         <div className="form-field">
-          <Label htmlFor="name">Name</Label>
+          <Label htmlFor="name">{words.labels.name}</Label>
           <Input autoComplete="name" id="name" maxLength={200} name="name" {...field('name')} />
           {fieldError('name')}
         </div>
         <div className="form-field">
-          <Label htmlFor="company">Company</Label>
+          <Label htmlFor="company">{words.labels.company}</Label>
           <Input autoComplete="organization" id="company" maxLength={200} name="company" {...field('company')} />
           {fieldError('company')}
         </div>
       </div>
       <fieldset className="form-field">
-        <legend className="mb-2 font-medium text-sm">What's this about?</legend>
+        <legend className="mb-2 font-medium text-sm">{words.labels.interest}</legend>
         <div className="grid gap-2 sm:grid-cols-2">
-          {INTERESTS.map((option) => (
+          {INTEREST_OPTIONS.map((option) => (
             <label
               className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm has-[:checked]:border-brand has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50"
               key={option.value}
@@ -176,7 +148,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
         {fieldError('interest')}
       </fieldset>
       <div className="form-field">
-        <Label htmlFor="volume">Expected events per month (optional)</Label>
+        <Label htmlFor="volume">{words.labels.volume}</Label>
         <select
           className="h-10 rounded-md border bg-background px-3 text-sm sm:max-w-xs"
           defaultValue=""
@@ -184,7 +156,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
           name="volume"
           {...field('volume')}
         >
-          <option value="">Choose one</option>
+          <option value="">{words.labels.volumeNone}</option>
           {VOLUME_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -194,7 +166,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
         {fieldError('volume')}
       </div>
       <fieldset className="form-field">
-        <legend className="mb-2 font-medium text-sm">What do you need? (optional)</legend>
+        <legend className="mb-2 font-medium text-sm">{words.labels.needs}</legend>
         <div className="grid gap-2 sm:grid-cols-2">
           {NEED_OPTIONS.map((option) => (
             <label
@@ -209,15 +181,13 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
         {fieldError('needs')}
       </fieldset>
       <div className="form-field">
-        <Label htmlFor="message">Message</Label>
+        <Label htmlFor="message">{words.labels.message}</Label>
         <Textarea id="message" maxLength={2000} name="message" rows={4} {...field('message')} />
-        <p className="text-muted-foreground text-xs">
-          What are you building, and what do you need from an audit log? For a privacy request, tell us what you'd like us to do.
-        </p>
+        <p className="text-muted-foreground text-xs">{words.messageHint}</p>
         {fieldError('message')}
       </div>
       <div aria-hidden="true" className="honeypot">
-        <label htmlFor="website">Website</label>
+        <label htmlFor="website">{words.labels.website}</label>
         <input autoComplete="off" id="website" name="website" tabIndex={-1} />
       </div>
       <div className="flex flex-col gap-3">
@@ -227,15 +197,14 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
           disabled={sending}
           type="submit"
         >
-          {sending ? 'Sending…' : 'Send'}
+          {sending ? words.submit.sending : words.submit.idle}
         </button>
         <p className="text-muted-foreground text-xs" id="form-privacy">
-          We use these details to reply to you and handle access requests, and send product updates only if you choose "Product updates only". No
-          trackers. By sending, you confirm you've read the{' '}
+          {words.consent.before}{' '}
           <a className="text-link" href="/legal/privacy">
-            privacy policy
+            {words.consent.link}
           </a>
-          .
+          {words.consent.after}
         </p>
       </div>
       <div aria-atomic="true" aria-live="polite">
