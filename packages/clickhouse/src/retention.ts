@@ -107,13 +107,19 @@ const params = (p: string, cutoff: Date, fenceA: Date, keys: RetentionKeys, fenc
 export async function stageRetentionRollups(session: ClickHouseClient, p: string, cutoff: Date, fenceA: Date, keys: RetentionKeys) {
   const ch = projectMaintenance(session, p);
   for (const [table, stage] of Object.entries(STAGE_TABLES)) {
-    await ch.command({ query: `DROP TEMPORARY TABLE IF EXISTS ${stage}` });
     await ch.command({ query: `CREATE TEMPORARY TABLE ${stage} AS ${table}` });
   }
   const surviving = "(received_at <= {fenceA:DateTime64(3,'UTC')} AND timestamp >= {cutoff:DateTime64(3,'UTC')})";
   for (const { table, select } of recomputeSelects(surviving)) {
     if (!(table in STAGE_TABLES)) continue;
     await ch.command({ query: `INSERT INTO ${STAGE_TABLES[table as Staged]} ${select}`, query_params: params(p, cutoff, fenceA, keys) });
+  }
+}
+
+/** Release staged rows on their session, even if staging failed partway through. */
+export async function dropStagedRetentionRollups(session: ClickHouseClient) {
+  for (const stage of Object.values(STAGE_TABLES)) {
+    await session.command({ query: `DROP TEMPORARY TABLE IF EXISTS ${stage}` }).catch(() => undefined);
   }
 }
 

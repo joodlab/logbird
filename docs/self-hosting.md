@@ -276,18 +276,15 @@ To act:
    and restore a corrupted part from backup). ClickHouse retries failed mutations by itself; the runs complete within
    about ten seconds of the queue draining, and their exports reopen.
 3. Only if the cause cannot be fixed, `KILL MUTATION WHERE database = currentDatabase() AND table = '…' AND mutation_id = '…' SYNC`
-   (mutation ids are unique per table only, so always name the table). Killing a Logbird retention DELETE leaves
-   rows that should have been removed: the reconciler's verification then marks the run failed, and the next hourly
-   run deletes them again on the synchronous path. Killing a DELETE on a derived table (`events_by_minute`, `entities`
-   or `attribute_keys`) leaves the old rollup rows next to their replacements: the minute buckets before the cutoff
-   keep counting the expired events, and the affected entities and attribute keys count twice. Each background run
-   compares the derived tables with the stored events before and after its DELETEs. Such a run is marked failed,
-   naming the table, the worker logs `retention.verification_drift`, and a synchronous run that rebuilds the
-   project's rollups is queued. A small killed `entities` or `attribute_keys` DELETE can hide in concurrent ingest at
-   completion; the next run's baseline then finds the drift (`retention.drift_baseline`) and queues the rebuild, at
-   most once per project per day. To rebuild at once instead:
+   (mutation ids are unique per table only, so always name the table). If expired rows remain in `events` or
+   `event_ids`, the reconciler marks the run failed and the next hourly run retries the deletion. If you cancel a
+   DELETE on `events_by_minute`, `entities` or `attribute_keys`, rebuild that project's rollups after the remaining
+   mutations finish. Completion verification checks for derived-table drift and queues a rebuild if it detects a
+   discrepancy. Concurrent ingest can obscure a small discrepancy in `entities` or `attribute_keys`, so rebuild even
+   if the run reports completion:
    `node --env-file=.env --import tsx scripts/repair-rollups.ts PROJECT`. The rebuild holds the project's exclusive
-   lock, so its ingest is refused (503 `project_busy`, retried by the SDKs) while it runs.
+   lock, so its ingest is refused (503 `project_busy`, retried by the SDKs) while it runs. If a claimed insert can
+   still land, the script stops before rebuilding and asks you to retry.
 
 **Worked example (from our own development store).** A test held a mutation on `events` with
 `sleepEachRow(0.1)` over 200 rows: 20 s per block, above ClickHouse's 3 s background limit, so every background

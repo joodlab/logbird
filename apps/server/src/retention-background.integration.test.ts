@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { CLICKHOUSE_PLAIN_READ, insertEvents, pendingProjectMutations, read } from '@logbird/clickhouse';
 import { closeProjectLocks, ProjectBusyError, prisma, SERVER_CAPABILITIES, withProjectLock } from '@logbird/database';
-import { RETENTION_CLOCK_SKEW_ALLOWANCE_MS, runBackgroundRetention } from '@logbird/worker/retention';
+import { RETENTION_CLOCK_SKEW_ALLOWANCE_MS, clickhouse as retentionClickhouse, runBackgroundRetention } from '@logbird/worker/retention';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { reconcileDestructiveMaintenance } from './destructive-maintenance';
@@ -206,11 +206,10 @@ it('deletes in the background: ingest waits only for the fences, and rollups mat
     expect(outcome).toBe('materializing');
     const run = await latestRun();
     expect(run).toMatchObject({ status: 'materializing', deletedEvents: 150, error: null });
-    // The DELETEs are still being applied in ClickHouse: readers see them applied already.
-    expect((await pendingProjectMutations(maintenanceClickhouse, f.project)).length).toBeGreaterThan(0);
+    // Readers must see the deletion before reconciliation, including when ClickHouse finishes unusually quickly.
     await traffic.quiet(async () => {
       expect(await expiredVisible()).toBe(0);
-      await expectRollupsExact('after the second fence, deletes pending');
+      await expectRollupsExact('after the second fence, before reconciliation');
     });
     // An export now says retention is finishing, with when to retry (not a timer or a generic busy error).
     const refused = await f.management(`/api/projects/${f.project}/export?format=jsonl&from=${new Date(Date.now() - 365 * DAY).toISOString()}`);
@@ -254,6 +253,28 @@ it('deletes in the background: ingest waits only for the fences, and rollups mat
       `${JSON.stringify({ event: 'qa.retention_background', live: traffic.ids.length, ...measured })}
 `,
     );
+});
+
+it('records a canceled run when Fence A cannot flush a settled claim', purgeLimit(180_000), async () => {
+  await seed();
+  await f.pending({ id: 'old-claim', action: 'qa.claim' }, { expired: true });
+  await prisma.ingestReceipt.updateMany({
+    where: { projectId: f.project, eventId: 'old-claim' },
+    data: { claimedAt: new Date(Date.now() - 300_000) },
+  });
+  const command = retentionClickhouse.command.bind(retentionClickhouse);
+  const flush = vi.spyOn(retentionClickhouse, 'command').mockImplementation((params) => {
+    if (params.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE') return Promise.reject(new Error('Grant denied'));
+    return command(params);
+  });
+  try {
+    expect(await runBackgroundRetention(f.project)).toBe('canceled');
+    expect(await latestRun()).toMatchObject({ status: 'canceled', error: expect.stringContaining('SYSTEM FLUSH ASYNC INSERT QUEUE') });
+    expect(await pendingProjectMutations(maintenanceClickhouse, f.project)).toEqual([]);
+    expect(await expiredVisible(true)).toBe(150);
+  } finally {
+    flush.mockRestore();
+  }
 });
 
 it('cancels the run and deletes nothing when the retention period changes between the fences', purgeLimit(90_000), async () => {

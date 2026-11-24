@@ -4,6 +4,7 @@ import {
   committedReceivedAfter,
   createMaintenanceClickHouseClient,
   createSessionClickHouseClient,
+  dropStagedRetentionRollups,
   hasExpiredEvents,
   INGEST_CLAIM_LEASE_MS,
   pendingEventMutations,
@@ -199,9 +200,7 @@ async function fenceClock(db: Prisma.TransactionClient) {
 }
 
 /**
- * `claimedAt` is stamped by the ingesting app instance's own clock, not the database's. An instance whose clock lags
- * the worker's by L makes an unresolved claim look L older than it is; the settle proof waits this much longer, so
- * an instance may lag by up to this much without an ambiguous insert landing after a fence it was judged settled for.
+ * Older servers stamped `claimedAt` with their own clocks. Allow for those servers' clock skew during an upgrade.
  */
 export const RETENTION_CLOCK_SKEW_ALLOWANCE_MS = 30_000;
 /**
@@ -209,15 +208,18 @@ export const RETENTION_CLOCK_SKEW_ALLOWANCE_MS = 30_000;
  * newest is past its lease, flush bound and clock-skew allowance and the async queue was flushed). False when a claim
  * may still be in flight.
  */
-async function settleProjectInserts(projectId: string) {
+export async function settleProjectInserts(projectId: string) {
   // One clock: claimedAt is stamped by the database and compared with the database clock here, so no instance clock
   // can make an unresolved claim look settled. The allowance remains for claims stamped by an older server's own
   // clock during a rolling upgrade.
   const settleMs = INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS + RETENTION_CLOCK_SKEW_ALLOWANCE_MS;
-  const [open] = await prisma.$queryRaw<[{ unsettled: boolean }]>`
-    SELECT EXISTS (SELECT 1 FROM "IngestReceipt" WHERE "projectId"=${projectId} AND "confirmedAt" IS NULL AND "claimedAt" IS NOT NULL
-      AND "claimedAt" > (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(secs => ${settleMs / 1000}::float8)) AS unsettled`;
-  if (open?.unsettled) return false;
+  const [open] = await prisma.$queryRaw<[{ claimedAt: Date | null; settledBefore: Date }]>`
+    SELECT (SELECT "claimedAt" FROM "IngestReceipt"
+      WHERE "projectId"=${projectId} AND "confirmedAt" IS NULL AND "claimedAt" IS NOT NULL
+      ORDER BY "claimedAt" DESC LIMIT 1) AS "claimedAt",
+      (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(secs => ${settleMs / 1000}::float8) AS "settledBefore"`;
+  if (!open.claimedAt) return true;
+  if (open.claimedAt > open.settledBefore) return false;
   try {
     await clickhouse.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE', clickhouse_settings: { max_execution_time: 30 } });
   } catch (error) {
@@ -324,7 +326,15 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
     if (!project || project.retentionDays !== current.retentionDays || project.exportDeleteStartedAt) return null;
     // Capability gate (#296, round-1 finding 15): every API server seen recently must support background retention.
     if (!(await backgroundRetentionAllowed(projectId, 'fence_a'))) return 'incapable' as const;
-    if (!(await settleProjectInserts(projectId))) return 'deferred' as const;
+    try {
+      if (!(await settleProjectInserts(projectId))) return 'deferred' as const;
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'LOGBIRD_FLUSH_UNAVAILABLE')) throw error;
+      await tx.retentionRun.create({
+        data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'canceled', finishedAt: new Date(), error: error.message },
+      });
+      return 'canceled' as const;
+    }
     const fenceA = await fenceClock(tx);
     generationsAtA = { maintenance: String(project.maintenanceGeneration), export: String(project.exportGeneration) };
     return tx.retentionRun.create({
@@ -333,6 +343,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
   });
   if (opened === null) return 'skipped';
   if (opened === 'deferred') return 'deferred';
+  if (opened === 'canceled') return 'canceled';
   if (opened === 'incapable') {
     await enforceProjectRetention(projectId);
     return 'synchronous';
@@ -457,6 +468,7 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
   } finally {
     stopHeartbeat();
     stopRepairHeartbeat?.();
+    await dropStagedRetentionRollups(session);
     await session.close().catch(() => undefined);
   }
 }
