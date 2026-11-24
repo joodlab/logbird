@@ -149,6 +149,15 @@ test('createRequire counts only from node:module', () => {
   const given =
     "const factory = () => ({ createRequire: () => (value) => value }); const object = factory('node:module'); const validate = object.createRequire(); validate('fictional-field');";
   assert.deepEqual(importsOf(given, 'dist/index.mjs'), []);
+  // Nor does a function given node:module itself: it returns whatever it returns.
+  const wrapped =
+    "const factory = () => ({ createRequire: () => (value) => value }); const object = factory(require('node:module')); const validate = object.createRequire(); validate('fictional-field');";
+  assert.deepEqual(importsOf(wrapped, 'dist/probe.cjs'), ['node:module']);
+  // `await import('node:module')`, and esbuild / Rolldown's __toESM wrapper, are node:module.
+  const awaited = "const m = await import('node:module'); m.createRequire(import.meta.url)('zod');";
+  assert.deepEqual(importsOf(awaited, 'dist/index.mjs'), ['node:module', 'zod']);
+  const toEsm = "var import_node_module = __toESM(require('node:module')); (0, import_node_module.createRequire)(__filename)('zod');";
+  assert.deepEqual(importsOf(toEsm, 'dist/probe.cjs'), ['node:module', 'zod']);
   // tsc's esModuleInterop output and Node's getBuiltinModule are loads of node:module.
   const interop =
     'const node_module_1 = __importDefault(require("node:module")); const load = (0, node_module_1.default.createRequire)(__filename); load("zod");';

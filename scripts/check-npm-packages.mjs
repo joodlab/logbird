@@ -195,13 +195,24 @@ export function importsOf(text, path, moduleType = 'commonjs') {
       (propertyName(callee) === 'require' && owner === 'global:module') || (propertyName(callee) === 'getBuiltinModule' && owner === 'global:process')
     );
   };
-  const loadsNodeModule = (value) => {
-    let found = false;
-    walk(value, (node) => {
-      const argument = node.type === 'ImportExpression' ? node.source : node.arguments?.[0];
-      if (isLoaderCall(node) && NODE_MODULE.has(staticName(argument))) found = true;
-    });
-    return found;
+  // Compilers' interop wrappers, which return the module they are given (or an object holding it): tsc's
+  // `__importDefault` / `__importStar`, Babel's `_interopRequireDefault` / `_interopRequireWildcard`, and esbuild's and
+  // Rolldown's `__toESM`.
+  const INTEROP = /^_{1,2}(?:importDefault|importStar|interopRequireDefault|interopRequireWildcard|toESM)\d*$/;
+  // Whether an expression evaluates to node:module: a loader call given it, `await` of one, a member of one
+  // (`require('node:module').Module`), or an interop wrapper around one. Not any expression that merely contains one:
+  // `factory(require('node:module'))` returns whatever `factory` returns.
+  const loadsNodeModule = (node) => {
+    const value = unwrap(node);
+    if (!value) return false;
+    if (value.type === 'AwaitExpression') return loadsNodeModule(value.argument);
+    if (isMember(value)) return loadsNodeModule(value.object);
+    if (isLoaderCall(value)) return NODE_MODULE.has(staticName(value.type === 'ImportExpression' ? value.source : value.arguments[0]));
+    if (value.type === 'CallExpression' || value.type === 'OptionalCallExpression') {
+      const callee = unwrap(value.callee);
+      return callee.type === 'Identifier' && INTEROP.test(callee.name) && loadsNodeModule(value.arguments[0]);
+    }
+    return false;
   };
   const moduleBindings = new Set();
   // The names createRequire itself is bound to: `import { createRequire as cr } from 'node:module'`,
