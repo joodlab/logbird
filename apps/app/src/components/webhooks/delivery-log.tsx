@@ -79,28 +79,34 @@ export function DeliveryLog({
   // The endpoint as it is now, read when the log opens: its window or late count may have changed in another session
   // since the settings list was loaded. The sentence shows only once a read made since this opening has answered: the
   // list's copy, or one from an earlier opening, could describe a window that no longer applies.
+  // Each read keeps the time it started: the server counted no later than that, so it is the time the read describes.
+  // (When the answer was stored is later, and can fall after counting started even though the count was taken before.)
   const fresh = useQuery({
     queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'detail'],
-    queryFn: ({ signal }) => api.webhooks.get(projectId, endpoint.id, signal),
+    queryFn: async ({ signal }) => {
+      const startedAt = Date.now();
+      return { endpoint: await api.webhooks.get(projectId, endpoint.id, signal), startedAt };
+    },
     enabled: open,
     staleTime: 0,
   });
   // When the log last opened, set during render so an earlier opening's copy never shows for a frame.
   const [opening, setOpening] = useState(() => ({ open, at: Date.now() }));
   if (opening.open !== open) setOpening({ open, at: Date.now() });
-  const current = fresh.data && !fresh.isError && fresh.dataUpdatedAt >= opening.at ? fresh.data : null;
+  const read = fresh.data && !fresh.isError && fresh.data.startedAt >= opening.at ? fresh.data : null;
   // Judged at the time of the read that produced it, never at render time: a read made before counting began says when
   // it starts, even if the log is still open after that.
-  const lateSentence = current ? lateEventsSentence(current, lateSince(current.lateEvents.since), new Date(fresh.dataUpdatedAt)) : null;
+  const lateSentence = read ? lateEventsSentence(read.endpoint, lateSince(read.endpoint.lateEvents.since), new Date(read.startedAt)) : null;
   // Counting starts later (just after a window change): with the log still open then, read the endpoint again so the
   // sentence becomes a count. The margin allows for the browser's clock being a little behind the server's.
-  const startsAt = current ? Date.parse(current.lateEvents.since) : Number.NaN;
+  const startsAt = read ? Date.parse(read.endpoint.lateEvents.since) : Number.NaN;
+  const readAt = read?.startedAt ?? Number.NaN;
   const { refetch: refetchFresh } = fresh;
   useEffect(() => {
-    if (!open || !(startsAt > fresh.dataUpdatedAt)) return;
+    if (!open || !(startsAt > readAt)) return;
     const timer = setTimeout(() => refetchFresh(), Math.max(startsAt - Date.now(), 0) + COUNT_START_MARGIN_MS);
     return () => clearTimeout(timer);
-  }, [open, startsAt, fresh.dataUpdatedAt, refetchFresh]);
+  }, [open, startsAt, readAt, refetchFresh]);
   // Resends still on their way. A resent delivery keeps its id and place, so it can sit below the loaded pages, where
   // the log's own polling cannot see it: while any is outstanding, the endpoint's pending deliveries are read every few
   // seconds, and once a resent one is no longer pending the log reloads to show how it ended.

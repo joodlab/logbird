@@ -225,3 +225,26 @@ it('keeps "starts counting" tied to its read, and reads again once counting has 
   expect(get.mock.calls.length).toBe(reads + 1);
   expect(sentence()).toMatch(/^Since .+, Logbird has recorded 1 event in this project arriving more than 7 days after it happened\./);
 }, 10_000);
+
+it('judges a read that crosses the start in flight by when it started, and reads again for the count', async () => {
+  // The first read starts before counting does and answers after it; only the second read may supply a count.
+  const startsAt = new Date(Date.now() + 200).toISOString();
+  get.mockImplementationOnce(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return { ...endpoint, lateEvents: { count: 0, since: startsAt } };
+  });
+  get.mockImplementationOnce(async () => ({ ...endpoint, lateEvents: { count: 2, since: startsAt } }));
+  await open(null);
+  const sentence = () => document.querySelector('[data-testid="late-events"]')?.textContent;
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  });
+  expect(Date.now()).toBeGreaterThan(Date.parse(startsAt));
+  expect(sentence()).toMatch(/^Logbird starts counting/);
+  const reads = get.mock.calls.length;
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  });
+  expect(get.mock.calls.length).toBe(reads + 1);
+  expect(sentence()).toMatch(/^Since .+, Logbird has recorded 2 events in this project/);
+}, 10_000);
