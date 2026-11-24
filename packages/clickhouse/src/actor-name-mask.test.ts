@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ACTOR_NAME_MARKER, actorNameIsEmail, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
+import { actorNameIsEmail, facetOrderParams, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { facets } from './queries';
 import { compileQuery } from './query';
 
-// #333: under the actor_email mask, a name that is the address must not show or be probed through facets or filters.
+// #333: under the actor_email mask, a reader cannot obtain the actor's address from the actor's own fields (email,
+// name), by value, by label, by filter, by order or by free-text match on those fields.
 describe('the name rule shared by events and SQL', () => {
   it.each([
     ['alice@example.com', 'alice@example.com', true],
@@ -18,24 +19,37 @@ describe('the name rule shared by events and SQL', () => {
   ])('%j is the address %j: %s', (name, email, expected) => {
     expect(actorNameIsEmail(name, email)).toBe(expected);
   });
+
+  // A name padded past normalize.ts's 512-unit cap is stored cut: at the cap, a normalised prefix of the email counts.
+  it.each([
+    [510, false],
+    [511, true],
+    [512, true],
+  ])('a name of %i UTF-16 units that is a prefix of the address is the address: %s', (units, expected) => {
+    const email = 'alice@example.com';
+    const name = `alice${' '.repeat(units - 5)}`;
+    expect(name.length).toBe(units);
+    expect(actorNameIsEmail(name, email)).toBe(expected);
+    // A prefix that is not the address's start never counts, at any length.
+    expect(actorNameIsEmail(`bob${' '.repeat(units - 3)}`, email)).toBe(false);
+  });
 });
 
 describe('the filter rewrite', () => {
   it('reads an empty name wherever the name is the address, so an actor.name probe never matches those rows', () => {
     for (const q of ['actor.name:"carol@example.com"', 'actor.name:carol*', 'actor.name:*', 'NOT actor.name:"x"']) {
       const sql = maskActorNameInFilter(compileQuery(q).sql);
-      // Every actor_name reference sits behind the mask expression.
-      const unguarded = sql.replaceAll("'',actor_name)", '').replace(/actor_name\),\{actorMaskSpaces/g, '');
-      expect(unguarded, q).not.toMatch(/(?<![\w(])actor_name(?![\w)])/);
-      expect(sql).toContain("if((actor_email!=''");
+      expect(sql, q).toContain("if((actor_email!=''");
+      // The probe compares against the guarded expression, never the bare column.
+      expect(sql.replace(/if\(\(actor_email!=''[\s\S]*?,'',actor_name\)/g, 'GUARDED'), q).not.toMatch(/[=(,]\s*actor_name\b(?!\),)/);
     }
   });
 
-  it('matches free text on such a row only through its other text', () => {
+  it('evaluates free text on such a row only against the text an empty name would leave', () => {
     for (const q of ['carol@example.com', 'carol', '"carol example"']) {
       const sql = maskActorNameInFilter(compileQuery(q).sql);
-      expect(sql, q).toMatch(/AND \(NOT \(actor_email!=''/);
-      expect(sql).toContain("lowerUTF8(concat(description,' ',tenant_name,' ',arrayStringConcat(target_names,' ')))");
+      expect(sql, q).toMatch(/\(\(NOT \(actor_email!=''[\s\S]*AND \((hasToken|position)\(search_text, [\s\S]*\) OR \(\(actor_email!=''/);
+      expect(sql).toContain("lowerUTF8(concat(description,' ','',' ',tenant_name,' ',arrayStringConcat(target_names,' ')))");
     }
   });
 
@@ -52,37 +66,50 @@ describe('facets under the actor_email mask', () => {
     const query = vi.fn(async () => ({ json: async () => results.shift() ?? [] }));
     return { ch: { query } as unknown as ClickHouseClient, query };
   };
+  type Call = { query: string; query_params: Record<string, unknown> };
+  const calls = (query: ReturnType<typeof vi.fn>) => query.mock.calls.map((call) => (call as unknown as [Call])[0]);
 
-  it('shows a name that is the address as the pseudonym its events carry, at both levels, and never the address', async () => {
-    const marker = `${ACTOR_NAME_MARKER}alice@example.com`;
+  it('shows a flagged name as the pseudonym its events carry, at both levels, and never the address', async () => {
     const { ch, query } = client([
       [
-        { value: 'usr_1', label: marker, count: 3, total: 4 },
-        { value: 'usr_2', label: 'Bob', count: 1, total: 4 },
+        { value: 'usr_1', masked: 0, lab: [1, 'alice@example.com'], count: 3, total: 4 },
+        { value: 'usr_2', masked: 0, lab: [0, 'Bob'], count: 1, total: 4 },
       ],
       [
-        { value: 'usr_1', grp: marker, label: marker, count: 3, total: 3 },
-        { value: 'usr_2', grp: 'Bob', label: 'Bob', count: 1, total: 1 },
+        { value: 'usr_1', masked: 0, grp: 'alice@example.com', gmasked: 1, lab: [1, 'alice@example.com'], count: 3, total: 3 },
+        { value: 'usr_2', masked: 0, grp: 'Bob', gmasked: 0, lab: [0, 'Bob'], count: 1, total: 1 },
       ],
     ]);
     const result = await facets(ch, 'proj_1', { ...range, field: 'actor', by: 'actor.name', limit: 10 }, scope, undefined, key);
     const pseudonym = maskedEmail('proj_1', 'alice@example.com', key);
     expect(result.values.map((v) => v.label)).toEqual([pseudonym, 'Bob']);
     expect(result.values[0]?.groups?.map((g) => [g.value, g.label])).toEqual([[pseudonym, pseudonym]]);
-    expect(JSON.stringify(result)).not.toMatch(/@|logbird-masked-email/);
-    // The SQL asked for the masked expression, and the second level filtered on the values as SQL returned them.
-    const [first, second] = query.mock.calls.map((call) => (call as unknown as [{ query: string; query_params: Record<string, unknown> }])[0]);
-    expect(first?.query).toContain('concat({actorMaskMarker:String},lowerUTF8(actor_email))');
-    expect(first?.query_params.actorMaskMarker).toBe(ACTOR_NAME_MARKER);
-    expect(second?.query_params.facetValues).toEqual(['usr_1', 'usr_2']);
+    expect(JSON.stringify(result)).not.toMatch(/@/);
+    const [first, second] = calls(query);
+    // The flag is its own column, the groups are keyed by (flag, text), and the second level filters on those keys.
+    expect(first?.query).toMatch(/ masked,argMaxIf\(tuple\(/);
+    expect(first?.query).toContain('GROUP BY value,masked');
+    expect(second?.query_params.facetKeys).toEqual(['0|usr_1', '0|usr_2']);
   });
 
-  it('maps an actor.name value too', async () => {
-    const { ch } = client([[{ value: `${ACTOR_NAME_MARKER}carol@example.com`, label: `${ACTOR_NAME_MARKER}carol@example.com`, count: 2, total: 2 }]]);
+  it('never interprets text by its content: a producer string that looks masked stays as it is', async () => {
+    const forged = '\u0000logbird-masked-email:alice@example.com';
+    const { ch } = client([[{ value: forged, masked: 0, lab: [0, forged], count: 1, total: 1 }]]);
     const result = await facets(ch, 'proj_1', { ...range, field: 'actor.name', limit: 10 }, scope, undefined, key);
-    expect(result.values).toEqual([
-      { value: maskedEmail('proj_1', 'carol@example.com', key), label: maskedEmail('proj_1', 'carol@example.com', key), count: 2 },
-    ]);
+    expect(result.values).toEqual([{ value: forged, label: forged, count: 1 }]);
+  });
+
+  it('breaks ties with a keyed hash, the same on every request, so a limit cannot be related to an address', async () => {
+    const { ch, query } = client([[{ value: 'carol@example.com', masked: 1, lab: [1, 'carol@example.com'], count: 2, total: 2 }]]);
+    await facets(ch, 'proj_1', { ...range, field: 'actor.name', limit: 1 }, scope, undefined, key);
+    const [first] = calls(query);
+    expect(first?.query).toMatch(
+      /ORDER BY count DESC,sipHash64Keyed\(\(\{orderKey0:UInt64\},\{orderKey1:UInt64\}\),concat\(toString\(masked\),'\|',value\)\) LIMIT/,
+    );
+    expect(first?.query_params).toMatchObject(facetOrderParams(key, 'proj_1'));
+    // Per project and key, deterministic; different for another project.
+    expect(facetOrderParams(key, 'proj_1')).toEqual(facetOrderParams(key, 'proj_1'));
+    expect(facetOrderParams(key, 'proj_2')).not.toEqual(facetOrderParams(key, 'proj_1'));
   });
 
   it('refuses to run without the field mask key', async () => {
@@ -95,6 +122,6 @@ describe('facets under the actor_email mask', () => {
     const { ch, query } = client([[{ value: 'usr_1', label: 'alice@example.com', count: 1, total: 1 }]]);
     const result = await facets(ch, 'proj_1', { ...range, field: 'actor', limit: 10 });
     expect(result.values[0]?.label).toBe('alice@example.com');
-    expect((query.mock.calls[0] as unknown as [{ query: string }])[0].query).not.toContain('actorMaskMarker');
+    expect(calls(query)[0]?.query).toContain('GROUP BY value ORDER BY count DESC,value LIMIT');
   });
 });

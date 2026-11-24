@@ -74,6 +74,15 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 - `ip` empties `context.ip`; `user_agent` empties `context.userAgent`.
 - `actor_email` replaces `actor.email` with `masked:<24 hex>`, a keyed hash that is stable per project, so a viewer
   can still group by person without seeing the address.
+- It also hides an actor **name that is the address** (a producer that used the address as the display name too):
+  lower-cased with all whitespace removed, the name equals the email, or a name cut at its 512-character cap is a
+  prefix of it. Events, facets (values, groups and labels) and filters treat such a name the same way: it shows as the
+  address's pseudonym, an `actor.name` filter never matches it, and free text matches such an event only through its
+  other text. Filtering by a pseudonym returns nothing; filter by actor id instead.
+- The mask hides the actor's email and a display name equal to it. Addresses a producer writes into other fields
+  (descriptions, target names, attributes) are not masked: mask those attribute paths or don't send them.
+- Case-insensitive matching follows the Unicode case tables of the server's Node.js runtime and of ClickHouse; they
+  agree for every script in common use, and a test pins that agreement.
 - **Any mask also drops the original payload:** detail returns `payload: null`, and `jsonl-evidence` exports answer
   422 `masked_export`.
 - A masked scope can't filter or facet on a masked field or on the matching attribute paths (`context.ip`,

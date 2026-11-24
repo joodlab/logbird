@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { facetResponseSchema, searchResponseSchema } from '@logbird/contracts';
 import { expect, it } from 'vitest';
-import { maskedEmail } from './actor-name-mask';
+import { ACTOR_NAME_IS_EMAIL_SQL, ACTOR_NAME_MASK_PARAMS, actorNameIsEmail, maskedEmail } from './actor-name-mask';
 import { maskEvent } from './field-mask';
 import { createClickHouseClient, facets, insertEvents, normalizeEvent, purgeProject, searchEvents } from './index';
 
@@ -39,6 +39,14 @@ it.runIf(process.env.CLICKHOUSE_URL)(
           actor: { id: 'u4', name: 'dave@example.com', email: 'dave@example.com' },
           tenant,
         },
+        // Padded past the 512-unit name cap: stored cut, still the address.
+        {
+          id: 'erin',
+          action: 'booking.noted',
+          description: 'plain',
+          actor: { id: 'u5', name: `erin${' '.repeat(600)}@example.com`, email: 'erin@example.com' },
+          tenant,
+        },
       ];
       const normalized = inputs.map((e, i) => normalizeEvent({ ...e, occurredAt: at(10_000 - i * 100) }, { projectId: p, receivedAt: now }));
       await insertEvents(
@@ -48,10 +56,11 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       const alice = maskedEmail(p, 'alice@example.com', key);
       const carol = maskedEmail(p, 'carol@example.com', key);
       const dave = maskedEmail(p, 'dave@example.com', key);
+      const erin = maskedEmail(p, 'erin@example.com', key);
 
       // field=actor.name: values and labels.
       const byName = facetResponseSchema.parse(await facets(ch, p, { ...range, field: 'actor.name', limit: 10 }, scope, undefined, key));
-      expect(Object.fromEntries(byName.values.map((v) => [v.value, v.count]))).toEqual({ [alice]: 2, Bob: 1, [carol]: 1, [dave]: 1 });
+      expect(Object.fromEntries(byName.values.map((v) => [v.value, v.count]))).toEqual({ [alice]: 2, Bob: 1, [carol]: 1, [dave]: 1, [erin]: 1 });
       expect(byName.values.every((v) => v.label === v.value)).toBe(true);
       // field=actor: the label at the first level; by=actor.name at the second.
       const byActor = facetResponseSchema.parse(
@@ -68,7 +77,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
           .find((v) => v.value === 'booking.noted')
           ?.groups?.map((g) => g.label)
           .sort(),
-      ).toEqual([carol, dave].sort());
+      ).toEqual([carol, dave, erin].sort());
       for (const facet of [byName, byActor, byAction]) expect(JSON.stringify(facet)).not.toMatch(/@/);
 
       // The pseudonym is the one the same scope's events carry.
@@ -76,6 +85,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       const masked = events.data.map((e) => maskEvent(e, scope.mask, key));
       expect(masked.find((e) => e.id === 'alice-1')?.actor?.name).toBe(alice);
       expect(masked.find((e) => e.id === 'alice-2')?.actor?.name).toBe(alice);
+      expect(masked.find((e) => e.id === 'erin')?.actor?.name).toBe(erin);
 
       // Filters cannot probe the address through the name, and match free text only through the other text.
       const count = async (q: string) =>
@@ -100,3 +110,39 @@ it.runIf(process.env.CLICKHOUSE_URL)(
   },
   120_000,
 );
+
+/**
+ * #333, round 1 finding 4 (class B): Node and ClickHouse case-map with their own Unicode tables. This pins today's
+ * agreement for every script both runtimes know, so a runtime upgrade that widens the gap fails here instead of
+ * silently making event detail and facets disagree.
+ */
+it.runIf(process.env.CLICKHOUSE_URL)('real ClickHouse: the SQL name rule and lower-casing agree with JavaScript', async () => {
+  const ch = createClickHouseClient();
+  const pairs: [string, string][] = [
+    ['ALICE@EXAMPLE.COM', 'alice@example.com'],
+    ['ÉLODIE.ÇA@EXAMPLE.FR', 'élodie.ça@example.fr'],
+    ['ΣΟΦΙΑ@EXAMPLE.GR', 'σοφια@example.gr'],
+    ['ИВАН@EXAMPLE.RU', 'иван@example.ru'],
+    ['İREM@EXAMPLE.TR', 'irem@example.tr'],
+    ['IRMAK@EXAMPLE.TR', 'ırmak@example.tr'],
+    ['ẞTRAẞE@EXAMPLE.DE', 'ßtraße@example.de'],
+    ['STRASSE@EXAMPLE.DE', 'straße@example.de'],
+    ['Bob', 'bob@example.com'],
+  ];
+  try {
+    for (const [name, email] of pairs) {
+      const [row] = await (
+        await ch.query({
+          query: `SELECT ${ACTOR_NAME_IS_EMAIL_SQL} same, lowerUTF8(actor_email) lowered, lowerUTF8(actor_name) nameLowered FROM (SELECT {n:String} actor_name, {e:String} actor_email)`,
+          query_params: { n: name, e: email, ...ACTOR_NAME_MASK_PARAMS },
+          format: 'JSONEachRow',
+        })
+      ).json<{ same: number; lowered: string; nameLowered: string }>();
+      expect(Boolean(Number(row?.same)), `${name} / ${email}`).toBe(actorNameIsEmail(name, email));
+      expect(row?.lowered, email).toBe(email.toLowerCase());
+      expect(row?.nameLowered, name).toBe(name.toLowerCase());
+    }
+  } finally {
+    await ch.close();
+  }
+});
