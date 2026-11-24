@@ -227,13 +227,15 @@ it('keeps an OR filter inside the project scope', async () => {
 
 it('continues the purge after a delete that succeeds on its second attempt', async () => {
   const command = vi.fn().mockResolvedValue({});
-  const probes = [1, 0, 0, 0, 0, 0];
+  const probes = [1, 0, 0, 0, 0, 0, 0];
   const query = vi.fn().mockImplementation(async () => ({ json: async () => [{ n: probes.shift() ?? 0 }] }));
   await settle(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa95-purge'));
   expect(command.mock.calls.map(([args]) => args.query.split(' WHERE ')[0])).toEqual([
     'DELETE FROM events',
     'DELETE FROM events',
     'DELETE FROM event_ids',
+    // Project deletion also removes the webhook lateness rollup (#152).
+    'DELETE FROM events_lateness_by_hour',
     'DELETE FROM events_by_minute',
     'DELETE FROM entities',
     'DELETE FROM attribute_keys',

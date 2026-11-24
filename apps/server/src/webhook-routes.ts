@@ -258,7 +258,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     // Count before saving, so a failed ClickHouse read fails the request before anything is written.
     const counted = lateFor(await lateEvents([current], await databaseNow()), current, new Date());
     const url = input.url === undefined ? undefined : await allowedUrl(c, input.url);
-    const endpoint = await lockedProject(c, async (tx) => {
+    const { after: endpoint, savedAt } = await lockedProject(c, async (tx) => {
       const before = await findEndpoint(c, tx);
       if (input.scope !== undefined || input.filterQuery !== undefined) {
         const scope = input.scope === undefined ? storedWebhookScope(before) : input.scope;
@@ -309,11 +309,14 @@ export const webhookRoutes = new Hono<AppEnv>()
       );
       if (fields.length) await record(c, tx, 'webhook.updated', after, fields);
       if (enabledChanged) await record(c, tx, input.enabled ? 'webhook.enabled' : 'webhook.disabled', after, ['enabled'], 'manual');
-      return after;
+      return { after, savedAt: now };
     });
-    // Unchanged window: the count read before the save. Changed window: it starts at the next whole hour, so 0.
-    const unchanged = +endpoint.deliveryWindowChangedAt === +current.deliveryWindowChangedAt;
-    const late = unchanged ? counted : { count: 0, since: lateEventsSince(endpoint, await databaseNow()) };
+    // Nothing is read after the commit, so a saved change never reports a failure. Unchanged window: the count read before
+    // the save, with the `since` it was counted from. Changed window: counting starts at the next whole hour after the
+    // save's own clock, so 0.
+    const unchanged =
+      endpoint.deliveryWindowSeconds === current.deliveryWindowSeconds && +endpoint.deliveryWindowChangedAt === +current.deliveryWindowChangedAt;
+    const late = unchanged ? counted : { count: 0, since: lateEventsSince(endpoint, savedAt) };
     return c.json(serialize(endpoint, late, endpoint._count.secrets));
   })
   .delete(`${base}/:id`, routeDoc('Delete webhook endpoint', { responses: { 204: { description: 'Deleted' }, 503: mutationBusy } }), async (c) => {
