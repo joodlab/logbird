@@ -105,13 +105,17 @@ function specifierOf(node) {
  * declarations), so the spelling cannot matter (`import{z}from"zod"`, comments between tokens, line breaks) and text in
  * a string or a comment is never read as an import. Covered: static imports and type imports, re-exports
  * (`export … from`, `export * from`), side-effect imports, dynamic `import()` (with or without a second argument), a
- * declaration's `import("x").T`, `require()`, `import x = require()` and `/// <reference types="x" />`. A file that
- * does not parse fails the check rather than being skipped.
+ * declaration's `import("x").T`, `require()` (also optional, `module.require()`, and a function made by
+ * `createRequire`), `import x = require()` and a `/// <reference types="x" />` directive where TypeScript reads one.
+ * A file is parsed as Node would load it: `.mjs` as a module, `.cjs` as a script, `.js` by the `type` of its package
+ * (`moduleType`). A file that does not parse fails the check rather than being skipped.
  */
-export function importsOf(text, path) {
-  const declaration = /\.d\.m?ts$/.test(path);
+export function importsOf(text, path, moduleType = 'commonjs') {
+  const declaration = /\.d\.[cm]?ts$/.test(path);
+  const asModule = declaration || path.endsWith('.mjs') || (path.endsWith('.js') && moduleType === 'module');
   const ast = parse(text, {
-    sourceType: path.endsWith('.mjs') || declaration ? 'module' : 'unambiguous',
+    sourceType: asModule ? 'module' : 'script',
+    allowReturnOutsideFunction: !asModule,
     plugins: declaration ? [['typescript', { dts: true }]] : [],
   });
   const found = new Set();
@@ -119,6 +123,44 @@ export function importsOf(text, path) {
     const specifier = specifierOf(node);
     if (specifier) found.add(specifier);
   };
+  // The names `createRequire` is bound to: itself, `import { createRequire as cr }`, `const { createRequire: cr } = …`.
+  const makers = new Set(['createRequire']);
+  const keyName = (node) => (node?.type === 'Identifier' ? node.name : node?.type === 'StringLiteral' ? node.value : undefined);
+  // `createRequire(…)`, `cr(…)` or `module.createRequire(…)`: its result is a require function.
+  const makesRequire = (node) =>
+    (node?.type === 'CallExpression' || node?.type === 'OptionalCallExpression') &&
+    (node.callee.type === 'Identifier' ? makers.has(node.callee.name) : keyName(node.callee.property) === 'createRequire');
+  // The names a require function is bound to: `require`, and every `const r = createRequire(…)` or `r = createRequire(…)`.
+  const requires = new Set(['require']);
+  const walk = (node, step) => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, step);
+      return;
+    }
+    if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
+    step(node);
+    for (const [key, child] of Object.entries(node)) if (!NOT_CHILDREN.has(key)) walk(child, step);
+  };
+  walk(ast.program, (node) => {
+    if (node.type === 'ImportSpecifier' && keyName(node.imported) === 'createRequire') makers.add(node.local.name);
+    if (node.type === 'ObjectPattern') {
+      for (const property of node.properties) {
+        if (property.type === 'ObjectProperty' && keyName(property.key) === 'createRequire' && property.value.type === 'Identifier')
+          makers.add(property.value.name);
+      }
+    }
+  });
+  walk(ast.program, (node) => {
+    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && makesRequire(node.init)) requires.add(node.id.name);
+    if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier' && makesRequire(node.right)) requires.add(node.left.name);
+  });
+  const loads = (callee) =>
+    callee.type === 'Import' ||
+    (callee.type === 'Identifier' && requires.has(callee.name)) ||
+    // `module.require('x')`, `globalThis.require?.('x')`
+    ((callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression') && !callee.computed && callee.property.name === 'require') ||
+    // `createRequire(import.meta.url)('x')`
+    makesRequire(callee);
   const visit = (node) => {
     if (Array.isArray(node)) {
       for (const item of node) visit(item);
@@ -133,7 +175,8 @@ export function importsOf(text, path) {
         add(node.source);
         break;
       case 'CallExpression':
-        if (node.callee.type === 'Import' || (node.callee.type === 'Identifier' && node.callee.name === 'require')) add(node.arguments[0]);
+      case 'OptionalCallExpression':
+        if (loads(node.callee)) add(node.arguments[0]);
         break;
       case 'TSImportType':
         add(node.argument);
@@ -146,9 +189,13 @@ export function importsOf(text, path) {
     for (const [key, child] of Object.entries(node)) if (!NOT_CHILDREN.has(key)) visit(child);
   };
   visit(ast.program);
+  // TypeScript reads a `/// <reference types>` directive only before the first statement, with its attributes in any
+  // order (`/// <reference preserve="true" types="x" />`).
+  const firstCode = Math.min(ast.program.body[0]?.start ?? Number.POSITIVE_INFINITY, ast.program.directives?.[0]?.start ?? Number.POSITIVE_INFINITY);
   for (const comment of ast.comments ?? []) {
-    const reference = /^\/\s*<reference\s+types\s*=\s*["']([^"']+)["']/.exec(comment.value);
-    if (comment.type === 'CommentLine' && reference) found.add(reference[1]);
+    if (comment.type !== 'CommentLine' || comment.start > firstCode) continue;
+    const reference = /^\/\s*<reference\b[^>]*?\stypes\s*=\s*(["'])(.+?)\1/.exec(comment.value);
+    if (reference) found.add(reference[2]);
   }
   // Relative and absolute paths are the package's own files.
   return [...found].filter((specifier) => !/^[./]/.test(specifier));
@@ -225,13 +272,22 @@ function main(folder, expected) {
       if (name.startsWith('@logbird/') && range !== manifest.version) fail(`depends on ${name}@${range}, not exactly ${manifest.version}`);
     }
 
-    // Imports in the shipped code and declarations.
+    // Imports in the shipped code and declarations. A `.js` file is a module or a script by the `type` of the nearest
+    // package.json above it in the tarball, as Node decides.
+    const moduleTypeOf = (path) => {
+      for (let dir = path; dir.includes('/'); ) {
+        dir = dir.slice(0, dir.lastIndexOf('/'));
+        const nested = files.get(`${dir}/package.json`);
+        if (nested) return JSON.parse(nested.toString('utf8')).type ?? 'commonjs';
+      }
+      return manifest.type ?? 'commonjs';
+    };
     const allowed = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.peerDependencies ?? {}), ...known.alsoImports]);
     for (const [path, body] of files) {
-      if (/\.(m?js|d\.m?ts)$/.test(path)) {
+      if (/\.([cm]?js|d\.[cm]?ts)$/.test(path)) {
         let specifiers;
         try {
-          specifiers = importsOf(body.toString('utf8'), path);
+          specifiers = importsOf(body.toString('utf8'), path, moduleTypeOf(path));
         } catch (error) {
           fail(`${path} cannot be parsed, so its imports cannot be checked: ${error.message}`);
           continue;

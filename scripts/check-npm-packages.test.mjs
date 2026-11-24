@@ -28,11 +28,22 @@ const IMPORTS = [
   ["const x = 'v4'; const z = await import(`@logbird/contracts/${x}`);", '@logbird/contracts'],
   ['const c = require(`@logbird/contracts`);', '@logbird/contracts'],
   ["const c = require('zod');", 'zod'],
+  ["const c = require?.('zod');", 'zod'],
+  ["import { createRequire } from 'node:module'; const load = createRequire(import.meta.url); load('zod');", ['node:module', 'zod']],
+  ["import { createRequire } from 'node:module'; let load; load = createRequire(import.meta.url); load?.('zod');", ['node:module', 'zod']],
+  ["import { createRequire } from 'node:module'; createRequire(import.meta.url)('zod');", ['node:module', 'zod']],
+  ["import module from 'node:module'; const load = module.createRequire(import.meta.url); load('zod');", ['node:module', 'zod']],
+  ["import { createRequire as cr } from 'node:module'; const load = cr(import.meta.url); load('zod');", ['node:module', 'zod']],
+  ["const { createRequire: cr } = require('node:module'); cr(__filename)('zod');", ['node:module', 'zod']],
+  ["module.require('zod');", 'zod'],
 ];
 const DECLARATION_IMPORTS = [
   ["import type {\n  ZodType,\n  infer as Infer\n} from 'zod';", 'zod'],
   ['export type Z = import("zod").ZodType;', 'zod'],
   ['/// <reference types="zod" />\nexport {};', 'zod'],
+  // TypeScript reads the directive's attributes in any order.
+  ['/// <reference preserve="true" types="zod" />\nexport {};', 'zod'],
+  ['// generated\n/// <reference types="zod" />\nexport {};', 'zod'],
   ['import z = require("zod");', 'zod'],
 ];
 // Text that mentions a package but imports nothing.
@@ -51,7 +62,7 @@ const NOT_IMPORTS = [
 ];
 
 test('every form of a JavaScript import is reported', () => {
-  for (const [code, specifier] of IMPORTS) assert.deepEqual(importsOf(code, 'dist/index.mjs'), [specifier], code);
+  for (const [code, specifier] of IMPORTS) assert.deepEqual(importsOf(code, 'dist/index.mjs'), [specifier].flat(), code);
 });
 
 test('every form of a declaration import is reported', () => {
@@ -60,6 +71,21 @@ test('every form of a declaration import is reported', () => {
 
 test('a string, a comment, a relative path or a computed specifier is not an import', () => {
   for (const code of NOT_IMPORTS) assert.deepEqual(importsOf(code, 'dist/index.mjs'), [], code);
+});
+
+test('a reference directive after the first statement is not read, as TypeScript does not read it', () => {
+  assert.deepEqual(importsOf('export {};\n/// <reference types="zod" />', 'dist/index.d.mts'), []);
+});
+
+test('each file is parsed as Node loads it: .mjs a module, .cjs a script, .js by its package type', () => {
+  // `with` is a syntax error in a module, so a module file holding it fails instead of being read as a script.
+  assert.throws(() => importsOf('with ({}) {}', 'dist/probe.js', 'module'));
+  assert.throws(() => importsOf('with ({}) {}', 'dist/probe.mjs'));
+  assert.deepEqual(importsOf("with ({}) {}\nrequire('zod');", 'dist/probe.js', 'commonjs'), ['zod']);
+  assert.deepEqual(importsOf("const z = require('zod');\nreturn;", 'dist/probe.cjs'), ['zod']);
+  assert.deepEqual(importsOf("import 'zod';", 'dist/probe.js', 'module'), ['zod']);
+  assert.throws(() => importsOf("import 'zod';", 'dist/probe.cjs'));
+  assert.deepEqual(importsOf("import type { Z } from 'zod';\nexport type { Z };", 'dist/index.d.cts'), ['zod']);
 });
 
 test('a file that does not parse throws, so the check cannot skip it', () => {
