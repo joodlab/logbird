@@ -301,6 +301,9 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
   const stopHeartbeat = heartbeatMaintenanceRun(run.id);
   const session = createSessionClickHouseClient(`logbird-retention-${run.id}`);
   let mutationsCreated = false;
+  // The repair obligation recorded with fence B (round-1 finding 6), and its heartbeat while the run holds it.
+  let repairId: string | undefined;
+  let stopRepairHeartbeat: (() => void) | undefined;
   try {
     // Between the fences, without a lock: the expensive recompute, from rows that cannot change any more.
     const keys = await retentionAffectedKeys(clickhouse, projectId, cutoff, fenceA);
@@ -331,14 +334,36 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       const fenceB = committed && committed > clockB ? committed : clockB;
       // Durable before any DELETE exists: the destructive fence, a new read generation, and `running` (which fences
       // ingest and rollup reads, both waiting on this lock anyway, for the few statements below).
-      await prisma.$transaction(async (db) => {
+      // The repair obligation commits with them: if this process dies after a DELETE exists but before the
+      // replacement rollup rows do, the record outlives it. Its lease expires like the run's (recoverAbandonedRetention
+      // marks it failed), a failed ingest_repair keeps every read fenced, and the next retention run rebuilds the
+      // rollups. It is removed in the same transaction that records the replacement rows as written.
+      repairId = await prisma.$transaction(async (db) => {
         await beginDestructiveMaintenance(projectId, db);
         await db.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
         await db.retentionRun.update({ where: { id: run.id }, data: { status: 'running', heartbeatAt: new Date(), deletedEvents } });
+        const repair = await db.retentionRun.create({
+          data: {
+            projectId,
+            kind: 'ingest_repair',
+            retentionDays: run.retentionDays,
+            cutoff,
+            status: 'running',
+            startedAt: fenceB,
+            heartbeatAt: new Date(),
+            error: 'Retention is replacing rollup rows; if it stops here, the next retention run rebuilds them.',
+          },
+        });
+        return repair.id;
       });
       mutationsCreated = true;
+      stopRepairHeartbeat = heartbeatMaintenanceRun(repairId);
       await applyRetention(session, projectId, cutoff, fenceA, fenceB, keys, hooks.afterDeletes);
-      await prisma.retentionRun.update({ where: { id: run.id }, data: { status: RETENTION_MATERIALIZING, heartbeatAt: new Date() } });
+      await prisma.$transaction([
+        prisma.retentionRun.delete({ where: { id: repairId } }),
+        prisma.retentionRun.update({ where: { id: run.id }, data: { status: RETENTION_MATERIALIZING, heartbeatAt: new Date() } }),
+      ]);
+      repairId = undefined;
       console.log(JSON.stringify({ level: 'info', event: 'retention.materializing', runId: run.id, projectId, deletedEvents }));
       return 'materializing' as const;
     });
@@ -353,27 +378,26 @@ export async function runBackgroundRetention(projectId: string, hooks: Backgroun
       );
     } else {
       // A DELETE may exist without the rollup rows that replace it: fence reads until retention rebuilds the rollups.
+      // The obligation recorded at fence B becomes a failed repair (it exists unless the replacement rows were written).
+      const repairFailed = {
+        status: 'failed',
+        finishedAt: new Date(),
+        error: 'Retention could not finish its rollup update; the next retention run rebuilds them.',
+      };
       await prisma.$transaction([
         prisma.retentionRun.update({
           where: { id: run.id },
           data: { status: 'failed', finishedAt: new Date(), error: 'ClickHouse retention failed; retry required.' },
         }),
-        prisma.retentionRun.create({
-          data: {
-            projectId,
-            kind: 'ingest_repair',
-            retentionDays: run.retentionDays,
-            cutoff,
-            status: 'failed',
-            finishedAt: new Date(),
-            error: 'Retention could not finish its rollup update; the next retention run rebuilds them.',
-          },
-        }),
+        repairId
+          ? prisma.retentionRun.update({ where: { id: repairId }, data: repairFailed })
+          : prisma.retentionRun.create({ data: { projectId, kind: 'ingest_repair', retentionDays: run.retentionDays, cutoff, ...repairFailed } }),
       ]);
     }
     throw error;
   } finally {
     stopHeartbeat();
+    stopRepairHeartbeat?.();
     await session.close().catch(() => undefined);
   }
 }
