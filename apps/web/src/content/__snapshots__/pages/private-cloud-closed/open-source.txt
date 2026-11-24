@@ -103,7 +103,7 @@ Don't open a public issue. Email security@example.test. Include the affected ver
 Security and data handling
 Versions
 Where the project is today.
-The supported line is 0.2, and the latest release is 0.2.1, with Docker images on GHCR for amd64 and arm64. The SDK and the integrations share the platform's version. They aren't on npm yet.
+The supported line is 0.2, and the latest release is 0.2.1, with Docker images on GHCR for amd64 and arm64. The SDK and the integrations share the platform's version. @logbird/sdk and @logbird/hono are on npm; the Vue, Nuxt and TanStack Start integrations aren't yet.
 Read the changelog
 Supported line
 0.2
@@ -112,7 +112,7 @@ Latest release
 Docker images
 GHCR
 npm packages
-Not yet
+@logbird/sdk, @logbird/hono
 Start with one event.
 The source opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.
 Join the waitlist

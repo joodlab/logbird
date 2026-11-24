@@ -159,7 +159,7 @@ function OpenSourcePage() {
       <Section id="versions" labelledBy="versions-title" tone="sunken">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
           <div className="flex flex-col gap-6">
-            <SectionHeader eyebrow={versions.eyebrow} id="versions-title" lead={versions.lead} title={versions.title} />
+            <SectionHeader eyebrow={versions.eyebrow} id="versions-title" lead={<Rich text={versions.lead} />} title={versions.title} />
             <div>
               <ButtonLink to="/changelog" variant="outline">
                 {versions.action}

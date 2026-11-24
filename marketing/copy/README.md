@@ -140,7 +140,7 @@ can be added when it lands, each with its source.
 
 ## Self-host CTA rule
 
-The repository is public and release images are on GHCR; the npm packages aren't published yet. While
+The repository is public and release images are on GHCR; `@logbird/sdk` and `@logbird/hono` are on npm. While
 `WEB_GITHUB_PUBLIC` is false the site must not offer a clone/compose quickstart or say "Self-host … today":
 
 - Secondary CTA: **"Self-host when the source opens"** → `/contact?interest=self-host` (the waitlist, self-host preselected).
@@ -189,8 +189,9 @@ These variants are **not** used anywhere on the site. The owner may approve them
   `WEB_CONTACT_EMAIL`, with no default. The engineer keeps the domain in one config value (`apps/web/src/env.ts`).
 - **Public repository (decided).** The repository is public; copy that depends on it follows `WEB_GITHUB_PUBLIC` (see the
   self-host CTA rule above).
-- **npm packages.** `@logbird/sdk` and the integrations are not on npm yet (registry returned 404 on 2026-11-07;
-  `docs/roadmap.md` P0-3). The public build shows the source install, labelled "From source (not on npm yet)".
+- **npm packages.** `@logbird/sdk` and `@logbird/hono` are on npm (phase 1); this copy went live only after the
+  maintainer verified both on npmjs.com. The Vue, Nuxt and TanStack Start packages aren't yet: never say all the
+  integrations are on npm. Install commands carry no version number (npm installs the one the registry lists).
 - **Docs links.** Pages link to repository docs (for example `docs/concepts.md`). Those links resolve once the
   repository is public or a docs site exists. Until then, the engineer can hide them or point them at `/developers`.
 - **Security contact.** `SECURITY.md` sends reports through GitHub private vulnerability reporting, with a fallback

@@ -26,17 +26,16 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
 - **body:** The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It
   batches events, retries failures and gives each event an id and a timestamp if you don't.
   <!-- source: packages/sdk/README.md -->
-- **install (labelled "From source (not on npm yet)", shown once `WEB_GITHUB_PUBLIC=true`):**
+- **install (labelled "Install from npm", shown in every build):**
 
   ```sh
-  git clone --branch v<latest release> <WEB_GITHUB_URL>.git ../logbird
-  pnpm -C ../logbird install
-  pnpm add @logbird/sdk@link:../logbird/packages/sdk
+  npm install @logbird/sdk
   ```
 
-  Small print: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite
-  or esbuild." While the repository is private: "The packages aren't on npm yet."
-  <!-- source: packages/sdk/README.md (source install); npm registry 404 for @logbird/sdk on 2026-11-22 -->
+  No version number: npm installs the one the registry lists. Small print: "`@logbird/sdk` and `@logbird/hono` are on
+  npm. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source." While the repository is private,
+  the sentence ends at "aren't yet." Never say all the integrations are on npm.
+  <!-- source: packages/sdk/README.md (install); npm phase 1 publishes @logbird/sdk and @logbird/hono only; both verified on npmjs.com by the maintainer before this copy merged -->
 - **code sample:**
 
   ```ts

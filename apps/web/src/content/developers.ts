@@ -1,10 +1,7 @@
-import { CLONE_URL, SELF_HOST_VERSION } from '../lib/selfhost';
 import { byRepo, SITE } from './site';
 
-/** The working install until the packages are on npm (packages/sdk/README.md): link the SDK from a checkout of the release. */
-const sourceInstall = `git clone ${SELF_HOST_VERSION ? `--branch v${SELF_HOST_VERSION} ` : ''}${CLONE_URL} ../logbird
-pnpm -C ../logbird install
-pnpm add @logbird/sdk@link:../logbird/packages/sdk`;
+/** The install from npm, with no version number (packages/sdk/README.md). Phase 1 publishes @logbird/sdk and @logbird/hono only. */
+const install = 'npm install @logbird/sdk';
 
 const quickstart = `import { Logbird } from '@logbird/sdk';
 
@@ -148,7 +145,7 @@ const limits: [string, string][] = [
  * and packages/integrations READMEs. Inline marks: `code` and **bold** (components/marketing/rich.tsx).
  */
 export const developers = {
-  samples: { sourceInstall, quickstart, http, smallest, worked, hono, workers, read },
+  samples: { install, quickstart, http, smallest, worked, hono, workers, read },
   hero: {
     eyebrow: 'Developers',
     title: 'Add an audit log in an afternoon. Keep it for years.',
@@ -183,11 +180,11 @@ export const developers = {
     ],
     limit:
       '**Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.',
-    sourceInstallTitle: 'From source (not on npm yet)',
+    installTitle: 'Install from npm',
     quickstartTitle: 'server.ts',
     npmNote: byRepo(SITE, {
-      public: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild.",
-      private: "The packages aren't on npm yet.",
+      public: "`@logbird/sdk` and `@logbird/hono` are on npm. The Vue, Nuxt and TanStack Start packages aren't yet: use them from source.",
+      private: "`@logbird/sdk` and `@logbird/hono` are on npm. The Vue, Nuxt and TanStack Start packages aren't yet.",
     }),
   },
   http: {

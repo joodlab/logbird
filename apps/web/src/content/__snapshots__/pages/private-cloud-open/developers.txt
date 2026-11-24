@@ -46,6 +46,8 @@ flush() and shutdown() can reject, for example when retryable delivery (network,
 Call shutdown() from your host's own exit hook. The SDK installs no process handlers.
 Keep ingest keys on the server. Never ship one in a browser bundle.
 Redaction: beforeSend: redact() deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with [redacted] before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.
+Install from npm
+pre| npm install @logbird/sdk
 server.ts
 pre| import { Logbird } from '@logbird/sdk';
 pre|
@@ -72,7 +74,7 @@ pre| // Permanent rejections don't reject flush(): they arrive through onError a
 pre| await client.flush().catch((error) => console.error('audit delivery pending', error));
 pre| // On exit: stop accepting events and drain the queue. Can reject like flush().
 pre| await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
-The packages aren't on npm yet.
+@logbird/sdk and @logbird/hono are on npm. The Vue, Nuxt and TanStack Start packages aren't yet.
 No SDK? Use HTTP.
 One request, one to a thousand events.
 POST /v1/events accepts one event, a JSON array, or { "events": [...] }. Authenticate with an ingest key. A 202 lists the stored event IDs in ids and rejected events in rejected.
@@ -296,6 +298,7 @@ Self-host when the source opens → /contact?interest=self-host
 
 controls:
 [shell: header — see _shell.txt]
+button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
 button type="button" aria-label="Copy code"
