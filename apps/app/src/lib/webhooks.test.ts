@@ -369,17 +369,25 @@ describe('delivery window (#152)', () => {
   });
   it('says how many events came too late, with the approved meaning, and nothing when there is no window', () => {
     expect(lateEventsSentence(ep(604_800, 0), 'Oct 25, 2026')).toBe(
-      'Since Oct 25, 2026, no event in this project has arrived more than 7 days after it happened.',
+      'Since Oct 25, 2026, Logbird has recorded no event in this project arriving more than 7 days after it happened.',
     );
     expect(lateEventsSentence(ep(604_800, 1204), 'Oct 25, 2026')).toBe(
-      'Since Oct 25, 2026, 1,204 events in this project arrived more than 7 days after they happened. The count covers the whole project, before this endpoint’s filter and scope.',
+      'Since Oct 25, 2026, Logbird has recorded 1,204 events in this project arriving more than 7 days after they happened. The count covers the whole project, before this endpoint’s filter and scope.',
     );
     // Never claims a delivery outcome: the count is project-wide, before filter and scope.
     expect(lateEventsSentence(ep(604_800, 1204), 'Oct 25, 2026')).not.toMatch(/did not send/);
     expect(lateEventsSentence(ep(3600, 1), 'Oct 25, 2026')).toMatch(
-      /^Since Oct 25, 2026, 1 event in this project arrived more than 1 hour after it happened/,
+      /^Since Oct 25, 2026, Logbird has recorded 1 event in this project arriving more than 1 hour after it happened/,
     );
     expect(lateEventsSentence(ep(null, 5), 'Oct 25, 2026')).toBeNull();
+    // Right after a window change the count starts at the next whole hour: say so instead of a zero.
+    const changed = { deliveryWindowSeconds: 604_800, lateEvents: { count: 0, since: '2026-11-24T03:00:00.000Z' } };
+    expect(lateEventsSentence(changed, 'Nov 24, 2026, 04:00 Berlin', new Date('2026-11-24T02:10:00.000Z'))).toBe(
+      'Logbird starts counting events that arrive more than 7 days late at Nov 24, 2026, 04:00 Berlin.',
+    );
+    expect(lateEventsSentence(changed, 'Nov 24, 2026, 04:00 Berlin', new Date('2026-11-24T03:00:00.000Z'))).toMatch(
+      /^Since .+, Logbird has recorded no event/,
+    );
     expect(windowLabel(null)).toBe('No limit');
     expect(deliveryWindowLine(null)).toBe('No limit on arrival time');
   });

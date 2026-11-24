@@ -179,7 +179,7 @@ it('settles a resend from a pending list longer than one page, reading every pag
 it('says how many events in the project came too late for the window', async () => {
   await open(null);
   expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(
-    /^Since .+, no event in this project has arrived more than 7 days after it happened\.$/,
+    /^Since .+, Logbird has recorded no event in this project arriving more than 7 days after it happened\.$/,
   );
 });
 
@@ -196,5 +196,5 @@ it('shows the late count only from a read made since the log opened, and says wh
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
   expect(document.querySelector('[data-testid="late-events-error"]')).toBeNull();
-  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Since .+, no event in this project/);
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Since .+, Logbird has recorded no event in this project/);
 });

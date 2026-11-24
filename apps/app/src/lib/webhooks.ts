@@ -148,15 +148,23 @@ export function deliveryWindowLine(seconds: number | null): string {
 /**
  * The delivery log's sentence about late events (#152): events in this project that arrived later than this endpoint's
  * window, before the endpoint's filter and scope are applied, counted since `since`. Null when there is no window.
+ * It says what Logbird recorded, not what happened: the count can fall short after a partial storage failure during
+ * ingest, so a zero is never put as "no event arrived late". Right after a window change, `since` is the next whole
+ * hour, still ahead: then it says when counting starts.
  */
-export function lateEventsSentence(e: Pick<WebhookEndpoint, 'deliveryWindowSeconds' | 'lateEvents'>, since: string): string | null {
+export function lateEventsSentence(
+  e: Pick<WebhookEndpoint, 'deliveryWindowSeconds' | 'lateEvents'>,
+  since: string,
+  now: Date = new Date(),
+): string | null {
   if (e.deliveryWindowSeconds === null) return null;
   const window = windowLabel(e.deliveryWindowSeconds);
   const { count } = e.lateEvents;
+  if (Date.parse(e.lateEvents.since) > now.getTime()) return `Logbird starts counting events that arrive more than ${window} late at ${since}.`;
   // Project-wide and before this endpoint's filter and scope (the approved meaning): it says how many arrived late, not
   // which of them this endpoint would otherwise have sent.
-  if (count === 0) return `Since ${since}, no event in this project has arrived more than ${window} after it happened.`;
-  return `Since ${since}, ${count.toLocaleString('en-US')} ${count === 1 ? 'event' : 'events'} in this project arrived more than ${window} after ${count === 1 ? 'it' : 'they'} happened. The count covers the whole project, before this endpoint’s filter and scope.`;
+  if (count === 0) return `Since ${since}, Logbird has recorded no event in this project arriving more than ${window} after it happened.`;
+  return `Since ${since}, Logbird has recorded ${count.toLocaleString('en-US')} ${count === 1 ? 'event' : 'events'} in this project arriving more than ${window} after ${count === 1 ? 'it' : 'they'} happened. The count covers the whole project, before this endpoint’s filter and scope.`;
 }
 
 /** "7 days", "36 hours", "1 day", or "No limit". */
