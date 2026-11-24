@@ -441,9 +441,6 @@ a {
 .panel-link:focus-within {
   border-color: color-mix(in oklab, var(--foreground) 35%, var(--border));
 }
-.callout {
-  border-inline-start: 3px solid var(--brand);
-}
 .table-panel tbody tr:last-child > * {
   border-bottom: 0;
 }

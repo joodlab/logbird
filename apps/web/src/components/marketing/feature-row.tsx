@@ -48,7 +48,7 @@ export function FeatureRow({
               ))}
             </ul>
           ) : null}
-          {limit ? <p className="border-s-2 ps-3 text-muted-foreground text-sm leading-relaxed">{limit}</p> : null}
+          {limit ? <p className="text-muted-foreground text-sm leading-relaxed">{limit}</p> : null}
         </div>
         <div className={cx('min-w-0', reverse && 'lg:order-1')}>{visual}</div>
       </div>
