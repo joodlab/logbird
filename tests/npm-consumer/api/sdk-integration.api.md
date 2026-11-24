@@ -36,8 +36,6 @@ export interface AuditCarrier {
 
 // @public (undocumented)
 export interface CaptureOptions<C> {
-    // Warning: (ae-forgotten-export) The symbol "Resolver" needs to be exported by the entry point integration.d.mts
-    //
     // (undocumented)
     actor?: Resolver<C, EventInput['actor']>;
     // Warning: (ae-forgotten-export) The symbol "Logbird" needs to be exported by the entry point integration.d.mts
@@ -98,6 +96,9 @@ export interface JobAuditOptions {
 
 // @public (undocumented)
 export function report(onError: CaptureOptions<unknown>['onError'], error: unknown): void;
+
+// @public
+export type Resolver<C, T> = (context: C) => T | Promise<T>;
 
 // @public (undocumented)
 export function shutdown(options: Pick<CaptureOptions<unknown>, 'client' | 'onError'>): Promise<void>;

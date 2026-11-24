@@ -203,6 +203,20 @@ for (const { name, reports } of project.report) {
     }
   }
 }
+// A type a report only names ("needs to be exported by the entry point") must be defined in one of this project's
+// reports, or a change to it would never show in a diff: export it, or stop naming a private alias.
+const reportTexts = [];
+for (const { reports } of project.report)
+  for (const reportName of Object.keys(reports)) reportTexts.push(readFileSync(join(temp, `${reportName}.api.md`), 'utf8'));
+const named = new Set(reportTexts.flatMap((text) => [...text.matchAll(/The symbol "([^"]+)" needs to be exported/g)].map((match) => match[1])));
+const undefinedTypes = [...named].filter(
+  (symbol) =>
+    !reportTexts.some((text) => new RegExp(String.raw`^(export )?(declare )?(interface|type|class|function|const|enum) ${symbol}\b`, 'm').test(text)),
+);
+if (undefinedTypes.length) {
+  console.error(`The public API names types that no report defines: ${undefinedTypes.join(', ')}. Export them from an entry point.`);
+  process.exit(1);
+}
 if (stale.length) {
   console.error(`The public API changed: ${stale.join(', ')} differ from tests/${project.dir}/api/.`);
   console.error(

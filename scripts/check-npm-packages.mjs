@@ -92,12 +92,14 @@ function importsOf(text) {
   const found = new Set();
   // A module specifier has no whitespace; prose in a message string ("from 'a' and/or 'b'") does, so it is skipped.
   const specifier = String.raw`["']([@#\w][^"'\s]*)["']`;
+  // Between tokens: whitespace and block or line comments (`import/* generated */"zod"`).
+  const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*`;
   const patterns = [
-    new RegExp(String.raw`\bfrom\s*${specifier}`, 'g'),
-    new RegExp(String.raw`\bimport\s*${specifier}`, 'g'),
+    new RegExp(String.raw`\bfrom${gap}${specifier}`, 'g'),
+    new RegExp(String.raw`\bimport${gap}${specifier}`, 'g'),
     // No closing parenthesis required: `import('x', { with: … })` has a second argument.
-    new RegExp(String.raw`\bimport\s*\(\s*${specifier}`, 'g'),
-    new RegExp(String.raw`\brequire\s*\(\s*${specifier}`, 'g'),
+    new RegExp(String.raw`\bimport${gap}\(${gap}${specifier}`, 'g'),
+    new RegExp(String.raw`\brequire${gap}\(${gap}${specifier}`, 'g'),
   ];
   for (const pattern of patterns) for (const match of text.matchAll(pattern)) found.add(match[1]);
   return [...found];
@@ -164,7 +166,10 @@ for (const tarball of tarballs) {
   if (!same(peers, known.peers)) fail(`peerDependencies are [${peers.sort()}], expected [${[...known.peers].sort()}]`);
   for (const field of ['optionalDependencies', 'bundleDependencies', 'bundledDependencies']) {
     const value = manifest[field];
-    if (value && (Array.isArray(value) ? value.length : Object.keys(value).length)) fail(`${field} must be empty`);
+    // `true` bundles every dependency (npm accepts both spellings); false, absent and an empty list or object are fine.
+    const nonEmpty =
+      value === true || (Array.isArray(value) ? value.length > 0 : value && typeof value === 'object' && Object.keys(value).length > 0);
+    if (nonEmpty) fail(`${field} must be empty`);
   }
   for (const [name, range] of Object.entries(manifest.dependencies ?? {})) {
     if (name.startsWith('@logbird/') && range !== manifest.version) fail(`depends on ${name}@${range}, not exactly ${manifest.version}`);

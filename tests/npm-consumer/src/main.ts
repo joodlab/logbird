@@ -157,6 +157,7 @@ try {
   await client.flush();
   const second = received.at(-1) as { targets: { id: string }[]; context: { requestId: string; operationId: string } } | undefined;
   expect(second?.targets[0]?.id === 'inv_10', 'the second request recorded');
+  expect(uuid.test(second?.context.requestId ?? '') && uuid.test(second?.context.operationId ?? ''), 'generated ids on the second request too');
   expect(
     second?.context.requestId !== viaHono?.context.requestId && second?.context.operationId !== viaHono?.context.operationId,
     'distinct ids for each request',

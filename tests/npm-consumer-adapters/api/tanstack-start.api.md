@@ -23,15 +23,13 @@ export function logbird(options: CaptureOptions<Request>): {
     shutdown: () => Promise<void>;
 };
 
-// Warning: (ae-forgotten-export) The symbol "Register" needs to be exported by the entry point index.d.mts
-//
 // @public
-export type LogbirdFunctionMiddleware = FunctionMiddlewareAfterServer<Register, readonly [LogbirdRequestMiddleware], undefined, {
+export type LogbirdFunctionMiddleware = FunctionMiddlewareAfterServer<{}, readonly [LogbirdRequestMiddleware], undefined, {
     audit: Audit;
 }, undefined, undefined, undefined>;
 
 // @public
-export type LogbirdRequestMiddleware = RequestMiddlewareAfterServer<Register, undefined, {
+export type LogbirdRequestMiddleware = RequestMiddlewareAfterServer<{}, undefined, {
     audit: Audit;
 }>;
 
