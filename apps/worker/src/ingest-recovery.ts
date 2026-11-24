@@ -177,7 +177,23 @@ export async function recoverProjectIngest(
     const proof = await proveAbandonedWrites(ch, eligible, expiredAt);
     if (!proof) return false;
     // A failed MV can commit any subset of destinations. Repair before confirming any page.
-    if (proof.claimed) await rebuildProjectReadModel(ch, projectId);
+    if (proof.claimed) {
+      await rebuildProjectReadModel(ch, projectId);
+      // The webhook lateness rollup is not rebuilt (it also counts arrivals whose raw rows have since expired), so a late
+      // arrival in this range may stay uncounted: lateEvents can read low, never high. Say so once per recovered range.
+      const late = preview.filter((r) => +r.receivedAt - +r.eventAt > 3_600_000);
+      if (late.length)
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            event: 'ingest.lateness_rollup_not_rebuilt',
+            projectId,
+            lateReceipts: late.length,
+            receivedFrom: new Date(Math.min(...late.map((r) => +r.receivedAt))).toISOString(),
+            receivedTo: new Date(Math.max(...late.map((r) => +r.receivedAt))).toISOString(),
+          }),
+        );
+    }
     await settleAbandonedReceipts(ch, projectId, eligible, readyCutoff);
     if (replay) {
       await replay();

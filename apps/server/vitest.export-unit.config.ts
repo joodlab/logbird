@@ -24,6 +24,7 @@ export default defineConfig({
       'src/slow-store.test.ts',
       'src/openapi-servers.test.ts',
       'src/webhook-window-migration.test.ts',
+      'src/webhook-late-events.test.ts',
     ],
     maxWorkers: 1,
     fileParallelism: false,

@@ -213,6 +213,7 @@ it('creates, lists, reads, patches and deletes configuration; exposes the encryp
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(0);
 });
 
+const nextHour = (time: string | Date) => new Date(Math.ceil(+new Date(time) / 3_600_000) * 3_600_000).toISOString();
 it('stores the delivery window: 7 days by default, whole hours or null, and stamps a change', async () => {
   const path = (id: string) => `${base()}/${id}`;
   const patch = async (id: string, body: unknown) => (await request(path(id), 'PATCH', body)).json();
@@ -221,7 +222,7 @@ it('stores the delivery window: 7 days by default, whole hours or null, and stam
   expect(DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS).toBe(604_800);
   expect(defaulted).toMatchObject({ deliveryWindowSeconds: DEFAULT_WEBHOOK_DELIVERY_WINDOW_SECONDS, lateEvents: { count: 0 } });
   expect((await stored(defaulted.id)).deliveryWindowChangedAt.toISOString()).toBe(defaulted.createdAt);
-  expect(defaulted.lateEvents.since).toBe(defaulted.createdAt);
+  expect(defaulted.lateEvents.since).toBe(nextHour(defaulted.createdAt));
   const hourly = (await create('owner', { url: receiver, deliveryWindowSeconds: 3600 })).endpoint;
   const unlimited = (await create('owner', { url: receiver, deliveryWindowSeconds: null })).endpoint;
   expect(hourly.deliveryWindowSeconds).toBe(3600);
@@ -242,11 +243,59 @@ it('stores the delivery window: 7 days by default, whole hours or null, and stam
   expect(widened).toMatchObject({ deliveryWindowSeconds: 86_400 });
   const changed = await stored(hourly.id);
   expect(+changed.deliveryWindowChangedAt).toBeGreaterThan(+before.deliveryWindowChangedAt);
-  expect(widened.lateEvents.since).toBe(changed.deliveryWindowChangedAt.toISOString());
+  expect(widened.lateEvents.since).toBe(nextHour(changed.deliveryWindowChangedAt));
   expect(await patch(hourly.id, { deliveryWindowSeconds: null })).toMatchObject({ deliveryWindowSeconds: null, lateEvents: { count: 0 } });
   // The window applies to events discovered after the save: the cursor does not move.
   expect((await stored(hourly.id)).cursorReceivedAt).toEqual(before.cursorReceivedAt);
   for (const id of [defaulted.id, hourly.id, unlimited.id]) expect((await request(path(id), 'DELETE')).status).toBe(204);
+});
+
+it("reports events that arrived later than each endpoint's window, from the hour of its last window change", async () => {
+  const receivedAt = new Date();
+  const event = normalizeEvent(
+    { id: 'qa-late-arrival', action: 'qa.webhook.late', occurredAt: new Date(+receivedAt - 2 * 3_600_000 - 60_000).toISOString() },
+    { projectId, receivedAt },
+  );
+  if (!event.ok) throw new Error(event.reason);
+  const hooks = [
+    (await create('owner', { url: receiver, deliveryWindowSeconds: 3600 })).endpoint,
+    (await create('owner', { url: receiver, deliveryWindowSeconds: 3 * 3600 })).endpoint,
+    (await create('owner', { url: receiver, deliveryWindowSeconds: null })).endpoint,
+  ];
+  // Counted from the later of the last window change and 30 days ago: move the change an hour back.
+  for (const { id } of hooks)
+    await prisma.webhookEndpoint.update({ where: { id }, data: { deliveryWindowChangedAt: new Date(+receivedAt - 3_600_000) } });
+  try {
+    await insertEvents(clickhouse, [event.row]);
+    // Two hours and a minute late: late for a 1 h window, on time for a 3 h window; a null window counts nothing.
+    const listed = listWebhooksResponseSchema.parse(await (await request(base())).json()).data;
+    const counts = hooks.map((hook) => listed.find(({ id }) => id === hook.id)?.lateEvents.count);
+    expect(counts).toEqual([1, 0, 0]);
+    expect(webhookEndpointSchema.parse(await (await request(`${base()}/${hooks[0]?.id}`)).json()).lateEvents.count).toBe(1);
+  } finally {
+    for (const { id } of hooks) await request(`${base()}/${id}`, 'DELETE');
+    await withProjectLock(projectId, () => purgeProjectEvents(projectId));
+  }
+});
+
+it('reports the same late count on create and on an immediate read, even after a late arrival earlier in that hour', async () => {
+  const receivedAt = new Date();
+  const event = normalizeEvent(
+    { id: 'qa-late-before-create', action: 'qa.webhook.late', occurredAt: new Date(+receivedAt - 5 * 3_600_000).toISOString() },
+    { projectId, receivedAt },
+  );
+  if (!event.ok) throw new Error(event.reason);
+  try {
+    await insertEvents(clickhouse, [event.row]);
+    const created = (await create('owner', { url: receiver, deliveryWindowSeconds: 3600 })).endpoint;
+    const read = webhookEndpointSchema.parse(await (await request(`${base()}/${created.id}`)).json());
+    // Counting starts at the next whole arrival hour, so the arrival a moment ago is outside both.
+    expect(created.lateEvents).toEqual({ count: 0, since: nextHour(created.createdAt) });
+    expect(read.lateEvents).toEqual(created.lateEvents);
+    await request(`${base()}/${created.id}`, 'DELETE');
+  } finally {
+    await withProjectLock(projectId, () => purgeProjectEvents(projectId));
+  }
 });
 
 it('returns a retryable 503 for PATCH, disable and rotation during a locked dispatch', async () => {

@@ -579,6 +579,12 @@ Save the dry-run output. Require no unfinished mutations and no existing
 from an interrupted attempt: inspect it first. Review every MV/destination and
 clear custom destinations before replay. The script clears all three rollups and
 optional `event_ids` (006 / PR #62), preventing its MV from being populated twice.
+It keeps the webhook lateness rollup (ClickHouse migration 011) as restored, because it
+counts arrivals whose raw events may already have expired: it snapshots the rollup's
+totals, detaches its view for the replay, re-attaches it, and stops if the totals
+changed. A run that stops part-way leaves the view detached until ClickHouse restarts;
+`pnpm ch:migrate`, which runs at every deploy, also re-attaches it (or recreates it if
+it is gone). The script needs migration 011 applied.
 
 ```sh
 docker compose --env-file .env.restore -p logbird-restore cp scripts/clickhouse-restore-normalize.sql clickhouse:/tmp/restore-normalize.sql
@@ -1140,9 +1146,16 @@ Endpoints that existed before this setting were given 7 days by its migration. A
 applies to events discovered after the save; the cursor doesn't move back, and deliveries
 already queued are still sent. Resends and test pings ignore the window. The endpoint's
 `lateEvents` reports how many events in the project arrived later than its window,
-counted before its filter and scope apply, since the later of its last window change
-and 30 days ago. The window also narrows each discovery scan to recent occurrence
-times, which keeps discovery cheap on large projects.
+counted before its filter and scope apply, in the whole arrival hours from `since`: the
+first hour boundary at or after the later of its last window change and 30 days ago.
+A new endpoint, or one whose window just changed, therefore reports 0 until the next
+hour begins. The count records arrivals, so it includes late events since removed by
+retention or deletion and can be higher than what a search finds. It is never higher
+than the true number of late arrivals, but it can be lower: after a partial storage
+failure during ingest (the worker then logs `ingest.lateness_rollup_not_rebuilt`), and
+for arrivals before the upgrade that added it, since it is not backfilled. The window
+also narrows each discovery scan to recent occurrence times, which keeps discovery
+cheap on large projects.
 
 Regexes run in ClickHouse with RE2, so webhook filters are checked against RE2's
 syntax rather than JavaScript's. Create and PATCH reject a pattern that RE2 rejects,
