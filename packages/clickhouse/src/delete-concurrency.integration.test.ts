@@ -22,6 +22,8 @@ it.runIf(process.env.CLICKHOUSE_URL)(
             {
               id: `round-${round}`,
               action: 'qa95.concurrent-delete',
+              // Two hours late, so the webhook lateness rollup has rows to delete too (it keeps only >1 h late arrivals).
+              occurredAt: new Date(+receivedAt - 2 * 3_600_000).toISOString(),
               actor: { id: 'qa95-actor', type: 'user' },
               tenant: { id: 'qa95-tenant' },
               executor: { id: 'qa95-worker', type: 'worker' },
