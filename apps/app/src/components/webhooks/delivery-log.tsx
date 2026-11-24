@@ -14,13 +14,18 @@ import { toast } from 'sonner';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { keys as queryKeys } from '@/lib/api/queries';
+import { displayTimeZone, formatDate, formatTime } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
+import { shortZoneLabel } from '@/lib/time-zone';
 import {
   ATTEMPT_STATUS_LABEL,
   attemptWhy,
   DELIVERY_STATUS_LABEL,
   displayUrl,
   isHoldRefusal,
+  LATE_EVENTS_APPROXIMATE,
+  lateEventsCounted,
+  lateEventsSentence,
   settledResends,
   webhookErrorCopy,
   webhookRetry,
@@ -32,6 +37,8 @@ import {
  * that a full scan every few seconds would cost more than the log reloading a little later.
  */
 const PENDING_WATCH_PAGES = 5;
+/** How long after the late count starts the open log reads the endpoint again, for a browser clock behind the server's. */
+const COUNT_START_MARGIN_MS = 2000;
 
 type Delivery = Awaited<ReturnType<typeof api.webhooks.deliveries>>['data'][number];
 const FILTERS = [
@@ -71,6 +78,39 @@ export function DeliveryLog({
     refetchInterval: (query) => (open && query.state.data?.pages.some((p) => p.data.some((d) => d.status === 'pending')) ? 3000 : false),
   });
   const rows = log.data?.pages.flatMap((p) => p.data) ?? [];
+  // The endpoint as it is now, read when the log opens: its window or late count may have changed in another session
+  // since the settings list was loaded. The sentence shows only once a read made since this opening has answered: the
+  // list's copy, or one from an earlier opening, could describe a window that no longer applies.
+  // Each read keeps the time it started: the server counted no later than that, so it is the time the read describes.
+  // (When the answer was stored is later, and can fall after counting started even though the count was taken before.)
+  // When the log last opened, set during render so an earlier opening's copy never shows for a frame.
+  const [opening, setOpening] = useState(() => ({ open, at: Date.now() }));
+  if (opening.open !== open) setOpening({ open, at: Date.now() });
+  // One read per opening (keyed by when it opened): a read still pending from an earlier opening is never reused for
+  // this one, where its start time would disqualify it and leave the section blank.
+  const fresh = useQuery({
+    queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'detail', opening.at],
+    queryFn: async ({ signal }) => {
+      const startedAt = Date.now();
+      return { endpoint: await api.webhooks.get(projectId, endpoint.id, signal), startedAt };
+    },
+    enabled: open,
+    staleTime: 0,
+  });
+  const read = fresh.data && !fresh.isError && fresh.data.startedAt >= opening.at ? fresh.data : null;
+  // Judged at the time of the read that produced it, never at render time: a read made before counting began says when
+  // it starts, even if the log is still open after that.
+  const lateSentence = read ? lateEventsSentence(read.endpoint, lateSince(read.endpoint.lateEvents.since), new Date(read.startedAt)) : null;
+  // Counting starts later (just after a window change): with the log still open then, read the endpoint again so the
+  // sentence becomes a count. The margin allows for the browser's clock being a little behind the server's.
+  const startsAt = read ? Date.parse(read.endpoint.lateEvents.since) : Number.NaN;
+  const readAt = read?.startedAt ?? Number.NaN;
+  const { refetch: refetchFresh } = fresh;
+  useEffect(() => {
+    if (!open || !(startsAt > readAt)) return;
+    const timer = setTimeout(() => refetchFresh(), Math.max(startsAt - Date.now(), 0) + COUNT_START_MARGIN_MS);
+    return () => clearTimeout(timer);
+  }, [open, startsAt, readAt, refetchFresh]);
   // Resends still on their way. A resent delivery keeps its id and place, so it can sit below the loaded pages, where
   // the log's own polling cannot see it: while any is outstanding, the endpoint's pending deliveries are read every few
   // seconds, and once a resent one is no longer pending the log reloads to show how it ended.
@@ -128,6 +168,27 @@ export function DeliveryLog({
               </SegmentedControlItem>
             ))}
           </SegmentedControl>
+          {/* How many events in the project came too late for this endpoint's window (#152). */}
+          {lateSentence ? (
+            <div className="flex flex-col gap-0.5">
+              <p className="text-muted-foreground text-sm" data-testid="late-events">
+                {lateSentence}
+              </p>
+              {/* The count is approximate by definition (#359): never shown as an exact figure. */}
+              {read && lateEventsCounted(read.endpoint, new Date(read.startedAt)) ? (
+                <p className="text-muted-foreground text-xs" data-testid="late-events-approximate">
+                  {LATE_EVENTS_APPROXIMATE}
+                </p>
+              ) : null}
+            </div>
+          ) : fresh.isError ? (
+            <p className="text-muted-foreground text-sm" data-testid="late-events-error">
+              Could not load how many events came too late for this endpoint's window.{' '}
+              <Button className="h-auto px-0" disabled={fresh.isFetching} onClick={() => fresh.refetch()} size="xs" variant="link">
+                Try again
+              </Button>
+            </p>
+          ) : null}
           {sendBlocked ? (
             <p className="text-muted-foreground text-sm" data-testid="send-blocked">
               {sendBlocked}
@@ -291,4 +352,10 @@ function DeliveryRow({
       </ol>
     </li>
   );
+}
+
+/** When the late count started, to the minute and with its zone: two window changes the same afternoon differ. */
+function lateSince(iso: string): string {
+  const zone = displayTimeZone();
+  return `${formatDate(iso)}, ${formatTime(iso)} ${zone === 'UTC' ? 'UTC' : shortZoneLabel(zone)}`;
 }

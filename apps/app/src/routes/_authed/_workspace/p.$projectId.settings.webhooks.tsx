@@ -21,6 +21,7 @@ import { SettingsSection } from '@/components/settings-section';
 import { TextField } from '@/components/text-field';
 import { Timestamp } from '@/components/timestamp';
 import { DeliveryLog } from '@/components/webhooks/delivery-log';
+import { DeliveryWindowField } from '@/components/webhooks/delivery-window-field';
 import { EndpointStates } from '@/components/webhooks/endpoint-states';
 import { api } from '@/lib/api/client';
 import { ApiRequestError } from '@/lib/api/errors';
@@ -31,6 +32,7 @@ import { useOrganization } from '@/lib/organization';
 import { useCan } from '@/lib/permissions';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import {
+  deliveryWindowLine,
   disabledCopy,
   displayUrl,
   endpointPatch,
@@ -49,6 +51,8 @@ import {
   validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
+  windowSeconds,
+  withKnownLateCount,
 } from '@/lib/webhooks';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/webhooks')({
@@ -172,7 +176,9 @@ function useEndpointMutations(projectId: string) {
    * in between sees the saved values (never the previous filter or its rejection).
    */
   const apply = (updated: WebhookEndpoint) => {
-    queryClient.setQueryData(webhooksQuery(projectId).queryKey, (list) => list?.map((e) => (e.id === updated.id ? updated : e)));
+    queryClient.setQueryData(webhooksQuery(projectId).queryKey, (list) =>
+      list?.map((e) => (e.id === updated.id ? withKnownLateCount(updated, e) : e)),
+    );
     refresh();
   };
   return { refresh, apply };
@@ -311,6 +317,8 @@ function EndpointCard({
           {' · '}
           {scopeSummary(endpoint.scope)}
         </dd>
+        <dt className="text-muted-foreground">Delivery window</dt>
+        <dd data-testid="delivery-window">{deliveryWindowLine(endpoint.deliveryWindowSeconds)}</dd>
         <dt className="text-muted-foreground">Created</dt>
         <dd>
           <Timestamp format="date" iso={endpoint.createdAt} />
@@ -378,6 +386,19 @@ function EndpointCard({
 /** A save from an earlier opening of the dialog: dropped, never retried. */
 class SaveAbandoned extends Error {}
 
+/** The dialog's fields in reading order, and each one's element id suffix, for focusing the first invalid one. */
+const FIELD_ORDER = ['url', 'description', 'filter', 'windowAmount', 'tenantId', 'targetType', 'targetId', 'masks'] as const;
+const FIELD_IDS: Record<(typeof FIELD_ORDER)[number], string> = {
+  url: 'url',
+  description: 'description',
+  filter: 'filter',
+  windowAmount: 'window-amount',
+  tenantId: 'tenant',
+  targetType: 'target-type',
+  targetId: 'target-id',
+  masks: 'masks',
+};
+
 function EndpointDialog({
   projectId,
   endpoint,
@@ -415,6 +436,14 @@ function EndpointDialog({
   const session = useRef(0);
   if (open !== wasOpen) session.current += 1;
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
+  // Shows errors from the form's own checks or the server's, and moves focus to the first field that needs attention,
+  // so a keyboard or screen-reader user lands on it and hears its error (each field's error is an alert).
+  function showErrors(next: FormErrors) {
+    setErrors(next);
+    if (next.tenantId || next.targetType || next.targetId || next.masks) setNarrowOpen(true);
+    const first = FIELD_ORDER.find((field) => next[field]);
+    if (first) requestAnimationFrame(() => document.getElementById(`${ids}-${FIELD_IDS[first]}`)?.focus());
+  }
   const onSecretRef = useRef(onSecret);
   onSecretRef.current = onSecret;
   const save = useMutation({
@@ -429,6 +458,8 @@ function EndpointDialog({
           description: f.description.trim() || null,
           filterQuery: f.filter.trim(),
           scope,
+          // Sent explicitly (7 days unless changed), so what the form showed is what the endpoint gets.
+          deliveryWindowSeconds: windowSeconds(f) ?? null,
         });
         // The endpoint exists now, so its secret is shown whatever happened to this form meanwhile (closed, reopened).
         // It goes straight to the one-time dialog and never enters the mutation's state.
@@ -450,23 +481,19 @@ function EndpointDialog({
     onError: (error, { f, at }) => {
       if (error instanceof SaveAbandoned || at !== session.current) return;
       const problem = queryProblem(error, 'query');
-      if (problem) setErrors({ filter: `${reasonTitle(problem.details, problem.code, problem.message)}: ${queryProblemText(problem, f.filter)}` });
-      else if (error instanceof ApiRequestError && error.code === 'webhook_url_not_allowed') setErrors({ url: webhookErrorCopy(error) });
+      if (problem) showErrors({ filter: `${reasonTitle(problem.details, problem.code, problem.message)}: ${queryProblemText(problem, f.filter)}` });
+      else if (error instanceof ApiRequestError && error.code === 'webhook_url_not_allowed') showErrors({ url: webhookErrorCopy(error) });
       else {
         // A body the contract rejects names its field: put the message there.
         const onField = fieldErrorsFromValidation(error);
-        setErrors(Object.keys(onField).length ? onField : { form: webhookErrorCopy(error) });
-        if (onField.tenantId || onField.targetType || onField.targetId || onField.masks) setNarrowOpen(true);
+        showErrors(Object.keys(onField).length ? onField : { form: webhookErrorCopy(error) });
       }
     },
   });
   const submit = () => {
     const next = validateWebhookForm(form);
-    setErrors(next);
-    if (Object.keys(next).length) {
-      if (next.tenantId || next.targetType || next.targetId || next.masks) setNarrowOpen(true);
-      return;
-    }
+    if (Object.keys(next).length) return showErrors(next);
+    setErrors({});
     save.mutate({ f: form, target: endpoint, at: session.current });
   };
   const retrying = save.isPending && save.failureCount > 0 && isWebhookBusy(save.failureReason);
@@ -479,7 +506,7 @@ function EndpointDialog({
           <DialogTitle>{endpoint ? 'Edit endpoint' : 'Add a webhook endpoint'}</DialogTitle>
           <DialogDescription>
             {endpoint
-              ? 'Changes apply to every delivery attempt that starts after you save, retries included.'
+              ? 'Changes apply to every delivery attempt that starts after you save, retries included. The delivery window is the exception: it applies when events are found, so deliveries already queued still go out.'
               : 'Logbird POSTs each new matching event to this URL, signed with a secret you see once.'}
           </DialogDescription>
         </DialogHeader>
@@ -523,6 +550,16 @@ function EndpointDialog({
             placeholder="action:booking.* outcome:failure"
             purpose="Which events to send. Empty sends every event."
             value={form.filter}
+          />
+          <DeliveryWindowField
+            error={errors.windowAmount}
+            id={`${ids}-window`}
+            onChange={(patch) => {
+              set(patch);
+              // A new choice answers the old error: "No limit" or a new amount must not keep "Choose from 1 to 3,650 days".
+              setErrors((e) => ({ ...e, windowAmount: undefined }));
+            }}
+            value={form}
           />
           <div className="flex min-w-0 flex-col gap-3">
             <button
@@ -577,7 +614,10 @@ function EndpointDialog({
               <fieldset
                 aria-describedby={`${ids}-masks-hint`}
                 aria-invalid={Boolean(errors.masks) || undefined}
-                className="flex min-w-0 flex-col gap-2"
+                className="flex min-w-0 flex-col gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                id={`${ids}-masks`}
+                // Focusable only from code: an invalid submit moves focus here so the hint below is read out.
+                tabIndex={-1}
               >
                 <legend className="font-medium text-sm">
                   Hide fields <span className="font-normal text-muted-foreground">· optional</span>
@@ -594,7 +634,11 @@ function EndpointDialog({
                     </span>
                   </label>
                 ))}
-                <p className={errors.masks ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'} id={`${ids}-masks-hint`}>
+                <p
+                  className={errors.masks ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'}
+                  id={`${ids}-masks-hint`}
+                  role={errors.masks ? 'alert' : undefined}
+                >
                   {errors.masks ??
                     'Each delivery, retry and test ping hides the chosen fields as described above (emptied, or a stable hash for actor email), and the filter cannot use them.'}
                 </p>

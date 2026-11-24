@@ -344,10 +344,15 @@ it('a masked reader cannot get an address-carrying actor name out of facets, fil
     const step = async (run: () => Promise<unknown>) => {
       try {
         await run();
+        return true;
       } catch (error) {
         failures.push(error);
+        return false;
       }
     };
+    // The organization and owner stay until the fixture's events are proven gone: removing them first would leave events
+    // with no project metadata, where retention never looks. A failure keeps them and is reported below.
+    let eventsGone = true;
     if (project) {
       const { id, slug } = project;
       await step(async () => {
@@ -356,7 +361,7 @@ it('a masked reader cannot get an address-carrying actor name out of facets, fil
       });
       // Whatever the delete did, the project's events must be gone before its owner is removed: purge them directly
       // otherwise, and fail if any remain (an organisation cascade would orphan them where retention never looks).
-      await step(async () => {
+      eventsGone = await step(async () => {
         const remaining = async () =>
           Number((await read<{ n: string }>(clickhouse, 'SELECT count() n FROM events WHERE project_id = {p:String}', { p: id }))[0]?.n);
         if ((await remaining()) > 0) await purgeProject(clickhouse, id);
@@ -365,10 +370,10 @@ it('a masked reader cannot get an address-carrying actor name out of facets, fil
     }
     if (organizationId) {
       await step(() => prisma.auditOutbox.deleteMany({ where: { stream: `ws:${organizationId}` } }));
-      await step(() => purgeProject(clickhouse, `ws:${organizationId}`));
-      await step(() => prisma.organization.delete({ where: { id: organizationId } }));
+      eventsGone = (await step(() => purgeProject(clickhouse, `ws:${organizationId}`))) && eventsGone;
+      if (eventsGone) await step(() => prisma.organization.delete({ where: { id: organizationId } }));
     }
-    await step(() => prisma.user.deleteMany({ where: { id: { in: users } } }));
+    if (eventsGone) await step(() => prisma.user.deleteMany({ where: { id: { in: users } } }));
     if (mailIds.length)
       await step(() =>
         fetch(`${MAILPIT}/api/v1/messages`, {
