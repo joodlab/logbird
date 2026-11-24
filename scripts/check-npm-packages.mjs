@@ -86,7 +86,9 @@ const builtins = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]
  * Bare specifiers imported by JavaScript or declaration text. Deliberately broad, so compact or minified code cannot
  * slip past: any `from "x"` (static imports and re-exports, with or without spaces: `import{z}from"zod"`,
  * `export*from"x"`), a side-effect `import "x"`, `import("x")` (dynamic, or a declaration's type import) and
- * `require("x")`. A string that merely looks like one of these is reported too, which fails safe.
+ * `require("x")`. Text inside a string is not read as an import (`"Migrated from 'zod'"`). A commented-out import
+ * (`// import … from 'zod'`) is reported, deliberately: stripping comments with a regex would also strip `//` inside a
+ * string such as a URL and could hide a real import after it on the same line, so the scan fails safe instead.
  */
 function importsOf(text) {
   const found = new Set();
@@ -95,7 +97,10 @@ function importsOf(text) {
   // Between tokens: whitespace and block or line comments (`import/* generated */"zod"`).
   const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*`;
   const patterns = [
-    new RegExp(String.raw`\bfrom${gap}${specifier}`, 'g'),
+    // `from` only as part of an import or export statement: from the keyword to `from`, no quote or semicolon, so a
+    // string such as "Migrated from 'zod'" is not read as one. Compact (`import{z}from"zod"`, `export*from"x"`),
+    // multi-line and `import type` forms still match.
+    new RegExp(String.raw`\b(?:import|export)\b[^;'"\x60]*?\bfrom${gap}${specifier}`, 'g'),
     new RegExp(String.raw`\bimport${gap}${specifier}`, 'g'),
     // No closing parenthesis required: `import('x', { with: … })` has a second argument.
     new RegExp(String.raw`\bimport${gap}\(${gap}${specifier}`, 'g'),
