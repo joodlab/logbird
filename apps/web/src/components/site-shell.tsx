@@ -3,23 +3,24 @@ import { Link, rootRouteId, useRouterState } from '@tanstack/react-router';
 import { MenuIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { shared } from '../content/shared';
-import { COPYRIGHT_HOLDER, GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { shell } from '../content/shell';
 import { ACCESS_CTA, SIGN_IN_URL } from '../lib/cloud';
 import { siteMap } from '../lib/site-map';
 import { ButtonLink } from './marketing/button-link';
 import { Wordmark } from './marketing/wordmark';
 
+// Words: content/shell.ts (the calls to action, the repository link and the tagline: content/shared.ts).
 const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
-  { value: 'light', label: 'Light theme', Icon: SunIcon },
-  { value: 'dark', label: 'Dark theme', Icon: MoonIcon },
-  { value: 'system', label: 'System theme', Icon: MonitorIcon },
+  { value: 'light', label: shell.header.themes.light, Icon: SunIcon },
+  { value: 'dark', label: shell.header.themes.dark, Icon: MoonIcon },
+  { value: 'system', label: shell.header.themes.system, Icon: MonitorIcon },
 ];
 
 function ThemeSwitch() {
   const { theme, setTheme } = useTheme();
   return (
     <fieldset className="inline-flex items-center gap-0.5 rounded-full border bg-background p-0.5">
-      <legend className="sr-only">Color theme</legend>
+      <legend className="sr-only">{shell.header.themeLegend}</legend>
       {themes.map(({ value, label, Icon }) => (
         <button
           aria-label={label}
@@ -55,7 +56,7 @@ function useNotFound() {
 
 function HomeLink() {
   return (
-    <Link aria-label="Logbird home" className="flex shrink-0 items-center rounded-md" to="/">
+    <Link aria-label={shell.header.homeLabel} className="flex shrink-0 items-center rounded-md" to="/">
       <Wordmark className="h-7 w-auto" />
     </Link>
   );
@@ -81,7 +82,7 @@ export function SiteHeader() {
       <div className="container-site flex h-full items-center gap-6">
         <HomeLink />
         {navPages.length ? (
-          <nav aria-label="Primary" className="hidden items-center lg:flex">
+          <nav aria-label={shell.header.primaryNavLabel} className="hidden items-center lg:flex">
             {navPages.map((page) => (
               <Link activeOptions={{ exact: page.path === '/' || notFound }} className="nav-link" key={page.path} to={page.path}>
                 {page.title}
@@ -98,19 +99,22 @@ export function SiteHeader() {
           <ThemeSwitch />
           {SIGN_IN_URL ? (
             <a className="nav-link" href={SIGN_IN_URL}>
-              Sign in
+              {shell.header.signIn}
             </a>
           ) : null}
           <ButtonLink to="/contact">{ACCESS_CTA}</ButtonLink>
         </div>
         <details className="mobile-menu ms-auto lg:hidden" ref={menu}>
-          <summary aria-label="Menu" className="inline-flex size-11 items-center justify-center rounded-md border bg-background text-foreground">
+          <summary
+            aria-label={shell.header.menuLabel}
+            className="inline-flex size-11 items-center justify-center rounded-md border bg-background text-foreground"
+          >
             <MenuIcon aria-hidden="true" className="icon-open size-5" />
             <XIcon aria-hidden="true" className="icon-close size-5" />
           </summary>
           <div className="mobile-menu-panel">
             {navPages.length ? (
-              <nav aria-label="Mobile" className="container-site flex flex-col py-3">
+              <nav aria-label={shell.header.mobileNavLabel} className="container-site flex flex-col py-3">
                 {navPages.map((page) => (
                   <Link
                     activeOptions={{ exact: notFound }}
@@ -135,11 +139,11 @@ export function SiteHeader() {
               </ButtonLink>
               {SIGN_IN_URL ? (
                 <ButtonLink className="w-full" href={SIGN_IN_URL} size="lg" variant="outline">
-                  Sign in
+                  {shell.header.signIn}
                 </ButtonLink>
               ) : null}
               <div className="flex items-center justify-between pt-1">
-                <span className="text-muted-foreground text-sm">Theme</span>
+                <span className="text-muted-foreground text-sm">{shell.header.themeLabel}</span>
                 <ThemeSwitch />
               </div>
             </div>
@@ -151,11 +155,11 @@ export function SiteHeader() {
 }
 
 const footerGroups: { label: string; sections: string[] }[] = [
-  { label: 'Product', sections: ['product'] },
-  { label: 'Developers', sections: ['developers'] },
-  { label: 'Compare', sections: ['compare'] },
-  { label: 'Resources', sections: ['resources'] },
-  { label: 'Company', sections: ['company', 'legal'] },
+  { label: shell.footer.groups.product, sections: ['product'] },
+  { label: shell.footer.groups.developers, sections: ['developers'] },
+  { label: shell.footer.groups.compare, sections: ['compare'] },
+  { label: shell.footer.groups.resources, sections: ['resources'] },
+  { label: shell.footer.groups.company, sections: ['company', 'legal'] },
 ];
 
 export function SiteFooter() {
@@ -166,10 +170,10 @@ export function SiteFooter() {
         <div className="flex flex-col gap-4">
           <p className="self-start">
             <Wordmark className="h-9 w-auto" />
-            <span className="sr-only">Logbird</span>
+            <span className="sr-only">{shell.footer.brandName}</span>
           </p>
           <p className="max-w-xs text-muted-foreground text-sm leading-relaxed">
-            Retrace every step.
+            {shell.footer.brandLine}
             <br />
             {shared.footerTagline}
           </p>
@@ -202,14 +206,18 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="container-site flex flex-col gap-2 border-t py-6 text-muted-foreground text-sm sm:flex-row sm:items-center sm:justify-between">
-        <p>© 2026 {COPYRIGHT_HOLDER}. Logbird is MIT-licensed.</p>
         <p>
-          {GITHUB_PUBLIC && GITHUB_URL ? (
-            <a className="hover:text-foreground" href={GITHUB_URL}>
-              Source on GitHub
+          {shell.footer.copyright.before}
+          {shell.footer.copyright.holder}
+          {shell.footer.copyright.after}
+        </p>
+        <p>
+          {'href' in shell.footer.source ? (
+            <a className="hover:text-foreground" href={shell.footer.source.href}>
+              {shell.footer.source.label}
             </a>
           ) : (
-            'Source on GitHub — coming soon.'
+            shell.footer.source.pending
           )}
         </p>
       </div>
