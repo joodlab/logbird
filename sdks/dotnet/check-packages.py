@@ -11,13 +11,21 @@ It requires, reading each package's manifest as XML:
   namespace, naming by its exact relative path (case included; no drive, root, empty, "." or ".." segment) a file the
   package carries, whose bytes are those of the repository's logbird-icon.png; that file itself must be a complete,
   valid 128x128 PNG (every chunk's CRC, IHDR first, IEND last, image data that inflates to exactly 128 rows, each row
-  starting with a valid filter type 0 to 4).
+  starting with a valid filter type 0 to 4);
+- the build paths mapped as a CI build maps them (issue #322): each package has its .snupkg next to it; every DLL a
+  package carries names its PDB under "/_/" (the CodeView entry of its PE debug directory); and the symbol package has
+  one PDB per DLL, whose Source Link maps only "/_/" paths, each to https://raw.githubusercontent.com/joodlab/logbird/
+  at a commit. A package packed without ContinuousIntegrationBuild (any build outside CI, unless it passes
+  -p:ContinuousIntegrationBuild=true to build and pack) embeds the machine's own paths and fails here. This checks the
+  path mapping, not where the packages were built: publication evidence is the CI artifact.
 
 NuGet package ids are case-insensitive, so ids are compared case-insensitively everywhere.
 
 Logbird.AspNetCore calls Logbird's internal members, so a version range could bind to a Logbird build without them.
 """
 
+import json
+import re
 import struct
 import sys
 import xml.etree.ElementTree as ElementTree
@@ -123,6 +131,87 @@ def check_icon(package, root, metadata):
     return icon
 
 
+SOURCE_LINK = re.compile(r"https://raw\.githubusercontent\.com/joodlab/logbird/[0-9a-f]{40}/\*")
+CI_BUILD = "packed outside CI? ContinuousIntegrationBuild must be on"
+
+
+def codeview_path(data, label):
+    """The PDB path in a PE file's CodeView (RSDS) debug entry, read through its debug directory."""
+    if data[:2] != b"MZ":
+        raise SystemExit(f"{label}: not a PE file")
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    if data[pe:pe + 4] != b"PE\x00\x00":
+        raise SystemExit(f"{label}: no PE signature")
+    sections, optional_size = struct.unpack_from("<H12xH", data, pe + 6)
+    optional = pe + 24
+    magic = struct.unpack_from("<H", data, optional)[0]
+    if magic not in (0x10B, 0x20B):
+        raise SystemExit(f"{label}: unknown optional header magic {magic:#x}")
+    # The data directories follow the fixed part of the optional header (96 bytes for PE32, 112 for PE32+); the debug
+    # directory is entry 6.
+    directories = optional + (96 if magic == 0x10B else 112)
+    debug_rva, debug_size = struct.unpack_from("<II", data, directories + 6 * 8)
+    table = optional + optional_size
+    for index in range(sections):
+        virtual_size, virtual_address, _, raw_pointer = struct.unpack_from("<IIII", data, table + index * 40 + 8)
+        if virtual_address <= debug_rva < virtual_address + max(virtual_size, 1):
+            start = debug_rva - virtual_address + raw_pointer
+            break
+    else:
+        raise SystemExit(f"{label}: the debug directory is in no section")
+    paths = []
+    for entry in range(start, start + debug_size, 28):
+        kind, _, pointer = struct.unpack_from("<12xII4xI", data, entry)
+        if kind == 2 and data[pointer:pointer + 4] == b"RSDS":
+            end = data.index(b"\x00", pointer + 24)
+            paths.append(data[pointer + 24:end].decode("utf-8"))
+    if len(paths) != 1:
+        raise SystemExit(f"{label}: expected one CodeView debug entry, found {len(paths)}")
+    return paths[0]
+
+
+def source_link(data, label):
+    """The Source Link document map a portable PDB carries."""
+    at = data.find(b'{"documents":')
+    if at < 0:
+        raise SystemExit(f"{label}: no Source Link in the PDB")
+    try:
+        value, _ = json.JSONDecoder().raw_decode(data[at:at + 65536].decode("utf-8", "replace"))
+    except ValueError as error:
+        raise SystemExit(f"{label}: the Source Link JSON does not parse ({error})") from error
+    documents = value.get("documents") if isinstance(value, dict) else None
+    if not isinstance(documents, dict) or not documents:
+        raise SystemExit(f"{label}: Source Link has no documents")
+    return documents
+
+
+def check_paths(package):
+    """Every DLL names its PDB under /_/, and each PDB's Source Link maps only /_/ paths to this repository at a commit."""
+    with zipfile.ZipFile(package) as archive:
+        dlls = sorted(name for name in archive.namelist() if name.startswith("lib/") and name.lower().endswith(".dll"))
+        if not dlls:
+            raise SystemExit(f"{package.name}: carries no lib/ DLL")
+        for name in dlls:
+            path = codeview_path(archive.read(name), f"{package.name} {name}")
+            if not path.startswith("/_/"):
+                raise SystemExit(f"{package.name} {name}: names its PDB at {path!r}, not under the CI path map /_/ ({CI_BUILD})")
+    symbols = package.with_suffix(".snupkg")
+    if not symbols.exists():
+        raise SystemExit(f"{package.name}: its symbol package {symbols.name} is missing")
+    with zipfile.ZipFile(symbols) as archive:
+        pdbs = sorted(name for name in archive.namelist() if name.lower().endswith(".pdb"))
+        expected = sorted(name[:-4] + ".pdb" for name in dlls)
+        if pdbs != expected:
+            raise SystemExit(f"{symbols.name}: carries PDBs {pdbs}, expected one for each DLL: {expected}")
+        for name in pdbs:
+            for mapped, target in source_link(archive.read(name), f"{symbols.name} {name}").items():
+                if not mapped.startswith("/_/"):
+                    raise SystemExit(f"{symbols.name} {name}: Source Link maps {mapped!r}, not a /_/ path ({CI_BUILD})")
+                if not isinstance(target, str) or not SOURCE_LINK.fullmatch(target):
+                    raise SystemExit(f"{symbols.name} {name}: Source Link points at {target!r}, not this repository at a commit")
+    return len(dlls)
+
+
 def text(metadata, name, package):
     found = children(metadata, name)
     value = (found[0].text or "").strip() if len(found) == 1 else ""
@@ -188,7 +277,9 @@ def main():
         if exclude != EXCLUDE:
             raise SystemExit(f"{aspnet.name}: the {framework} Logbird dependency excludes {sorted(exclude)}, expected {sorted(EXCLUDE)}")
 
-    print(f"Logbird {logbird_version} and Logbird.AspNetCore {aspnet_version}: Logbird.AspNetCore depends on exactly Logbird {pinned} for {', '.join(frameworks)}; both carry their 128x128 PNG icon ({', '.join(icons)})")
+    dlls = sum(check_paths(package) for package, *_ in (packages["logbird"][0], packages["logbird.aspnetcore"][0]))
+
+    print(f"Logbird {logbird_version} and Logbird.AspNetCore {aspnet_version}: Logbird.AspNetCore depends on exactly Logbird {pinned} for {', '.join(frameworks)}; both carry their 128x128 PNG icon ({', '.join(icons)}); all {dlls} DLLs and their PDBs carry CI-mapped /_/ paths")
 
 
 if __name__ == "__main__":
