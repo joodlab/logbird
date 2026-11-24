@@ -53,6 +53,8 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
 
   client.track({
     action: 'booking.cancelled',
+    outcome: 'success',
+    description: 'Lina cancelled booking #1042',
     actor: { type: 'user', id: 'usr_42', name: 'Lina Haddad' },
     tenant: { id: 'biz_7', name: 'Azure Hotels' },
     targets: [{ type: 'booking', id: 'bk_1042', name: 'Booking #1042' }],
@@ -112,10 +114,12 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   operations each get their own page in the console. The conformance score is the
   share of nine recommended checks an event passes.
   <!-- source: docs/concepts.md; docs/SPEC.md §3 -->
-- **table:**
+- **table:** <!-- outcome and description: SPEC §3 (envelope; the nine conformance checks include both) and docs/concepts.md's worked example (same description values); Recent problems = RECENT_PROBLEM_OUTCOMES in packages/contracts/src/api.ts; the drawer title is the description (apps/app/src/components/explorer/event-sheet.tsx); free-text search covers description (SPEC § Query language). The console's first-event snippets send outcome and description too. -->
 
   | Field | Answers | Example |
   | --- | --- | --- |
+  | `outcome` | Whether it worked: success, failure, denied, partial or unknown. Failed and denied events show under Recent problems on the overview. | `"success"` |
+  | `description` | What happened, in words a person reads. It's the event's title in the console, and free-text search covers it. | `"Lina cancelled booking #1042"` |
   | `actor` | Who caused it | `{ type: "user", id: "usr_42", name: "Lina Haddad" }` |
   | `executor` | What did the work, and on which try | `{ type: "worker", id: "refunds-worker", jobId: "job_981", attempt: 2 }` |
   | `impersonator` | Which staff member acted for the actor | `{ id: "usr_1", name: "Support agent" }` |
@@ -141,6 +145,8 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
     {
       "id": "evt_cancel_bk_1042",
       "action": "booking.cancelled",
+      "outcome": "success",
+      "description": "Lina cancelled booking #1042",
       "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
       "executor": { "type": "api", "id": "api-server" },
       "tenant": { "id": "biz_7", "name": "Azure Hotels" },
@@ -150,6 +156,8 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
     },
     {
       "action": "payment.refunded",
+      "outcome": "success",
+      "description": "Refunded €240.00 for booking #1042",
       "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
       "executor": { "type": "worker", "id": "refunds-worker", "jobId": "job_981", "attempt": 2 },
       "tenant": { "id": "biz_7", "name": "Azure Hotels" },
