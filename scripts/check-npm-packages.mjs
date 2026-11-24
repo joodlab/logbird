@@ -100,6 +100,9 @@ function importsOf(text) {
     // No closing parenthesis required: `import('x', { with: … })` has a second argument.
     new RegExp(String.raw`\bimport${gap}\(${gap}${specifier}`, 'g'),
     new RegExp(String.raw`\brequire${gap}\(${gap}${specifier}`, 'g'),
+    // A template literal without substitutions is a static specifier too: import(`zod`). Only inside these calls, so a
+    // template string of prose elsewhere is not read as one.
+    new RegExp(String.raw`\b(?:import|require)${gap}\(${gap}\x60([@#\w][^\x60\s$]*)\x60`, 'g'),
   ];
   for (const pattern of patterns) for (const match of text.matchAll(pattern)) found.add(match[1]);
   return [...found];
