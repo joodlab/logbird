@@ -384,7 +384,7 @@ function EndpointCard({
 class SaveAbandoned extends Error {}
 
 /** The dialog's fields in reading order, and each one's element id suffix, for focusing the first invalid one. */
-const FIELD_ORDER = ['url', 'description', 'filter', 'windowAmount', 'tenantId', 'targetType', 'targetId'] as const;
+const FIELD_ORDER = ['url', 'description', 'filter', 'windowAmount', 'tenantId', 'targetType', 'targetId', 'masks'] as const;
 const FIELD_IDS: Record<(typeof FIELD_ORDER)[number], string> = {
   url: 'url',
   description: 'description',
@@ -393,6 +393,7 @@ const FIELD_IDS: Record<(typeof FIELD_ORDER)[number], string> = {
   tenantId: 'tenant',
   targetType: 'target-type',
   targetId: 'target-id',
+  masks: 'masks',
 };
 
 function EndpointDialog({
@@ -432,6 +433,14 @@ function EndpointDialog({
   const session = useRef(0);
   if (open !== wasOpen) session.current += 1;
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
+  // Shows errors from the form's own checks or the server's, and moves focus to the first field that needs attention,
+  // so a keyboard or screen-reader user lands on it and hears its error (each field's error is an alert).
+  function showErrors(next: FormErrors) {
+    setErrors(next);
+    if (next.tenantId || next.targetType || next.targetId || next.masks) setNarrowOpen(true);
+    const first = FIELD_ORDER.find((field) => next[field]);
+    if (first) requestAnimationFrame(() => document.getElementById(`${ids}-${FIELD_IDS[first]}`)?.focus());
+  }
   const onSecretRef = useRef(onSecret);
   onSecretRef.current = onSecret;
   const save = useMutation({
@@ -469,26 +478,19 @@ function EndpointDialog({
     onError: (error, { f, at }) => {
       if (error instanceof SaveAbandoned || at !== session.current) return;
       const problem = queryProblem(error, 'query');
-      if (problem) setErrors({ filter: `${reasonTitle(problem.details, problem.code, problem.message)}: ${queryProblemText(problem, f.filter)}` });
-      else if (error instanceof ApiRequestError && error.code === 'webhook_url_not_allowed') setErrors({ url: webhookErrorCopy(error) });
+      if (problem) showErrors({ filter: `${reasonTitle(problem.details, problem.code, problem.message)}: ${queryProblemText(problem, f.filter)}` });
+      else if (error instanceof ApiRequestError && error.code === 'webhook_url_not_allowed') showErrors({ url: webhookErrorCopy(error) });
       else {
         // A body the contract rejects names its field: put the message there.
         const onField = fieldErrorsFromValidation(error);
-        setErrors(Object.keys(onField).length ? onField : { form: webhookErrorCopy(error) });
-        if (onField.tenantId || onField.targetType || onField.targetId || onField.masks) setNarrowOpen(true);
+        showErrors(Object.keys(onField).length ? onField : { form: webhookErrorCopy(error) });
       }
     },
   });
   const submit = () => {
     const next = validateWebhookForm(form);
-    setErrors(next);
-    if (Object.keys(next).length) {
-      if (next.tenantId || next.targetType || next.targetId || next.masks) setNarrowOpen(true);
-      // Move focus to the first field that needs attention, so a keyboard or screen-reader user hears its error.
-      const first = FIELD_ORDER.find((field) => next[field]);
-      if (first) requestAnimationFrame(() => document.getElementById(`${ids}-${FIELD_IDS[first]}`)?.focus());
-      return;
-    }
+    if (Object.keys(next).length) return showErrors(next);
+    setErrors({});
     save.mutate({ f: form, target: endpoint, at: session.current });
   };
   const retrying = save.isPending && save.failureCount > 0 && isWebhookBusy(save.failureReason);
@@ -609,7 +611,10 @@ function EndpointDialog({
               <fieldset
                 aria-describedby={`${ids}-masks-hint`}
                 aria-invalid={Boolean(errors.masks) || undefined}
-                className="flex min-w-0 flex-col gap-2"
+                className="flex min-w-0 flex-col gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                id={`${ids}-masks`}
+                // Focusable only from code: an invalid submit moves focus here so the hint below is read out.
+                tabIndex={-1}
               >
                 <legend className="font-medium text-sm">
                   Hide fields <span className="font-normal text-muted-foreground">· optional</span>
@@ -626,7 +631,11 @@ function EndpointDialog({
                     </span>
                   </label>
                 ))}
-                <p className={errors.masks ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'} id={`${ids}-masks-hint`}>
+                <p
+                  className={errors.masks ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'}
+                  id={`${ids}-masks-hint`}
+                  role={errors.masks ? 'alert' : undefined}
+                >
                   {errors.masks ??
                     'Each delivery, retry and test ping hides the chosen fields as described above (emptied, or a stable hash for actor email), and the filter cannot use them.'}
                 </p>

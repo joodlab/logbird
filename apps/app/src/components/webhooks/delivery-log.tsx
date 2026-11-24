@@ -75,15 +75,19 @@ export function DeliveryLog({
   });
   const rows = log.data?.pages.flatMap((p) => p.data) ?? [];
   // The endpoint as it is now, read when the log opens: its window or late count may have changed in another session
-  // since the settings list was loaded. Until it answers, the list's copy stands in.
+  // since the settings list was loaded. The sentence shows only once a read made since this opening has answered: the
+  // list's copy, or one from an earlier opening, could describe a window that no longer applies.
   const fresh = useQuery({
     queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'detail'],
     queryFn: ({ signal }) => api.webhooks.get(projectId, endpoint.id, signal),
     enabled: open,
     staleTime: 0,
   });
-  const now = fresh.data ?? endpoint;
-  const lateSentence = lateEventsSentence(now, lateSince(now.lateEvents.since));
+  // When the log last opened, set during render so an earlier opening's copy never shows for a frame.
+  const [opening, setOpening] = useState(() => ({ open, at: Date.now() }));
+  if (opening.open !== open) setOpening({ open, at: Date.now() });
+  const current = fresh.data && !fresh.isError && fresh.dataUpdatedAt >= opening.at ? fresh.data : null;
+  const lateSentence = current ? lateEventsSentence(current, lateSince(current.lateEvents.since)) : null;
   // Resends still on their way. A resent delivery keeps its id and place, so it can sit below the loaded pages, where
   // the log's own polling cannot see it: while any is outstanding, the endpoint's pending deliveries are read every few
   // seconds, and once a resent one is no longer pending the log reloads to show how it ended.
@@ -145,6 +149,13 @@ export function DeliveryLog({
           {lateSentence ? (
             <p className="text-muted-foreground text-sm" data-testid="late-events">
               {lateSentence}
+            </p>
+          ) : fresh.isError ? (
+            <p className="text-muted-foreground text-sm" data-testid="late-events-error">
+              Could not load how many events came too late for this endpoint's window.{' '}
+              <Button className="h-auto px-0" disabled={fresh.isFetching} onClick={() => fresh.refetch()} size="xs" variant="link">
+                Try again
+              </Button>
             </p>
           ) : null}
           {sendBlocked ? (

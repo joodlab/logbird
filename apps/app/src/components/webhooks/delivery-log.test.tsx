@@ -5,7 +5,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 
-const { resend, failedPing, deliveries, pendingIds } = vi.hoisted(() => ({
+const { resend, failedPing, deliveries, pendingIds, get } = vi.hoisted(() => ({
+  // The endpoint read fresh when the log opens.
+  get: vi.fn(async (): Promise<unknown> => null),
   // What the pending list holds (the resend watcher reads it); everything else answers with the one failed ping.
   pendingIds: { current: [] as string[] },
   deliveries: vi.fn(async (_p: string, _e: string, _query: { status?: string }) => ({ data: [], nextCursor: null }) as unknown),
@@ -25,7 +27,7 @@ const { resend, failedPing, deliveries, pendingIds } = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/api/client', () => ({
-  api: { webhooks: { deliveries, resend, get: async () => endpoint } },
+  api: { webhooks: { deliveries, resend, get } },
 }));
 
 import { DeliveryLog } from './delivery-log';
@@ -50,6 +52,7 @@ const endpoint = {
   deliveryWindowSeconds: 604_800,
   lateEvents: { count: 0, since: '2026-10-25T00:00:00.000Z' },
 } as WebhookEndpoint;
+get.mockImplementation(async () => endpoint);
 
 async function open(sendBlocked: string | null) {
   const host = document.createElement('div');
@@ -178,4 +181,20 @@ it('says how many events in the project came too late for the window', async () 
   expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(
     /^Since .+, no event in this project has arrived more than 7 days after it happened\.$/,
   );
+});
+
+it('shows the late count only from a read made since the log opened, and says when that read failed', async () => {
+  // The list's copy has a 7-day window, but the fresh read fails: its sentence must not stand in as current.
+  get.mockRejectedValueOnce(new Error('offline'));
+  await open(null);
+  expect(document.querySelector('[data-testid="late-events"]')).toBeNull();
+  const failed = document.querySelector('[data-testid="late-events-error"]');
+  expect(failed?.textContent).toContain('Could not load how many events came too late');
+  const retry = [...(failed?.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Try again');
+  await act(async () => {
+    retry?.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(document.querySelector('[data-testid="late-events-error"]')).toBeNull();
+  expect(document.querySelector('[data-testid="late-events"]')?.textContent).toMatch(/^Since .+, no event in this project/);
 });
