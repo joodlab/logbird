@@ -12,6 +12,12 @@ TRUNCATE TABLE logbird.entities;
 TRUNCATE TABLE logbird.attribute_keys;
 -- Migration 006 / PR #62 adds this MV destination. Clear it before replaying raw rows.
 TRUNCATE TABLE IF EXISTS logbird.event_ids;
+-- Migration 011: the webhook lateness rollup counts arrivals, including some whose raw rows have since expired, so it is
+-- kept as restored, not rebuilt. Snapshot its totals, then keep its view out of the replay. DETACH without PERMANENTLY
+-- lasts until the next server restart, and ClickHouse migrations re-attach it, so a run that stops below cannot leave the
+-- view missing.
+CREATE TABLE logbird.lateness_restore_check ENGINE=MergeTree ORDER BY tuple() AS SELECT project_id, received_hour, late_hours, sum(events) AS events FROM logbird.events_lateness_by_hour GROUP BY project_id, received_hour, late_hours;
+DETACH TABLE IF EXISTS logbird.events_lateness_mv;
 -- SELECT * includes received_at and payload, and omits the recomputed MATERIALIZED category.
 -- Existing materialized views rebuild every destination exactly once.
 INSERT INTO logbird.events SELECT * FROM logbird.events_restore_staging;
@@ -20,4 +26,8 @@ SELECT throwIf(count()!=0,'Restored events differ from staging; keep staging and
 SELECT throwIf((SELECT count() FROM logbird.events)!=(SELECT sum(events) FROM logbird.events_by_minute),'Minute rollup mismatch');
 SELECT throwIf((SELECT sum((actor_id!='')+(tenant_id!='')+(executor_id!='')+length(target_ids)) FROM logbird.events)!=(SELECT sum(events) FROM logbird.entities),'Entity rollup mismatch');
 SELECT throwIf((SELECT sum(length(mapKeys(attributes))) FROM logbird.events)!=(SELECT sum(count) FROM logbird.attribute_keys),'Attribute rollup mismatch');
+ATTACH TABLE IF NOT EXISTS logbird.events_lateness_mv;
+SELECT throwIf(count()!=0,'Lateness rollup changed during replay; keep staging and investigate') FROM (SELECT project_id, received_hour, late_hours, sum(events) AS events FROM logbird.events_lateness_by_hour GROUP BY project_id, received_hour, late_hours EXCEPT ALL SELECT * FROM logbird.lateness_restore_check);
+SELECT throwIf(count()!=0,'Lateness rollup changed during replay; keep staging and investigate') FROM (SELECT * FROM logbird.lateness_restore_check EXCEPT ALL SELECT project_id, received_hour, late_hours, sum(events) AS events FROM logbird.events_lateness_by_hour GROUP BY project_id, received_hour, late_hours);
+DROP TABLE logbird.lateness_restore_check;
 -- Keep staging until the operator verifies event_ids (when present), retention and receipts.

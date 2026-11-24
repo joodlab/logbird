@@ -5,9 +5,14 @@ export type Late = { count: number; since: Date };
 export type LateInput = Pick<WebhookEndpoint, 'id' | 'projectId' | 'deliveryWindowSeconds' | 'deliveryWindowChangedAt'>;
 export type CountLate = (projectId: string, windows: { since: Date; windowSeconds: number }[]) => Promise<number[]>;
 
-/** The late-event count starts at the later of the endpoint's last window change and the delivery-log retention. */
+const HOUR_MS = 3_600_000;
+/**
+ * Where the late-event count starts: the first whole arrival hour at or after the later of the endpoint's last window
+ * change and the delivery-log retention. The rollup counts by arrival hour, so starting on an hour boundary keeps every
+ * response for the same endpoint consistent: a new endpoint or a just-changed window counts 0 until that hour begins.
+ */
 export const lateEventsSince = (endpoint: Pick<WebhookEndpoint, 'deliveryWindowChangedAt'>, now: Date) =>
-  new Date(Math.max(+endpoint.deliveryWindowChangedAt, +now - WEBHOOK_LOG_RETENTION_MS));
+  new Date(Math.ceil(Math.max(+endpoint.deliveryWindowChangedAt, +now - WEBHOOK_LOG_RETENTION_MS) / HOUR_MS) * HOUR_MS);
 
 /**
  * Late-event counts per endpoint (#152): one count per project for its windowed endpoints, so endpoints of different

@@ -8,8 +8,8 @@ const chTime = (time: Date) => time.toISOString().replace('T', ' ').slice(0, -1)
 
 /**
  * Late arrivals for webhook delivery windows (#152), from `events_lateness_by_hour`. For each `{ since, windowSeconds }`,
- * the project's events that arrived later than the window after they occurred, counted by arrival hour from the hour
- * that contains `since`, before any endpoint filter or scope. One scan for all windows of a project.
+ * the project's events that arrived later than the window after they occurred, in the whole arrival hours that start at or
+ * after `since`, before any endpoint filter or scope. One scan for all windows of a project.
  */
 export async function lateEventCounts(
   ch: ClickHouseClient,
@@ -25,7 +25,8 @@ export async function lateEventCounts(
     if (!Number.isInteger(windowSeconds / 3600) || windowSeconds < 3600) throw new Error('A delivery window is a whole number of hours');
     params[`s${index}`] = chTime(since);
     params[`k${index}`] = windowSeconds / 3600;
-    return `sumIf(events, received_hour >= toStartOfHour({s${index}:DateTime64(3,'UTC')}) AND late_hours > {k${index}:UInt32}) AS c${index}`;
+    // Whole arrival hours that start at or after `since`.
+    return `sumIf(events, received_hour >= {s${index}:DateTime64(3,'UTC')} AND late_hours > {k${index}:UInt32}) AS c${index}`;
   });
   const [row] = await read<Record<string, string | number>>(
     ch,

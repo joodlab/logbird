@@ -86,7 +86,7 @@ for (let pair = 0; pair < 5; pair++) for (const withView of [false, true]) round
 for (let pair = 0; pair < 3; pair++) for (const withView of [false, true]) rounds.push(await round(withView, true));
 const summary = (late: boolean) => {
   const picked = rounds.filter((r) => r.late === late);
-  const pairs = [];
+  const pairs: { without: number; with: number; change: string }[] = [];
   for (let i = 0; i + 1 < picked.length; i += 2) {
     const [without, withView] = [picked[i], picked[i + 1]];
     if (without && withView)

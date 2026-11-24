@@ -30,6 +30,9 @@ it('counts from the later of the last window change and 30 days ago, and skips t
   const count = vi.fn(async (_projectId: string, windows: unknown[]) => windows.map(() => 0));
   const late = await lateEvents([endpoint('recent', 'p', 3600, 2), endpoint('old', 'p', 3600, 24 * 90)], now, count);
   expect(late.get('recent')?.since).toEqual(new Date(+now - 2 * 3_600_000));
+  // A change at 11:20 counts from the next whole arrival hour, 12:00.
+  const midHour = await lateEvents([endpoint('mid', 'p', 3600, 40 / 60)], now, count);
+  expect(midHour.get('mid')?.since).toEqual(new Date('2026-11-24T12:00:00.000Z'));
   expect(late.get('old')?.since).toEqual(new Date(+now - WEBHOOK_LOG_RETENTION_MS));
   const none = vi.fn(async () => []);
   expect([...(await lateEvents([endpoint('off', 'p', null)], now, none)).values()]).toEqual([{ count: 0, since: new Date(+now - 3_600_000) }]);

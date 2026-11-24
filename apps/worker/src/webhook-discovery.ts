@@ -145,6 +145,8 @@ export async function discoverWebhookDeliveries(
     scopeTargetId: endpoint.scopeTargetId,
     scopeMask: { equals: endpoint.scopeMask },
     filterQuery: endpoint.filterQuery,
+    // A scan read under one window must not commit after a save changed it, even within the same updatedAt millisecond.
+    deliveryWindowSeconds: endpoint.deliveryWindowSeconds,
   };
   // Scheduling records every attempt independently of cursor progress and configuration edits.
   await prisma.webhookEndpoint.updateMany({

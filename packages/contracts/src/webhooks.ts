@@ -114,9 +114,11 @@ export const webhookEndpointSchema = z.object({
     })
     .describe(
       "Events in this project that arrived later than this endpoint's window, before the endpoint's filter and scope are " +
-        "applied. Counted from `since`: the later of the endpoint's last window change and 30 days ago (the delivery log " +
-        'retention), by arrival hour from the hour that contains `since`. It counts arrivals, so it includes late events ' +
-        'since removed by retention or deletion, and can exceed what a search finds. 0 when the window is null.',
+        'applied, recorded in the whole arrival hours from `since`: the first hour boundary at or after the later of the ' +
+        "endpoint's last window change and 30 days ago (the delivery log retention). It counts arrivals, so it includes late " +
+        'events since removed by retention or deletion and can exceed what a search finds. After a partial storage failure ' +
+        'during ingest it can be lower than the true number; it is never higher. There is no backfill: arrivals before the ' +
+        'deployment added this count are not included. 0 when the window is null.',
     ),
   createdById: z.string().nullable(),
   createdAt: z.iso.datetime(),

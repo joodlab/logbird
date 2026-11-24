@@ -237,8 +237,8 @@ export const webhookRoutes = new Hono<AppEnv>()
         return endpoint;
       });
       c.header('Cache-Control', 'no-store');
-      // A new endpoint's window starts now, so nothing has arrived late yet.
-      return c.json({ endpoint: serialize(endpoint, { count: 0, since: endpoint.deliveryWindowChangedAt }), secret }, 201);
+      // A new endpoint counts from the next whole arrival hour, so its count is 0, as a read in this hour also reports.
+      return c.json({ endpoint: serialize(endpoint, { count: 0, since: lateEventsSince(endpoint, endpoint.createdAt) }), secret }, 201);
     },
   )
   .get(`${base}/:id`, doc('Get webhook endpoint (no secrets)', webhookEndpointSchema), async (c) => {
@@ -254,7 +254,9 @@ export const webhookRoutes = new Hono<AppEnv>()
   .patch(`${base}/:id`, updateWebhookDoc, validator('json', updateWebhookSchema, webhookBody), async (c) => {
     const input = c.req.valid('json');
     // A missing endpoint is a 404 before any DNS lookup; the locked re-read below still decides.
-    if (input.url !== undefined) await findEndpoint(c);
+    const current = await findEndpoint(c);
+    // Count before saving, so a failed ClickHouse read fails the request before anything is written.
+    const counted = lateFor(await lateEvents([current], await databaseNow()), current, new Date());
     const url = input.url === undefined ? undefined : await allowedUrl(c, input.url);
     const endpoint = await lockedProject(c, async (tx) => {
       const before = await findEndpoint(c, tx);
@@ -309,8 +311,10 @@ export const webhookRoutes = new Hono<AppEnv>()
       if (enabledChanged) await record(c, tx, input.enabled ? 'webhook.enabled' : 'webhook.disabled', after, ['enabled'], 'manual');
       return after;
     });
-    const now = await databaseNow();
-    return c.json(serialize(endpoint, lateFor(await lateEvents([endpoint], now), endpoint, now), endpoint._count.secrets));
+    // Unchanged window: the count read before the save. Changed window: it starts at the next whole hour, so 0.
+    const unchanged = +endpoint.deliveryWindowChangedAt === +current.deliveryWindowChangedAt;
+    const late = unchanged ? counted : { count: 0, since: lateEventsSince(endpoint, await databaseNow()) };
+    return c.json(serialize(endpoint, late, endpoint._count.secrets));
   })
   .delete(`${base}/:id`, routeDoc('Delete webhook endpoint', { responses: { 204: { description: 'Deleted' }, 503: mutationBusy } }), async (c) => {
     await lockedProject(c, async (tx) => {
