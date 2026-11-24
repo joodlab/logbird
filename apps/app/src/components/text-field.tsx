@@ -24,7 +24,8 @@ export function FieldHint({
   return (
     <>
       {error ? (
-        <p className="text-destructive text-xs" id={`${id}-hint`}>
+        // Announced when it appears: a keyboard user submitting from elsewhere still hears what to fix.
+        <p className="text-destructive text-xs" id={`${id}-hint`} role="alert">
           {error}
         </p>
       ) : purpose ? (

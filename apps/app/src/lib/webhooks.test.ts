@@ -6,6 +6,7 @@ import { ApiRequestError } from './api/errors';
 import {
   attemptErrorCopy,
   attemptWhy,
+  deliveryWindowLine,
   disabledCopy,
   displayUrl,
   endpointPatch,
@@ -15,6 +16,9 @@ import {
   formFrom,
   isHoldRefusal,
   isWebhookBusy,
+  LATE_EVENTS_APPROXIMATE,
+  lateEventsCounted,
+  lateEventsSentence,
   lenientDeliveriesSchema,
   scopeOf,
   scopeSummary,
@@ -24,6 +28,10 @@ import {
   validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
+  windowLabel,
+  windowParts,
+  windowSeconds,
+  withKnownLateCount,
 } from './webhooks';
 
 /** Every path the console serves, as the router resolves them. */
@@ -132,7 +140,7 @@ describe('webhooks after delivery (#179)', () => {
     filterQuery: 'action:booking.*',
     scope: null,
     deliveryWindowSeconds: 604_800,
-    lateEvents: { count: 0, since: '2026-11-22T11:00:00.000Z' },
+    lateEvents: { count: 0, since: '2026-10-24T10:00:00.000Z' },
     createdById: null,
     createdAt: '2026-11-22T10:00:00.000Z',
     updatedAt: '2026-11-22T10:00:00.000Z',
@@ -322,5 +330,100 @@ describe('settledResends', () => {
     expect(settledResends(watching, { ids: [], complete: true, startedAt: 200 })).toEqual(['A']);
     // The next read, started after B was queued, can settle it.
     expect(settledResends(new Map([['B', 300]]), { ids: [], complete: true, startedAt: 400 })).toEqual(['B']);
+  });
+});
+
+describe('delivery window (#152)', () => {
+  const ep = (deliveryWindowSeconds: number | null, count = 0) =>
+    ({ deliveryWindowSeconds, lateEvents: { count, since: '2026-10-25T00:00:00.000Z' } }) as WebhookEndpoint;
+  it('shows a new endpoint at the 7-day default, and an existing one at its own window or "No limit"', () => {
+    expect(windowParts(604_800)).toEqual({ windowLimited: true, windowAmount: '7', windowUnit: 'days' });
+    expect(windowParts(5400 * 2)).toEqual({ windowLimited: true, windowAmount: '3', windowUnit: 'hours' });
+    expect(windowParts(null)).toMatchObject({ windowLimited: false });
+    expect(formFrom(null)).toMatchObject({ windowLimited: true, windowAmount: '7', windowUnit: 'days' });
+  });
+  it('turns the form into seconds, null for no limit, and refuses what the contract refuses', () => {
+    expect(windowSeconds({ windowLimited: true, windowAmount: '36', windowUnit: 'hours' })).toBe(129_600);
+    expect(windowSeconds({ windowLimited: true, windowAmount: '2', windowUnit: 'days' })).toBe(172_800);
+    expect(windowSeconds({ windowLimited: false, windowAmount: 'x', windowUnit: 'days' })).toBeNull();
+    expect(windowSeconds({ windowLimited: true, windowAmount: '1.5', windowUnit: 'days' })).toBeUndefined();
+    const base = { ...formFrom(null), url: 'https://hooks.example.com/x' };
+    expect(validateWebhookForm({ ...base, windowAmount: '0' }).windowAmount).toBe('Choose from 1 to 3,650 days.');
+    expect(validateWebhookForm({ ...base, windowAmount: '3651' }).windowAmount).toBe('Choose from 1 to 3,650 days.');
+    expect(validateWebhookForm({ ...base, windowAmount: '3650' }).windowAmount).toBeUndefined();
+    expect(validateWebhookForm({ ...base, windowUnit: 'hours', windowAmount: '87601' }).windowAmount).toMatch(/87,600 hours/);
+    expect(validateWebhookForm({ ...base, windowAmount: 'soon' }).windowAmount).toBe('Enter a whole number of days.');
+    expect(validateWebhookForm({ ...base, windowLimited: false, windowAmount: '' }).windowAmount).toBeUndefined();
+  });
+  it('sends the window only when it changed, and null to remove the limit', () => {
+    const target = {
+      ...ep(604_800),
+      id: 'w',
+      url: 'https://hooks.example.com/x',
+      description: null,
+      enabled: true,
+      filterQuery: '',
+      scope: null,
+    } as WebhookEndpoint;
+    const f = formFrom(target);
+    expect(endpointPatch(target, f, scopeOf(f))).not.toHaveProperty('deliveryWindowSeconds');
+    expect(endpointPatch(target, { ...f, windowAmount: '14' }, scopeOf(f))).toMatchObject({ deliveryWindowSeconds: 1_209_600 });
+    expect(endpointPatch(target, { ...f, windowLimited: false }, scopeOf(f))).toMatchObject({ deliveryWindowSeconds: null });
+  });
+  it('says how many events came too late, with the approved meaning, and nothing when there is no window', () => {
+    expect(lateEventsSentence(ep(604_800, 0), 'Oct 25, 2026')).toBe(
+      'Since Oct 25, 2026, Logbird has recorded no event in this project arriving more than 7 days after it happened.',
+    );
+    expect(lateEventsSentence(ep(604_800, 1204), 'Oct 25, 2026')).toBe(
+      'Since Oct 25, 2026, Logbird has recorded 1,204 events in this project arriving more than 7 days after they happened. The count covers the whole project, before this endpoint’s filter and scope.',
+    );
+    // Never claims a delivery outcome: the count is project-wide, before filter and scope.
+    expect(lateEventsSentence(ep(604_800, 1204), 'Oct 25, 2026')).not.toMatch(/did not send/);
+    expect(lateEventsSentence(ep(3600, 1), 'Oct 25, 2026')).toMatch(
+      /^Since Oct 25, 2026, Logbird has recorded 1 event in this project arriving more than 1 hour after it happened/,
+    );
+    expect(lateEventsSentence(ep(null, 5), 'Oct 25, 2026')).toBeNull();
+    // Right after a window change the count starts at the next whole hour: say so instead of a zero.
+    const changed = { deliveryWindowSeconds: 604_800, lateEvents: { count: 0, since: '2026-11-24T03:00:00.000Z' } };
+    expect(lateEventsSentence(changed, 'Nov 24, 2026, 04:00 Berlin', new Date('2026-11-24T02:10:00.000Z'))).toBe(
+      'Logbird starts counting events that arrive more than 7 days late at Nov 24, 2026, 04:00 Berlin.',
+    );
+    expect(lateEventsSentence(changed, 'Nov 24, 2026, 04:00 Berlin', new Date('2026-11-24T03:00:00.000Z'))).toMatch(
+      /^Since .+, Logbird has recorded no event/,
+    );
+    expect(windowLabel(null)).toBe('No limit');
+    expect(deliveryWindowLine(null)).toBe('No limit on arrival time');
+  });
+  it('keeps the shown count when a save could not read it, while it still describes the same window and start', () => {
+    const shown = { ...ep(604_800, 12), lateEvents: { count: 12, since: '2026-10-25T00:00:00.000Z' } } as WebhookEndpoint;
+    const unread = (over: Partial<WebhookEndpoint> = {}) =>
+      ({ ...shown, description: 'Saved', lateEvents: { count: null, since: shown.lateEvents.since }, ...over }) as WebhookEndpoint;
+    expect(withKnownLateCount(unread(), shown)).toMatchObject({ description: 'Saved', lateEvents: { count: 12 } });
+    // A changed window restarts the count: the old number would be wrong, so it waits for the read that follows.
+    const rewindowed = unread({ deliveryWindowSeconds: 3600, lateEvents: { count: null, since: '2026-11-24T03:00:00.000Z' } });
+    expect(withKnownLateCount(rewindowed, shown).lateEvents.count).toBeNull();
+    expect(withKnownLateCount(unread(), undefined).lateEvents.count).toBeNull();
+    // A count the PATCH did read always wins.
+    expect(withKnownLateCount({ ...shown, lateEvents: { ...shown.lateEvents, count: 13 } }, shown).lateEvents.count).toBe(13);
+    // An unread count is never shown as a number.
+    expect(lateEventsSentence(unread(), 'Oct 25, 2026')).toBeNull();
+  });
+});
+
+describe('delivery window errors from the server (#152)', () => {
+  it('puts a 422 on deliveryWindowSeconds beside the window field', () => {
+    const error = new ApiRequestError(422, 'validation_error', 'Invalid', [{ path: ['deliveryWindowSeconds'], message: 'Too large' }]);
+    expect(fieldErrorsFromValidation(error)).toEqual({ windowAmount: 'Too large' });
+  });
+});
+
+describe('late-event count qualifier (#359: approximate by definition)', () => {
+  const ep = (since: string, window: number | null = 604_800) => ({ deliveryWindowSeconds: window, lateEvents: { count: 3, since } });
+  it('applies once counting has started, and never without a window', () => {
+    const now = new Date('2026-11-24T03:00:00.000Z');
+    expect(lateEventsCounted(ep('2026-11-24T03:00:00.000Z'), now)).toBe(true);
+    expect(lateEventsCounted(ep('2026-11-24T04:00:00.000Z'), now)).toBe(false);
+    expect(lateEventsCounted(ep('2026-11-24T02:00:00.000Z', null), now)).toBe(false);
+    expect(LATE_EVENTS_APPROXIMATE).toBe('Approximate. It can be off after a storage failure or a restore.');
   });
 });
