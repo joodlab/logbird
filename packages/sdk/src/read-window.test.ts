@@ -379,3 +379,85 @@ describe('readAuditEvent returns only the event asked for', () => {
     }
   });
 });
+
+describe('round three: shapes and ownership', () => {
+  const reply = (pages: unknown[]) => {
+    let i = 0;
+    const fetch = vi.fn(async () => json(pages[Math.min(i++, pages.length - 1)]));
+    return { fetch, options: { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch } };
+  };
+  const collect = async (options: Parameters<typeof iterateAuditTrail>[0], trail: Parameters<typeof iterateAuditTrail>[1]) => {
+    const seen: string[] = [];
+    let error: unknown;
+    try {
+      for await (const e of iterateAuditTrail(options, trail)) seen.push(e.id);
+    } catch (cause) {
+      error = cause;
+    }
+    return { seen, error: error instanceof Error ? error.message : undefined };
+  };
+
+  it('ignores a `to` added to Object.prototype after the pass was created', async () => {
+    const { options, fetch } = reply([{ data: [event('a')], nextCursor: null, total: 1, range: { from: FROM, to: TO }, tookMs: 1 }]);
+    const pass = iterateAuditTrail(options, { tenant: 'acme', range: { from: FROM } });
+    const proto = Object.prototype as Record<string, unknown>;
+    proto.to = '2026-11-01T00:00:00.500Z';
+    try {
+      const seen: string[] = [];
+      for await (const e of pass) seen.push(e.id);
+      expect(seen).toEqual(['a']);
+      expect(new URL(String((fetch.mock.calls[0] as unknown as [URL])[0])).searchParams.get('to')).toBeNull();
+    } finally {
+      delete proto.to;
+    }
+  });
+
+  it('refuses a page that is not a page of events, before yielding any of it', async () => {
+    const noCursor = { data: [event('a')], total: 1, range: { from: FROM, to: TO }, tookMs: 1 };
+    expect(await collect(reply([noCursor]).options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+      seen: [],
+      error: expect.stringMatching(/not a page of events/),
+    });
+    const noIds = {
+      data: [
+        { ...event('a'), id: undefined },
+        { ...event('b'), id: undefined },
+      ],
+      nextCursor: null,
+      total: 2,
+      range: { from: FROM, to: TO },
+      tookMs: 1,
+    };
+    expect(await collect(reply([noIds]).options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+      seen: [],
+      error: expect.stringMatching(/not a page of events/),
+    });
+  });
+
+  it('accepts a reported window only in the server form: UTC with three fractional digits', async () => {
+    for (const range of [
+      { from: '2026-11-01T00:00:00.0009Z', to: TO },
+      { from: FROM, to: '2026-11-02T00:00:00' },
+      { from: '2026-11-01T00:00:00Z', to: TO },
+    ]) {
+      const { options } = reply([{ data: [event('a')], nextCursor: null, total: 1, range, tookMs: 1 }]);
+      expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+        seen: [],
+        error: expect.stringMatching(/not two instants/),
+      });
+    }
+  });
+
+  it('refuses a detail whose event, parents or counts break the contract', async () => {
+    for (const body of [
+      { event: { id: 'e1' }, payload: null, parents: [], childCount: 0, operationSize: 0 },
+      { event: event('e1'), payload: null, parents: [null], childCount: 0, operationSize: 0 },
+      { event: event('e1'), payload: null, parents: [], childCount: 1.5, operationSize: 0 },
+      { event: event('e1'), payload: null, parents: [], childCount: 0, operationSize: -1 },
+    ]) {
+      const fetch = vi.fn(async () => json(body));
+      const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+      await expect(readAuditEvent(options, 'e1')).rejects.toThrow(/not the detail of the event asked for/);
+    }
+  });
+});

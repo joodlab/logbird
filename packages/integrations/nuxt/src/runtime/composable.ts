@@ -32,7 +32,14 @@ export function useAuditTrail(options: MaybeRefOrGetter<Omit<AuditTrailOptions, 
         ? { ...(Object.hasOwn(range, 'from') ? { from: range.from } : {}), ...(Object.hasOwn(range, 'to') ? { to: range.to } : {}) }
         : {};
     const order = Object.hasOwn(trail, 'order') ? trail.order : undefined;
-    const query = empty ? { ...bounds, ...(order ? { order } : {}), limit: trail.limit } : trailQuery(trail);
+    // A trail with a selector is rebuilt from the snapshot's own fields (null prototypes), so the window rule sees only
+    // what the caller gave.
+    const own = Object.assign(
+      Object.create(null),
+      trail,
+      range && typeof range === 'object' ? { range: Object.assign(Object.create(null), bounds) } : {},
+    );
+    const query = empty ? { ...bounds, ...(order ? { order } : {}), limit: trail.limit } : trailQuery(own);
     return { query, fetcher, session };
   });
 }

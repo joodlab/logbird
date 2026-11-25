@@ -27,14 +27,14 @@ sets private/no-store caching, and only forwards the query returned by authorize
 server, not serialized runtime config. Authorize every page/cursor; tenant selectors are not a policy.
 If authorize throws a `TrailQueryError` (a `TypeError`, from `trailQuery`) or returns a query with no `q`, the route answers 400 and reads
 nothing. Because authorize decides the scope on the server, `useAuditTrail({})` may send an empty trail to this route;
-a selector passed without a value (`tenant: undefined`) still throws on the client, and so does a trail with a
-selector but no `range.from` (pass `range: SERVER_DEFAULT_RANGE` to read the last 24 hours on purpose). The window of an empty trail is the hook's to choose: build its query with
+a selector passed without a value (`tenant: undefined`), or a trail with a selector but no `range.from` (pass
+`range: SERVER_DEFAULT_RANGE` to read the last 24 hours on purpose), sets the composable's `error` and sends nothing. The window of an empty trail is the hook's to choose: build its query with
 `trailQuery({ …, range: { from } })`, which refuses a trail without a window (a hand-built `{ q }` without `from` reads
 only the server's last 24 hours). Bounds the component passes (`range`) arrive in the hook's `query`. Only a `TrailQueryError` from the
 SDK becomes a 400; any other error in `authorize` stays a server error.
 Pass `session` in the options: a string that changes whenever `authorize` would return a different scope, so the user
 **and** the active tenant or workspace, for example
-`` useAuditTrail(() => ({ target: { id }, session: JSON.stringify([user.value?.id ?? null, workspace.value?.id ?? null]) })) ``. When it changes, the
+`` useAuditTrail(() => ({ target: { id }, range: { from: historyFrom }, session: JSON.stringify([user.value?.id ?? null, workspace.value?.id ?? null]) })) `` (with `historyFrom` a fixed start). When it changes, the
 rows on screen, the cursor and any read in flight are dropped at once and the trail reloads. Remounting the component
 with the same key (`` <AuditTrail :key="JSON.stringify([user.id, workspace.id])" /> ``; JSON keeps ids containing `:` apart) does the same. Without either, the route still
 re-authorizes every request, so no response contains events the new scope may not read, but the rows already on screen

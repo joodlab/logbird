@@ -7,22 +7,47 @@ vi.mock('@logbird/contracts/json', async (original) => ({
 }));
 const { readAuditEvent } = await import('./read');
 
-const event = (id: string) => ({ id, timestamp: '2026-11-01T00:00:00.000Z', attributes: { account: '12345678901234567890' } });
+const event = (id: string) => ({
+  id,
+  projectId: 'p',
+  timestamp: '2026-11-01T00:00:00.000Z',
+  receivedAt: '2026-11-01T00:00:00.000Z',
+  environment: 'production',
+  action: 'invoice.updated',
+  category: 'invoice',
+  outcome: 'success',
+  severity: 'info',
+  description: '',
+  actor: null,
+  impersonator: null,
+  executor: null,
+  tenant: null,
+  source: null,
+  targets: [],
+  changes: [],
+  context: { operationId: '', parentEventId: '', requestId: '', traceId: '', ip: '', userAgent: '' },
+  attributes: { account: '12345678901234567890' },
+  conformance: 50,
+  schemaVersion: '',
+  sdk: '',
+});
 const reader = (body: string) => ({
   endpoint: 'https://logbird.test',
   readKey: 'k',
   fetch: (async () => new Response(body, { status: 200 })) as unknown as typeof fetch,
 });
+const detail = (id: string, payload: string) =>
+  `{"event":${JSON.stringify(event(id))},"payload":${payload},"parents":[],"childCount":0,"operationSize":1}`;
 
 it('reads a detail whose long digits are only inside strings', async () => {
-  const body = JSON.stringify({ event: event('1234567890123456'), payload: null, parents: [], childCount: 0, operationSize: 1 });
-  const detail = await readAuditEvent(reader(body), '1234567890123456');
-  expect(detail?.event.id).toBe('1234567890123456');
+  const read = await readAuditEvent(reader(detail('1234567890123456', 'null')), '1234567890123456');
+  expect(read?.event.id).toBe('1234567890123456');
 });
 
-it('refuses a detail holding a number a double cannot keep, rather than rounding it', async () => {
-  const body = `{"event":${JSON.stringify(event('e1'))},"payload":{"accountId":9007199254740993},"parents":[],"childCount":0,"operationSize":1}`;
-  await expect(readAuditEvent(reader(body), 'e1')).rejects.toThrow(/cannot keep exactly/);
-  const exact = `{"event":${JSON.stringify(event('e1'))},"payload":{"n":12.5,"big":9007199254740992},"parents":[],"childCount":0,"operationSize":1}`;
-  expect((await readAuditEvent(reader(exact), 'e1'))?.payload).toEqual({ n: 12.5, big: 9_007_199_254_740_992 });
+it('refuses a detail holding a number a double cannot keep, however long, rather than rounding it', async () => {
+  await expect(readAuditEvent(reader(detail('e1', '{"accountId":9007199254740993}')), 'e1')).rejects.toThrow(/cannot keep exactly/);
+  // A digit past the first 4,096 characters of a token still counts.
+  await expect(readAuditEvent(reader(detail('e1', `{"ratio":1.${'0'.repeat(4094)}1}`)), 'e1')).rejects.toThrow(/cannot keep exactly/);
+  const exact = await readAuditEvent(reader(detail('e1', '{"n":12.5,"big":9007199254740992}')), 'e1');
+  expect(exact?.payload).toEqual({ n: 12.5, big: 9_007_199_254_740_992 });
 });

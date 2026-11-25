@@ -408,7 +408,8 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
   const snapshot = snapshotSearchQuery(query);
   const url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events`);
   for (const field of SEARCH_FIELDS) {
-    const value = snapshot[field];
+    // Own fields only: nothing added to Object.prototype can join the request.
+    const value = Object.hasOwn(snapshot, field) ? snapshot[field] : undefined;
     if (value !== undefined) url.searchParams.set(field, String(value));
   }
   // The last check, on what is about to be sent rather than on what came in (#263): whatever the caller's object was,
@@ -431,8 +432,8 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
  * it as their parent (`childCount`; list them with `parent:` and the id quoted by the query language rules in a
  * trail's `q`, over a window that covers them), how many share its operation (`operationSize`, 0 without an operation
  * id), and the original document (`payload`, null under a field mask). No time window applies. Resolves to null when
- * the id is unknown or outside the key's scope (404). With a project-wide read key, `parents` can include events of
- * other tenants: use a tenant-scoped key (or check each parent) before showing them to a customer.
+ * the id is unknown or outside the key's scope (404). With a project-wide read key, `parents`, `childCount` and
+ * `operationSize` can include events of other tenants: read a customer's view with a tenant-scoped key.
  *
  * The payload keeps the exact digits of every number it holds (64-bit ids, long decimals) on runtimes with
  * `JSON.rawJSON` (Node 21 or later). Where a runtime cannot, a detail holding such a number is refused with an error
@@ -462,17 +463,49 @@ export async function readAuditEvent(options: ReadOptions, id: string, signal?: 
   if (
     !detail ||
     typeof detail !== 'object' ||
-    !detail.event ||
-    typeof detail.event !== 'object' ||
+    !isEvent(detail.event) ||
     detail.event.id !== eventId ||
     !Array.isArray(detail.parents) ||
-    typeof detail.childCount !== 'number' ||
-    typeof detail.operationSize !== 'number' ||
+    !detail.parents.every(isEvent) ||
+    !isCount(detail.childCount) ||
+    !isCount(detail.operationSize) ||
     !('payload' in detail)
   )
     throw new Error('Logbird read: the answer is not the detail of the event asked for.');
   return detail as EventDetail;
 }
+const isCount = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
+const isObjectValue = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+const EVENT_TEXTS = [
+  'id',
+  'projectId',
+  'timestamp',
+  'receivedAt',
+  'environment',
+  'action',
+  'category',
+  'outcome',
+  'severity',
+  'description',
+  'schemaVersion',
+  'sdk',
+] as const;
+/** The stored-event shape every read answer carries (the server's contract), checked before an event reaches a caller. */
+function isEvent(value: unknown): value is AuditEvent {
+  if (!isObjectValue(value)) return false;
+  for (const key of EVENT_TEXTS) if (typeof value[key] !== 'string') return false;
+  return (
+    typeof value.conformance === 'number' &&
+    Array.isArray(value.targets) &&
+    Array.isArray(value.changes) &&
+    isObjectValue(value.context) &&
+    isObjectValue(value.attributes) &&
+    ['actor', 'impersonator', 'executor', 'tenant'].every((key) => value[key] === null || isObjectValue(value[key])) &&
+    (value.source === null || typeof value.source === 'string')
+  );
+}
+/** A whole JSON number token, matched at one position (sticky), however long. */
+const NUMBER_TOKEN = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
 /** Whether a JSON text holds a number token (outside strings) that a double cannot represent exactly. */
 function holdsInexactNumber(json: string): boolean {
   for (let i = 0; i < json.length; i++) {
@@ -482,7 +515,8 @@ function holdsInexactNumber(json: string): boolean {
       continue;
     }
     if (c === '-' || (c !== undefined && c >= '0' && c <= '9')) {
-      const token = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(json.slice(i, i + 4096))?.[0] ?? '';
+      NUMBER_TOKEN.lastIndex = i;
+      const token = NUMBER_TOKEN.exec(json)?.[0] ?? '';
       if (token && !isExactNumber(token, Number(token))) return true;
       i += Math.max(token.length - 1, 0);
     }
@@ -505,11 +539,14 @@ function sameBound(requested: string, applied: string) {
  * UTC). A date-time without an offset is read in the server's time zone, which the SDK cannot know.
  */
 const UNAMBIGUOUS_BOUND = /(?:Z|[+-]\d{2}:?\d{2})$|^\d{4}-\d{2}-\d{2}$/i;
-/** A reported window: two instants, start first. */
+/** The server's instant form: ISO 8601 UTC with exactly three fractional digits. */
+const instant = (value: unknown): value is string =>
+  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && new Date(value).toISOString() === value;
+/** A reported window: two instants in the server's form, start first. */
 function validRange(range: unknown): range is { from: string; to: string } {
   if (!range || typeof range !== 'object') return false;
   const { from, to } = range as { from?: unknown; to?: unknown };
-  return typeof from === 'string' && typeof to === 'string' && Date.parse(from) < Date.parse(to);
+  return instant(from) && instant(to) && Date.parse(from) < Date.parse(to);
 }
 
 /**
@@ -554,7 +591,8 @@ export function iterateAuditTrail(options: ReadOptions, trail: TrailQuery, signa
   const transport: unknown = options.fetch;
   if (transport !== undefined && typeof transport !== 'function') fail('iterateAuditTrail', '`fetch` must be a function.');
   const reader: ReadOptions = Object.freeze({ endpoint, readKey, ...(transport === undefined ? {} : { fetch: transport as typeof fetch }) });
-  return pages(reader, first, signal);
+  // The request leaves as a null-prototype copy of its own fields: nothing added to Object.prototype later reaches it.
+  return pages(reader, bare(first), signal);
 }
 /** A snapshot's own fields (and its range's own bounds) on null-prototype objects, plus `extra`. */
 function ownFields(snapshot: TrailSnapshot, extra: Partial<TrailSnapshot>): TrailSnapshot {
@@ -568,6 +606,8 @@ function ownFields(snapshot: TrailSnapshot, extra: Partial<TrailSnapshot>): Trai
   }
   return Object.assign(out, extra) as TrailSnapshot;
 }
+/** A copy of an object's own fields on a null prototype. */
+const bare = <T extends object>(value: T): T => Object.assign(Object.create(null) as T, value);
 async function* pages(reader: ReadOptions, first: Partial<SearchQuery>, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined> {
   const asked = { from: first.from as string, to: first.to };
   const usedCursors = new Set<string>(first.cursor ? [first.cursor] : []);
@@ -576,7 +616,9 @@ async function* pages(reader: ReadOptions, first: Partial<SearchQuery>, signal?:
   let pinned: { from: string; to: string } | undefined;
   for (;;) {
     const page = await readAuditTrail(reader, query, signal);
-    // Check the whole page before yielding any of it.
+    // Check the whole page before yielding any of it: its shape, its window, then its rows.
+    if (!Array.isArray(page.data) || !(typeof page.nextCursor === 'string' || page.nextCursor === null) || !page.data.every(isEvent))
+      throw new Error('Logbird read: the answer is not a page of events.');
     const reported: unknown = page.range;
     if (pinned) {
       // Once a page has reported the window, every later page must report the same one.
@@ -610,6 +652,6 @@ async function* pages(reader: ReadOptions, first: Partial<SearchQuery>, signal?:
     if (!next) return;
     usedCursors.add(next);
     // Keep the window the first page applied: a cursor carries none, and an open `to` would move with the clock.
-    query = { ...query, ...(pinned ?? {}), cursor: next };
+    query = bare({ ...query, ...(pinned ?? {}), cursor: next });
   }
 }
