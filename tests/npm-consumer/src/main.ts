@@ -11,6 +11,8 @@ import {
   generateWebhookSecret,
   IDENTIFIER_FIELDS,
   Logbird,
+  LogbirdError,
+  type LogbirdWarning,
   type RedactionOptions,
   redact,
   signWebhook,
@@ -38,7 +40,7 @@ const STORED = {
   tenant: { id: 't1', name: '' },
   source: null,
   targets: [{ type: 'invoice', id: 'inv_1', name: 'INV-1' }],
-  changes: [{ field: 'status', before: 'draft', after: 'sent' }],
+  changes: [{ field: 'status', before: 'draft', after: 'sent', beforeKind: 'string', afterKind: 'string' }],
   context: { operationId: 'op', parentEventId: '', requestId: 'req', traceId: '', ip: '', userAgent: '' },
   attributes: { 'metadata.plan': 'pro' },
   conformance: 77.8,
@@ -211,6 +213,7 @@ try {
   const page = await readAuditTrail({ endpoint, readKey: 'lb_read_fictional' }, trailQuery({ target: { type: 'invoice', id: 'inv_1' } }));
   const stored = page.data[0];
   expect(page.total === 1 && stored?.actor?.id === 'u1' && stored.changes[0]?.after === 'sent', 'the stored event read back');
+  expect(stored?.changes[0]?.afterKind === 'string', 'the stored change kind read back');
   expect((searches.at(-1)?.searchParams.get('q') ?? '').includes('inv_1'), 'the trail query to name the target');
   let threw = false;
   try {
@@ -244,6 +247,36 @@ try {
   expect(redacted.actor?.name === '[redacted]' && redacted.actor?.email === '[redacted]', 'the rest of the actor redacted');
   expect(IDENTIFIER_FIELDS.includes('actor.id'), 'IDENTIFIER_FIELDS to list actor.id');
   pass('redact: a matching party key keeps its identifier fields');
+
+  const warnings: Readonly<LogbirdWarning>[] = [];
+  const warningClient = new Logbird({ endpoint, apiKey: 'lb_ingest_fictional', onWarning: (warning) => warnings.push(warning) });
+  const partyId = 'fictional-\ud800';
+  warningClient.track({ action: 'fixture.warning', actor: { id: partyId } });
+  await warningClient.shutdown();
+  const warning = warnings[0];
+  const warningEvent = received.at(-1) as EventInput | undefined;
+  expect(warnings.length === 1 && warning?.code === 'party_id_normalization' && warning.field === 'actor.id', 'a field-only party warning');
+  expect(warningEvent?.actor?.id === partyId, 'party identifier preserved on the wire');
+  pass('Logbird warning: the indexed field is identified and the input stays intact');
+
+  let safeReadError = false;
+  try {
+    await readAuditTrail(
+      {
+        endpoint,
+        readKey: 'lb_read_fictional',
+        fetch: async (_url, init) => {
+          expect(init?.redirect === 'manual', 'the read request to refuse redirects');
+          return new Response('fictional response marker');
+        },
+      },
+      { q: 'timestamp:*' },
+    );
+  } catch (error) {
+    safeReadError = error instanceof LogbirdError && error.code === 'read_invalid_response' && !error.message.includes('fictional');
+  }
+  expect(safeReadError, 'a malformed read is classified without echoing the body');
+  pass('read diagnostics: manual redirects and stable malformed-response code');
 
   console.log(`npm consumer: all ${checks} checks passed`);
 } catch (error) {
