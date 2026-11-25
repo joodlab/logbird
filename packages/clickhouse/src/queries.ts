@@ -490,6 +490,16 @@ export async function histogram(
 const TARGET_COLUMNS = ['target_ids', 'target_types', 'target_names'];
 /** Two target-level facets expand ONE (id, type, name) tuple, so an id is never paired with another target's type. */
 const SHARED_TARGETS = 'ARRAY JOIN arrayZip(target_ids,target_types,target_names) AS facet_targets';
+const CHANGE_COLUMNS = ['changes_fields', 'changes_before', 'changes_after'];
+/** Two change-level facets expand ONE (field, before, after) tuple, so a value is never paired with another field. */
+const SHARED_CHANGES = 'ARRAY JOIN arrayZip(changes_fields,changes_before,changes_after) AS facet_changes';
+/** The zipped expansion both facet levels share, when both read the same array family. */
+function sharedArrays(field: string, by: string) {
+  const a = facetColumn(field) ?? '';
+  const b = facetColumn(by) ?? '';
+  if (TARGET_COLUMNS.includes(a) && TARGET_COLUMNS.includes(b)) return SHARED_TARGETS;
+  if (CHANGE_COLUMNS.includes(a) && CHANGE_COLUMNS.includes(b)) return SHARED_CHANGES;
+}
 /** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
 function facetLevel(field: string, n: number, sharedTargets = false, maskName = false) {
   const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
@@ -503,6 +513,10 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     // The caller adds SHARED_TARGETS once for both levels.
     expr = `facet_targets.${TARGET_COLUMNS.indexOf(col) + 1}`;
     label = col === 'target_ids' ? 'facet_targets.3' : expr;
+  } else if (sharedTargets && col && CHANGE_COLUMNS.includes(col)) {
+    // The caller adds SHARED_CHANGES once for both levels.
+    expr = `facet_changes.${CHANGE_COLUMNS.indexOf(col) + 1}`;
+    label = expr;
   } else if (expr === 'target_ids') {
     join = `ARRAY JOIN arrayZip(target_ids,target_names) AS facet_target${n}`;
     expr = `facet_target${n}.1`;
@@ -567,11 +581,11 @@ export async function facets(
   if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values, otherCount };
   // Second level (#140): the top `byLimit` values of `by` within each returned value, and the count of the rest.
   // One bounded query: the outer filter keeps only the returned first-level values.
-  const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
-  const shared = isTarget(q.field) && isTarget(q.by);
+  const sharedJoin = sharedArrays(q.field, q.by);
+  const shared = Boolean(sharedJoin);
   const both = shared ? { one: facetLevel(q.field, 1, true), two: facetLevel(q.by, 2, true) } : { one, two: facetLevel(q.by, 2) };
   const two = both.two;
-  const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
+  const joins = sharedJoin ?? `${one.join} ${two.join}`;
   const groups = await read<{ value: string; grp: string; label: string; count: number; total: number }>(
     ch,
     `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE value IN {facetValues:Array(String)} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
@@ -633,13 +647,13 @@ async function maskedFacets(
   const otherCount = Math.max(total - values.reduce((n, v) => n + v.count, 0), 0);
   const strip = () => values.map(({ key: _key, ...v }) => v);
   if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values: strip(), otherCount };
-  const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
-  const shared = isTarget(q.field) && isTarget(q.by);
+  const sharedJoin = sharedArrays(q.field, q.by);
+  const shared = Boolean(sharedJoin);
   const both = shared
     ? { one: facetLevel(q.field, 1, true, true), two: facetLevel(q.by, 2, true, true) }
     : { one, two: facetLevel(q.by, 2, false, true) };
   const two = both.two;
-  const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
+  const joins = sharedJoin ?? `${one.join} ${two.join}`;
   type Group = { value: string; masked: number; grp: string; gmasked: number; labf: number; labt: string; count: number; total: number };
   const groups = await read<Group>(
     ch,
@@ -944,6 +958,8 @@ export async function listFields(ch: ClickHouseClient, p: string, q: RangeQuery)
     // envelope field. An event carries it when it has a non-empty target id, exactly what the `target:*` filter matches.
     const array = QUERY_FIELDS.find((f) => f.column === col)?.type === 'array';
     if ((array && key !== 'target') || key === 'env') continue;
+    // Query fields added later are not reported here, so this page keeps its cost (one aggregate per reported field).
+    if (key === 'impersonator.name' || key === 'impersonator.id') continue;
     const value = `toString(${col})`;
     const ids = `arrayFilter(x -> x!='', ${col})`;
     // Each row's share is over its own query's total (`count()`, as in metrics()), so events arriving between two

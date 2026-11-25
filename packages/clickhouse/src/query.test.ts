@@ -352,6 +352,21 @@ describe('change values and the impersonator name', () => {
     }
   });
 
+  it('refuses the changes namespace in any letter case, and comparisons against * on non-numeric fields', () => {
+    for (const q of ['Changes.field:status', '_exists_:"CHANGES.after"', 'changes.Field:status'])
+      expect(() => compileQuery(q), q).toThrow(/Unknown field/);
+    for (const q of ['changes.after:>*', 'impersonator.name:<=*', 'actor:>*'])
+      expect(() => compileQuery(q), q).toThrow(/does not support comparisons/);
+    // Presence, _exists_ and a fully open range stay presence; numbers and dates keep their comparisons.
+    expect(compileQuery('changes.after:*').sql).toBe("(arrayExists(x -> x != '', changes_after))");
+    expect(compileQuery('_exists_:impersonator.name').sql).toBe("(impersonator_name != '')");
+    expect(compileQuery('attempt:>*').sql).toBe('(1)');
+  });
+
+  it('reads impersonator.id as the impersonator id', () => {
+    expect(compileQuery('impersonator.id:sup_rita')).toEqual(compileQuery('impersonator:sup_rita'));
+  });
+
   it('keeps explicit attribute lookups and the other changes fields', () => {
     expect(compileQuery('attr.changes.to:x').params).toEqual({ q0: 'changes.to', q1: 'x' });
     expect(compileQuery('changes.field:status').sql).toBe('(arrayExists(x -> x = {q0:String}, changes_fields))');

@@ -72,31 +72,42 @@ resolved dates are parameters. `NOT _exists_:field` means missing.
 `changes.field`, `changes.before` and `changes.after` search the event's `changes` list: `changes.after:PUBLISHED`
 finds events where some change ended with the value `PUBLISHED`, and `changes.before:DRAFT` events where some change
 started from `DRAFT`. Like every array field they match any element, and they support exact values, prefixes
-(`changes.after:PUB*`), regexes, value groups, presence and negation, but not ordered comparisons.
+(`changes.after:PUB*`), regexes, value groups, presence and negation, but not ordered comparisons (`changes.after:>x`
+and `changes.after:>*` are refused, as on every field that is not a number or date).
 
 A value matches its stored text, exactly and case-sensitively:
 
 | Sent value | Stored text | Query |
 | --- | --- | --- |
-| a string | the string as sent (not trimmed) | `changes.after:PUBLISHED`, `changes.after:"In review"` |
-| a number | JavaScript's shortest spelling of its value (`12.50` → `12.5`, `1e2` → `100`); a number a double cannot hold exactly keeps its digits as sent | `changes.after:12.5` |
+| a string | the string as sent (not trimmed; an unpaired UTF-16 surrogate becomes U+FFFD) | `changes.after:PUBLISHED`, `changes.after:"In review"` |
+| a number | JavaScript's shortest spelling of the parsed number when that spelling has the same decimal value as the digits sent (`12.50` → `12.5`, `0.10` → `0.1`, `1e2` → `100`); otherwise the digits as sent (`12345678901234567890`) | `changes.after:12.5` |
 | `true` / `false` | `true` / `false` | `changes.after:true` |
 | `null` | `null` (the same as the text "null") | `changes.before:null` |
 | absent (no `before` or no `after`) | empty text (the same as an empty string) | `changes.before:""` |
 | an array or object | compact JSON text | `changes.after:"[\"a\",\"b\"]"` |
 
 `changes.before:*` and `changes.after:*` mean some change has a non-empty value on that side. Up to 256 changes per
-event are indexed.
+event are indexed. Facets on these fields count elements, not events: an event with two changes to the same value
+counts twice. A two-level facet over two of them (`field=changes.field&by=changes.after`) pairs each field with its
+own values.
 
 The three fields are checked independently, like `target` and `target.type`: `changes.field:status
 changes.after:PUBLISHED` also matches an event where `status` changed to something else while another field became
 `PUBLISHED`. To be sure a specific field took a value, open the matching events and read their `changes`.
 
-Any other `changes` key (`changes.to`, `changes.value`, `changes` alone) is refused with 422 `invalid_query`, reason
-`unknown_field`: the `changes` list is never stored as attributes, so such a key could never match. Use
-`attr.changes.<x>` to look up a custom attribute with that name.
+Any other `changes` key (`changes.to`, `changes.value`, `changes` alone, or any of these in another letter case such
+as `Changes.field`) is refused with 422 `invalid_query`, reason `unknown_field`: the `changes` list is never stored
+as attributes, so such a key could never match. Use `attr.changes.<x>` to look up a custom attribute with that name
+(an event can carry one as a literal top-level dotted key).
 
-`impersonator.name` is the display name of the support person acting as the actor. Under a scope with the
+Core fields always win over a literal attribute of the same name: `changes.before`, `changes.after` and
+`impersonator.name` read the event's columns, so an attribute literally named `changes.after` (sent as a top-level
+dotted key) is reached only as `attr.changes.after`. Before these fields existed, such a term read that attribute.
+
+`impersonator.name` is the display name of the support person acting as the actor, and `impersonator.id` is an alias
+of `impersonator`. Other `impersonator.*` keys are attribute lookups, because ingest keeps any other field sent with
+the impersonator as an attribute (`impersonator.email`, `impersonator.type`); a misspelled key such as
+`impersonator.nmae` therefore matches only events that carry that attribute. Under a scope with the
 `actor_email` mask, a name that carries an address reads as an empty name, as for `actor.name`
 ([scoped read access](scoped-read-access.md#masks)).
 
@@ -115,7 +126,7 @@ These fields also work in webhook filters.
 | actor.type |  | string | actor_type | rollup |
 | actor.name |  | string | actor_name | entities |
 | actor.email |  | string | actor_email | column |
-| impersonator |  | string | impersonator_id | column |
+| impersonator | impersonator.id | string | impersonator_id | column |
 | impersonator.name |  | string | impersonator_name | none |
 | tenant |  | string | tenant_id | entities |
 | tenant.name |  | string | tenant_name | entities |

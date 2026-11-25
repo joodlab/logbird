@@ -16,6 +16,7 @@ env
 actor.id
 actor.name
 actor.email
+impersonator.id
 impersonator.name
 tenant.name
 executor.name

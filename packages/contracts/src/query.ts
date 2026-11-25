@@ -78,7 +78,14 @@ export const QUERY_FIELDS: readonly QueryFieldInfo[] = [
   { key: 'actor.type', type: 'string', column: 'actor_type', description: 'user, service, system, api_key…', suggest: 'rollup' },
   { key: 'actor.name', type: 'string', column: 'actor_name', description: 'Actor display name', suggest: 'entities' },
   { key: 'actor.email', type: 'string', column: 'actor_email', description: 'Actor email', suggest: 'column' },
-  { key: 'impersonator', type: 'string', column: 'impersonator_id', description: 'Who acted on behalf of the actor', suggest: 'column' },
+  {
+    key: 'impersonator',
+    aliases: ['impersonator.id'],
+    type: 'string',
+    column: 'impersonator_id',
+    description: 'Who acted on behalf of the actor',
+    suggest: 'column',
+  },
   { key: 'impersonator.name', type: 'string', column: 'impersonator_name', description: 'Impersonator display name', suggest: 'none' },
   { key: 'tenant', type: 'string', column: 'tenant_id', description: 'Which customer/account it happened in', suggest: 'entities' },
   { key: 'tenant.name', type: 'string', column: 'tenant_name', description: 'Tenant display name', suggest: 'entities' },
@@ -120,10 +127,13 @@ export const QUERY_FIELDS: readonly QueryFieldInfo[] = [
 ];
 
 /** Whether a bare query key names the never-flattened `changes` list without being one of its fields. */
-export const isUnknownChangesKey = (field: string) =>
-  (field === 'changes' || field.startsWith('changes.')) && !QUERY_FIELDS.some((f) => f.key === field || f.aliases?.includes(field));
+export const isUnknownChangesKey = (field: string) => {
+  // In any letter case: `Changes.field` is not a field (keys are case-sensitive) and can never match an attribute.
+  const lower = field.toLowerCase();
+  return (lower === 'changes' || lower.startsWith('changes.')) && !QUERY_FIELDS.some((f) => f.key === field || f.aliases?.includes(field));
+};
 export const CHANGES_FIELD_HINT =
-  'Use changes.field, changes.before or changes.after. Changes are not attributes, so another changes.* key never matches.';
+  'Use changes.field, changes.before or changes.after (lower case). Changes are not attributes, so another changes.* key never matches; use attr.<key> for a literal attribute.';
 
 /** Identifiers SQL mode may reference. `attributes` is Map(String, String): `attributes['metadata.plan'] = 'pro'`. */
 export const SQL_ALLOWED_COLUMNS = [

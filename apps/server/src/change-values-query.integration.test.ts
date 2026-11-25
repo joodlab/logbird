@@ -99,11 +99,20 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       expect(r.status, await r.clone().text()).toBe(201);
       hooks.push({ ...hook, id: (await r.json()).endpoint.id });
     }
+    // A stored filter that later stops compiling: created valid, then rewritten in the database to an unknown key.
+    const staleHook = await createHook('changes.after:PUBLISHED');
+    expect(staleHook.status).toBe(201);
+    const staleId = (await staleHook.json()).endpoint.id as string;
     const refusedHook = await createHook('changes.to:PUBLISHED');
     expect(refusedHook.status).toBe(422);
     expect((await refusedHook.json()).error).toMatchObject({ code: 'invalid_query', details: { reason: 'unknown_field' } });
     const cursorFrom = new Date(+(await webhookCursorClock(prisma)).now - 60_000);
-    for (const { id } of hooks) await prisma.webhookEndpoint.update({ where: { id }, data: { createdAt: cursorFrom, cursorReceivedAt: cursorFrom } });
+    for (const id of [...hooks.map((h) => h.id), staleId])
+      await prisma.webhookEndpoint.update({ where: { id }, data: { createdAt: cursorFrom, cursorReceivedAt: cursorFrom } });
+    const patched = await console_(ownerCookie, `/api/projects/${projectId}/webhooks/${hooks[0]?.id}`, 'PATCH', { filterQuery: 'changes.to:x' });
+    expect(patched.status, await patched.clone().text()).toBe(422);
+    expect((await patched.json()).error).toMatchObject({ code: 'invalid_query', details: { reason: 'unknown_field' } });
+    await prisma.webhookEndpoint.update({ where: { id: staleId }, data: { filterQuery: 'changes.to:PUBLISHED' } });
 
     const ts = (n: number) => new Date(Date.now() - (60 - n) * 60_000).toISOString();
     const tenant = { id: 't1' };
@@ -157,6 +166,28 @@ it('change values and the impersonator name are query fields; unknown changes.* 
         ],
       },
       { id: 'i1', occurredAt: ts(5), action: 'article.updated', tenant, actor, impersonator: { id: 'sup_rita', name: 'Rita Support' } },
+      // A literal top-level dotted key (an attribute, reachable as attr.changes.to) and the same after-value twice.
+      {
+        id: 'l1',
+        occurredAt: ts(7),
+        action: 'article.updated',
+        tenant,
+        actor,
+        'changes.to': 'PUBLISHED',
+        changes: [
+          { field: 'a', before: 'X', after: 'SAME' },
+          { field: 'b', before: 'Y', after: 'SAME' },
+        ],
+      },
+      // Another tenant: a t1 scope must never see it.
+      {
+        id: 'o1',
+        occurredAt: ts(8),
+        action: 'article.status_changed',
+        tenant: { id: 't2' },
+        actor,
+        changes: [{ field: 'status', before: 'DRAFT', after: 'PUBLISHED' }],
+      },
       {
         id: 'i2',
         occurredAt: ts(6),
@@ -219,13 +250,21 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       { q: 'changes.after:true', rows: ['c4'] },
       { q: 'changes.after:"[\\"a\\",\\"b\\"]"', rows: ['c4'] },
       { q: 'changes.after:"{\\"k\\":1}"', rows: ['c4'] },
-      { q: '_exists_:changes.before', rows: ['c1', 'c2', 'c3', 'c4'] },
+      { q: '_exists_:changes.before', rows: ['c1', 'c2', 'c3', 'c4', 'l1'] },
+      { q: 'changes.after:SAME', rows: ['l1'] },
       { q: 'impersonator.name:"Rita Support"', rows: ['i1'] },
       { q: 'impersonator.name:Rita*', rows: ['i1'] },
       { q: 'impersonator.name:"rita@example.invalid"', rows: ['i2'] },
       { q: '_exists_:impersonator.name', rows: ['i1', 'i2'] },
     ];
-    for (const bearer of [reader.secret, plain.secret]) for (const { q, rows } of PROBES) expect(await ids(bearer, q), q).toEqual(rows);
+    // The t1 scoped key: exactly the fixture rows. The project read key also sees the t2 event.
+    for (const { q, rows } of PROBES) expect(await ids(plain.secret, q), q).toEqual(rows);
+    expect(await ids(reader.secret, 'changes.after:PUBLISHED')).toEqual(['c1', 'c3', 'o1']);
+    expect(await ids(reader.secret, 'changes.field:status changes.before:DRAFT')).toEqual(['c1', 'c3', 'o1']);
+    // impersonator.id is the impersonator id; letter case of the changes namespace does not bypass the refusal.
+    expect(await ids(plain.secret, 'impersonator.id:sup_rita')).toEqual(['i1']);
+    for (const q of ['Changes.field:status', 'changes.after:>*'])
+      expect((await get(plain.secret, `/events?${new URLSearchParams({ q, from })}`)).status, q).toBe(422);
 
     // Unknown changes.* keys: 422 invalid_query (unknown_field) naming the valid fields, in search, facets and export.
     for (const q of ['changes.to:PUBLISHED', 'changes.value:x', 'changes:x', '_exists_:changes.new']) {
@@ -241,13 +280,26 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       }
     }
     // An explicit attribute lookup stays an attribute lookup.
-    expect(await ids(reader.secret, 'attr.changes.to:PUBLISHED')).toEqual([]);
+    expect(await ids(reader.secret, 'attr.changes.to:PUBLISHED')).toEqual(['l1']);
 
     // Facets over the arrays count each element.
-    const after = await get(reader.secret, `/facets?${new URLSearchParams({ field: 'changes.after', from, limit: '20' })}`);
+    const after = await get(plain.secret, `/facets?${new URLSearchParams({ field: 'changes.after', from, limit: '20' })}`);
     expect(after.status, after.text).toBe(200);
     const counts = Object.fromEntries(facetResponseSchema.parse(after.body).values.map((v) => [v.value, v.count]));
-    expect(counts).toMatchObject({ PUBLISHED: 2, ARCHIVED: 1, REVIEW: 1, New: 1, true: 1, '12.5': 1 });
+    // Counts are per element: l1's two changes to SAME count twice (documented).
+    expect(counts).toMatchObject({ PUBLISHED: 2, ARCHIVED: 1, REVIEW: 1, New: 1, true: 1, '12.5': 1, SAME: 2 });
+    // Two change levels pair each field with its own value (one zipped expansion), never with another field's.
+    const pairs = await get(
+      plain.secret,
+      `/facets?${new URLSearchParams({ field: 'changes.field', by: 'changes.after', from, limit: '50', byLimit: '20' })}`,
+    );
+    expect(pairs.status, pairs.text).toBe(200);
+    const grouped = Object.fromEntries(
+      facetResponseSchema.parse(pairs.body).values.map((v) => [v.value, Object.fromEntries((v.groups ?? []).map((g) => [g.value, g.count]))]),
+    );
+    expect(grouped.status).toEqual({ PUBLISHED: 1, ARCHIVED: 1, REVIEW: 1 });
+    expect(grouped.label).toEqual({ PUBLISHED: 1 });
+    expect(grouped.title).toEqual({ New: 1 });
 
     // Under the actor_email mask: change values filter as usual; an address-carrying impersonator name reads as empty
     // in filters and shows as the address's pseudonym in facets, while an ordinary name still filters.
@@ -277,6 +329,14 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       return (await prisma.webhookDelivery.findMany({ where: { endpointId: id }, select: { eventId: true } })).map((d) => d.eventId).sort();
     };
     for (const hook of hooks) expect(await discovered(hook.id), `${hook.filter} ${hook.id}`).toEqual(hook.rows);
+    // The stored filter that no longer compiles: discovery holds the endpoint and leaves its cursor where it was.
+    await discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: staleId } }), {
+      now: (await webhookCursorClock(prisma)).now,
+      rollout: new Date(+cursorFrom - 1),
+    });
+    const held = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: staleId } });
+    expect([held.filterReviewRequired, held.filterReviewReason, +held.cursorReceivedAt]).toEqual([true, 'invalid_filter', +cursorFrom]);
+    expect(await prisma.webhookDelivery.count({ where: { endpointId: staleId } })).toBe(0);
     passed = true;
   } finally {
     const failures: unknown[] = [];

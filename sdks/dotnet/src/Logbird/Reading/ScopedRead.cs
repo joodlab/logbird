@@ -482,9 +482,9 @@ internal static class FacetFields
     [
         "action", "category", "outcome", "severity", "environment", "actor.type", "actor", "impersonator", "tenant",
         "executor", "executor.type", "target", "target.type", "source", "env", "actor.id", "actor.name", "actor.email",
-        "impersonator.name", "tenant.name", "executor.name", "job", "attempt", "target.name", "changes.field",
-        "changes.before", "changes.after", "operation", "parent", "request", "trace", "id", "ip", "conformance",
-        "occurredAt", "timestamp", "receivedAt", "description",
+        "impersonator.id", "impersonator.name", "tenant.name", "executor.name", "job", "attempt", "target.name",
+        "changes.field", "changes.before", "changes.after", "operation", "parent", "request", "trace", "id", "ip",
+        "conformance", "occurredAt", "timestamp", "receivedAt", "description",
     ];
 
     private static readonly HashSet<string> NamedSet = new(Named, StringComparer.Ordinal);
