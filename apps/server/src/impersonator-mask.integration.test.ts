@@ -4,12 +4,12 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fieldMaskKey, maskedEmail, purgeProject, read } from '@logbird/clickhouse';
-import { createApiKeyResponseSchema, createProjectResponseSchema, facetResponseSchema } from '@logbird/contracts';
+import { createApiKeyResponseSchema, createProjectResponseSchema, facetResponseSchema, storedWebhookScope } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
 import { webhookCursorClock, webhookSecretKey } from '@logbird/database/webhooks';
 import { expect, it } from 'vitest';
 import { deliverWebhooks } from '../../worker/src/webhook-delivery';
-import { discoverWebhookDeliveries } from '../../worker/src/webhook-discovery';
+import { discoverWebhookDeliveries, webhookEvent } from '../../worker/src/webhook-discovery';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
 import { env } from './env';
@@ -32,6 +32,9 @@ const PSEUDONYM = /^masked:[0-9a-f]{24}$/;
 /** A display label cut at the 512-unit name cap right after an address's local part (the '@' is lost). */
 const LONG_LOCAL = 'rita.long';
 const LONG_PREFIX = 'Support desk ';
+/** 510 and 511 UTF-16 units, one astral character (two units) each: below and at the capped-name rule's threshold. */
+const NAME_510 = `Support \u{1F600}${'a'.repeat(500)}`;
+const NAME_511 = `Support \u{1F600}${'a'.repeat(501)}`;
 const LONG_LABEL = `${LONG_PREFIX}${'-'.repeat(512 - LONG_PREFIX.length - LONG_LOCAL.length)}${LONG_LOCAL}@example.invalid`;
 
 it("a masked reader cannot get the impersonator's address out of any read, export, facet, filter, token or webhook (real services)", async () => {
@@ -189,6 +192,18 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       // A long display label that ends with an address, cut at the 512-unit name cap inside it: the stored name ends
       // with the address's local part and no '@'.
       { id: 'qa-imp-7', occurredAt: ts(7), action: 'article.updated', tenant, actor, impersonator: { id: 'sup_long', name: LONG_LABEL } },
+      // The same person as an actor: their actor pseudonym must differ from their impersonator pseudonym (role-keyed).
+      {
+        id: 'qa-imp-8',
+        occurredAt: ts(8),
+        action: 'article.viewed',
+        tenant,
+        actor: { type: 'user', id: 'u_rita', name: 'Rita Actor', email: 'rita@example.invalid' },
+      },
+      // Names just below and at the 511-unit cap rule, with an astral character (two UTF-16 units, one code point), so
+      // SQL (facet labels) and TypeScript (events) must count UTF-16 units alike.
+      { id: 'qa-imp-9', occurredAt: ts(9), action: 'article.updated', tenant, actor, impersonator: { id: 'sup_510', name: NAME_510 } },
+      { id: 'qa-imp-10', occurredAt: ts(10), action: 'article.updated', tenant, actor, impersonator: { id: 'sup_511', name: NAME_511 } },
     ];
     const ingested = await app.request('/v1/events', {
       method: 'POST',
@@ -198,7 +213,7 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
     expect(ingested.status, await ingested.clone().text()).toBe(202);
     const ingestedAt = (await webhookCursorClock(prisma)).now;
     const from = '2026-01-01T00:00:00Z';
-    const ALL = events.map((e) => e.id);
+    const ALL = events.map((e) => e.id).sort();
     const get = async (bearer: string, path: string) => {
       const r = await v1(bearer, path);
       const text = await r.text();
@@ -230,13 +245,74 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
     const key = fieldMaskKey(env.BETTER_AUTH_SECRET);
     const storedLong = LONG_LABEL.slice(0, 512);
     expect(storedLong.endsWith(LONG_LOCAL)).toBe(true);
+    expect([NAME_510.length, NAME_511.length]).toEqual([510, 511]);
+    // Impersonator pseudonyms are keyed by role; the actor's pseudonym of the same address differs.
+    const imp = (text: string) => maskedEmail(projectId, text, key, 'impersonator');
     const p = {
-      long: maskedEmail(projectId, storedLong.replace(/\s/g, '').toLowerCase(), key),
-      rita: maskedEmail(projectId, 'rita@example.invalid', key),
-      omar: maskedEmail(projectId, 'omar@example.invalid', key),
-      nadia: maskedEmail(projectId, 'nadia@example.invalid', key),
-      solo: maskedEmail(projectId, 'solo@example.invalid', key),
+      long: imp(storedLong.replace(/\s/g, '').toLowerCase()),
+      rita: imp('rita@example.invalid'),
+      omar: imp('omar@example.invalid'),
+      nadia: imp('nadia@example.invalid'),
+      solo: imp('solo@example.invalid'),
+      n511: imp(NAME_511.replace(/\s/g, '').toLowerCase()),
+      ritaActor: maskedEmail(projectId, 'rita@example.invalid', key),
     };
+    expect(p.rita).not.toBe(p.ritaActor);
+    // The masked label of each impersonator id, in facets ('' for events without an impersonator).
+    const LABEL: Record<string, string> = {
+      sup_rita: p.rita,
+      sup_omar: 'Omar Support',
+      sup_nadia: p.nadia,
+      sup_solo: p.solo,
+      sup_long: p.long,
+      sup_510: NAME_510,
+      sup_511: p.n511,
+      '': '',
+    };
+    // Expected two-level facets, computed from the fixture: value -> { count, groups: { group -> count } }.
+    const DIMENSION: Record<string, (e: (typeof events)[number]) => string> = {
+      impersonator: (e) => e.impersonator?.id ?? '',
+      action: (e) => e.action,
+      actor: (e) => e.actor.id,
+    };
+    const expectedFacet = (field: string, by: string) => {
+      const out: Record<string, { count: number; groups: Record<string, number> }> = {};
+      for (const e of events) {
+        const value = DIMENSION[field]?.(e) ?? '';
+        const group = DIMENSION[by]?.(e) ?? '';
+        out[value] ??= { count: 0, groups: {} };
+        out[value].count++;
+        out[value].groups[group] = (out[value].groups[group] ?? 0) + 1;
+      }
+      return out;
+    };
+    const facetMap = (values: { value: string; count: number; groups?: { value: string; count: number }[] }[]) =>
+      Object.fromEntries(
+        values.map((v) => [v.value, { count: v.count, groups: Object.fromEntries((v.groups ?? []).map((g) => [g.value, g.count])) }]),
+      );
+    /** Minimal CSV reader for the export (quoted cells with doubled quotes; no line breaks inside cells here). */
+    const csvRows = (text: string) =>
+      text
+        .trim()
+        .split('\n')
+        .map((line) => {
+          const cells: string[] = [];
+          let cell = '';
+          let quoted = false;
+          for (let i = 0; i < line.length; i++) {
+            const c = line[i];
+            if (quoted && c === '"' && line[i + 1] === '"') {
+              cell += '"';
+              i++;
+            } else if (c === '"') quoted = !quoted;
+            else if (c === ',' && !quoted) {
+              cells.push(cell);
+              cell = '';
+            } else cell += c;
+          }
+          cells.push(cell);
+          return cells;
+        });
     // What each event's impersonator looks like under the mask: name and the email attribute(s).
     const EXPECTED: Record<string, { name: string; attributes: Record<string, string> }> = {
       'qa-imp-1': { name: p.rita, attributes: { 'impersonator.email': p.rita } },
@@ -247,6 +323,9 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       // Paths below the email are dropped whole under the mask (their keys are producer text).
       'qa-imp-6': { name: 'Omar Support', attributes: {} },
       'qa-imp-7': { name: p.long, attributes: {} },
+      'qa-imp-8': { name: undefined as unknown as string, attributes: {} },
+      'qa-imp-9': { name: NAME_510, attributes: {} },
+      'qa-imp-10': { name: p.n511, attributes: {} },
     };
     type Event = { id: string; impersonator: { id: string; name: string } | null; attributes: Record<string, string> };
     const impersonatorOf = (e: Event) => ({
@@ -290,7 +369,9 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       const data = page.body.data as Event[];
       expect(data.map((e) => e.id).sort(), label).toEqual(ALL);
       for (const e of data) expect(impersonatorOf(e), `${label} ${e.id}`).toEqual(EXPECTED[e.id]);
-      for (const e of data) expect(e.impersonator?.name, `${label} ${e.id}`).toSatisfy((n: string) => n === 'Omar Support' || PSEUDONYM.test(n));
+      // The same address as an actor gets the actor's pseudonym, which differs from the impersonator's.
+      expect((data.find((e) => e.id === 'qa-imp-8') as Event & { actor: { email: string } }).actor.email, label).toBe(p.ritaActor);
+      expect(PSEUDONYM.test(p.rita) && PSEUDONYM.test(p.ritaActor), label).toBe(true);
       for (const e of data) expect(Object.keys(e.attributes).join(' '), `${label} ${e.id} keys`).not.toMatch(ADDRESS);
 
       // Event detail: the event and its impersonated parent, payload dropped.
@@ -304,6 +385,8 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         label,
       ).toEqual([['qa-imp-1', EXPECTED['qa-imp-1']]]);
       expect([detail.body.childCount, detail.body.operationSize], label).toEqual([0, 2]);
+      const parent = await get(bearer, '/events/qa-imp-1');
+      expect([parent.status, parent.body.childCount, parent.body.operationSize], label).toEqual([200, 1, 2]);
       for (const id of ALL) {
         const one = await get(bearer, `/events/${id}`);
         expect(one.status, `${label} detail ${id}`).toBe(200);
@@ -316,13 +399,9 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       const byImpersonator = await facets(bearer, { field: 'impersonator' });
       expect(byImpersonator.text, label).not.toMatch(ADDRESS);
       expect(byImpersonator.text, label).not.toContain(LONG_LOCAL);
-      expect(Object.fromEntries(byImpersonator.body.values.map((v) => [v.value, [v.label, v.count]])), label).toEqual({
-        sup_rita: [p.rita, 2],
-        sup_omar: ['Omar Support', 2],
-        sup_nadia: [p.nadia, 1],
-        sup_solo: [p.solo, 1],
-        sup_long: [p.long, 1],
-      });
+      expect(Object.fromEntries(byImpersonator.body.values.map((v) => [v.value, [v.label, v.count]])), label).toEqual(
+        Object.fromEntries(Object.entries(expectedFacet('impersonator', 'impersonator')).map(([v, { count }]) => [v, [LABEL[v], count]])),
+      );
       expect(byImpersonator.body.otherCount, label).toBe(0);
       for (const query of [
         { field: 'impersonator', by: 'impersonator' },
@@ -333,19 +412,15 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         const f = await facets(bearer, { ...query, byLimit: '10' });
         expect(f.text, `${label} ${JSON.stringify(query)}`).not.toMatch(ADDRESS);
         expect(f.text, `${label} ${JSON.stringify(query)}`).not.toContain(LONG_LOCAL);
-        // Nothing dropped: every value's groups add up to its count.
-        for (const v of f.body.values)
-          expect((v.groups ?? []).reduce((n, g) => n + g.count, 0) + (v.groupsOtherCount ?? 0), `${label} ${JSON.stringify(query)}`).toBe(v.count);
+        // Exactly the fixture's values and groups, nothing dropped or merged.
+        expect(facetMap(f.body.values), `${label} ${JSON.stringify(query)}`).toEqual(expectedFacet(query.field, query.by));
+        expect(f.body.otherCount, `${label} ${JSON.stringify(query)}`).toBe(0);
+        for (const v of f.body.values) expect(v.groupsOtherCount ?? 0, `${label} ${JSON.stringify(query)}`).toBe(0);
       }
       const actionsBySupport = await facets(bearer, { field: 'action', by: 'impersonator', byLimit: '10' });
-      const updated = actionsBySupport.body.values.find((v) => v.value === 'article.updated');
-      expect(Object.fromEntries((updated?.groups ?? []).map((g) => [g.value, [g.label, g.count]])), label).toEqual({
-        sup_rita: [p.rita, 1],
-        sup_omar: ['Omar Support', 2],
-        sup_nadia: [p.nadia, 1],
-        sup_solo: [p.solo, 1],
-        sup_long: [p.long, 1],
-      });
+      // Group labels follow the same rule as first-level labels.
+      for (const v of actionsBySupport.body.values)
+        for (const g of v.groups ?? []) expect(g.label, `${label} ${v.value} ${g.value}`).toBe(LABEL[g.value] || g.value);
 
       // Refused: filters on the email attribute (search, facet filter, export filter) and facets on it at either level.
       const refused = [
@@ -378,8 +453,17 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       const csv = await exported(bearer, 'csv');
       expect(csv, label).not.toMatch(ADDRESS);
       expect(csv, label).not.toContain(LONG_LOCAL);
-      expect(csv.trim().split('\n'), label).toHaveLength(ALL.length + 1);
-      for (const pseudonym of [p.rita, p.omar, p.nadia, p.solo, p.long]) expect(csv, `${label} csv ${pseudonym}`).toContain(pseudonym);
+      const [header = [], ...rows] = csvRows(csv);
+      const column = (name: string) => header.indexOf(name);
+      expect(rows.map((r) => r[column('id')]).sort(), label).toEqual(ALL);
+      for (const r of rows) {
+        const id = r[column('id')] ?? '';
+        const attributes = JSON.parse(r[column('attributes')] || '{}') as Record<string, string>;
+        expect(
+          { name: r[column('impersonator_name')] || undefined, attributes: impersonatorOf({ id, impersonator: null, attributes }).attributes },
+          `${label} csv ${id}`,
+        ).toEqual({ ...EXPECTED[id], name: EXPECTED[id]?.name || undefined });
+      }
       const jsonl = await exported(bearer, 'jsonl');
       expect(jsonl, label).not.toMatch(ADDRESS);
       expect(jsonl, label).not.toContain(LONG_LOCAL);
@@ -479,6 +563,18 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
     expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hooks.stale } })).toMatchObject({
       filterReviewRequired: true,
       filterReviewReason: 'invalid_filter',
+    });
+    // The cause at send time: the sender's own lookup refuses the stored filter under the mask (not a timeout), and
+    // finds the same queued event once the filter is allowed.
+    const staleEndpoint = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hooks.stale } });
+    const staleScope = storedWebhookScope(staleEndpoint) ?? null;
+    const [queued] = stale;
+    if (!queued?.receivedAt) throw new Error('missing queued stale delivery');
+    await expect(webhookEvent(clickhouse, staleEndpoint, staleScope, queued.eventId, queued.receivedAt)).rejects.toMatchObject({
+      details: { reason: 'not_allowed' },
+    });
+    expect(await webhookEvent(clickhouse, { ...staleEndpoint, filterQuery: '' }, staleScope, queued.eventId, queued.receivedAt)).toMatchObject({
+      id: queued.eventId,
     });
     passed = true;
   } finally {

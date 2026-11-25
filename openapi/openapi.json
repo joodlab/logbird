@@ -826,7 +826,7 @@
                                       "type": "array"
                                     },
                                     "mask": {
-                                      "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                                      "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                       "example": [
                                         "ip",
                                         "user_agent"
@@ -4837,7 +4837,7 @@
                                     "type": "array"
                                   },
                                   "mask": {
-                                    "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                                    "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                     "example": [
                                       "ip",
                                       "user_agent"
@@ -5109,7 +5109,7 @@
                         "type": "array"
                       },
                       "mask": {
-                        "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                        "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                         "example": [
                           "ip",
                           "user_agent"
@@ -5285,7 +5285,7 @@
                                   "type": "array"
                                 },
                                 "mask": {
-                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                   "example": [
                                     "ip",
                                     "user_agent"
@@ -5800,7 +5800,7 @@
                                   "type": "array"
                                 },
                                 "mask": {
-                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                   "example": [
                                     "ip",
                                     "user_agent"
@@ -10225,7 +10225,7 @@
                               {
                                 "properties": {
                                   "mask": {
-                                    "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                                    "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                     "example": [
                                       "ip",
                                       "user_agent"
@@ -10495,7 +10495,7 @@
                         "additionalProperties": false,
                         "properties": {
                           "mask": {
-                            "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                            "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                             "example": [
                               "ip",
                               "user_agent"
@@ -10688,7 +10688,7 @@
                             {
                               "properties": {
                                 "mask": {
-                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                   "example": [
                                     "ip",
                                     "user_agent"
@@ -11330,7 +11330,7 @@
                         {
                           "properties": {
                             "mask": {
-                              "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                              "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                               "example": [
                                 "ip",
                                 "user_agent"
@@ -11600,7 +11600,7 @@
                         "additionalProperties": false,
                         "properties": {
                           "mask": {
-                            "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                            "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                             "example": [
                               "ip",
                               "user_agent"
@@ -11788,7 +11788,7 @@
                         {
                           "properties": {
                             "mask": {
-                              "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                              "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                               "example": [
                                 "ip",
                                 "user_agent"
@@ -16821,7 +16821,7 @@
                         "type": "array"
                       },
                       "mask": {
-                        "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                        "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                         "example": [
                           "ip",
                           "user_agent"
@@ -16918,7 +16918,7 @@
                           "type": "array"
                         },
                         "mask": {
-                          "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project, and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
+                          "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                           "example": [
                             "ip",
                             "user_agent"

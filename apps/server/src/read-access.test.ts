@@ -90,7 +90,7 @@ describe('masks', () => {
     }
     expect(maskEvent(event, ['actor_email']).actor?.name).toBe('Lina');
   });
-  it("shows the impersonator's email as the pseudonym an actor with that address would have, and judges their name by it", () => {
+  it("shows the impersonator's email as a role-keyed pseudonym, and judges their name by it", () => {
     const support = {
       ...event,
       impersonator: { id: 'sup_1', name: 'Rita <Rita@example.invalid>' },
@@ -104,10 +104,14 @@ describe('masks', () => {
     } as unknown as AuditEvent;
     const masked = maskEvent(support, ['actor_email']);
     const asActor = maskEvent({ ...event, actor: { ...event.actor, email: 'rita@example.invalid' } } as AuditEvent, ['actor_email']);
-    expect(masked.attributes['impersonator.email']).toBe(asActor.actor?.email);
+    // A stable pseudonym, keyed by role: never the one the same address has as an actor.
+    const pseudonym = masked.attributes['impersonator.email'];
+    expect(pseudonym).toMatch(/^masked:[0-9a-f]{24}$/);
+    expect(pseudonym).not.toBe(asActor.actor?.email);
+    expect(maskEvent(support, ['actor_email']).attributes['impersonator.email']).toBe(pseudonym);
     // Paths below the email are dropped whole: their keys are producer text and can be an address themselves.
     expect(Object.keys(masked.attributes).sort()).toEqual(['impersonator.email', 'impersonator.type', 'metadata.plan']);
-    expect(masked.impersonator).toEqual({ id: 'sup_1', name: asActor.actor?.email });
+    expect(masked.impersonator).toEqual({ id: 'sup_1', name: pseudonym });
     expect(masked.attributes['impersonator.type']).toBe('user');
     expect(JSON.stringify(masked)).not.toMatch(/example\.invalid/i);
     // An address only as the name, with no email; an ordinary name stays; other masks leave the impersonator as it is.

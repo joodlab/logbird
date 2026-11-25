@@ -197,11 +197,13 @@ describe('facets under the actor_email mask', () => {
 
   it("labels an impersonator by the name rule judged against the impersonator's email, at both levels", async () => {
     const { ch, query } = client([
-      [{ value: 'sup_1', masked: 0, labf: 1, labt: 'rita@example.invalid', count: 2, total: 2 }],
-      [{ value: 'sup_1', masked: 0, grp: 'sup_1', gmasked: 0, labf: 1, labt: 'rita@example.invalid', count: 2, total: 2 }],
+      [{ value: 'sup_1', masked: 0, labf: 2, labt: 'rita@example.invalid', count: 2, total: 2 }],
+      [{ value: 'sup_1', masked: 0, grp: 'sup_1', gmasked: 0, labf: 2, labt: 'rita@example.invalid', count: 2, total: 2 }],
     ]);
     const result = await facets(ch, 'proj_1', { ...range, field: 'impersonator', by: 'impersonator', limit: 10 }, scope, undefined, key);
-    const pseudonym = maskedEmail('proj_1', 'rita@example.invalid', key);
+    // Flag 2: the impersonator's role-keyed pseudonym, never the actor's.
+    const pseudonym = maskedEmail('proj_1', 'rita@example.invalid', key, 'impersonator');
+    expect(pseudonym).not.toBe(maskedEmail('proj_1', 'rita@example.invalid', key));
     expect(result.values.map((v) => [v.value, v.label])).toEqual([['sup_1', pseudonym]]);
     expect(result.values[0]?.groups?.map((g) => [g.value, g.label])).toEqual([['sup_1', pseudonym]]);
     const [first, second] = calls(query);

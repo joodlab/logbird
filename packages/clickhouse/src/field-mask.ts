@@ -38,17 +38,21 @@ export function maskEvent(event: AuditEvent, mask: Masks, secret?: Buffer): Audi
       };
     }
     // The impersonator (support acting as the actor): the same rule for their name, judged against their email, which
-    // ingest keeps as an attribute. Read before the attributes below are pseudonymized.
+    // ingest keeps as an attribute. Read before the attributes below are pseudonymized. Their pseudonyms are keyed by
+    // role, so they never equal an actor's (maskedEmail).
     if (masked.impersonator) {
       const email = event.attributes[IMPERSONATOR_EMAIL_ATTRIBUTE] ?? '';
       const { name } = masked.impersonator;
       if (actorNameIsSensitive(name, email))
-        masked.impersonator = { ...masked.impersonator, name: maskedEmail(event.projectId, actorNamePseudonymInput(name, email), secret) };
+        masked.impersonator = {
+          ...masked.impersonator,
+          name: maskedEmail(event.projectId, actorNamePseudonymInput(name, email), secret, 'impersonator'),
+        };
     }
     // The email shows as its pseudonym; paths below it are dropped whole, since their keys are producer text.
     for (const [key, value] of Object.entries(masked.attributes))
       if (belowPseudonymizedAttribute(mask, key)) delete masked.attributes[key];
-      else if (pseudonymizedAttribute(mask, key)) masked.attributes[key] = maskedEmail(event.projectId, value, secret);
+      else if (pseudonymizedAttribute(mask, key)) masked.attributes[key] = maskedEmail(event.projectId, value, secret, 'impersonator');
   }
   for (const preset of mask) for (const key of MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];
   return masked;

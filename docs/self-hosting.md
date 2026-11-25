@@ -1183,7 +1183,8 @@ delivery. Replace the scope through PATCH to resume processing.
 `scope.mask` accepts `ip`, `user_agent` and `actor_email`. The signed event uses
 the same [field masks as scoped reads](scoped-read-access.md#masks), with empty
 IP and user agent, stable project-keyed hashes for the actor's and the
-impersonator's email (and for a name that carries one), and the corresponding
+impersonator's email (and for a name that carries one; the impersonator's are
+keyed by role, so they never equal an actor's), and the corresponding
 attribute paths removed (`context.ip`, `context.userAgent`, `actor.email`, and
 the paths below `impersonator.email`). The webhook body is the event projection. It excludes
 the original document. Create and PATCH reject filters on masked fields with
@@ -1193,7 +1194,11 @@ and masks. A masked endpoint whose stored filter names a field a mask now covers
 like any stored filter that no longer compiles. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
 even when `WEBHOOK_SECRET_KEY` is configured separately. Upgrade all workers
 before enabling masks, and disable masked endpoints before rolling workers back
-to code that predates masks.
+to code that predates masks. Releases before the impersonator was covered by
+`actor_email` send and return the impersonator's email in clear to masked
+readers: upgrade every API and worker replica together (or drain the old ones)
+before relying on it, and disable masked endpoints and masked keys before
+rolling back past that change.
 
 Secret rotation accepts an
 `overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH

@@ -30,7 +30,7 @@ import {
   RECENT_PROBLEM_SEVERITY,
 } from '@logbird/contracts';
 import type { z } from 'zod';
-import { ACTOR_NAME_MASK_PARAMS, facetOrderParams, facetOrderSql, MASKED_NAME_COLUMNS, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
+import { ACTOR_NAME_MASK_PARAMS, facetOrderParams, facetOrderSql, MASKED_NAME_COLUMNS, maskActorNameInFilter, maskedFacetText } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
@@ -593,7 +593,7 @@ async function maskedFacets(
   key: Buffer,
 ): Promise<FacetResponse> {
   const params = { ...ACTOR_NAME_MASK_PARAMS, ...facetOrderParams(key, p) };
-  const show = (flag: number | string, text: string) => (Number(flag) ? maskedEmail(p, text, key) : text);
+  const show = (flag: number | string, text: string) => maskedFacetText(p, flag, text, key);
   // The selected label leaves SQL as two scalar columns (never a tuple, whose JSON shape depends on server settings).
   const label = (flag: number | string, text: string, shown: string) => (text ? show(flag, text) : shown);
   const w = await where(ch, p, q, compiled, scope);

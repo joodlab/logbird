@@ -14,9 +14,17 @@
  */
 import { createHmac } from 'node:crypto';
 
-/** A stable per-project pseudonym, so scoped readers can still group by person. */
-export function maskedEmail(projectId: string, email: string, secret: Buffer) {
-  return email ? `masked:${createHmac('sha256', secret).update(`${projectId}\0${email.toLowerCase()}`).digest('hex').slice(0, 24)}` : '';
+/** Whose address a pseudonym stands for. */
+export type MaskedRole = 'actor' | 'impersonator';
+/**
+ * A stable per-project pseudonym, so scoped readers can still group by person. The impersonator's are keyed by role
+ * (a NUL-led tag, which no actor input can start with: project ids are never empty), so they never equal an actor's:
+ * readers who saw impersonator addresses in clear before the mask covered them cannot match those to actor pseudonyms.
+ */
+export function maskedEmail(projectId: string, email: string, secret: Buffer, role: MaskedRole = 'actor') {
+  if (!email) return '';
+  const input = `${role === 'impersonator' ? '\0impersonator\0' : ''}${projectId}\0${email.toLowerCase()}`;
+  return `masked:${createHmac('sha256', secret).update(input).digest('hex').slice(0, 24)}`;
 }
 
 /** Whitespace removed before comparing: JavaScript's `\s`, plus U+0085 and U+200B, on both sides of the rule. */
@@ -84,11 +92,18 @@ export const MASKED_ACTOR_NAME_TEXT_SQL = actorSql.text;
 export const IMPERSONATOR_NAME_IS_SENSITIVE_SQL = impersonatorSql.sensitive;
 /** The impersonator name's facet text under the mask, flagged by `IMPERSONATOR_NAME_IS_SENSITIVE_SQL`. */
 export const MASKED_IMPERSONATOR_NAME_TEXT_SQL = impersonatorSql.text;
-/** Masked facet text and flag for each stored name column the mask judges. */
+/** Facet flag values: 0 shows the text, 1 the actor's pseudonym of it, 2 the impersonator's (`maskedFacetText`). */
+export const FACET_FLAG_ROLE: Record<number, MaskedRole> = { 1: 'actor', 2: 'impersonator' };
+/** Masked facet text and flag (`FACET_FLAG_ROLE`) for each stored name column the mask judges. */
 export const MASKED_NAME_COLUMNS: Record<string, { text: string; flag: string }> = {
   actor_name: { text: MASKED_ACTOR_NAME_TEXT_SQL, flag: ACTOR_NAME_IS_SENSITIVE_SQL },
-  impersonator_name: { text: MASKED_IMPERSONATOR_NAME_TEXT_SQL, flag: IMPERSONATOR_NAME_IS_SENSITIVE_SQL },
+  impersonator_name: { text: MASKED_IMPERSONATOR_NAME_TEXT_SQL, flag: `(${IMPERSONATOR_NAME_IS_SENSITIVE_SQL}*2)` },
 };
+/** A facet value or label under the mask: flagged text becomes the pseudonym of the flag's role. */
+export function maskedFacetText(projectId: string, flag: number | string, text: string, secret: Buffer) {
+  const role = FACET_FLAG_ROLE[Number(flag)];
+  return role ? maskedEmail(projectId, text, secret, role) : text;
+}
 
 /**
  * Keys for ordering tied facet groups under the mask: a keyed hash of each group, so which of several equal counts is
