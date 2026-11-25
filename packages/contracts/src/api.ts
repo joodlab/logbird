@@ -363,7 +363,11 @@ export const readScopeSchema = z
       .min(1)
       .max(SCOPE_MASKS.length)
       .optional()
-      .meta({ example: ['ip', 'user_agent'] }),
+      .meta({
+        example: ['ip', 'user_agent'],
+        description:
+          'Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` (and paths below it) and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project. A masked scope cannot filter or facet on the masked fields (422 `invalid_query`, reason `not_allowed`). Any mask drops the original payload. See docs/scoped-read-access.md#masks.',
+      }),
   })
   .strict();
 export type ReadScope = z.infer<typeof readScopeSchema>;

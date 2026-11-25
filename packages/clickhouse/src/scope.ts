@@ -47,6 +47,23 @@ export const MASKED_ATTRIBUTES: Record<NonNullable<ReadScope['mask']>[number], s
   user_agent: ['context.userAgent'],
   actor_email: ['actor.email'],
 };
+/**
+ * Attribute paths a mask shows as a pseudonym instead of removing, and refuses in filters and facets: the path itself
+ * and every path below it (`impersonator.email.work`). Ingest keeps the impersonator's email, which the SDK input
+ * accepts, as the attribute `impersonator.email`.
+ */
+export const PSEUDONYMIZED_ATTRIBUTES: Record<NonNullable<ReadScope['mask']>[number], string[]> = {
+  ip: [],
+  user_agent: [],
+  actor_email: ['impersonator.email'],
+};
+const under = (key: string, path: string) => key === path || key.startsWith(`${path}.`);
+/** Whether `mask` pseudonymizes attribute `key`. */
+export const pseudonymizedAttribute = (mask: ReadScope['mask'], key: string) =>
+  Boolean(mask?.some((preset) => PSEUDONYMIZED_ATTRIBUTES[preset].some((path) => under(key, path))));
+/** Whether `mask` hides attribute `key` (removed or pseudonymized), so a filter or facet on it would be an oracle. */
+export const maskedAttribute = (mask: ReadScope['mask'], key: string) =>
+  Boolean(mask?.some((preset) => MASKED_ATTRIBUTES[preset].includes(key))) || pseudonymizedAttribute(mask, key);
 
 /** Stable identity of a scope within a project, used to bind cursors to the project and scope that minted them. */
 export function scopeFingerprint(scope: ReadScope | null | undefined, projectId: string) {

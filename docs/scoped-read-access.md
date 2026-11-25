@@ -90,11 +90,23 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   - Free text matches such an event only through its other text.
   - A pseudonym can't be inverted, so `actor.name:"masked:…"` matches only a name a producer literally sent as that
     text. Filter by actor id instead.
+- `actor_email` also covers the **impersonator** (`impersonator`, the support person acting as the actor). Ingest keeps
+  the impersonator's id and name as fields, and an `email` sent with them as the attribute `impersonator.email` (an
+  object there becomes paths below it, such as `impersonator.email.work`). Under the mask:
+  - `attributes["impersonator.email"]` and every path below it show as `masked:<24 hex>`, the same pseudonym that
+    address has as an actor email.
+  - The impersonator's name follows the actor name rule above, judged against `impersonator.email`: a name that
+    carries an address shows as a pseudonym, in events and in facet labels (`impersonator`, at both levels).
+  - Filters and facets on `impersonator.email` or a path below it are refused like `actor.email` (see the last item).
+  - This holds for search results, event detail (the event and its parents), facets, CSV and JSONL exports, viewer
+    tokens minted with the mask, and webhook bodies and filters of masked endpoints. Free text never searches the
+    impersonator's fields, masked or not.
 - Under `actor_email`, if an id's earliest `(received_at, timestamp)` pair holds more than one distinct stored payload
   (legacy data), detail answers 404 and parent traversal stops at that id: choosing between them would read the hidden
   fields. Identical copies, and an earliest version that is unique, are served as usual.
-- The mask covers the actor's own email and name. Addresses a producer writes into other fields (descriptions, target
-  names, attributes) are not masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
+- The mask covers the actor's and the impersonator's email and name. Addresses a producer writes into other fields
+  (descriptions, executor, tenant or target names, ids, or other attributes such as `actor.contactEmail` or
+  `impersonator.Email`) are not masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
   addresses out of those fields when scoped readers must not see them.
 - Case-insensitive matching follows the Unicode case tables of the server's Node.js runtime and of ClickHouse. A test
   pins their agreement for the examples it lists (ASCII, Latin-1, Greek, Cyrillic, Turkish and German). Case pairs
@@ -102,8 +114,8 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 - **Any mask also drops the original payload:** detail returns `payload: null`, and `jsonl-evidence` exports answer
   422 `masked_export`.
 - A masked scope can't filter or facet on a masked field or on the matching attribute paths (`context.ip`,
-  `context.userAgent`, `actor.email`) (422 `invalid_query`, reason `not_allowed`), because the answer would reveal the
-  hidden value.
+  `context.userAgent`, `actor.email`, and for `actor_email` also `impersonator.email` and the paths below it) (422
+  `invalid_query`, reason `not_allowed`), because the answer would reveal the hidden value.
 
 ## Keys
 

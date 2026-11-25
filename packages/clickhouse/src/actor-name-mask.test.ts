@@ -4,6 +4,7 @@ import {
   actorNameIsSensitive,
   actorNamePseudonymInput,
   facetOrderParams,
+  IMPERSONATOR_NAME_IS_SENSITIVE_SQL,
   maskActorNameInFilter,
   maskedEmail,
 } from './actor-name-mask';
@@ -70,6 +71,22 @@ describe('the shared masked-filter compilation (webhook discovery and recheck co
       expect(compiled.params).toMatchObject({ actorMaskSpaces: expect.any(String), actorMaskAstral: expect.any(String) });
     }
     expect(() => compileMaskedQuery('actor.email:"ada@example.org"', ['actor_email'])).toThrow(/masked/);
+    // The impersonator's email attribute, the path below it, in every spelling and form, is refused under actor_email.
+    for (const q of [
+      'impersonator.email:"rita@example.invalid"',
+      'attr.impersonator.email:rita*',
+      'attributes.impersonator.email:/.*@.*/',
+      '_exists_:impersonator.email',
+      'impersonator.email:*',
+      'NOT impersonator.email:x',
+      'impersonator.email:(a OR b)',
+      'impersonator.email.work:x',
+      'action:x OR impersonator.email:>2',
+    ])
+      expect(() => compileMaskedQuery(q, ['actor_email']), q).toThrow(/masked/);
+    // A sibling path is not the email; other masks do not hide it.
+    expect(() => compileMaskedQuery('impersonator.emailVerified:true', ['actor_email'])).not.toThrow();
+    expect(() => compileMaskedQuery('impersonator.email:x', ['ip'])).not.toThrow();
     // Other masks and no mask compile as before.
     expect(compileMaskedQuery('actor.name:"x"', ['ip']).sql).not.toContain('actorMaskSpaces');
     expect(compileMaskedQuery('actor.name:"x"', undefined).sql).not.toContain('actorMaskSpaces');
@@ -100,6 +117,18 @@ describe('the filter rewrite', () => {
       );
       expect(sql.split(DEFINED).length, q).toBe(2);
     }
+  });
+
+  it("reads an empty impersonator name wherever it carries the impersonator's address, defining that test once", () => {
+    const IMP = `(${IMPERSONATOR_NAME_IS_SENSITIVE_SQL} AS __lb_impersonator_name_carries_address)`;
+    const sql = maskActorNameInFilter("impersonator_name = {q0:String} OR startsWith(impersonator_name, {q1:String}) OR actor_name = ''");
+    expect(sql.split(IMP).length).toBe(2);
+    expect(sql.split(DEFINED).length).toBe(2);
+    const rest = sql.replace(IMP, 'S').replace(DEFINED, 'A');
+    expect(rest.match(/\bimpersonator_name\b/g)?.length).toBe(rest.match(/,'',impersonator_name\)/g)?.length);
+    expect(IMPERSONATOR_NAME_IS_SENSITIVE_SQL).toContain("attributes['impersonator.email']");
+    // A filter that never reads the impersonator's name gets no impersonator test.
+    expect(maskActorNameInFilter(compileQuery('actor.name:x').sql)).not.toContain('impersonator');
   });
 
   it('fails closed on a free-text form it does not recognise', () => {
@@ -159,6 +188,22 @@ describe('facets under the actor_email mask', () => {
     expect(second?.query).toContain('tupleElement(lab,2) labt');
     expect(first?.query).toContain('GROUP BY value,masked');
     expect(second?.query_params.facetKeys).toEqual(['0|usr_1', '0|usr_2']);
+  });
+
+  it("labels an impersonator by the name rule judged against the impersonator's email, at both levels", async () => {
+    const { ch, query } = client([
+      [{ value: 'sup_1', masked: 0, labf: 1, labt: 'rita@example.invalid', count: 2, total: 2 }],
+      [{ value: 'sup_1', masked: 0, grp: 'sup_1', gmasked: 0, labf: 1, labt: 'rita@example.invalid', count: 2, total: 2 }],
+    ]);
+    const result = await facets(ch, 'proj_1', { ...range, field: 'impersonator', by: 'impersonator', limit: 10 }, scope, undefined, key);
+    const pseudonym = maskedEmail('proj_1', 'rita@example.invalid', key);
+    expect(result.values.map((v) => [v.value, v.label])).toEqual([['sup_1', pseudonym]]);
+    expect(result.values[0]?.groups?.map((g) => [g.value, g.label])).toEqual([['sup_1', pseudonym]]);
+    const [first, second] = calls(query);
+    for (const sql of [first?.query, second?.query]) {
+      expect(sql).toContain(IMPERSONATOR_NAME_IS_SENSITIVE_SQL);
+      expect(sql).not.toMatch(/argMaxIf\(tuple\(0,impersonator_name\)/);
+    }
   });
 
   it('never interprets text by its content: a producer string that looks masked stays as it is', async () => {

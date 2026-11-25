@@ -1182,7 +1182,8 @@ delivery. Replace the scope through PATCH to resume processing.
 
 `scope.mask` accepts `ip`, `user_agent` and `actor_email`. The signed event uses
 the same [field masks as scoped reads](scoped-read-access.md#masks), with empty
-IP and user agent, a stable project-keyed actor email hash, and the corresponding
+IP and user agent, stable project-keyed hashes for the actor's and the
+impersonator's email (and for a name that carries one), and the corresponding
 attribute paths removed. The webhook body is the event projection. It excludes
 the original document. Create and PATCH reject filters on masked fields with
 HTTP 422 `invalid_query`. Retries and resends apply the endpoint's current scope

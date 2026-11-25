@@ -90,6 +90,32 @@ describe('masks', () => {
     }
     expect(maskEvent(event, ['actor_email']).actor?.name).toBe('Lina');
   });
+  it("shows the impersonator's email as the pseudonym an actor with that address would have, and judges their name by it", () => {
+    const support = {
+      ...event,
+      impersonator: { id: 'sup_1', name: 'Rita <Rita@example.invalid>' },
+      attributes: {
+        'impersonator.email': 'Rita@example.invalid',
+        'impersonator.email.work': 'rita.work@example.invalid',
+        'impersonator.type': 'user',
+        'metadata.plan': 'pro',
+      },
+    } as unknown as AuditEvent;
+    const masked = maskEvent(support, ['actor_email']);
+    const asActor = maskEvent({ ...event, actor: { ...event.actor, email: 'rita@example.invalid' } } as AuditEvent, ['actor_email']);
+    expect(masked.attributes['impersonator.email']).toBe(asActor.actor?.email);
+    expect(masked.attributes['impersonator.email.work']).toMatch(/^masked:[0-9a-f]{24}$/);
+    expect(masked.impersonator).toEqual({ id: 'sup_1', name: asActor.actor?.email });
+    expect(masked.attributes['impersonator.type']).toBe('user');
+    expect(JSON.stringify(masked)).not.toMatch(/example\.invalid/i);
+    // An address only as the name, with no email; an ordinary name stays; other masks leave the impersonator as it is.
+    const nameOnly = { ...support, impersonator: { id: 'sup_2', name: 'Solo@example.invalid' }, attributes: {} } as AuditEvent;
+    expect(maskEvent(nameOnly, ['actor_email']).impersonator?.name).toMatch(/^masked:[0-9a-f]{24}$/);
+    const plain = { ...support, impersonator: { id: 'sup_3', name: 'Rita Support' } } as AuditEvent;
+    expect(maskEvent(plain, ['actor_email']).impersonator?.name).toBe('Rita Support');
+    expect(maskEvent(support, ['ip']).attributes['impersonator.email']).toBe('Rita@example.invalid');
+    expect(maskEvent(support, ['ip']).impersonator?.name).toBe('Rita <Rita@example.invalid>');
+  });
   it('hashes emails per project and case-insensitively', () => {
     const key = viewerTokenKey('z'.repeat(48));
     expect(maskedEmail('p1', 'A@example.invalid', key)).toBe(maskedEmail('p1', 'a@example.invalid', key));

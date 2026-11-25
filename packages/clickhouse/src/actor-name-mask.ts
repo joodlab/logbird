@@ -1,8 +1,10 @@
 /**
  * The `actor_email` mask also hides an actor name that carries an address (#333): a producer that used the address as
- * the display name, put it inside the name ("Ada <ada@example.org>"), or sent an address only as the name. One rule
- * everywhere, in TypeScript for events (`maskEvent`) and in SQL for facets and filters. Normalised (lower-cased, every
- * whitespace character removed), the name is sensitive when it:
+ * the display name, put it inside the name ("Ada <ada@example.org>"), or sent an address only as the name. The same
+ * rule covers the impersonator (the support person acting as the actor): their name, judged against the impersonator's
+ * email, which ingest keeps as the attribute `impersonator.email`. One rule everywhere, in TypeScript for events
+ * (`maskEvent`) and in SQL for facets and filters. Normalised (lower-cased, every whitespace character removed), the
+ * name is sensitive when it:
  * - contains `@`; or
  * - equals the email; or
  * - was cut at its 512-unit storage cap (511 or more UTF-16 units stored) and is a non-empty prefix of the email.
@@ -46,19 +48,44 @@ export const ACTOR_NAME_MASK_PARAMS = { actorMaskSpaces: SPACES_RE2, actorMaskAs
 
 const sqlNormalized = (column: string) => `lowerUTF8(replaceRegexpAll(${column},{actorMaskSpaces:String},''))`;
 const sqlUtf16Length = (column: string) => `(lengthUTF8(${column})+countMatches(${column},{actorMaskAstral:String}))`;
-const N = sqlNormalized('actor_name');
-const E = sqlNormalized('actor_email');
-const SQL_CAPPED_PREFIX = `(${sqlUtf16Length('actor_name')}>=${NAME_CAP_REACHED} AND ${N}!='' AND startsWith(${E},${N}))`;
-/** SQL form of `actorNameIsSensitive` over the stored columns (UInt8). */
-export const ACTOR_NAME_IS_SENSITIVE_SQL = `(position(${N},'@')>0 OR (${E}!='' AND (${N}=${E} OR ${SQL_CAPPED_PREFIX})))`;
-/** SQL form of `actorNamePseudonymInput`, lower-cased as `maskedEmail` lower-cases its input. */
-const PSEUDONYM_INPUT_SQL = `if(${E}!='' AND (position(${N},${E})>0 OR ${SQL_CAPPED_PREFIX}),lowerUTF8(actor_email),${N})`;
+
+/** A party whose name the actor_email mask judges against an email: SQL for the stored name and the stored email. */
+type Party = { name: string; email: string };
+/** The actor's columns. */
+const ACTOR: Party = { name: 'actor_name', email: 'actor_email' };
+/** The impersonator's name column and the attribute ingest keeps their email in (`impersonator` stores id and name only). */
+export const IMPERSONATOR_EMAIL_ATTRIBUTE = 'impersonator.email';
+const IMPERSONATOR: Party = { name: 'impersonator_name', email: `attributes['${IMPERSONATOR_EMAIL_ATTRIBUTE}']` };
+
+function partySql({ name, email }: Party) {
+  const N = sqlNormalized(name);
+  const E = sqlNormalized(email);
+  const cappedPrefix = `(${sqlUtf16Length(name)}>=${NAME_CAP_REACHED} AND ${N}!='' AND startsWith(${E},${N}))`;
+  /** SQL form of `actorNameIsSensitive` over the stored columns (UInt8). */
+  const sensitive = `(position(${N},'@')>0 OR (${E}!='' AND (${N}=${E} OR ${cappedPrefix})))`;
+  /** SQL form of `actorNamePseudonymInput`, lower-cased as `maskedEmail` lower-cases its input. */
+  const pseudonymInput = `if(${E}!='' AND (position(${N},${E})>0 OR ${cappedPrefix}),lowerUTF8(${email}),${N})`;
+  return { sensitive, text: `if(${sensitive},${pseudonymInput},${name})` };
+}
+const actorSql = partySql(ACTOR);
+const impersonatorSql = partySql(IMPERSONATOR);
+/** SQL form of `actorNameIsSensitive` over the stored actor columns (UInt8). */
+export const ACTOR_NAME_IS_SENSITIVE_SQL = actorSql.sensitive;
 /**
  * The actor name's facet text under the mask: a sensitive name becomes its pseudonym's input, and the separate flag
  * column (`ACTOR_NAME_IS_SENSITIVE_SQL`) says so. facets() turns flagged text into the address's pseudonym
  * before returning; text is never interpreted by its content, so no producer string can pass for a masked address.
  */
-export const MASKED_ACTOR_NAME_TEXT_SQL = `if(${ACTOR_NAME_IS_SENSITIVE_SQL},${PSEUDONYM_INPUT_SQL},actor_name)`;
+export const MASKED_ACTOR_NAME_TEXT_SQL = actorSql.text;
+/** The same rule for the impersonator's name, judged against `attributes['impersonator.email']` (UInt8). */
+export const IMPERSONATOR_NAME_IS_SENSITIVE_SQL = impersonatorSql.sensitive;
+/** The impersonator name's facet text under the mask, flagged by `IMPERSONATOR_NAME_IS_SENSITIVE_SQL`. */
+export const MASKED_IMPERSONATOR_NAME_TEXT_SQL = impersonatorSql.text;
+/** Masked facet text and flag for each stored name column the mask judges. */
+export const MASKED_NAME_COLUMNS: Record<string, { text: string; flag: string }> = {
+  actor_name: { text: MASKED_ACTOR_NAME_TEXT_SQL, flag: ACTOR_NAME_IS_SENSITIVE_SQL },
+  impersonator_name: { text: MASKED_IMPERSONATOR_NAME_TEXT_SQL, flag: IMPERSONATOR_NAME_IS_SENSITIVE_SQL },
+};
 
 /**
  * Keys for ordering tied facet groups under the mask: a keyed hash of each group, so which of several equal counts is
@@ -77,16 +104,19 @@ const SEARCH_TEXT_WITHOUT_NAME = "lowerUTF8(concat(description,' ','',' ',tenant
 const FREE_TEXT = /\((hasToken|position)\(search_text, (lowerUTF8\(\{q\d+:String\}\))\)( > 0)?\)/g;
 /** Aliases the rewrite defines once per filter, so a query of many terms stays far below the scoped key's 64 KiB SQL limit. */
 const NAME_CARRIES_ADDRESS = '__lb_name_carries_address';
+const IMPERSONATOR_NAME_CARRIES_ADDRESS = '__lb_impersonator_name_carries_address';
 const MASKED_HAYSTACK = '__lb_masked_haystack';
 
 /**
  * Rewrites a compiled query-language filter so it cannot probe a masked address (#333):
  * - every `actor_name` reference reads an empty string where the name carries an address, so `actor.name:"a@b"` (or
- *   a prefix or wildcard) never matches those rows;
+ *   a prefix or wildcard) never matches those rows; every `impersonator_name` reference likewise, judged against the
+ *   impersonator's email;
  * - free text matches against a sanitised haystack: the stored `search_text`, or on such a row the text it would have
  *   with an empty name. The match function only ever sees the sanitised text, so neither the result nor the work of
  *   the match depends on the hidden name. (Masked free text cannot use the text index; it scans the project and range.)
- * The sensitivity test and the haystack are each written once, as a ClickHouse alias, and referenced from every term.
+ * `search_text` holds the actor's name but not the impersonator's, so only the actor's test changes the haystack.
+ * The sensitivity tests and the haystack are each written once, as a ClickHouse alias, and referenced from every term.
  * Fails closed: a `search_text` use this rewrite does not recognise throws instead of passing through unmasked.
  */
 export function maskActorNameInFilter(sql: string): string {
@@ -97,8 +127,11 @@ export function maskActorNameInFilter(sql: string): string {
     return `(${expr()} AS ${alias})`;
   };
   const carries = () => once(NAME_CARRIES_ADDRESS, () => ACTOR_NAME_IS_SENSITIVE_SQL);
-  // actor_name first: the definitions below add references that must stay as they are (replace never rescans).
-  const named = sql.replace(/\bactor_name\b/g, () => `if(${carries()},'',actor_name)`);
+  const impersonatorCarries = () => once(IMPERSONATOR_NAME_CARRIES_ADDRESS, () => IMPERSONATOR_NAME_IS_SENSITIVE_SQL);
+  // Names first, in one pass: the definitions below add references that must stay as they are (replace never rescans).
+  const named = sql.replace(/\b(actor_name|impersonator_name)\b/g, (column: string) =>
+    column === 'actor_name' ? `if(${carries()},'',actor_name)` : `if(${impersonatorCarries()},'',impersonator_name)`,
+  );
   const uses = (named.match(/\bsearch_text\b/g) ?? []).length;
   let rewritten = 0;
   const out = named.replace(FREE_TEXT, (_match: string, fn: string, arg: string, gt: string | undefined) => {

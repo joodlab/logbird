@@ -30,15 +30,7 @@ import {
   RECENT_PROBLEM_SEVERITY,
 } from '@logbird/contracts';
 import type { z } from 'zod';
-import {
-  ACTOR_NAME_IS_SENSITIVE_SQL,
-  ACTOR_NAME_MASK_PARAMS,
-  facetOrderParams,
-  facetOrderSql,
-  MASKED_ACTOR_NAME_TEXT_SQL,
-  maskActorNameInFilter,
-  maskedEmail,
-} from './actor-name-mask';
+import { ACTOR_NAME_MASK_PARAMS, facetOrderParams, facetOrderSql, MASKED_NAME_COLUMNS, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
@@ -511,8 +503,10 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     expr = `arrayJoin(${expr})`;
     label = expr;
   } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) {
-    label = maskName && field === 'actor' ? MASKED_ACTOR_NAME_TEXT_SQL : `${field}_name`;
-    if (maskName && field === 'actor') labelFlag = ACTOR_NAME_IS_SENSITIVE_SQL;
+    // Under the mask, the actor's and the impersonator's labels follow the name rule (#333).
+    const masked = maskName ? MASKED_NAME_COLUMNS[`${field}_name`] : undefined;
+    label = masked?.text ?? `${field}_name`;
+    if (masked) labelFlag = masked.flag;
   } else if (!col) {
     // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
     // other element types keep their JSON text. An empty array contributes no group.
@@ -527,10 +521,11 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     label = expr;
   }
   // Under the actor_email mask a name that is the address leaves SQL as the lower-cased address plus its flag (#333).
-  if (maskName && col === 'actor_name') {
-    expr = MASKED_ACTOR_NAME_TEXT_SQL;
+  const maskedName = maskName && col ? MASKED_NAME_COLUMNS[col] : undefined;
+  if (maskedName) {
+    expr = maskedName.text;
     label = expr;
-    flag = ACTOR_NAME_IS_SENSITIVE_SQL;
+    flag = maskedName.flag;
     labelFlag = flag;
   }
   return { expr, label, flag, labelFlag, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };
