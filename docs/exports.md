@@ -62,6 +62,8 @@ The receipt also carries the export schema version.
 is the stored receive time of the selected event version, both ISO UTC strings. `job_attempt` is an integer; `conformance` is a score
 from 0 to 100. `targets`, `changes`, `context`, `attributes` are JSON cells. Other CSV fields are strings, with empty
 values for missing optional data. JSONL keeps structured objects/arrays and the contract's numeric types.
+In JSONL and the CSV `changes` cell, each change includes `beforeKind` and `afterKind` when known.
+The existing change text, CSV headers and export schema version stay the same.
 
 ### Spreadsheet handling
 

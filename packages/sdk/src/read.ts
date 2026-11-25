@@ -16,6 +16,9 @@ export interface SearchQuery {
   limit: number;
   order: 'asc' | 'desc';
 }
+/** The JSON kind sent for a change value, with `absent` for an omitted side. */
+export type ChangeValueKind = 'absent' | 'null' | 'string' | 'number' | 'boolean' | 'json';
+
 export interface AuditEvent {
   id: string;
   projectId: string;
@@ -33,7 +36,15 @@ export interface AuditEvent {
   tenant: { id: string; name: string } | null;
   source: string | null;
   targets: { type: string; id: string; name: string }[];
-  changes: { field: string; before: string; after: string }[];
+  changes: {
+    field: string;
+    before: string;
+    after: string;
+    /** Omitted when the original kind is unknown. */
+    beforeKind?: ChangeValueKind;
+    /** Omitted when the original kind is unknown. */
+    afterKind?: ChangeValueKind;
+  }[];
   context: { operationId: string; parentEventId: string; requestId: string; traceId: string; ip: string; userAgent: string };
   attributes: Record<string, string>;
   conformance: number;

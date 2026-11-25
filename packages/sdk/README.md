@@ -86,6 +86,10 @@ audit.track({ action: 'guest.updated', actor,
 // Scheduled work uses actor: { type: 'system', id: 'crm-scheduler' }.
 ```
 
+Send change values as their JSON types. Use `10` for a number and `null` for an explicit
+null. Omit `before` when creating a field or `after` when removing it. Reads include
+`beforeKind` and `afterKind` when the server recorded them.
+
 Do not log raw SDK error objects, events, headers or credentials. Use safe diagnostic messages as above.
 
 ## Outage backpressure

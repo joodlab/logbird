@@ -18,7 +18,7 @@ TRUNCATE TABLE logbird.entities;
 TRUNCATE TABLE logbird.attribute_keys;
 -- Migration 006 / PR #62 adds this MV destination. Clear it before replaying raw rows.
 TRUNCATE TABLE IF EXISTS logbird.event_ids;
--- SELECT * includes received_at and payload, and omits the recomputed MATERIALIZED category.
+-- SELECT * includes received_at, payload and both change kind arrays when present, and omits the recomputed MATERIALIZED category.
 -- Existing materialized views rebuild every destination exactly once.
 INSERT INTO logbird.events SELECT * FROM logbird.events_restore_staging;
 SELECT throwIf(count()!=0,'Restored events differ from staging; keep staging and do not resume writers') FROM (SELECT * FROM logbird.events EXCEPT ALL SELECT * FROM logbird.events_restore_staging);

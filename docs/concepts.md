@@ -42,6 +42,19 @@ carried out has `actor = Lina` and `executor = refunds-worker`.
 `type` + `id`, so `booking:bk_1042` and `payment:bk_1042` are different records. Put field-level before/after
 values in `changes` (never secrets — send `"[redacted]"` to record that a secret changed).
 
+### Change values
+
+Send numbers as JSON numbers and explicit nulls as JSON `null`. Omit the side that does not exist.
+For example, `{"field":"limit","after":10}` creates a value and `{"field":"limit","before":10}` removes it.
+Both `{"field":"limit","after":null}` and `{"field":"limit","after":""}` set a value.
+
+Normalized changes keep their `before` and `after` text and, when known, include `beforeKind` and
+`afterKind`. The kinds are `absent`, `null`, `string`, `number`, `boolean` and `json` (objects
+and arrays). Older events omit the kinds. Scoped and masked reads include available kinds with
+the same access rules as the change text. The console shows an omitted value as “not set” and
+quotes strings with known kinds so that `""`, `"null"` and `"10"` are distinct from absence, null
+and the number 10.
+
 ## Operations — how events relate
 
 `context.operationId` groups everything one logical operation did: the API request, the jobs it enqueued, the
