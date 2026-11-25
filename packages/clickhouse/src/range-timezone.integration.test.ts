@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import type { ClickHouseClient } from './client';
-import { createClickHouseClient, exportEvents, facets, insertEvents, normalizeEvent, purgeProject, searchEvents } from './index';
+import { createClickHouseClient, exportEvents, facets, insertEvents, liveEvents, normalizeEvent, purgeProject, searchEvents } from './index';
 
 /** Every statement of this client runs in a non-UTC session, as on a ClickHouse server configured for that zone. */
 function inZone(ch: ClickHouseClient, zone: string): ClickHouseClient {
@@ -65,6 +65,11 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       };
       expect(await exported(start + 3 * hour)).toEqual(['in-1', 'in-2']);
       expect(await exported(start + hour)).toEqual([]);
+
+      // Live events filter on receipt time as a UTC instant too: an hour after the receipt there is nothing new.
+      const live = async (since: number) => (await liveEvents(ch, p, { since: new Date(since).toISOString(), limit: 10 })).map((e) => e.id).sort();
+      expect(await live(start + 2 * hour - 1)).toEqual(['in-1', 'in-2', 'shifted']);
+      expect(await live(start + 3 * hour)).toEqual([]);
     } finally {
       await purgeProject(base, p);
       await base.close();

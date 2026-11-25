@@ -34,9 +34,7 @@ it('runs the framework request middleware and passes typed audit through next', 
 });
 
 it('answers an incomplete trail with an error and sends no request (#263)', async () => {
-  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-    Response.json({ data: [{ id: 'everyone' }], nextCursor: null, total: 1, tookMs: 0 }),
-  );
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ data: [], nextCursor: null, total: 0, tookMs: 0 }));
   const options = { endpoint: 'http://logbird.test', readKey: 'lb_read_fake', fetch };
   const session: { tenantId?: string } = {};
   // The README's helper call, with the tenant id missing: it throws before reading.

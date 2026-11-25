@@ -2,6 +2,11 @@ import { isExactNumber, parseJsonExact, supportsExactJson } from '@logbird/contr
 import { parseQueryExpression } from '@logbird/contracts/query-syntax';
 import { formatRecordTerm, quoteQueryValue } from '@logbird/contracts/record-selector';
 
+import { LogbirdError } from './errors';
+import { cancelBody, isRedirect, READ_RESPONSE_BYTES, readJson } from './response';
+
+export { LogbirdError, type LogbirdErrorCode, type LogbirdErrorDetails } from './errors';
+
 /** Structural public read types, checked against contracts in read.test.ts. */
 export interface SearchQuery {
   from?: string;
@@ -398,15 +403,95 @@ export interface ReadOptions {
   readKey: string;
   fetch?: typeof fetch;
 }
+
+const MAX_ABANDONED_READS = 4;
+// Distinct fetch transports have independent cleanup limits. All default reads share the built-in transport.
+const abandonedReads = new WeakMap<typeof fetch, number>();
+
+function retainRead(fetcher: typeof fetch, work: Promise<unknown>, cleanup: () => Promise<void> | undefined) {
+  abandonedReads.set(fetcher, (abandonedReads.get(fetcher) ?? 0) + 1);
+  const release = async () => {
+    await cleanup();
+    const remaining = (abandonedReads.get(fetcher) ?? 1) - 1;
+    if (remaining) abandonedReads.set(fetcher, remaining);
+    else abandonedReads.delete(fetcher);
+  };
+  void work.then(release, release);
+}
+
+function textFields(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
+  if (!isObject(value) || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return fields.every((field) => typeof record[field] === 'string');
+}
+
+const storedEventText = [
+  'id',
+  'projectId',
+  'timestamp',
+  'receivedAt',
+  'environment',
+  'action',
+  'category',
+  'outcome',
+  'severity',
+  'description',
+  'schemaVersion',
+  'sdk',
+] as const satisfies readonly (keyof AuditEvent)[];
+
+const valueKinds = new Set<unknown>(['absent', 'null', 'string', 'number', 'boolean', 'json'] satisfies ChangeValueKind[]);
+
+function isStoredChange(change: unknown): boolean {
+  if (!textFields(change, ['field', 'before', 'after'])) return false;
+  return (
+    (change.beforeKind === undefined || valueKinds.has(change.beforeKind)) && (change.afterKind === undefined || valueKinds.has(change.afterKind))
+  );
+}
+
+function isStoredEvent(value: unknown): boolean {
+  if (!textFields(value, storedEventText)) return false;
+  const { actor, impersonator, executor, tenant, source, targets, changes, context, attributes, conformance } = value;
+  return (
+    (actor === null || textFields(actor, ['type', 'id', 'name', 'email'])) &&
+    (impersonator === null || textFields(impersonator, ['id', 'name'])) &&
+    (executor === null || (textFields(executor, ['type', 'id', 'name', 'jobId']) && Number.isFinite(executor.attempt))) &&
+    (tenant === null || textFields(tenant, ['id', 'name'])) &&
+    (source === null || typeof source === 'string') &&
+    Array.isArray(targets) &&
+    targets.every((target) => textFields(target, ['type', 'id', 'name'])) &&
+    Array.isArray(changes) &&
+    changes.every(isStoredChange) &&
+    textFields(context, ['operationId', 'parentEventId', 'requestId', 'traceId', 'ip', 'userAgent']) &&
+    isObject(attributes) &&
+    !Array.isArray(attributes) &&
+    Object.values(attributes).every((item) => typeof item === 'string') &&
+    Number.isFinite(conformance)
+  );
+}
+
 /**
  * One page of events for an explicit search query. The query passes the boundary first (`snapshotSearchQuery`): only
  * its known fields are sent, each read once. It always needs a non-blank `q`: build it with `trailQuery`, or pass
  * `q: 'timestamp:*'` to read a whole project on purpose.
  */
 export async function readAuditTrail(options: ReadOptions, query: SearchInput, signal?: AbortSignal): Promise<SearchResponse> {
-  if (typeof window !== 'undefined') throw new Error('Logbird read keys are server-only');
-  const snapshot = snapshotSearchQuery(query);
-  const url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events`);
+  signal?.throwIfAborted();
+  if (typeof window !== 'undefined') throw new LogbirdError('read_server_only');
+  let snapshot: SearchSnapshot;
+  try {
+    snapshot = snapshotSearchQuery(query);
+  } catch {
+    throw new TrailQueryError('readAuditTrail could not use the query options');
+  }
+  let url: URL;
+  try {
+    url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events`);
+  } catch {
+    signal?.throwIfAborted();
+    throw new LogbirdError('read_request_failed');
+  }
+  signal?.throwIfAborted();
   for (const field of SEARCH_FIELDS) {
     // Own fields only: nothing added to Object.prototype can join the request.
     const value = Object.hasOwn(snapshot, field) ? snapshot[field] : undefined;
@@ -419,12 +504,103 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
       'readAuditTrail',
       "the query has no `q`, so it would read the whole project; build it with trailQuery, or pass `q: 'timestamp:*'` to read the whole project on purpose.",
     );
-  const response = await (options.fetch ?? fetch)(url, {
-    headers: { Authorization: `Bearer ${options.readKey}` },
-    signal: signal ?? AbortSignal.timeout(30_000),
+  const timeout = AbortSignal.timeout(30_000);
+  const controller = new AbortController();
+  const readSignal = controller.signal;
+  const aborted = () => {
+    if (signal?.aborted) throw new DOMException('Logbird read aborted', 'AbortError');
+    if (timeout.aborted) throw new LogbirdError('read_timeout');
+  };
+  let fetcher: typeof fetch;
+  let authorization: string;
+  try {
+    fetcher = options.fetch ?? fetch;
+    authorization = `Bearer ${options.readKey}`;
+  } catch {
+    signal?.throwIfAborted();
+    throw new LogbirdError('read_request_failed');
+  }
+  signal?.throwIfAborted();
+  if ((abandonedReads.get(fetcher) ?? 0) >= MAX_ABANDONED_READS) throw new LogbirdError('read_requests_outstanding');
+  const cancel = () => controller.abort();
+  signal?.addEventListener('abort', cancel, { once: true });
+  timeout.addEventListener('abort', cancel, { once: true });
+  let interrupt!: () => void;
+  const interrupted = new Promise<never>((_, reject) => {
+    interrupt = () => reject(new LogbirdError('read_request_failed'));
   });
-  if (!response.ok) throw new Error(`Logbird read HTTP ${response.status}`);
-  return response.json() as Promise<SearchResponse>;
+  readSignal.addEventListener('abort', interrupt, { once: true });
+  let cancellation: Promise<void> | undefined;
+  let settled = false;
+  const send = async () => {
+    let response: Response;
+    try {
+      response = await fetcher(url, {
+        headers: { Authorization: authorization },
+        redirect: 'manual',
+        signal: readSignal,
+      });
+    } catch {
+      throw new LogbirdError('read_request_failed');
+    }
+    if (readSignal.aborted) {
+      cancellation = cancelBody(response);
+      throw new LogbirdError('read_request_failed');
+    }
+    let status: number;
+    let redirected: boolean;
+    let ok: boolean;
+    try {
+      status = response.status;
+      redirected = isRedirect(response, status);
+      ok = response.ok;
+    } catch {
+      cancellation = cancelBody(response);
+      throw new LogbirdError('read_invalid_response');
+    }
+    if (!ok || redirected) {
+      cancellation = cancelBody(response);
+      throw new LogbirdError(redirected ? 'read_redirect' : 'read_http_error', { status });
+    }
+    let value: unknown;
+    try {
+      value = await readJson(response, READ_RESPONSE_BYTES, readSignal, status, (completion) => {
+        cancellation = completion;
+      });
+    } catch (error) {
+      throw new LogbirdError(error instanceof LogbirdError && error.code === 'response_too_large' ? error.code : 'read_invalid_response', { status });
+    }
+    const result = value as SearchResponse | null;
+    if (
+      !result ||
+      !Array.isArray(result.data) ||
+      !result.data.every(isStoredEvent) ||
+      !(result.nextCursor === null || typeof result.nextCursor === 'string') ||
+      !Number.isSafeInteger(result.total) ||
+      !Number.isFinite(result.tookMs) ||
+      (result.totalExact !== undefined && typeof result.totalExact !== 'boolean')
+    )
+      throw new LogbirdError('read_invalid_response', { status });
+    return result;
+  };
+  let work: Promise<SearchResponse> | undefined;
+  try {
+    signal?.throwIfAborted();
+    work = send().finally(() => {
+      settled = true;
+    });
+    const result = await Promise.race([work, interrupted]);
+    aborted();
+    return result;
+  } catch (error) {
+    if (work) aborted();
+    throw error;
+  } finally {
+    if (work && (!settled || cancellation)) retainRead(fetcher, work, () => cancellation);
+    signal?.removeEventListener('abort', cancel);
+    timeout.removeEventListener('abort', cancel);
+    readSignal.removeEventListener('abort', interrupt);
+  }
 }
 
 /**

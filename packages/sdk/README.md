@@ -1,17 +1,43 @@
 # @logbird/sdk
 
-Dependency-free capture for Node 22+ and modern browsers with Fetch and Web Crypto.
+Dependency-free capture for Node 20+ and modern browsers with Fetch and Web Crypto.
 The structural `EventInput` type is copied from contracts so publishing does not
 require a private workspace package. Keep envelope additions synchronized with contracts.
 
-`@logbird/sdk` is not published on npm yet; `pnpm add @logbird/sdk` returns 404.
-Use `packages/sdk` from source: inside this repository run
-`pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'`, or link a sibling
-checkout with `pnpm add @logbird/sdk@link:../logbird/packages/sdk`. Run `pnpm install`
-in that Logbird clone before linking from your backend. Source exports are
-TypeScript; use `tsx` or a bundler such as Vite or esbuild. Native Node type stripping
-does not support the SDK's constructor parameter property. See the
-[backend integration guide](../../docs/integrating-a-backend.md#configure-delivery).
+## Install
+
+`@logbird/sdk` is not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases)
+attaches it as `logbird-sdk-X.Y.Z.tgz` (built JavaScript and type declarations) with a
+`SHA256SUMS` file. Download both, verify, and install the file. The commands are one
+chain, so a failed download or a checksum that does not match stops it before the install
+(on macOS, use `shasum -a 256 --check` for `sha256sum --check`; with npm, `npm install` for
+`pnpm add`):
+
+```sh
+version=X.Y.Z
+base="https://github.com/joodlab/logbird/releases/download/v$version"
+mkdir -p vendor/logbird && cd vendor/logbird &&
+  curl -fsSLO "$base/SHA256SUMS" && curl -fsSLO "$base/logbird-sdk-$version.tgz" &&
+  grep " logbird-sdk-$version.tgz\$" SHA256SUMS | sha256sum --check &&
+  cd ../.. && pnpm add "./vendor/logbird/logbird-sdk-$version.tgz"
+```
+
+Commit `vendor/logbird/` and the lockfile; the lockfile pins the tarball's SHA-512 integrity.
+You can also depend on the Release URL directly:
+`pnpm add https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`,
+or the same with `npm install` (npm 12 first needs `allow-remote=root` in the project's
+`.npmrc`). With `@logbird/hono` as well, an override makes it use the same SDK tarball: see
+[Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
+for that recipe for pnpm and npm. `@logbird/vue`, `@logbird/nuxt` (which also depends on `@logbird/vue`) and
+`@logbird/tanstack-start` are attached to the same release and type-checked from those tarballs, but there is
+no tested install recipe for them yet.
+
+Requirements: Node 20 or later (`engines.node` `>=20`), or a runtime with Fetch and Web
+Crypto. ES modules only (no CommonJS build); the declarations are checked with TypeScript
+6 and 7 under `moduleResolution` `nodenext` and `bundler`. A source
+checkout of this repository is for contributors ([CONTRIBUTING.md](https://github.com/joodlab/logbird/blob/master/CONTRIBUTING.md)).
+
+## Capture
 
 ```ts
 import { Logbird } from '@logbird/sdk';
@@ -48,6 +74,17 @@ stay below 5 MB and 1000 rows, with a 256 KiB per-event limit. Each request has
 up to 30 seconds and each batch send has up to five minutes. On Node, batching
 and background request and backoff timers are unreferenced. An explicit flush
 or shutdown keeps the active delivery timers referenced while it waits.
+
+Ingest and read requests use manual redirect handling. Configure the endpoint
+as the serving origin. A redirect produces a status-only error. Ingest
+acknowledgements are limited to 4 MiB and read pages to 64 MiB. The SDK cancels
+unused or oversized bodies. An unreadable or oversized acknowledgement leaves
+the covered events eligible for retry. Reads validate the returned event shape
+and have a 30-second deadline. Before each dispatch, a fetch transport with
+four pending cancellations or abandoned reads refuses the new read until cleanup
+completes. Callers control read concurrency. Simultaneous aborts of reads already
+dispatched can put more than four operations into cleanup.
+
 Do not ship private ingest keys in a public browser bundle.
 
 `endpoint` is the public origin that serves the console, the same value as the server's `APP_URL`.
@@ -82,6 +119,22 @@ null. Omit `before` when creating a field or `after` when removing it. Reads inc
 `beforeKind` and `afterKind` when the server recorded them.
 
 Do not log raw SDK error objects, events, headers or credentials. Use safe diagnostic messages as above.
+
+## What search can find
+
+Logbird stores each event exactly as sent, up to the 256 KB event limit (event detail returns
+it unless a field mask hides it, and the `jsonl-evidence` export carries it), and indexes it
+for search with caps. The known fields are columns
+cut to a length in UTF-16 code units (`action` 200, ids 256, names 512, `description` 4,096), with the
+first 64 `targets` and 256 `changes`. Every other field (`metadata.*`, other top-level
+fields, extra keys on the actor, executor, tenant, context or a target) becomes an attribute
+searched by its dotted path, such as `metadata.plan:pro`: flattened to six path segments
+(arrays and deeper objects as JSON text), at most 256 from your fields per event, each text value's first 2 KB.
+A field past a cap is not searchable but stays in the stored event. So an event whose
+`metadata` holds `importer` and a 300-key `settings` object indexes `metadata.importer` and
+the first 255 settings keys; the other 45 are only in event detail and the `jsonl-evidence` export. The
+[backend guide](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#what-search-can-find)
+lists every cap.
 
 ## Outage backpressure
 
@@ -196,6 +249,32 @@ stamping. Redaction runs next, followed by the 256 KiB check on the resulting JS
 Returning null/undefined records a `filtered` drop. A throwing hook records a
 `before_send_failed` drop and reports through `onError`.
 
+Before copying input or invoking `beforeSend`, the SDK checks a 1 MiB lower
+bound of its JSON size and a depth of 1,000 levels within metadata and each
+change value. The lower bound counts one
+byte per UTF-16 code unit of keys and values, plus JSON framing and literals.
+The guard is an approximation. A few hundred bytes of SDK-added framing can
+affect results near the limit, and TypeScript and .NET also estimate numeric
+values differently.
+An event outside those limits is reported as `input_too_large` or
+`input_too_deep`, even if redaction would have reduced the output. Supply
+ordinary JSON data and convert accessor-backed values to plain data at capture.
+The final 256 KiB cap measures the actual serialized UTF-8 bytes. A redaction
+result that exceeds this output limit is reported as `too_large`.
+
+`onWarning` receives a `party_id_normalization` code and the field name when
+party identifiers or target types may be indexed differently because of
+whitespace, length or lone surrogates, or when there are more than 64 targets.
+The SDK sends the values as supplied. The server decides whether to accept
+the event.
+
+`LogbirdError` supports a stable `code` and safe numeric `status` and `count`
+fields when applicable. Use these fields for operational logs. The SDK reports
+approved rejection codes through `onDrop` and leaves its event snapshot
+available for recovery. A read cancelled before dispatch rejects with the
+caller's abort reason. Cancellation after dispatch uses a standard `AbortError`
+with a fixed message.
+
 ## Redaction
 
 Every event passes through client redaction, including events from framework
@@ -237,8 +316,7 @@ Use `\.`, `\*` or `\\` in a path to match a literal dot, star or backslash.
 Double the backslashes in a JavaScript string, as in `'metadata.guest\\.email'` for
 the key `guest.email`. Paths match existing JSON locations. They support
 one-segment wildcards only and do not match value contents or select changes
-by field name. Invalid paths throw during setup and name the option and
-zero-based entry index.
+by field name. Invalid paths throw during setup with code `redaction_options_invalid`.
 
 The SDK preserves top-level `id` and `action` and the party identifiers listed in
 `IDENTIFIER_FIELDS`. It reports rules that directly match identifiers once via
@@ -295,7 +373,7 @@ a literal substring is enough.
 
 `signWebhook`, `verifyWebhook`, `generateWebhookSecret` and
 `WebhookVerificationError` are exported from `@logbird/sdk`. Signing and verification
-are async and use Web Crypto HMAC-SHA256, which Node 22+, browsers and edge runtimes
+are async and use Web Crypto HMAC-SHA256, which Node 20+, browsers and edge runtimes
 all provide, so there are no runtime dependencies. Verification computes one HMAC of
 the body per secret and compares it with each claimed signature (at most 10) in
 constant time.
@@ -419,7 +497,7 @@ ids across separate `track()` calls, resend identical content, including `occurr
 and `executor.attempt`; a new call otherwise gets a fresh timestamp. A different
 event with the same id is rejected with `duplicate_id_conflict: ...`; the original
 is kept. Send a correction with a new id and `context.parentEventId` pointing to it.
-The SDK calls `onDrop` for that event and `onError` with the reason.
+The SDK calls `onDrop` with the approved rejection code and gives `onError` a count.
 
 `503 ingest_pending` and `503 ingest_unavailable` mean retry unsettled events,
 honoring `Retry-After`. Healthy siblings commit before a pending response and remain

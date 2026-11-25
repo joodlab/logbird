@@ -1,7 +1,13 @@
 import { acknowledge } from './acknowledgement';
 import { attachCaptureQueue } from './capture-queue';
-
+import { LogbirdError, safeDiagnostic } from './errors';
+import { checkEventBounds, inputBoundReason, stringifyEvent } from './event-bounds';
+import { type LogbirdWarning, partyWarnings } from './party-warnings';
 import { createRedactor, type RedactionOptions } from './redaction';
+import { ACKNOWLEDGEMENT_BYTES, cancelBody, isRedirect, readJson } from './response';
+
+export { LogbirdError, type LogbirdErrorCode, type LogbirdErrorDetails } from './errors';
+export type { LogbirdWarning } from './party-warnings';
 
 export { DEFAULT_SECRET_KEYS, IDENTIFIER_FIELDS, type RedactionOptions, redact } from './redaction';
 export {
@@ -21,6 +27,17 @@ const SDK_VERSION = '0.3.0';
 const MAX_SEND_MS = 5 * 60_000;
 const MAX_PENDING_NOTIFICATIONS = 1024;
 const MAX_OUTSTANDING_REQUESTS = 4;
+
+function retryAfterSeconds(headers: Headers): number | undefined {
+  try {
+    const header = headers.get('Retry-After');
+    const text = header == null ? '' : String(header).trim();
+    const seconds = text ? Number(text) : Number.NaN;
+    if (Number.isFinite(seconds)) return seconds;
+  } catch {
+    // Use the normal retry backoff when a transport returns an unreadable header.
+  }
+}
 
 /**
  * A string id, or a JavaScript number from an integer key. A JS number cannot hold integers above 2^53 − 1: send
@@ -81,6 +98,8 @@ export type DropReason =
   | 'rejected'
   | 'http_error'
   | 'too_large'
+  | 'input_too_large'
+  | 'input_too_deep'
   | 'invalid'
   | 'before_send_failed'
   | 'redaction_failed'
@@ -114,7 +133,8 @@ export interface LogbirdOptions {
   /** Total delivery time allowed at shutdown, including any request already in progress. Defaults to 10 seconds. */
   shutdownTimeoutMs?: number;
   maxRetries?: number;
-  onError?: (error: Error) => void;
+  onError?: (error: LogbirdError) => void;
+  onWarning?: (warning: Readonly<LogbirdWarning>) => void;
   maxQueueSize?: number;
   dropPolicy?: 'oldest' | 'newest';
   onDrop?: (event: EventInput, details: Readonly<DropDetails>) => void;
@@ -252,23 +272,30 @@ export class Logbird {
     this.drop(entry.event, { reason, mayBeStored: entry.sending || entry.uncertain, ...extra });
   }
   constructor(options: LogbirdOptions) {
-    const snapshot: LogbirdOptions = {
-      apiKey: options.apiKey,
-      endpoint: options.endpoint,
-      enabled: options.enabled,
-      defaults: options.defaults,
-      beforeSend: options.beforeSend,
-      redaction: options.redaction,
-      batchSize: options.batchSize,
-      flushIntervalMs: options.flushIntervalMs,
-      shutdownTimeoutMs: options.shutdownTimeoutMs,
-      maxRetries: options.maxRetries,
-      onError: options.onError,
-      maxQueueSize: options.maxQueueSize,
-      dropPolicy: options.dropPolicy,
-      onDrop: options.onDrop,
-    };
-    if (snapshot.enabled !== false && (!snapshot.apiKey || !snapshot.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
+    let snapshot: LogbirdOptions;
+    try {
+      snapshot = {
+        apiKey: options.apiKey,
+        endpoint: options.endpoint,
+        enabled: options.enabled,
+        defaults: options.defaults,
+        beforeSend: options.beforeSend,
+        redaction: options.redaction,
+        batchSize: options.batchSize,
+        flushIntervalMs: options.flushIntervalMs,
+        shutdownTimeoutMs: options.shutdownTimeoutMs,
+        maxRetries: options.maxRetries,
+        onError: options.onError,
+        onWarning: options.onWarning,
+        maxQueueSize: options.maxQueueSize,
+        dropPolicy: options.dropPolicy,
+        onDrop: options.onDrop,
+      };
+    } catch {
+      throw new LogbirdError('options_invalid');
+    }
+    if (snapshot.enabled !== false && (!snapshot.apiKey || !snapshot.endpoint)) throw new LogbirdError('credentials_required');
+    if (snapshot.endpoint !== undefined && typeof snapshot.endpoint !== 'string') throw new LogbirdError('options_invalid');
     this.endpoint = (snapshot.endpoint ?? '').replace(/\/$/, '');
     this.capacity = snapshot.maxQueueSize ?? 10_000;
     this.batchSize = snapshot.batchSize ?? 100;
@@ -290,22 +317,25 @@ export class Logbird {
       !Number.isInteger(this.retries) ||
       this.retries < 0
     )
-      throw new Error('Invalid batching options');
+      throw new LogbirdError('options_invalid');
     this.options = snapshot;
     attachCaptureQueue(this, {
       defer: (identity, prepare, onFailure) => this.deferCapture(identity, prepare, onFailure),
-      notify: (callback, error) => this.notify(callback, error instanceof Error ? error : new Error('Logbird capture failed')),
+      notify: (callback, error) => this.notify(callback, safeDiagnostic(error, 'capture_failed')),
+      refuse: (identity) => {
+        if (snapshot.enabled !== false) this.refuse(identity, 'invalid');
+      },
     });
     if (snapshot.redaction !== false) {
       this.serializeRedacted = createRedactor(snapshot.redaction, (error) => this.report(error));
     }
   }
   private report(error: unknown) {
-    this.notify(this.options.onError, error instanceof Error ? error : new Error('Logbird delivery failed'));
+    this.notify(this.options.onError, safeDiagnostic(error, 'ingest_request_failed'));
   }
-  private refuse(event: EventInput, reason: DropReason, message?: string) {
+  private refuse(event: EventInput, reason: DropReason, error?: LogbirdError) {
     this.drop(dropIdentity(event), { reason, mayBeStored: false });
-    if (message) this.report(new Error(message));
+    if (error) this.report(error);
   }
   track(event: EventInput, options?: TrackOptions): void {
     this.trackPrepared(event, options, false);
@@ -317,7 +347,7 @@ export class Logbird {
       return;
     }
     if (this.closed && !duringShutdown) {
-      this.refuse(event, 'shutdown', 'Logbird is shut down');
+      this.refuse(event, 'shutdown', new LogbirdError('client_closed'));
       return;
     }
     let entry: Omit<QueuedEvent, 'sequence'>;
@@ -325,13 +355,18 @@ export class Logbird {
     let identity = dropIdentity(event);
     try {
       const defaults = this.options.defaults;
+      checkEventBounds(event);
+      if (defaults) checkEventBounds(defaults);
       let prepared: EventInput = { ...defaults, ...event };
-      const id = typeof prepared.id === 'string' && prepared.id.trim() ? prepared.id : uuidv7();
+      const inputId: unknown = prepared.id;
+      checkEventBounds(inputId);
+      const id = typeof inputId === 'string' && inputId.trim() ? inputId : uuidv7();
       prepared.id = id;
       identity = dropIdentity(prepared);
       prepared.context = { ...defaults?.context, ...event.context };
       prepared.metadata = { ...defaults?.metadata, ...event.metadata };
       prepared.occurredAt ??= new Date().toISOString();
+      if (defaults || this.options.beforeSend) checkEventBounds(prepared);
       if (this.options.beforeSend) {
         failure = 'before_send_failed';
         const result = this.options.beforeSend(prepared);
@@ -342,28 +377,30 @@ export class Logbird {
         if (typeof result.then === 'function') {
           // beforeSend prepares the event synchronously. Observe an accidental async return without queuing it.
           void Promise.resolve(result).catch(() => undefined);
-          this.refuse(identity, 'before_send_failed', 'Logbird beforeSend must be synchronous');
+          this.refuse(identity, 'before_send_failed', new LogbirdError('before_send_failed'));
           return;
         }
         prepared = result;
         failure = 'invalid';
+        checkEventBounds(prepared);
       }
       const supplied: unknown = prepared.id;
+      checkEventBounds(supplied);
       const hookId = typeof supplied === 'string' && supplied.trim() ? supplied : undefined;
       const outgoingId = options?.preserveId ? id : (hookId ?? uuidv7());
       if (supplied !== outgoingId) prepared = { ...prepared, id: outgoingId };
       // The serialized snapshot also enforces the id for events with a top-level toJSON.
       if (this.serializeRedacted) failure = 'redaction_failed';
-      let serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : JSON.stringify(prepared);
+      let serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : stringifyEvent(prepared);
       failure = 'invalid';
       let bytes = new TextEncoder().encode(serialized).length;
       if (bytes > 256 * 1024) {
-        this.refuse(identity, 'too_large', 'Event exceeds 256 KB');
+        this.refuse(identity, 'too_large', new LogbirdError('event_too_large'));
         return;
       }
       const copy = JSON.parse(serialized) as EventInput;
       if (!copy || typeof copy !== 'object' || Array.isArray(copy)) {
-        this.refuse(identity, 'invalid', 'An audit event could not be prepared and was dropped');
+        this.refuse(identity, 'invalid', new LogbirdError('event_invalid'));
         return;
       }
       if (typeof copy.id !== 'string' || !copy.id.trim() || (options?.preserveId && copy.id !== outgoingId)) {
@@ -371,19 +408,21 @@ export class Logbird {
         serialized = JSON.stringify(copy);
         bytes = new TextEncoder().encode(serialized).length;
         if (bytes > 256 * 1024) {
-          this.refuse(identity, 'too_large', 'Event exceeds 256 KB');
+          this.refuse(identity, 'too_large', new LogbirdError('event_too_large'));
           return;
         }
       }
       entry = { event: copy, wireId: copy.id.trim(), serialized, bytes, uncertain: false, sending: false };
-    } catch {
-      this.refuse(
-        identity,
-        failure,
-        failure === 'redaction_failed'
-          ? 'An audit event could not be redacted and was dropped'
-          : 'An audit event could not be prepared and was dropped',
-      );
+    } catch (error) {
+      const bound = failure === 'before_send_failed' ? undefined : inputBoundReason(error);
+      if (failure === 'redaction_failed' && error instanceof LogbirdError && error.code === 'event_too_large') {
+        this.refuse(identity, 'too_large', new LogbirdError('event_too_large'));
+      } else if (bound) {
+        this.refuse(identity, bound, new LogbirdError(bound));
+      } else {
+        const code = failure === 'before_send_failed' || failure === 'redaction_failed' ? failure : 'event_invalid';
+        this.refuse(identity, failure, new LogbirdError(code));
+      }
       return;
     }
     // beforeSend is host code and can shut down the client before preparation returns.
@@ -396,6 +435,9 @@ export class Logbird {
       return;
     }
     this.queue.push({ ...entry, sequence: ++this.lastSequence });
+    if (this.options.onWarning) {
+      for (const warning of partyWarnings(entry.event)) this.notify(this.options.onWarning, warning);
+    }
     if (this.queue.length >= this.batchSize) this.backgroundFlush();
     else this.schedule();
   }
@@ -407,7 +449,11 @@ export class Logbird {
     this.completeFlushes();
     return true;
   }
-  private deferCapture(identity: EventInput, prepare: () => Promise<EventInput>, onFailure: () => void): Promise<void> | undefined {
+  private deferCapture(
+    identity: EventInput,
+    prepare: () => Promise<EventInput>,
+    onFailure: (error: LogbirdError) => void,
+  ): Promise<void> | undefined {
     if (this.notifying || this.closed || !this.makeRoom()) {
       if (this.options.enabled !== false) this.refuse(identity, this.notifying ? 'diagnostic_reentry' : this.closed ? 'shutdown' : 'queue_full');
       return;
@@ -418,23 +464,31 @@ export class Logbird {
     });
     const capture = { identity: dropIdentity(identity), done, finish };
     this.preparing.add(capture);
-    const fail = () => {
-      if (this.options.enabled !== false) this.refuse(capture.identity, 'invalid');
-      onFailure();
+    const fail = (error: unknown) => {
+      if (!this.preparing.delete(capture)) return;
+      const bound = inputBoundReason(error);
+      if (this.options.enabled !== false) this.refuse(capture.identity, bound ?? 'invalid');
+      try {
+        onFailure(new LogbirdError(bound ?? 'capture_failed'));
+      } finally {
+        finish();
+      }
     };
-    const settle = (event?: EventInput) => {
+    const settle = (event: EventInput) => {
       if (!this.preparing.delete(capture)) return;
       try {
-        if (!event) fail();
-        else if (this.closed && this.options.enabled !== false) this.trackPrepared(event, { preserveId: true }, true);
+        if (this.closed && this.options.enabled !== false) this.trackPrepared(event, { preserveId: true }, true);
         else this.track(event, { preserveId: true });
+      } catch {
+        if (this.options.enabled !== false) this.refuse(capture.identity, 'invalid');
+        onFailure(new LogbirdError('capture_failed'));
       } finally {
         finish();
       }
     };
     void prepare()
-      .then(settle, () => settle())
-      .catch(fail);
+      .then(settle, fail)
+      .catch(() => undefined);
     return done;
   }
   private backgroundFlush() {
@@ -471,11 +525,12 @@ export class Logbird {
     }
   }
   private async request(batch: QueuedEvent[], remainingMs: number) {
-    if (this.outstandingRequests >= MAX_OUTSTANDING_REQUESTS) throw new Error('Logbird transport has too many outstanding requests');
+    if (this.outstandingRequests >= MAX_OUTSTANDING_REQUESTS) throw new LogbirdError('ingest_requests_outstanding');
     const body = `{"events":[${batch.map((entry) => entry.serialized).join(',')}]}`;
     let status = 0;
-    let retryAfter: string | null = null;
-    const answer = () => ({ status, retryAfter, result: undefined as unknown });
+    let retryAfter: number | undefined;
+    let redirected = false;
+    const answer = () => ({ status, retryAfter, redirected, result: undefined as unknown, bodyFailure: undefined as LogbirdError | undefined });
     try {
       return await this.timed(Math.max(1, Math.floor(Math.min(30_000, remainingMs))), answer, async (signal) => {
         let cancellation: Promise<void> | undefined;
@@ -485,6 +540,7 @@ export class Logbird {
           for (const entry of batch) entry.sending = true;
           const response = await fetch(`${this.endpoint}/v1/events`, {
             method: 'POST',
+            redirect: 'manual',
             headers: {
               Authorization: `Bearer ${this.options.apiKey}`,
               'Content-Type': 'application/json',
@@ -496,17 +552,37 @@ export class Logbird {
             signal,
           });
           if (signal.aborted) {
-            cancellation = response.body?.cancel().catch(() => undefined);
+            cancellation = cancelBody(response);
             return answer();
           }
-          status = response.status;
-          retryAfter = response.headers.get('Retry-After');
-          if (!response.ok && status !== 503) {
-            cancellation = response.body?.cancel().catch(() => undefined);
+          let ok: boolean;
+          try {
+            const code = response.status;
+            if (!Number.isInteger(code) || code < 100 || code > 599) {
+              cancellation = cancelBody(response);
+              return answer();
+            }
+            const redirect = isRedirect(response, code);
+            ok = response.ok;
+            retryAfter = retryAfterSeconds(response.headers);
+            status = code;
+            redirected = redirect;
+          } catch {
+            cancellation = cancelBody(response);
             return answer();
           }
-          const result: unknown = await response.json().catch(() => undefined);
-          return { status, retryAfter, result };
+          if (redirected || (!ok && status !== 503)) {
+            cancellation = cancelBody(response);
+            return answer();
+          }
+          try {
+            const result = await readJson(response, ACKNOWLEDGEMENT_BYTES, signal, status, (completion) => {
+              cancellation = completion;
+            });
+            return { ...answer(), result };
+          } catch (error) {
+            return { ...answer(), bodyFailure: error instanceof LogbirdError ? error : undefined };
+          }
         } finally {
           if (cancellation) {
             // Return the classification immediately but keep owning transport cleanup until it finishes.
@@ -535,8 +611,8 @@ export class Logbird {
     for (let attempt = 1; ; attempt++) {
       this.checkShutdownDeadline();
       const remainingMs = deadline - monotonicNow();
-      if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
-      const { status, retryAfter, result } = await this.request(wire, remainingMs);
+      if (remainingMs <= 0) throw new LogbirdError('ingest_timeout');
+      const { status, retryAfter, result, redirected, bodyFailure } = await this.request(wire, remainingMs);
       const success = status >= 200 && status < 300;
       let progressed = false;
       if (!this.stop.signal.aborted && (success || status === 503)) {
@@ -554,7 +630,7 @@ export class Logbird {
             this.drop(entry.event, { reason: 'rejected', code, mayBeStored: entry.uncertain && !definitive });
             rejectedCount++;
           }
-          if (rejectedCount) this.report(new Error(`${rejectedCount} events rejected by Logbird`));
+          if (rejectedCount) this.report(new LogbirdError('events_rejected', { count: rejectedCount }));
           if (ack.delivered)
             for (const index of ack.delivered) {
               const entry = wire[index];
@@ -572,19 +648,19 @@ export class Logbird {
       }
       if (status < 400 || status >= 500) for (const entry of batch) entry.uncertain = true;
       this.stop.signal.throwIfAborted();
-      const retry = success || status === 0 || status === 429 || status >= 500;
+      const retry = !redirected && (success || status === 0 || status === 429 || status >= 500);
       if (!retry) {
         for (const entry of batch.splice(0)) this.dropQueued(entry, 'http_error', { status });
-        this.report(new Error(`Logbird HTTP ${status}; batch dropped`));
+        this.report(new LogbirdError(redirected ? 'ingest_redirect' : 'ingest_http_error', { status }));
         this.completeFlushes();
         return;
       }
       if ((!progressed && retries >= this.retries) || attempt >= maxAttempts) {
-        if (success) throw new Error('Logbird response did not acknowledge all events');
-        throw new Error(status ? `Logbird HTTP ${status}` : 'Logbird request failed');
+        if (bodyFailure?.code === 'response_too_large') throw bodyFailure;
+        if (success) throw new LogbirdError('ingest_unacknowledged', { status });
+        throw new LogbirdError(status ? 'ingest_http_error' : 'ingest_request_failed', { status });
       }
-      const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
-      const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
+      const delay = retryAfter === undefined ? Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random()) : retryAfter * 1000;
       if (!progressed) retries++;
       await this.timed(Math.max(0, Math.min(60_000, delay, deadline - monotonicNow())), () => undefined);
     }
@@ -731,7 +807,7 @@ export class Logbird {
     }
   }
   private abortShutdown() {
-    this.stop.abort(new Error('Logbird shutdown time limit exceeded'));
+    this.stop.abort(new LogbirdError('shutdown_timeout'));
   }
   private checkShutdownDeadline() {
     if (this.shutdownDeadline !== undefined && monotonicNow() >= this.shutdownDeadline) this.abortShutdown();
