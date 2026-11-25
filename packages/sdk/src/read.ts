@@ -270,6 +270,17 @@ function frozen<T extends object>(fields: T): Readonly<T> {
   return Object.freeze(out) as Readonly<T>;
 }
 
+/**
+ * A field read once, as the boundary reads any field (own, inherited from a class, or served by a Proxy), except a value
+ * that only Object.prototype holds: a window or an order added there must never choose a trail's window for it.
+ */
+function notFromObjectPrototype(input: object, key: 'range' | 'order'): unknown {
+  for (let object: object | null = input; object !== null; object = Object.getPrototypeOf(object)) {
+    if (object === Object.prototype) return undefined;
+    if (Object.getOwnPropertyDescriptor(object, key)) break;
+  }
+  return (input as Record<string, unknown>)[key];
+}
 /** The trail input boundary: the caller's trail as a plain frozen snapshot of primitives, each property read once. */
 export function snapshotTrail(input: TrailInput, where = 'trailQuery'): TrailSnapshot {
   if (!isRecord(input)) return fail(where, 'expects an options object.');
@@ -290,7 +301,7 @@ export function snapshotTrail(input: TrailInput, where = 'trailQuery'): TrailSna
   const givenTenant = readOnce(input, 'tenant');
   const tenant = givenTenant.present ? selector(where, 'tenant', givenTenant.value) : undefined;
   const q = optionalText(where, 'q', (input as { q?: unknown }).q);
-  const givenRange: unknown = (input as { range?: unknown }).range;
+  const givenRange: unknown = notFromObjectPrototype(input, 'range');
   let range: TrailSnapshot['range'];
   if (givenRange === SERVER_DEFAULT_RANGE) range = SERVER_DEFAULT_RANGE;
   else if (givenRange !== undefined) {
@@ -302,7 +313,7 @@ export function snapshotTrail(input: TrailInput, where = 'trailQuery'): TrailSna
       return fail(where, '`range` was given without `from` or `to`; pass `from` (a trail needs it), or `range: SERVER_DEFAULT_RANGE`.');
     range = frozen({ from, to });
   }
-  const order = optionalChoice(where, 'order', (input as { order?: unknown }).order, ['asc', 'desc'] as const);
+  const order = optionalChoice(where, 'order', notFromObjectPrototype(input, 'order'), ['asc', 'desc'] as const);
   const limit = optionalLimit(where, (input as { limit?: unknown }).limit);
   const cursor = optionalText(where, 'cursor', (input as { cursor?: unknown }).cursor);
   return frozen({
@@ -805,7 +816,8 @@ async function* pages(reader: ReadOptions, first: Partial<SearchQuery>, signal?:
     }
     const next = page.nextCursor;
     // A repeated cursor would loop.
-    if (next !== null && used.has(next)) throw new LogbirdError('read_invalid_response');
+    // A cursor that cannot be sent back as given (empty, or not well-formed text) would restart or break the pass.
+    if (next !== null && (next === '' || /[\uD800-\uDFFF]/u.test(next) || used.has(next))) throw new LogbirdError('read_invalid_response');
     for (const event of page.data) {
       signal?.throwIfAborted();
       if (yielded.has(event.id)) continue; // an id stored at two positions (older data) is yielded once

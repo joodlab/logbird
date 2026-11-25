@@ -1,4 +1,5 @@
 import type { EventDetail as ContractDetail } from '@logbird/contracts';
+import { supportsExactJson } from '@logbird/contracts/json';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
   type AuditEvent,
@@ -282,14 +283,21 @@ describe('the helpers keep what the caller and the server gave', () => {
     }
   });
 
-  it('keeps the exact digits of numbers in the original payload, and refuses an id no URL path can hold', async () => {
+  it('keeps the exact digits of numbers in the original payload where the runtime can, and refuses them where it cannot', async () => {
     const body = `{"event":${JSON.stringify(event('e1'))},"payload":{"accountId":9007199254740993,"ratio":0.1000000000000000055511151231257827},"parents":[],"childCount":0,"operationSize":1}`;
     const fetch = vi.fn(async () => new Response(body, { status: 200 }));
     const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
-    const detail = await readAuditEvent(options, 'e1');
-    expect(JSON.stringify(detail?.payload)).toBe('{"accountId":9007199254740993,"ratio":0.1000000000000000055511151231257827}');
+    if (supportsExactJson) {
+      const detail = await readAuditEvent(options, 'e1');
+      expect(JSON.stringify(detail?.payload)).toBe('{"accountId":9007199254740993,"ratio":0.1000000000000000055511151231257827}');
+    } else await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: 'read_inexact_number' });
+  });
+
+  it('refuses an id no URL path can hold, before any request', async () => {
+    const fetch = vi.fn(async () => new Response('{}', { status: 200 }));
+    const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
     for (const id of ['.', '..']) await expect(readAuditEvent(options, id)).rejects.toThrow(/cannot be addressed in a URL path/);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -558,5 +566,43 @@ describe('closed check: inherited fields, single pages and wire shapes', () => {
     const fetch = vi.fn(async () => new Response(body, { status: 200 }));
     const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
     await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: 'read_invalid_response' });
+  });
+});
+
+describe('review threads', () => {
+  it('never takes a range or order from Object.prototype for an ordinary object, while class getters still count', () => {
+    const proto = Object.prototype as Record<string, unknown>;
+    proto.range = SERVER_DEFAULT_RANGE;
+    proto.order = 'asc';
+    try {
+      expect(() => trailQuery({ tenant: 'acme' } as unknown as TrailQuery)).toThrow(/needs a `range`/);
+      expect(Object.hasOwn(trailQuery({ tenant: 'acme', range: { from: FROM } }), 'order')).toBe(false);
+      class Scoped {
+        get tenant() {
+          return 'acme';
+        }
+        get range() {
+          return { from: FROM };
+        }
+      }
+      expect(trailQuery(new Scoped() as unknown as TrailQuery)).toMatchObject({ from: FROM, q: 'tenant:"acme"' });
+    } finally {
+      delete proto.range;
+      delete proto.order;
+    }
+  });
+
+  it('refuses a next cursor that cannot be sent back as given, before yielding its page', async () => {
+    for (const nextCursor of ['', 'bad\uD800cursor']) {
+      const fetch = vi.fn(async () => json({ data: [event('a')], nextCursor, total: 2, range: { from: FROM, to: TO }, tookMs: 1 }));
+      const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+      const seen: string[] = [];
+      await expect(
+        (async () => {
+          for await (const e of iterateAuditTrail(options, { tenant: 'acme', range: { from: FROM } })) seen.push(e.id);
+        })(),
+      ).rejects.toMatchObject({ code: 'read_invalid_response' });
+      expect(seen).toEqual([]);
+    }
   });
 });
