@@ -80,7 +80,7 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   project. Where that matters, don't give that reader the actor fields at all. Keying pseudonyms per read key or scope
   is tracked in #370.
 - It also hides an actor **name that carries an address**: lower-cased with all whitespace removed, the name contains
-  `@`, or equals the email, or the name is 511 UTF-16 code units or longer (names are stored cut at 512, or 511 when a
+  `@` (or its fullwidth or small compatibility forms `＠` and `﹫`), or equals the email, or the name is 511 UTF-16 code units or longer (names are stored cut at 512, or 511 when a
   surrogate pair straddles the cut; the cut can fall inside an address and drop its `@`, so a name that may have been
   cut always counts). That covers a producer that used the address as the display name, put
   it inside the name (`Ada <ada@example.org>`), or sent an address only as the name.
@@ -97,9 +97,10 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   the impersonator's id and name as fields, and an `email` sent with them as the attribute `impersonator.email` (an
   object there becomes paths below it, such as `impersonator.email.work`). Under the mask:
   - `attributes["impersonator.email"]` shows as `masked:<24 hex>`, stable per project like the actor's, but keyed by
-    role: the two roles hash disjoint inputs, so an impersonator's pseudonym does not match the actor pseudonym of the
-    same address. A reader who saw impersonator addresses in clear before the mask covered them therefore can't use
-    them to identify actor pseudonyms.
+    role: the two roles hash disjoint inputs, so an impersonator's pseudonym can't be compared directly with the actor
+    pseudonym of the same address, and impersonator addresses seen in clear before the mask covered them don't reveal
+    actor pseudonyms. Within each role, pseudonyms stay linkable as described above: a reader who learns the actor
+    pseudonym of an address (for example by causing an actor event with it) can still recognise it in actor results.
   - Paths below it are removed from the event: their keys are producer text and can be an address themselves.
   - The impersonator's name follows the actor name rule above, judged against `impersonator.email`: a name that
     carries an address shows as a pseudonym, in events and in facet labels (`impersonator`, at both levels).

@@ -25,6 +25,9 @@ describe('the name rule shared by events and SQL', () => {
     ['alice @ example.com', 'alice@example.com', true],
     // Round 2: a name that carries an address in any form, with or without a matching email.
     ['Ada <ada@example.org>', 'ada@example.org', true],
+    // Compatibility forms of '@' (NFKC maps both to '@'): fullwidth and small commercial at.
+    ['Rita\uFF20example.invalid', 'rita@example.invalid', true],
+    ['rita\uFE6Bexample.invalid', '', true],
     ['contact@acme.example', '', true],
     ['Bob (bob at example)', 'bob@example.com', false],
     ['bob@other.example', 'alice@example.com', true],
@@ -68,7 +71,9 @@ describe('the pseudonym a sensitive name shows', () => {
     ['Support <old@example.org>', 'new@example.org', 'new@example.org'],
     ['ada@example.org', `ada${' '.repeat(509)}`, `ada${' '.repeat(509)}`],
     // A capped name that normalises to nothing (zero-width spaces) still gets a pseudonym, of the name as stored.
-    ['​'.repeat(511), '', '​'.repeat(511)],
+    ['\u200B'.repeat(511), '', '\u200B'.repeat(511)],
+    // A whitespace-only stored email is still the email (the attribute's own pseudonym hashes it too).
+    ['ada@example.org', ' ', ' '],
   ])('%j with email %j hashes %j', (name, email, input) => {
     expect(actorNamePseudonymInput(name, email)).toBe(input);
   });
@@ -78,7 +83,8 @@ describe('the pseudonym a sensitive name shows', () => {
     expect(maskedFacetText('p', 0, 'Bob', key)).toBe('Bob');
     expect(maskedFacetText('p', 1, 'a@b.example', key)).toBe(maskedEmail('p', 'a@b.example', key));
     expect(maskedFacetText('p', '2', 'a@b.example', key)).toBe(maskedEmail('p', 'a@b.example', key, 'impersonator'));
-    expect(() => maskedFacetText('p', 3, 'a@b.example', key)).toThrow(/Unknown masked facet flag/);
+    for (const flag of [3, -1, '', ' ', '01', '1.0', 'x'])
+      expect(() => maskedFacetText('p', flag, 'a@b.example', key), JSON.stringify(flag)).toThrow(/Unknown masked facet flag/);
   });
 });
 
@@ -86,8 +92,12 @@ describe('the shared masked-filter compilation (webhook discovery and recheck co
   it('rewrites actor.name and free text for the actor_email mask, with its parameters, and still refuses actor.email', () => {
     for (const q of ['actor.name:"ada@example.org"', 'ada@example.org']) {
       const compiled = compileMaskedQuery(q, ['actor_email']);
-      expect(compiled.sql, q).toContain("position(lowerUTF8(replaceRegexpAll(actor_name,{actorMaskSpaces:String},'')),'@')>0");
-      expect(compiled.params).toMatchObject({ actorMaskSpaces: expect.any(String), actorMaskAstral: expect.any(String) });
+      expect(compiled.sql, q).toContain("match(lowerUTF8(replaceRegexpAll(actor_name,{actorMaskSpaces:String},'')),{actorMaskAt:String})");
+      expect(compiled.params).toMatchObject({
+        actorMaskSpaces: expect.any(String),
+        actorMaskAstral: expect.any(String),
+        actorMaskAt: expect.any(String),
+      });
     }
     expect(() => compileMaskedQuery('actor.email:"ada@example.org"', ['actor_email'])).toThrow(/masked/);
     // The impersonator's email attribute, the path below it, in every spelling and form, is refused under actor_email.
