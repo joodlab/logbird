@@ -272,7 +272,9 @@ SETTINGS index_granularity = 8192;
 ```
 
 The two change kind arrays share the order and 256-entry cap of `changes_fields`,
-`changes_before` and `changes_after`. Empty kind arrays on earlier rows mean unknown.
+`changes_before` and `changes_after`. An empty kind array means unknown. Earlier writers
+leave both empty. In-process values that serialize differently in the stored payload and
+indexed text leave the affected kind array empty.
 The additive migration leaves the text columns, original payload and existing parts in place.
 
 Rollups (materialized views, populated on insert):

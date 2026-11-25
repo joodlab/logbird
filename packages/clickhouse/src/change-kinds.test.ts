@@ -65,3 +65,10 @@ it('omits unknown kinds for old rows regardless of their text or payload', () =>
   expect(toEvent({ ...legacy, changes_before_kind: [], changes_after_kind: [] }).changes).toStrictEqual(expected);
   expect(toEvent({ ...legacy, changes_after_kind: ['null', 'string'] }).changes).toStrictEqual(expected);
 });
+
+it('omits an untrustworthy kind when an in-process value serializes differently in the payload', () => {
+  const after = { toJSON: (key: string) => (key === 'after' ? 7 : false) };
+  const row = normalize({ action: 'record.updated', changes: [{ field: 'value', before: null, after }] });
+  expect(JSON.parse(row.payload).changes).toEqual([{ field: 'value', before: null, after: 7 }]);
+  expect(toEvent(row).changes).toStrictEqual([{ field: 'value', before: 'null', beforeKind: 'null', after: 'false' }]);
+});

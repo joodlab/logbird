@@ -134,7 +134,7 @@ export type ChangeValueKind = z.infer<typeof changeValueKindSchema>;
 const changeText = z
   .string()
   .describe(
-    'Existing indexed text. Absent: empty string. Null: "null". String: its contents, without JSON quotes. Number: its JSON number text (exact digits preserved by ingest). Boolean: "true" or "false". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.',
+    'Existing indexed text. Absent: empty string. Null: "null". String: its contents, without JSON quotes. Number: JSON number text that preserves numeric precision. Equivalent spellings may normalize (for example, 19.90 to 19.9 or 1e3 to 1000). Boolean: "true" or "false". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.',
   );
 const changeKind = changeValueKindSchema
   .describe(

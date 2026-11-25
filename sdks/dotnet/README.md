@@ -93,6 +93,8 @@ one, and `AuditChange.Secret("password")` records that a secret changed without 
 Pass numbers as numbers and `null` as an explicit value. `Set` omits the previous value and
 `Removed` omits the new value. On reads, `StoredChange.BeforeKind` and `StoredChange.AfterKind`
 give the original JSON kind when the server recorded it.
+Record equality includes these properties. To compare only change text across old and new
+server responses, compare `Field`, `Before` and `After`.
 
 ### Identifiers
 

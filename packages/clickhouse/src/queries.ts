@@ -43,7 +43,7 @@ import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
-import type { EventRow } from './normalize';
+import type { EventRow, StoredEventRow } from './normalize';
 import { columns, compileQuery, QueryError, recordTargetPredicate } from './query';
 import { rollupSql } from './rollup-sql';
 import { CursorError, cursorBinding, scopePredicate } from './scope';
@@ -178,7 +178,7 @@ export async function where(ch: ClickHouseClient, projectId: string, q: RangeQue
   };
 }
 const iso = (s: string) => new Date(s.endsWith('Z') ? s : `${s.replace(' ', 'T')}Z`).toISOString();
-export function toEvent(r: EventRow & { category?: string }): AuditEvent {
+export function toEvent(r: StoredEventRow & { category?: string }): AuditEvent {
   // Parts written by older servers have empty kind arrays. Never infer a kind from ambiguous text.
   const beforeKinds = r.changes_before_kind?.length === r.changes_fields.length ? r.changes_before_kind : undefined;
   const afterKinds = r.changes_after_kind?.length === r.changes_fields.length ? r.changes_after_kind : undefined;
