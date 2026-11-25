@@ -41,7 +41,10 @@ export const MASKED_COLUMNS: Record<NonNullable<ReadScope['mask']>[number], stri
   user_agent: 'user_agent',
   actor_email: 'actor_email',
 };
-/** Attribute paths a mask hides too (an event may carry them as literal dotted keys). */
+/**
+ * Attribute paths a mask removes (an event may carry them as literal dotted keys), each with every path below it: a
+ * literal key whose value is an object is flattened into child attributes (`"actor.name": {"en": ...}`).
+ */
 export const MASKED_ATTRIBUTES: Record<NonNullable<ReadScope['mask']>[number], string[]> = {
   ip: ['context.ip'],
   user_agent: ['context.userAgent'],
@@ -66,9 +69,13 @@ export const pseudonymizedAttribute = (mask: ReadScope['mask'], key: string) =>
 /** Whether `mask` removes attribute `key` because it lies below a pseudonymized path. */
 export const belowPseudonymizedAttribute = (mask: ReadScope['mask'], key: string) =>
   Boolean(mask?.some((preset) => PSEUDONYMIZED_ATTRIBUTES[preset].some((path) => key.startsWith(`${path}.`))));
+const atOrBelow = (key: string, path: string) => key === path || key.startsWith(`${path}.`);
+/** Whether `mask` removes attribute `key`: a masked path, a path below one, or a path below a pseudonymized one. */
+export const removedAttribute = (mask: ReadScope['mask'], key: string) =>
+  Boolean(mask?.some((preset) => MASKED_ATTRIBUTES[preset].some((path) => atOrBelow(key, path)))) || belowPseudonymizedAttribute(mask, key);
 /** Whether `mask` hides attribute `key` (removed or pseudonymized), so a filter or facet on it would be an oracle. */
 export const maskedAttribute = (mask: ReadScope['mask'], key: string) =>
-  Boolean(mask?.some((preset) => MASKED_ATTRIBUTES[preset].includes(key))) ||
+  Boolean(mask?.some((preset) => MASKED_ATTRIBUTES[preset].some((path) => atOrBelow(key, path)))) ||
   pseudonymizedAttribute(mask, key) ||
   belowPseudonymizedAttribute(mask, key);
 

@@ -1194,8 +1194,13 @@ and masks. A masked endpoint whose stored filter names a field a mask now covers
 like any stored filter that no longer compiles. Its pending deliveries were
 chosen by that old filter, and an edit sends those that match the new one, so
 the receiver could tell which events the old filter matched. To avoid that,
-replace such an endpoint instead of editing it: create a new endpoint with the
-corrected filter and delete the held one. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
+replace such an endpoint instead of editing it: delete the held endpoint (its
+pending deliveries go with it), then create a new one with the corrected filter.
+The new endpoint has a new signing secret, so update the receiver, and its
+cursor starts at creation, so events that arrived while the old one was held
+are not delivered (an export of that window fills the gap if you
+need them). Deleting first also keeps a project at its endpoint limit able to
+create the replacement. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
 even when `WEBHOOK_SECRET_KEY` is configured separately. Upgrade all workers
 before enabling masks, and disable masked endpoints before rolling workers back
 to code that predates masks. Releases before the impersonator was covered by

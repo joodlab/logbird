@@ -110,16 +110,20 @@ const FACET_FLAGS = new Map<unknown, number>([
   ['1', 1],
   ['2', 2],
 ]);
+/**
+ * A facet row's flag as 0, 1 or 2. Only the exact literals pass (a number, or its digit as JSON may carry it); anything
+ * else, '' or [0] included, throws: text under a flag this code does not know may be the address.
+ */
+export function facetFlag(flag: unknown): 0 | 1 | 2 {
+  const value = FACET_FLAGS.get(flag);
+  if (value === undefined) throw new Error(`Unknown masked facet flag ${String(flag)}`);
+  return value as 0 | 1 | 2;
+}
 /** A facet value or label under the mask: flagged text becomes the pseudonym of the flag's role. */
 export function maskedFacetText(projectId: string, flag: number | string, text: string, secret: Buffer) {
-  // Only the exact flags 0, 1 and 2 (a number, or its digit as JSON may carry it); anything else, '' or [0] included,
-  // must not read as 0.
-  const value = FACET_FLAGS.get(flag) ?? Number.NaN;
-  if (value === 0) return text;
+  const value = facetFlag(flag);
   const role = FACET_FLAG_ROLE[value];
-  // Fail closed: text under a flag this code does not know may be the address.
-  if (!role) throw new Error(`Unknown masked facet flag ${String(flag)}`);
-  return maskedEmail(projectId, text, secret, role);
+  return role ? maskedEmail(projectId, text, secret, role) : text;
 }
 
 /**

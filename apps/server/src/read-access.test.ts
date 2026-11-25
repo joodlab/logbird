@@ -129,6 +129,19 @@ describe('masks', () => {
     } as unknown as AuditEvent;
     expect(maskEvent(copies, ['actor_email']).attributes).toEqual({ 'metadata.plan': 'pro' });
     expect(maskEvent(copies, ['ip']).attributes['impersonator.name']).toBe('rita@example.invalid');
+    // Object-valued literal keys flatten into child attributes; every path below a masked one goes too.
+    const children = {
+      ...event,
+      attributes: {
+        'impersonator.name.en': 'rita@example.invalid',
+        'impersonator.name.solo@example.invalid': 'x',
+        'actor.name.en': 'lina@example.invalid',
+        'actor.email.work': 'lina@example.invalid',
+        'context.ip.v4': '203.0.113.1',
+        'actor.nameplate': 'kept',
+      },
+    } as unknown as AuditEvent;
+    expect(maskEvent(children, ['actor_email', 'ip']).attributes).toEqual({ 'actor.nameplate': 'kept' });
   });
   it('derives pseudonyms from a pinned HMAC input per role', () => {
     // An independent vector: HMAC-SHA256 over the documented input, so an unkeyed or re-keyed change fails here.

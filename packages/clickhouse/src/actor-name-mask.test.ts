@@ -110,6 +110,10 @@ describe('the shared masked-filter compilation (webhook discovery and recheck co
       'NOT impersonator.email:x',
       'impersonator.email:(a OR b)',
       'impersonator.email.work:x',
+      'attr.impersonator.name:x',
+      'attr.impersonator.name.en:*',
+      'attr.actor.name.en:x',
+      'attr.actor.email.work:x',
       'action:x OR impersonator.email:>2',
     ])
       expect(() => compileMaskedQuery(q, ['actor_email']), q).toThrow(/masked/);
@@ -240,6 +244,25 @@ describe('facets under the actor_email mask', () => {
       expect(sql).toContain(IMPERSONATOR_NAME_IS_SENSITIVE_SQL);
       expect(sql).not.toMatch(/argMaxIf\(tuple\(0,impersonator_name\)/);
     }
+  });
+
+  it('refuses a second-level row whose parent flag is malformed instead of joining it to bucket 0', async () => {
+    const { ch } = client([
+      [{ value: 'usr_1', masked: 0, labf: 0, labt: 'Bob', count: 1, total: 1 }],
+      [{ value: 'usr_1', masked: '', grp: 'Bob', gmasked: 0, labf: 0, labt: 'Bob', count: 1, total: 1 }],
+    ]);
+    await expect(facets(ch, 'proj_1', { ...range, field: 'actor', by: 'actor.name', limit: 10 }, scope, undefined, key)).rejects.toThrow(
+      /Unknown masked facet flag/,
+    );
+  });
+
+  it('orders tied second-level groups by the keyed hash too', async () => {
+    const { ch, query } = client([[{ value: 'usr_1', masked: 0, labf: 0, labt: 'Bob', count: 2, total: 2 }], []]);
+    await facets(ch, 'proj_1', { ...range, field: 'actor', by: 'impersonator', limit: 10, byLimit: 1 }, scope, undefined, key);
+    const [, second] = calls(query);
+    expect(second?.query).toContain(
+      "ORDER BY value,masked,count DESC,sipHash64Keyed(({orderKey0:UInt64},{orderKey1:UInt64}),concat(toString(gmasked),'|',grp)) LIMIT",
+    );
   });
 
   it('never interprets text by its content: a producer string that looks masked stays as it is', async () => {
