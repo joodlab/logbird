@@ -15,6 +15,7 @@ import {
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
     id: 'evt_1',
+    projectId: 'project_1',
     timestamp: '2026-11-05T10:00:00.000Z',
     receivedAt: '2026-11-05T10:00:00.000Z',
     environment: 'production',
@@ -42,6 +43,69 @@ function event(patch: Partial<AuditEvent>): AuditEvent {
 const vera = { type: 'user', id: 'usr_vera', name: 'Vera Validator', email: 'vera@logbird.local' };
 
 describe('eventSentence', () => {
+  it.each(['a  b', ' a', 'a ', 'a\n b', 'a\t b'])('keeps whitespace in a generated change title for %j', (before) => {
+    const e = event({
+      action: 'article.updated',
+      actor: vera,
+      targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
+      changes: [{ field: 'subtitle', before, after: 'C', beforeKind: 'string', afterKind: 'string' }],
+    });
+    expect(eventSentence(e)).toBe(`Vera Validator changed Spring guide’s subtitle from ${JSON.stringify(before)} to "C"`);
+  });
+
+  it('describes an explicitly empty after value as a change', () => {
+    const e = event({
+      action: 'article.updated',
+      actor: vera,
+      targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
+      changes: [{ field: 'subtitle', before: 'Planning your trip', after: '', beforeKind: 'string', afterKind: 'string' }],
+    });
+    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s subtitle from "Planning your trip" to ""');
+  });
+
+  it('describes a legacy blank without guessing whether it was absent', () => {
+    const e = event({
+      action: 'article.updated',
+      actor: vera,
+      targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
+      changes: [{ field: 'subtitle', before: 'Draft', after: '' }],
+    });
+    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s subtitle');
+  });
+
+  it('keeps quoted text distinct from an equal-looking boolean', () => {
+    const e = event({
+      action: 'article.updated',
+      actor: vera,
+      targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
+      changes: [{ field: 'featured', before: 'false', after: 'false', beforeKind: 'string', afterKind: 'boolean' }],
+    });
+    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s featured from "false" to false');
+  });
+
+  it('preserves customer role values even when a token resembles a workspace role', () => {
+    const e = event({
+      action: 'member.role.changed',
+      actor: vera,
+      targets: [{ type: 'user', name: 'Sara', id: 'usr_sara' }],
+      changes: [{ field: 'role', before: 'a,b', after: 'member' }],
+    });
+    expect(eventSentence(e)).toBe('Vera Validator changed Sara’s role from a,b to member');
+    expect(eventSentence({ ...e, changes: [{ field: 'role', before: 'admin', after: 'member', beforeKind: 'string', afterKind: 'string' }] })).toBe(
+      'Vera Validator changed Sara’s role from "admin" to "member"',
+    );
+  });
+
+  it('preserves a customer retention change with a non-integer value', () => {
+    const e = event({
+      action: 'project.retention.changed',
+      actor: vera,
+      targets: [{ type: 'project', name: 'Spring guide', id: 'project_1' }],
+      changes: [{ field: 'retentionDays', before: '90.5', after: '180' }],
+    });
+    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s retention from 90.5 to 180');
+  });
+
   it('keeps a producer description', () => {
     expect(eventSentence(event({ description: 'Lina changed the policy', actor: vera }))).toBe('Lina changed the policy');
   });
@@ -142,27 +206,39 @@ describe('eventSentence', () => {
 describe('eventSentence for Logbird management actions', () => {
   const ada = { type: 'user', id: 'usr_ada', name: 'Ada Admin', email: 'ada@logbird.local' };
   const audit = (patch: Partial<AuditEvent>) =>
-    event({ actor: ada, executor: { type: 'api', id: 'api-server', name: '', jobId: '', attempt: 0 }, ...patch });
+    event({ projectId: 'ws:org_1', actor: ada, executor: { type: 'api', id: 'api-server', name: '', jobId: '', attempt: 0 }, ...patch });
 
   it('reads a role change from its recorded change', () => {
     const e = audit({
       action: 'member.role.changed',
       description: 'member.role.changed',
       targets: [{ type: 'user', id: 'usr_2', name: 'member2@logbird.local' }],
-      changes: [{ field: 'role', before: 'admin', after: 'member' }],
+      changes: [{ field: 'role', before: 'admin', after: 'member', beforeKind: 'string', afterKind: 'string' }],
     });
     expect(eventSentence(e)).toBe('Ada Admin changed member2@logbird.local’s role from Admin to Member');
+    expect(eventSentence(audit({ ...e, changes: [{ field: 'role', before: 'owner,admin', after: 'member' }] }))).toBe(
+      'Ada Admin changed member2@logbird.local’s role from Owner, Admin to Member',
+    );
+    expect(eventSentence(audit({ ...e, changes: [{ field: 'role', before: 'admin,a', after: 'member' }] }))).toBe(
+      'Ada Admin changed member2@logbird.local’s role from admin,a to Member',
+    );
   });
 
-  it('reads a retention change in days', () => {
+  it('reads whole-day workspace retention changes', () => {
     const e = audit({
       action: 'project.retention.changed',
       targets: [{ type: 'project', id: 'prj_1', name: 'Validator2 Empty' }],
-      changes: [{ field: 'retentionDays', before: '90', after: '180' }],
+      changes: [{ field: 'retentionDays', before: '90', after: '180', beforeKind: 'number', afterKind: 'number' }],
     });
     expect(eventSentence(e)).toBe('Ada Admin changed Validator2 Empty’s retention from 90 to 180 days');
     const years = audit({ ...e, changes: [{ field: 'retentionDays', before: '90', after: '365' }] });
     expect(eventSentence(years)).toBe('Ada Admin changed Validator2 Empty’s retention from 90 days to 1 year');
+    expect(eventSentence(audit({ ...e, changes: [{ field: 'retentionDays', before: '90', after: '180.5' }] }))).toBe(
+      'Ada Admin changed Validator2 Empty’s retention from 90 to 180.5',
+    );
+    expect(
+      eventSentence(audit({ ...e, changes: [{ field: 'retentionDays', before: '90', after: '180', beforeKind: 'string', afterKind: 'number' }] })),
+    ).toBe('Ada Admin changed Validator2 Empty’s retention from "90" to 180');
   });
 
   it('names what changed when the change list is absent', () => {

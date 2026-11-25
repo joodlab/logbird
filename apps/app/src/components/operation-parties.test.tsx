@@ -95,6 +95,15 @@ describe('OperationParties', () => {
     expect(executors.textContent).toBe('Performed bywestbilling:west');
   });
 
+  it('preserves distinct recorded names for a shared executor id', () => {
+    const { executors } = show([
+      ev(1, null, executor('jobs', 'Publish job')),
+      ev(2, null, executor('jobs', 'Cache purge')),
+      ev(3, null, executor('jobs', 'Publish job')),
+    ]);
+    expect(links(executors)).toEqual(['Publish job', 'Cache purge']);
+  });
+
   it('names a party recorded by an email or a name alone (as the read API now returns it), never "Not recorded"', () => {
     const { actors, executors } = show([ev(1, actor('', '', 'lina@example.test', ''), executor('', 'Billing worker', ''))]);
     expect(actors.textContent).toBe('Caused bylina@example.test');
@@ -111,6 +120,7 @@ describe('OperationParties', () => {
     const lina = actor('u1', 'Lina Haddad');
     const { actors } = show([ev(1, lina), ev(2, lina, null, sam), ev(3, null, null, sam)]);
     expect(links(actors)).toEqual(['Lina Haddad', 'Sam Support', 'Lina Haddad', 'Sam Support']);
+    expect(actors.textContent).toContain('acting asLina Haddad·Sam Support');
     expect(actors.textContent).toContain('acting asan unknown customer');
   });
 });

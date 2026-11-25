@@ -19,6 +19,10 @@ export function namesWhole(text: string, name: string): boolean {
   return new RegExp(`(?<!${WORD})(?<!${WORD}${JOINER})${escaped}(?!${WORD})(?!${JOINER}${WORD})`, 'iu').test(text.normalize('NFC'));
 }
 
+export function sentenceNamesActor(e: AuditEvent, sentence: string, actor: string): boolean {
+  return usesDescription(e) ? namesWhole(sentence, actor) : sentenceSubject(e).party === 'actor';
+}
+
 /**
  * The row's accessible name: what happened (actor, action, target), who was really at the keyboard, how it ended,
  * which background job ran it, and when. Screen readers announce it when the roving focus lands on the row, so it
@@ -31,7 +35,7 @@ export function eventRowLabel(e: AuditEvent, now = Date.now()): string {
   // "done by support agent X while acting as Y" names the actor itself, so it replaces "by Y" — unless the sentence
   // already credits the actor (a built sentence whose subject is the actor, or a description naming them), then only
   // the agent is added. A built sentence crediting a worker names the actor at most as its object, never as who acted.
-  const named = usesDescription(e) ? namesWhole(sentence, actor) : sentenceSubject(e).party === 'actor';
+  const named = sentenceNamesActor(e, sentence, actor);
   const support = e.impersonator ? (named ? `done by support agent ${e.impersonator.name || e.impersonator.id}` : supportPhrase(e)) : null;
   if (support) parts.push(support);
   // Producer descriptions do not always name who acted ("Booking cancelled"): add the actor when it is missing.

@@ -208,7 +208,11 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
         </div>
 
         <StatTileGrid className="grid-cols-2 sm:grid-cols-4">
-          <StatTile label={`Events · ${rangeInSentence(rangeLabel(timeline.range))}`} loading={!p} value={p ? formatNumber(outcomeTotal) : ''} />
+          <StatTile
+            label={`${kind === 'target' ? 'Activity' : 'Events'} · ${rangeInSentence(rangeLabel(timeline.range))}`}
+            loading={!p}
+            value={p ? formatNumber(outcomeTotal) : ''}
+          />
           <StatTile
             label={
               countsMentions(kind, entityId) ? (
@@ -311,10 +315,12 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
                 baseLabel={`${kind}: ${p?.entity.name || displayId}`}
                 baseQuery={baseQuery}
                 embedded
+                recordHistory={kind === 'target'}
                 onChange={onTimelineChange}
                 projectId={projectId}
                 rangeComplete={!rangeChosen}
                 rangeLabel={rangeChosen ? undefined : 'All history'}
+                showChanges={kind !== 'executor'}
                 state={{ ...timeline, range: timelineRange }}
               />
             ) : (
