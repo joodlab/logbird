@@ -21,13 +21,14 @@ import { allTimeCheckNeedsAsking, otherDatesAction, otherDatesCheck, otherDatesL
 import { ENTITY_SECTIONS, entityQuery, idFromFreeText, sectionForKind, settledIdMatches } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
-import { andQuery, scopedQuery } from '@/lib/query-language';
+import { andQuery, includeTerm, scopedQuery } from '@/lib/query-language';
 import { isKnownFieldName, lintQuery, suggestedConversion } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { ALL_RANGE, absoluteRange, isValidRange, rangeInSentence, rangeLabel, resolveRange } from '@/lib/range';
 import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { useConsoleZone } from '@/lib/time-zone';
+import { causalPageOrder } from './causal-order';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
 import { ColumnPicker, ExplorerOverflowMenu, ExportMenu, SaveViewButton } from './explorer-toolbar';
@@ -58,6 +59,8 @@ interface ExplorerProps {
   rangeLabel?: string;
   /** The range already covers everything there is (an entity's full history): never suggest widening it. */
   rangeComplete?: boolean;
+  showChanges?: boolean;
+  filterChangeFields?: boolean;
   className?: string;
 }
 
@@ -114,6 +117,8 @@ function ProjectExplorer({
   allowSql = !embedded && !baseQuery,
   rangeLabel: rangeLabelOverride,
   rangeComplete = false,
+  showChanges = false,
+  filterChangeFields = false,
   className,
 }: ExplorerProps) {
   useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
@@ -250,11 +255,11 @@ function ProjectExplorer({
   });
 
   const rows = useMemo(() => {
-    const paged = pages?.flatMap((p) => p.data) ?? [];
+    const paged = pages?.flatMap((p) => (showChanges ? causalPageOrder(p.data, 'desc') : p.data)) ?? [];
     if (!liveRows.length) return paged;
     const seen = new Set(liveRows.map((e) => e.id));
     return [...liveRows, ...paged.filter((e) => !seen.has(e.id))];
-  }, [pages, liveRows]);
+  }, [pages, liveRows, showChanges]);
   // Search totals are capped for huge ranges; the histogram counts every match exactly.
   const pagedCount = pages?.reduce((n, p) => n + p.data.length, 0) ?? 0;
   const known = searchTotal(pages, pagedCount, events.hasNextPage);
@@ -739,6 +744,16 @@ function ProjectExplorer({
               loadMore={() => events.fetchNextPage()}
               loading={resultsLoading}
               onCursorChange={setCursorId}
+              onChangeField={
+                filterChangeFields && !problem
+                  ? (field) => {
+                      // Keep focus with the results while the current row unmounts. Focusing the query would open
+                      // suggestions over the history just as the filtered rows arrive.
+                      results.current?.focus({ preventScroll: true });
+                      onChange({ q: includeTerm(q, 'changes.field', field), ev: undefined });
+                    }
+                  : undefined
+              }
               resultKey={resultKey}
               onSelect={(e) => {
                 setCursorId(e.id);
@@ -747,6 +762,7 @@ function ProjectExplorer({
               ref={eventsTable}
               rows={rows}
               selectedId={ev}
+              showChanges={showChanges}
               total={total}
             />
           </EventListContext>

@@ -42,6 +42,16 @@ function event(patch: Partial<AuditEvent>): AuditEvent {
 const vera = { type: 'user', id: 'usr_vera', name: 'Vera Validator', email: 'vera@logbird.local' };
 
 describe('eventSentence', () => {
+  it('describes an explicitly empty after value as a change', () => {
+    const e = event({
+      action: 'article.updated',
+      actor: vera,
+      targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
+      changes: [{ field: 'subtitle', before: 'Planning your trip', after: '', beforeKind: 'string', afterKind: 'string' }],
+    });
+    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s subtitle from Planning your trip to ""');
+  });
+
   it('keeps a producer description', () => {
     expect(eventSentence(event({ description: 'Lina changed the policy', actor: vera }))).toBe('Lina changed the policy');
   });

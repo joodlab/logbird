@@ -34,6 +34,10 @@ Use `record:<type>:<id>` to filter a record's history. The first unescaped colon
 
 Quote the whole pair if it contains whitespace or grammar punctuation such as parentheses. Query-value escapes apply before record-pair escapes. For example, `record:"order\\:archived:A1"` matches type `order:archived` and id `A1`, and `record:"page:home (west)"` matches id `home (west)`. `record:page:/home/`, `record:page:home*`, and `record:page:home\*` use literal ids.
 
+Add `tenant:<id>` when the same record ID is used by multiple tenants, or `changes.field:<name>` to see events that changed a specific field.
+
+Search orders events by timestamp and breaks ties by event ID. Read causation from `parentEventId`. Within each loaded page of a console history, events with the same timestamp follow their parent links, with the child after its parent in oldest-first order and before its parent in newest-first order.
+
 Record pairs support negation and value groups, such as `-record:(page:1 OR site:7)`. `record:*` and `_exists_:record` match events with any target. Use `attr.record` to search a custom attribute named `record`.
 
 The record directory and unscoped record suggestions still group targets by the stored `type:id` key. Pairs that share a key appear together in the directory. A record link from an event carries its original type, and each record profile and timeline uses the exact pair it opened.

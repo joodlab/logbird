@@ -1,4 +1,5 @@
 import { type AuditEvent, supportsExactJson } from '@logbird/contracts';
+import { REDACTED_CHANGE_VALUE } from './change-values';
 import { formatRetention } from './format';
 
 const VERB_PAST: Record<string, string> = {
@@ -158,9 +159,12 @@ export function changeSentence(changes: AuditEvent['changes'] | undefined, targe
   if (list.length > 1) return `changed ${owner} ${joinWords([...new Set(list.map((c) => fieldLabel(c.field)))])}`;
   const [c] = list as [AuditEvent['changes'][number]];
   const label = fieldLabel(c.field);
-  const before = c.before ? fieldValue(c.field, c.before) : '';
-  const after = c.after ? fieldValue(c.field, c.after) : '';
-  const showable = (v: string) => v.length <= MAX_INLINE_VALUE && v !== '[redacted]';
+  const inlineValue = (text: string, kind: typeof c.beforeKind) =>
+    kind === 'absent' ? '' : !text && kind === 'string' ? '""' : text ? fieldValue(c.field, text) : '';
+  const before = inlineValue(c.before, c.beforeKind);
+  const after = inlineValue(c.after, c.afterKind);
+  const showable = (v: string) => v.length <= MAX_INLINE_VALUE;
+  if (c.before === REDACTED_CHANGE_VALUE || c.after === REDACTED_CHANGE_VALUE) return `changed ${owner} ${label}`;
   if (!(showable(before) && showable(after))) return `changed ${owner} ${label}`;
   if (before && after) {
     // "from 90 to 180 days" rather than "from 90 days to 180 days".

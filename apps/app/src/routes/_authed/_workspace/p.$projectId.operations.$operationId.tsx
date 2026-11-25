@@ -276,14 +276,13 @@ function OperationPage() {
                         <span className={cn('truncate', problem && 'font-medium')}>{eventSentence(e)}</span>
                         <span className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs">
                           <ActionName action={e.action} className="text-[11px]" />
-                          {/* Who ran this step: the id, else the name or type recorded without one (#333). */}
-                          {e.executor?.id ? (
-                            <span className="hidden shrink-0 font-mono text-[11px] sm:inline">{e.executor.id}</span>
-                          ) : e.executor?.name || e.executor?.type ? (
-                            <bdi className="min-w-0 shrink truncate text-[11px]">{e.executor.name || e.executor.type}</bdi>
-                          ) : null}
                           {e.executor && e.executor.attempt > 1 ? <TypePill tone="warning">attempt {e.executor.attempt}</TypePill> : null}
                         </span>
+                        {e.executor?.name || e.executor?.id || e.executor?.type ? (
+                          <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                            Performed by <bdi>{e.executor.name || e.executor.id || e.executor.type}</bdi>
+                          </span>
+                        ) : null}
                       </span>
                     </span>
                     <span className="relative hidden h-full min-h-11 items-center px-4 md:flex">

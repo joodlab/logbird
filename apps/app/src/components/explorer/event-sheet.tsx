@@ -1,4 +1,4 @@
-import { type AuditEvent, type ChangeValueKind, type EventDetail, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
+import { type AuditEvent, type EventDetail, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
 import { OutcomeBadge, OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badges';
 import { CopyButton, CopyValue } from '@logbird/ui/components/copy-button';
 import { EntityAvatar, EntityChip } from '@logbird/ui/components/entity-chip';
@@ -56,6 +56,7 @@ import { andQuery, formatTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
 import { useConsoleZone } from '@/lib/time-zone';
+import { ChangeValue } from './change-value';
 
 interface EventSheetProps {
   projectId?: string;
@@ -574,25 +575,6 @@ function PartyCard({
   );
 }
 
-function ChangeValue({ text, kind, before, redacted }: { text: string; kind: ChangeValueKind | undefined; before?: boolean; redacted: boolean }) {
-  const value = kind === 'string' && text !== '[redacted]' ? JSON.stringify(text) : text;
-  return (
-    <span
-      className={cn(
-        'font-mono text-[12px] [overflow-wrap:anywhere]',
-        kind === 'absent' || redacted
-          ? 'text-muted-foreground italic'
-          : before
-            ? 'text-diff-remove line-through decoration-diff-remove/40'
-            : 'text-diff-add',
-      )}
-      dir="auto"
-    >
-      {kind === 'absent' ? 'not set' : value || <span className={cn('text-muted-foreground', before && 'no-underline')}>∅</span>}
-    </span>
-  );
-}
-
 function EventDetailBody({
   event: e,
   detail,
@@ -816,20 +798,18 @@ function EventDetailBody({
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {e.changes.map((c) => {
-                    const redacted = c.before === '[redacted]' || c.after === '[redacted]';
-                    return (
-                      <tr key={c.field}>
-                        <td className="px-3 py-2 align-top font-mono text-[12px] [overflow-wrap:anywhere]">{c.field}</td>
-                        <td className="px-3 py-2 align-top">
-                          <ChangeValue before kind={c.beforeKind} redacted={redacted} text={c.before} />
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <ChangeValue kind={c.afterKind} redacted={redacted} text={c.after} />
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {e.changes.map((c, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: the event's change list is positional and can repeat field names
+                    <tr key={`${index}:${c.field}`}>
+                      <td className="px-3 py-2 align-top font-mono text-[12px] [overflow-wrap:anywhere]">{c.field}</td>
+                      <td className="px-3 py-2 align-top">
+                        <ChangeValue before kind={c.beforeKind} text={c.before} />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <ChangeValue kind={c.afterKind} text={c.after} />
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
