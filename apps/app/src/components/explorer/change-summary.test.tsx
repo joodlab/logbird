@@ -85,8 +85,34 @@ describe('history change summary', () => {
       expect(button?.getAttribute('aria-label')).toBe('Filter history by Unnamed field');
       act(() => button?.click());
       expect(filter).toHaveBeenCalledExactlyOnceWith('');
-      expect([...host.querySelectorAll('.whitespace-pre-wrap')].map((node) => node.textContent)).toEqual(['"A  B"', '"A B"']);
+      expect([...host.querySelectorAll('.whitespace-break-spaces')].map((node) => node.textContent)).toEqual(['"A  B"', '"A B"']);
     });
+  });
+
+  it.each(['a  b', ' a', 'a ', 'a\n b', 'a\t b'])('preserves %j in the compact summary and full value', (value) => {
+    const encoded = JSON.stringify(value);
+    render(
+      <>
+        <ChangeSummary changes={[change('title', value, 'C', 'string', 'string')]} onOpen={vi.fn()} />
+        <ChangeValue kind="string" text={value} />
+      </>,
+      (host) => {
+        expect([...host.querySelectorAll('.whitespace-break-spaces')].map((node) => node.textContent)).toEqual([encoded, '"C"', encoded]);
+      },
+    );
+  });
+
+  it.each([
+    ['absent', 'absent', 'not set → not set'],
+    ['absent', undefined, 'not set → ∅'],
+    [undefined, 'absent', '∅ → not set'],
+    [undefined, undefined, '∅ → ∅'],
+  ] as const)('makes no transition claim for blanks with kinds %s and %s', (beforeKind, afterKind, expected) => {
+    const entries = [change('note', '', '', beforeKind, afterKind)];
+    render(<ChangeSummary changes={entries} onOpen={vi.fn()} />, (host) => {
+      expect(host.textContent).toBe(`note: ${expected}`);
+    });
+    expect(changeSummaryLabel(entries)).toBe(`note: ${expected.replace(' → ', ' to ')}`);
   });
 
   it('names a creation, removal and legacy change without guessing absent kinds', () => {

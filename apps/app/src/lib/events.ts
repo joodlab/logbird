@@ -138,7 +138,7 @@ function fieldValue(field: string, value: string): string {
   if (field === 'role')
     return value
       .split(',')
-      .map((r) => ROLE_LABEL[r.trim()] ?? r.trim())
+      .map((r) => ROLE_LABEL[r] ?? r)
       .join(', ');
   if (field === 'retentionDays' && /^\d+$/.test(value)) return formatRetention(Number(value));
   return value;
@@ -168,9 +168,12 @@ export function changeSentence(changes: AuditEvent['changes'] | undefined, targe
   const showable = (v: string) => v.length <= MAX_INLINE_VALUE;
   if (c.before === REDACTED_CHANGE_VALUE || c.after === REDACTED_CHANGE_VALUE) return `changed ${owner} ${label}`;
   if (!(showable(before) && showable(after))) return `changed ${owner} ${label}`;
-  if (before && after && before.replace(/\s+/g, ' ') !== after.replace(/\s+/g, ' ')) {
+  if (before && after && before !== after) {
     // "from 90 to 180 days" rather than "from 90 days to 180 days".
-    const unit = / days$/.exec(before)?.[0] && / days$/.test(after) ? ' days' : '';
+    const unit =
+      c.field === 'retentionDays' && /^\d+$/.test(c.before) && /^\d+$/.test(c.after) && before.endsWith(' days') && after.endsWith(' days')
+        ? ' days'
+        : '';
     return `changed ${owner} ${label} from ${unit ? before.slice(0, -unit.length) : before} to ${after}`;
   }
   if (c.beforeKind === 'absent' && after) return `set ${owner} ${label} to ${after}`;

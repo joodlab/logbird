@@ -1,7 +1,7 @@
 import type { ChangeValueKind } from '@logbird/contracts';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { cn } from '@logbird/ui/lib/utils';
-import { changeValueText, middleTruncate, REDACTED_CHANGE_VALUE } from '@/lib/change-values';
+import { CHANGE_VALUE_WHITESPACE, changeValueText, middleTruncate, REDACTED_CHANGE_VALUE } from '@/lib/change-values';
 
 export function ChangeValue({
   text,
@@ -20,7 +20,8 @@ export function ChangeValue({
   const shown = limit === undefined ? value : middleTruncate(value, limit);
   const neutral = kind === 'absent' || text === REDACTED_CHANGE_VALUE;
   const className = cn(
-    'whitespace-pre-wrap font-mono [overflow-wrap:anywhere]',
+    CHANGE_VALUE_WHITESPACE,
+    'font-mono',
     limit === undefined ? 'text-[12px]' : 'text-[11px]',
     neutral
       ? 'text-muted-foreground italic'
@@ -55,7 +56,7 @@ export function ChangeValue({
         {shown}
       </TooltipTrigger>
       <TooltipContent
-        className="max-h-[50svh] max-w-[min(32rem,85vw)] overflow-auto whitespace-pre-wrap font-mono [overflow-wrap:anywhere]"
+        className={cn(CHANGE_VALUE_WHITESPACE, 'max-h-[50svh] max-w-[min(32rem,85vw)] overflow-auto font-mono')}
         dir="auto"
         role="tooltip"
       >

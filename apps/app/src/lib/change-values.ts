@@ -3,6 +3,7 @@ import type { AuditEvent, ChangeValueKind } from '@logbird/contracts';
 export type EventChange = AuditEvent['changes'][number];
 
 export const REDACTED_CHANGE_VALUE = '[redacted]';
+export const CHANGE_VALUE_WHITESPACE = 'whitespace-break-spaces [overflow-wrap:anywhere]';
 
 export const changeFieldLabel = (field: string) => field || 'Unnamed field';
 
@@ -22,7 +23,8 @@ export function middleTruncate(text: string, limit: number): string {
 }
 
 export function changeDisplayParts(change: EventChange) {
-  if (change.beforeKind === 'absent' && change.afterKind !== 'absent') return { before: false, after: true };
-  if (change.afterKind === 'absent' && change.beforeKind !== 'absent') return { before: true, after: false };
+  const present = (text: string, kind?: ChangeValueKind) => (kind === undefined ? text !== '' : kind !== 'absent');
+  if (change.beforeKind === 'absent' && present(change.after, change.afterKind)) return { before: false, after: true };
+  if (change.afterKind === 'absent' && present(change.before, change.beforeKind)) return { before: true, after: false };
   return { before: true, after: true };
 }

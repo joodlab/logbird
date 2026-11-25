@@ -42,6 +42,16 @@ function event(patch: Partial<AuditEvent>): AuditEvent {
 const vera = { type: 'user', id: 'usr_vera', name: 'Vera Validator', email: 'vera@logbird.local' };
 
 describe('eventSentence', () => {
+  it.each(['a  b', ' a', 'a ', 'a\n b', 'a\t b'])('keeps whitespace in a generated change title for %j', (before) => {
+    const e = event({
+      action: 'article.updated',
+      actor: vera,
+      targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
+      changes: [{ field: 'subtitle', before, after: 'C', beforeKind: 'string', afterKind: 'string' }],
+    });
+    expect(eventSentence(e)).toBe(`Vera Validator changed Spring guide’s subtitle from ${JSON.stringify(before)} to "C"`);
+  });
+
   it('describes an explicitly empty after value as a change', () => {
     const e = event({
       action: 'article.updated',
