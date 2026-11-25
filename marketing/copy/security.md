@@ -189,7 +189,7 @@ production. Code citations below refer to [`84a32282`](https://github.com/joodla
     from the SDK, which sets ids, don't add copies; changed content under that id is rejected with
     `duplicate_id_conflict`. An event sent without an id gets a new one on every retry. Once retention deletes an
     event, its id can be used again.
-  - Keep secrets out of event inputs. The TypeScript SDK redacts common secret keys before sending by default.
+  - Keep secrets out of event inputs. The TypeScript SDK can redact common secret keys before sending. Follow the SDK quickstart for the tagged release.
   <!-- source: docs/SPEC.md §5; docs/deployment.md; README.md; packages/sdk/README.md -->
 - **visual:** none
 

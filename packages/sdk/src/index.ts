@@ -137,18 +137,20 @@ export class Logbird {
   }
   track(event: EventInput): void {
     if (this.options.enabled === false) return;
+    let action = '';
+    let id: string | undefined;
+    let refusal: string | undefined;
     try {
       if (this.closed) throw new Error('Logbird is shut down');
+      refusal = 'An audit event could not be prepared and was dropped';
       const defaults = this.options.defaults;
-      let prepared: EventInput = {
-        ...defaults,
-        ...event,
-        context: { ...defaults?.context, ...event.context },
-        metadata: { ...defaults?.metadata, ...event.metadata },
-      };
+      let prepared: EventInput = { ...defaults, ...event };
+      if (typeof prepared.action === 'string') action = prepared.action;
+      if (typeof prepared.id === 'string' && prepared.id.trim()) id = prepared.id;
+      prepared.context = { ...defaults?.context, ...event.context };
+      prepared.metadata = { ...defaults?.metadata, ...event.metadata };
       prepared.id ??= uuidv7();
       prepared.occurredAt ??= new Date().toISOString();
-      const { action, id } = prepared;
       if (this.options.beforeSend) {
         const result = this.options.beforeSend(prepared);
         if (result == null) return;
@@ -156,19 +158,20 @@ export class Logbird {
       }
       // The server mints a fresh id for a missing, blank or non-string id (numbers included), which a retry could
       // never match. Mint it here instead, on a copy, so a frozen or caller-owned beforeSend result is never mutated.
-      if (typeof prepared.id !== 'string' || !prepared.id.trim()) prepared = { ...prepared, id: uuidv7() };
-      let serialized: string;
-      try {
-        serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : JSON.stringify(prepared);
-      } catch (error) {
-        if (!this.serializeRedacted) throw error;
-        // No redacted payload exists. Only keep the event's envelope identity for the drop callback.
-        this.drop({ action, id });
-        this.report(new Error('An audit event could not be redacted and was dropped'));
-        return;
+      const preparedId = prepared.id;
+      if (typeof preparedId === 'string' && preparedId.trim()) id = preparedId;
+      else {
+        id = uuidv7();
+        prepared = { ...prepared, id };
       }
-      if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
+      if (this.serializeRedacted) refusal = 'An audit event could not be redacted and was dropped';
+      const serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : JSON.stringify(prepared);
+      if (new TextEncoder().encode(serialized).length > 256 * 1024) {
+        refusal = 'Event exceeds 256 KB and was dropped';
+        throw new Error(refusal);
+      }
       const copy = JSON.parse(serialized) as EventInput;
+      refusal = undefined;
       if (this.queue.length >= this.capacity) {
         if (this.options.dropPolicy === 'newest') {
           this.drop(copy);
@@ -180,7 +183,11 @@ export class Logbird {
       if (this.queue.length >= this.batchSize) void this.flush().catch((e) => this.report(e));
       else this.schedule();
     } catch (e) {
-      this.report(e);
+      if (refusal) {
+        // Preparation failed before a safe payload was available. Report scalar identity and fixed diagnostics.
+        this.drop(id === undefined ? { action } : { action, id });
+        this.report(new Error(refusal));
+      } else this.report(e);
     }
   }
   private schedule() {

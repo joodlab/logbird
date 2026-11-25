@@ -1,5 +1,5 @@
 {
-  "description": "Redaction parity for the TypeScript and .NET SDKs. Both use the same expected JSON. keys and changeFields are pattern sources without flags; null uses the default (changeFields defaults to keys plus addKeys). replacement null uses [redacted]. Cases with paths or keepPaths exercise the path options.",
+  "description": "Redaction parity for the TypeScript and .NET SDKs. Both use the same expected JSON. keys and changeFields are pattern sources (ignoreCase applies the native case-insensitive flag to both); null uses the default (changeFields defaults to keys plus addKeys). replacement null uses [redacted]. Cases with paths or keepPaths exercise the path options. expectedDotnet documents a native regex difference.",
   "cases": [
     {
       "name": "the default pattern redacts nested secrets, array entries and change values",
@@ -687,6 +687,63 @@
             "after": ""
           }
         ]
+      }
+    },
+    {
+      "name": "anchored alternatives with native ASCII case-insensitivity agree on ordinary keys and change fields",
+      "keys": "^(billing|guestId)$",
+      "changeFields": "^(guest\\.phone|guest-email)$",
+      "ignoreCase": true,
+      "replacement": null,
+      "input": {
+        "id": "e",
+        "action": "a",
+        "metadata": {
+          "BILLING": "hidden",
+          "GuestId": "hidden",
+          "guestIdSuffix": "visible"
+        },
+        "changes": [
+          { "field": "GUEST.Phone", "after": "hidden" },
+          { "field": "guest.email", "after": "visible" }
+        ]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "metadata": {
+          "BILLING": "[redacted]",
+          "GuestId": "[redacted]",
+          "guestIdSuffix": "visible"
+        },
+        "changes": [
+          { "field": "GUEST.Phone", "after": "[redacted]" },
+          { "field": "guest.email", "after": "visible" }
+        ]
+      }
+    },
+    {
+      "name": "native regex difference: .NET dollar matches before a final line feed",
+      "keys": "^label$",
+      "changeFields": "^label$",
+      "replacement": null,
+      "input": {
+        "id": "e",
+        "action": "a",
+        "metadata": { "label\n": "value" },
+        "changes": [{ "field": "label\n", "after": "value" }]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "metadata": { "label\n": "value" },
+        "changes": [{ "field": "label\n", "after": "value" }]
+      },
+      "expectedDotnet": {
+        "id": "e",
+        "action": "a",
+        "metadata": { "label\n": "[redacted]" },
+        "changes": [{ "field": "label\n", "after": "[redacted]" }]
       }
     },
     {

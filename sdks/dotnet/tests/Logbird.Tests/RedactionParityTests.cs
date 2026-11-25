@@ -27,10 +27,16 @@ public class RedactionParityTests
     {
         var keys = (string?)parityCase["keys"];
         var changeFields = (string?)parityCase["changeFields"];
+        var regexOptions = RegexOptions.CultureInvariant;
+        if ((bool?)parityCase["ignoreCase"] == true)
+        {
+            regexOptions |= RegexOptions.IgnoreCase;
+        }
+
         var options = new RedactionOptions
         {
-            Keys = keys is null ? Redactor.DefaultSecretKeys : new Regex(keys, RegexOptions.CultureInvariant),
-            ChangeFields = changeFields is null ? null : new Regex(changeFields, RegexOptions.CultureInvariant),
+            Keys = keys is null ? Redactor.DefaultSecretKeys : new Regex(keys, regexOptions),
+            ChangeFields = changeFields is null ? null : new Regex(changeFields, regexOptions),
             Replacement = (string?)parityCase["replacement"] ?? Redactor.DefaultReplacement,
         };
         if (parityCase["addKeys"] is JsonArray added)
@@ -52,7 +58,7 @@ public class RedactionParityTests
 
         var result = redactor.Redact(input);
 
-        Assert.True(JsonNode.DeepEquals(parityCase["expected"], result), name + ": " + result.ToJsonString());
+        Assert.True(JsonNode.DeepEquals(parityCase["expectedDotnet"] ?? parityCase["expected"], result), name + ": " + result.ToJsonString());
         Assert.Equal(original, input.ToJsonString());
     }
 
@@ -92,6 +98,8 @@ public class RedactionParityTests
         Assert.True(await client.FlushAsync());
         var result = JsonNode.Parse(Assert.Single(Assert.Single(server.Requests).RawEvents))!.AsObject();
         Assert.True(result.Remove("occurredAt"));
+        Assert.Empty(result["context"]!.AsObject());
+        Assert.True(result.Remove("context"));
         Assert.True(JsonNode.DeepEquals(parityCase["expected"], result), name + ": " + result.ToJsonString());
     }
 

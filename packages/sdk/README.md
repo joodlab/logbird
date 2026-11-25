@@ -127,16 +127,18 @@ An unset key requires `enabled: false`. Disabled clients require neither endpoin
 track does nothing and flush/shutdown resolve immediately. Enabled clients require both.
 Defaults are shallow merged under events; context and metadata merge one level deep.
 Explicit undefined values override defaults. beforeSend runs after defaults and id/time
-stamping. Redaction runs next, followed by the 256 KiB check on the resulting JSON. Returning null/undefined silently filters;
-a throwing hook fails closed and reports onError. Neither counts as an overflow drop.
+stamping. Redaction runs next, followed by the 256 KiB check on the resulting JSON.
+Returning null/undefined silently filters. A throwing hook refuses the event, increments
+the drop count, and reports the refusal through onError and onDrop.
 
 ## Redaction
 
 Every event passes through client redaction, including events from framework
 adapters, `createAudit`, and BullMQ's `jobAudit`. The SDK applies the rules to the
 value returned by `beforeSend` and checks the size of the redacted JSON. It
-reports redaction failures through `onError`, counts them in `client.dropped`,
-and passes only the original action and event ID to `onDrop`.
+reports preparation, redaction and size failures through `onError`, counts them
+in `client.dropped`, and supplies only the action and last validated event ID to
+`onDrop` when available.
 
 Redaction is on by default. `DEFAULT_SECRET_KEYS` matches passwords, secrets,
 tokens, OTPs, API keys, authorization, cookies, credentials and private keys.
@@ -150,7 +152,17 @@ your policy.
 | `changeFields` | A regular expression for the `field` name of a change. This rule replaces its present `before` and `after` values and keeps the field name. Omit it to use `keys` and `addKeys` for matching change fields. |
 | `replacement` | A string that replaces each matched value. Defaults to `[redacted]`. |
 | `paths` | Exact locations to redact regardless of their key. |
-| `keepPaths` | Exact locations exempt from the key match at that node. Descendants still get checked. An explicit `paths` match, a redacted ancestor, or a matching `changeFields` rule takes precedence. |
+| `keepPaths` | Exact locations exempt from the key match at that node. Descendants still get checked. |
+
+After protecting the identifier fields, the SDK applies these rules in order.
+
+1. An explicit `paths` match forces redaction.
+2. A matching change field forces redaction of its present `before` and `after` values.
+3. A whole-party match redacts the party's non-identifier fields. For example,
+   `keys: /actor/` redacts the staff email even with `keepPaths: ['actor.email']`.
+4. A `keepPaths` match exempts the node from its own key match. For example,
+   keeping `actor` prevents `/actor/` from triggering whole-party redaction.
+5. The `keys` and `addKeys` rules redact matching keys and indices.
 
 Paths start at the event root. Each dot separates a case-sensitive segment.
 A segment of `*` matches exactly one object key or array index.
@@ -165,7 +177,8 @@ zero-based entry index.
 
 The SDK preserves top-level `id` and `action` and the party identifiers listed in
 `IDENTIFIER_FIELDS`. It reports rules that directly match identifiers once via
-`onError` when the client is constructed. Matching an entire `actor`,
+`onError` when the client is constructed. An identifier that serializes to a
+JSON object or array causes the event to be refused. Matching an entire `actor`,
 `impersonator`, `executor`, `tenant`, or target object redacts all its other
 fields while preserving its identifiers. Matching `targets` applies that rule
 to every target. Malformed scalar party values can be replaced in full.
@@ -201,10 +214,17 @@ exemption. For hooks that must remain the sole redaction policy, set
 `redaction: false`. Redaction operates on the JSON representation, including
 values returned by `toJSON`. Supply plain data and serialization methods without
 side effects. If a change field comes from a getter, an inherited or
-non-enumerable property, or a value with a `toJSON` method, the SDK redacts its
-change values. Custom regular expressions follow each platform's engine, which
-can differ across JavaScript and .NET. The default pattern and `addKeys` use the
-same ASCII case rules in both.
+non-enumerable property, a boxed string, or a value with a `toJSON` method, the
+SDK redacts its change values.
+
+The default rules and literal `addKeys` matching use the same ASCII case rules
+in both SDKs. Custom `keys` and `changeFields` run on each platform's regex engine
+and agree where the engines interpret the pattern the same way. For example,
+`^label$` matches a key ending in a line feed in .NET, where `$` also matches
+before a final line feed. JavaScript requires the actual end for this pattern.
+For a strict end anchor in a shared expression, use a pattern such as
+`^label(?![\s\S])` (equivalent to `^label\z` in .NET). Prefer `addKeys` whenever
+a literal substring is enough.
 
 ## Standard Webhooks
 

@@ -198,6 +198,12 @@ describe('a change whose field JSON cannot tell fails closed', () => {
     expect(values({ field: callable, before: 1, after: 2 })).toEqual(redacted);
   });
 
+  it('redacts a boxed string even when it derives its JSON field name at serialization', () => {
+    const field = Object.assign(new Object('public'), { [Symbol.toPrimitive]: () => 'password' });
+    expect(values({ field, before: 'b', after: 'a' })).toEqual(redacted);
+    expect(values({ field: new Object(7), before: 'b', after: 'a' })).toEqual(['b', 'a']);
+  });
+
   it('keeps the shared rule for a plain own field', () => {
     expect(values({ field: 'public', before: 'b', after: 'a' })).toEqual(['b', 'a']);
     expect(values({ field: 'password', before: 'b', after: 'a' })).toEqual(redacted);
@@ -230,6 +236,7 @@ type ParityCase = {
   addKeys?: string[];
   paths?: string[];
   keepPaths?: string[];
+  ignoreCase?: boolean;
   input: EventInput;
   expected: unknown;
 };
@@ -254,13 +261,14 @@ function capture() {
 
 afterEach(() => vi.unstubAllGlobals());
 
-it.each(fixture.cases)('parity: $name', async ({ keys, changeFields, replacement, input, expected, addKeys, paths, keepPaths }) => {
+it.each(fixture.cases)('parity: $name', async ({ keys, changeFields, replacement, input, expected, addKeys, paths, keepPaths, ignoreCase }) => {
+  const flags = ignoreCase ? 'i' : '';
   const options = {
     addKeys,
     paths,
     keepPaths,
-    ...(keys === null ? {} : { keys: new RegExp(keys) }),
-    ...(changeFields === null ? {} : { changeFields: new RegExp(changeFields) }),
+    ...(keys === null ? {} : { keys: new RegExp(keys, flags) }),
+    ...(changeFields === null ? {} : { changeFields: new RegExp(changeFields, flags) }),
     ...(replacement === null ? {} : { replacement }),
   };
   const original = structuredClone(input);
@@ -297,6 +305,17 @@ it('runs the hook before default redaction and checks the final serialized size'
   ]);
   expect(onError).toHaveBeenCalledOnce();
   expect(onError.mock.calls[0]?.[0].message).toMatch(/256/);
+  expect(client.dropped).toBe(1);
+  expect(onDrop).toHaveBeenCalledWith({ action: 'oversize', id: expect.any(String) });
+});
+
+it('counts events made oversized by redaction, even without an onError callback', async () => {
+  const { send } = capture();
+  const client = new Logbird({ ...connection, redaction: { replacement: 'x'.repeat(256 * 1024) } });
+  client.track({ id: 'expanded', action: 'a', metadata: { token: 'one' } });
+  await client.shutdown();
+  expect(send).not.toHaveBeenCalled();
+  expect(client.dropped).toBe(1);
 });
 
 it('allows opting out and composing the helper with client options', async () => {
@@ -314,6 +333,21 @@ it('allows opting out and composing the helper with client options', async () =>
   await composed.shutdown();
   expect(events[0]?.metadata).toEqual(event.metadata);
   expect(events[1]?.metadata).toEqual({ password: '[redacted]', notes: 'hidden by hook', phone: 'hidden by hook', email: '[redacted]' });
+});
+
+it('requires an exemption on the party itself to prevent a whole-party key match', () => {
+  const event = { action: 'a', actor: { id: 'staff', email: 'staff@example.invalid', token: 'fictional' } };
+  const keys = /actor|token/;
+  expect(redact({ keys, keepPaths: ['actor.email'] })(event).actor).toEqual({
+    id: 'staff',
+    email: '[redacted]',
+    token: '[redacted]',
+  });
+  expect(redact({ keys, keepPaths: ['actor'] })(event).actor).toEqual({
+    id: 'staff',
+    email: 'staff@example.invalid',
+    token: '[redacted]',
+  });
 });
 
 it.each(['', '.private', 'private.', 'private..value', 'private.**', 'private.pre*', 'private.\\q', 'private.\\'])(
@@ -386,6 +420,49 @@ it('refuses unredactable events, counts them, and keeps recording without leakin
   expect(onError).toHaveBeenCalledTimes(3);
   for (const [error] of onError.mock.calls) {
     expect(error.message).toBe('An audit event could not be redacted and was dropped');
+  }
+});
+
+it('refuses malformed identifier subtrees and reports only safe scalar identity', async () => {
+  const { send } = capture();
+  const onDrop = vi.fn();
+  const onError = vi.fn();
+  const client = new Logbird({ ...connection, onDrop, onError, redaction: { paths: ['actor.id.secret'] } });
+  const event = { id: { secret: 'invalid envelope' }, action: 'a', actor: { id: { secret: 'invalid party' } } } as unknown as EventInput;
+  expect(() => redact()(event)).toThrow('An identifier must serialize to a scalar');
+  client.track(event);
+  await client.shutdown();
+  expect(send).not.toHaveBeenCalled();
+  expect(client.dropped).toBe(1);
+  expect(onDrop.mock.calls).toEqual([[{ action: 'a', id: expect.stringMatching(/^[\da-f-]{36}$/) }]]);
+  expect(onError.mock.calls[0]?.[0].message).toBe('An audit event could not be redacted and was dropped');
+});
+
+it('accounts for throwing metadata getters and redaction hooks without exposing exceptions or data', async () => {
+  const { send } = capture();
+  const onDrop = vi.fn();
+  const onError = vi.fn();
+  const client = new Logbird({ ...connection, onDrop, onError });
+  client.track({
+    id: 'getter',
+    action: 'a',
+    metadata: {
+      get unsafe() {
+        throw new Error('fictional secret');
+      },
+    },
+  });
+  await client.shutdown();
+  const helper = new Logbird({ ...connection, redaction: false, beforeSend: redact(), onDrop, onError });
+  helper.track({ id: 'helper', action: 'a', metadata: { nonscalar: 1n } });
+  await helper.shutdown();
+  expect(send).not.toHaveBeenCalled();
+  expect(client.dropped).toBe(1);
+  expect(helper.dropped).toBe(1);
+  expect(onDrop.mock.calls).toEqual([[{ action: 'a', id: 'getter' }], [{ action: 'a', id: 'helper' }]]);
+  expect(onError).toHaveBeenCalledTimes(2);
+  for (const [error] of onError.mock.calls) {
+    expect(error.message).toBe('An audit event could not be prepared and was dropped');
   }
 });
 

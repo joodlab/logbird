@@ -19,7 +19,7 @@ export const IDENTIFIER_FIELDS: readonly string[] = Object.freeze([
   'targets[].id',
 ]);
 
-type Level = 'nested' | 'top' | 'actor' | 'impersonator' | 'executor' | 'tenant' | 'targets' | 'target' | 'changes' | 'change' | 'plain';
+type Level = 'nested' | 'top' | 'actor' | 'impersonator' | 'executor' | 'tenant' | 'targets' | 'target' | 'changes' | 'change';
 
 const IDENTITY: Record<Level, readonly string[]> = {
   nested: [],
@@ -32,7 +32,6 @@ const IDENTITY: Record<Level, readonly string[]> = {
   target: ['id', 'type'],
   changes: [],
   change: [],
-  plain: [],
 };
 
 const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'impersonator', executor: 'executor', tenant: 'tenant', targets: 'targets' };
@@ -143,9 +142,8 @@ function childPaths(nodes: readonly PathNode[], key: string): readonly PathNode[
  * The contract: `redact()` is exact for JSON data, which is what `EventInput` types: plain objects, arrays, primitives,
  * and `toJSON` values (such as `Date`) without side effects on other parts of the event. Getters or `toJSON` with side
  * effects on other parts of the event, or anything that changes the event while it is serialized, are outside it. A
- * change whose `field` is a getter, an inherited or non-enumerable property, or a value (an object or a function) with a
- * `toJSON` has its `before` and `after` redacted, whatever the pattern; any other non-string `field`, or none, is not
- * matched.
+ * change whose `field` is a getter, an inherited or non-enumerable property, a boxed string, or a value with a
+ * `toJSON` has its `before` and `after` redacted, whatever the pattern. Other non-string fields are not matched.
  */
 export function redact(options?: RedactionOptions): (event: EventInput) => EventInput {
   const serialize = createRedactor(options);
@@ -193,27 +191,25 @@ export function createRedactor(options: RedactionOptions = {}, report?: (error: 
       Boolean.prototype.valueOf,
       BigInt.prototype.valueOf,
     ];
-    const boxed = (value: object) =>
-      brands.some((unbox) => {
-        try {
-          unbox.call(value);
-          return true;
-        } catch {
-          return false;
-        }
-      });
+    const hasBrand = (value: object, unbox: (this: unknown) => unknown) => {
+      try {
+        unbox.call(value);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     const isObject = (value: unknown): value is Record<string, unknown> =>
-      !!value && typeof value === 'object' && !Array.isArray(value) && !boxed(value);
+      !!value && typeof value === 'object' && !Array.isArray(value) && !brands.some((unbox) => hasBrand(value, unbox));
     const keep = (value: unknown, context: Context) => {
       if (value && typeof value === 'object') contexts.set(value, context);
       return value;
     };
-    const plain: Context = { level: 'plain', whole: false, changed: false, paths: NO_PATHS };
     const nested: Context = { level: 'nested', whole: false, changed: false, paths: NO_PATHS };
     // A change's values are decided from its field's property descriptor, before anything is serialized and without
     // reading the field. An own, enumerable string data property is matched against the change pattern. A field whose
-    // value JSON cannot tell this way (a getter, an inherited or non-enumerable property, or a value with a toJSON) fails
-    // closed: the entry's before and after are redacted. Any other JSON value, or no field, is not matched, as in .NET.
+    // field can serialize to a string through toJSON or boxed-string coercion, or come from a getter, inherited or
+    // non-enumerable property. In those cases redact the values without trying to evaluate the field again.
     const changeEntry = (entry: Record<string, unknown>, paths: readonly PathNode[]) => {
       const own = Object.getOwnPropertyDescriptor(entry, 'field');
       let changed: boolean;
@@ -224,15 +220,18 @@ export function createRedactor(options: RedactionOptions = {}, report?: (error: 
         changed =
           !!own.value &&
           (typeof own.value === 'object' || typeof own.value === 'function') &&
-          typeof (own.value as { toJSON?: unknown }).toJSON === 'function';
+          (typeof (own.value as { toJSON?: unknown }).toJSON === 'function' || hasBrand(own.value, String.prototype.valueOf));
       return keep(entry, { level: 'change', whole: false, changed, paths });
     };
     function replacer(this: unknown, key: string, value: unknown): unknown {
       const holder = this && typeof this === 'object' ? contexts.get(this) : undefined;
       if (!holder) return keep(value, { level: 'top', whole: false, changed: false, paths: rootPaths });
       const { level, whole, changed } = holder;
-      if (level === 'plain') return keep(value, plain);
-      if (!Array.isArray(this) && IDENTITY[level].includes(key)) return keep(value, plain);
+      if (!Array.isArray(this) && IDENTITY[level].includes(key)) {
+        // Identifiers are scalar. Refuse malformed containers so the identity exemption cannot hide a secret subtree.
+        if (Array.isArray(value) || isObject(value)) throw new TypeError('An identifier must serialize to a scalar');
+        return value;
+      }
       const paths = childPaths(holder.paths, key);
       const matched =
         whole ||
