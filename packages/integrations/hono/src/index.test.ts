@@ -3,25 +3,107 @@ import { Hono } from 'hono';
 import { expect, it, vi } from 'vitest';
 import { type AuditVariables, logbird } from './index';
 
+it('propagates delivery failure from adapter shutdown', async () => {
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', maxRetries: 0 });
+  const capture = logbird({ client });
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(null, { status: 500 }));
+  try {
+    client.track({ action: 'failed' });
+    await expect(capture.shutdown()).rejects.toThrow();
+  } finally {
+    fetch.mockRestore();
+  }
+});
+
+it('bounds resolver waits within the client shutdown budget and counts reserved captures', async () => {
+  vi.useFakeTimers();
+  try {
+    const onDrop = vi.fn();
+    const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', maxQueueSize: 1, shutdownTimeoutMs: 25, onDrop });
+    const actor = vi.fn(() => new Promise<undefined>(() => undefined));
+    const capture = logbird({ client, actor });
+    const app = new Hono<{ Variables: AuditVariables }>();
+    app.use(capture);
+    app.get('/', (c) => {
+      c.var.audit('waiting');
+      c.var.audit('overflow');
+      return c.text('ok');
+    });
+    await app.request('/');
+    const closing = expect(capture.shutdown()).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(25);
+    await closing;
+    expect(actor).toHaveBeenCalledOnce();
+    expect(onDrop.mock.calls.map(([event, details]) => [event.action, details.reason, details.mayBeStored])).toEqual([
+      ['overflow', 'queue_full', false],
+      ['waiting', 'shutdown', false],
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+}, 500);
+
+it('counts a capture preparation failure by the returned id', async () => {
+  const onDrop = vi.fn();
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', onDrop });
+  const capture = logbird({ client });
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(capture);
+  app.get('/', (c) =>
+    c.text(
+      c.var.audit('failed', {
+        context: {
+          get operationId(): string {
+            throw new Error('fixture');
+          },
+        },
+      }),
+    ),
+  );
+  const id = await (await app.request('/')).text();
+  await capture.shutdown();
+  expect(onDrop).toHaveBeenCalledWith({ action: 'failed', id }, { reason: 'invalid', mayBeStored: false });
+});
+
+it('sends the id returned by audit for a blank input even if beforeSend changes it', async () => {
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', beforeSend: (event) => ({ ...event, id: 'hook' }) });
+  const capture = logbird({ client });
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(capture);
+  app.get('/', (c) => c.text(c.var.audit('test.audit', { id: '   ' })));
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+    const id = JSON.parse(String(init?.body)).events[0].id;
+    return Response.json({ accepted: 1, ids: [id], rejected: [], warnings: [] }, { status: 202 });
+  });
+  try {
+    const id = await (await app.request('/')).text();
+    await capture.shutdown();
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)).events[0].id).toBe(id);
+  } finally {
+    fetch.mockRestore();
+  }
+});
+
 it('isolates concurrent requests, merges causation and auto-tracks mutations', async () => {
-  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
+  const client = new Logbird({ enabled: false });
   const track = vi.spyOn(client, 'track').mockImplementation(() => undefined);
   const app = new Hono<{ Variables: AuditVariables }>();
-  app.use(
-    logbird({
-      client,
-      actor: (c) => ({ id: c.req.header('user') }),
-      tenant: () => ({ id: 'tenant' }),
-      useOperationHeader: true,
-      autoTrack: {},
-    }),
-  );
+  const capture = logbird({
+    client,
+    actor: (c) => ({ id: c.req.header('user') }),
+    tenant: () => ({ id: 'tenant' }),
+    useOperationHeader: true,
+    autoTrack: {},
+  });
+  app.use(capture);
   app.post('/', async (c) => {
     await Promise.resolve();
     c.var.audit('record.updated', { context: { parentEventId: 'parent' } });
     return c.text('ok');
   });
   await Promise.all(['alice', 'bob'].map((user) => app.request('/', { method: 'POST', headers: { user, 'x-logbird-operation': user } })));
+  await capture.shutdown();
   expect(track).toHaveBeenCalledTimes(4);
   for (const [event] of track.mock.calls) expect(event.context?.operationId).toBe(event.actor?.id);
   expect(track.mock.calls[0]?.[0].context?.parentEventId).toBe('parent');

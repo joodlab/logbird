@@ -95,7 +95,7 @@ export interface JobAuditOptions {
 }
 
 // @public (undocumented)
-export function report(onError: CaptureOptions<unknown>['onError'], error: unknown): void;
+export function report(onError: CaptureOptions<unknown>['onError'], error: unknown, client?: Logbird): void;
 
 // @public
 export type Resolver<C, T> = (context: C) => T | Promise<T>;

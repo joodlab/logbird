@@ -7,7 +7,8 @@
 // - a known package (PACKAGES below), at the same version as the others (and the expected version, when given), with
 //   no `workspace:` specifier left anywhere in its manifest;
 // - `repository.directory` naming the package's folder, `license` MIT and a LICENSE file, `engines.node` set;
-// - every `exports` target present in the tarball, and nothing shipped but `dist/` JavaScript, declarations and source
+// - every `exports` target present in the tarball, explicit declaration and runtime exports for the SDK and Hono,
+//   and nothing shipped but `dist/` JavaScript, declarations and source
 //   maps, `package.json`, the README, LICENSE and CHANGELOG (no source anywhere: `src/`, `lib/helper.ts`, `dist/x.ts`);
 // - its `dependencies` and `peerDependencies` exactly the allowed ones, every @logbird dependency at the same version,
 //   no optional or bundled dependencies, and `zod` / `@logbird/contracts` in none of those fields;
@@ -31,8 +32,8 @@ const traverse = babelTraverse.default ?? babelTraverse;
 
 /** Every package that may be packed, with what it may import beyond its declared dependencies and peers. */
 const PACKAGES = {
-  '@logbird/sdk': { dir: 'packages/sdk', dependencies: [], peers: [], alsoImports: [] },
-  '@logbird/hono': { dir: 'packages/integrations/hono', dependencies: ['@logbird/sdk'], peers: ['hono'], alsoImports: [] },
+  '@logbird/sdk': { dir: 'packages/sdk', dependencies: [], peers: [], alsoImports: [], typedEntrypoints: ['.', './integration', './read'] },
+  '@logbird/hono': { dir: 'packages/integrations/hono', dependencies: ['@logbird/sdk'], peers: ['hono'], alsoImports: [], typedEntrypoints: ['.'] },
   '@logbird/vue': { dir: 'packages/integrations/vue', dependencies: ['@logbird/sdk'], peers: ['vue'], alsoImports: [] },
   '@logbird/tanstack-start': {
     dir: 'packages/integrations/tanstack-start',
@@ -401,6 +402,11 @@ function main(folder, expected) {
     collect(manifest.exports);
     if (targets.length === 0) fail('no exports');
     for (const target of targets) if (!files.has(target.replace(/^\.\//, ''))) fail(`exports names ${target}, which the tarball does not carry`);
+    for (const entrypoint of known.typedEntrypoints ?? []) {
+      const entry = manifest.exports?.[entrypoint];
+      if (typeof entry?.types !== 'string' || typeof entry.import !== 'string')
+        fail(`exports.${entrypoint} needs types and import targets for packed consumers`);
+    }
 
     // What npm installs for a consumer: exactly the allowed dependencies and peers, no optional or bundled ones, and
     // never zod or @logbird/contracts in any of these fields.

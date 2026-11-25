@@ -28,10 +28,26 @@ await audit.shutdown();
 
 `track(event): void` never throws, even when `onError` throws. It snapshots the
 event, assigns UUIDv7 and a timestamp when absent, and batches by rows, bytes and
-time. `flush(): Promise<void>` drains the queue; `shutdown(): Promise<void>` closes
-capture and drains. Defaults: 100 rows, 1000 ms, 5 retries. Events over 256 KB are
-reported through `onError`; requests stay below 5 MB and 1000 rows. Timers are
-unreferenced on Node; applications must call shutdown to ensure exit delivery.
+time. `flush(): Promise<void>` covers events queued or already sending at the
+call, including a call made during shutdown. It settles independently of later
+captures and rejects with unresolved events retained for retry. Await the adapter's `audit.pending()` first to include
+pending preparation in a direct flush. `shutdown(): Promise<void>` closes capture
+and drains under one `shutdownTimeoutMs` budget (default 10,000 ms, 0 to stop
+immediately). The budget includes pending integration context resolution, an active
+batch, retries and the queued tail.
+If delivery fails or takes too long, shutdown reports each remaining event as a
+`shutdown` drop and rejects. Always await shutdown in the host's lifecycle.
+
+Pass plain JSON data with own enumerable fields to `track()`. Call `flush()`
+and `shutdown()` from the host lifecycle outside `beforeSend`, `onDrop` and
+`onError`. An event still inside `beforeSend` when shutdown starts can be
+refused and counted as a `shutdown` drop.
+
+The defaults are 100 rows, a 1000 ms batching interval and 5 retries. Requests
+stay below 5 MB and 1000 rows, with a 256 KiB per-event limit. Each request has
+up to 30 seconds and each batch send has up to five minutes. On Node, batching
+and background request and backoff timers are unreferenced. An explicit flush
+or shutdown keeps the active delivery timers referenced while it waits.
 Do not ship private ingest keys in a public browser bundle.
 
 `endpoint` is the public origin that serves the console, the same value as the server's `APP_URL`.
@@ -39,9 +55,10 @@ It forwards `/v1` to the API, which stays on a private listener (never expose `:
 reference is at `<origin>/docs` and the OpenAPI document at `<origin>/openapi.json`.
 
 429, 5xx and network failures retry the same serialized batch with exponential
-backoff and jitter (numeric Retry-After supported). A terminal failure leaves the
-batch queued and rejects flush/shutdown. Background flush reports through onError;
-an explicit later flush retries the retained batch. The queue is memory-only;
+backoff and jitter (numeric Retry-After supported). Missing acknowledgements
+are retried too. After retry exhaustion, flush rejects and retains unresolved
+events. Background flush reports through `onError`. An explicit later flush
+retries the retained batch. The queue is memory-only;
 crashes before server acknowledgement can lose pending events. The server arbitrates immutable ids; exact retries do not repeat ClickHouse rollups.
 
 Carry the initiating actor and operation ID through job data:
@@ -68,15 +85,29 @@ Do not log raw SDK error objects, events, headers or credentials. Use safe diagn
 
 ## Outage backpressure
 
-The SDK retains at most `maxQueueSize` queued events (default 10,000), plus one in-flight
+The SDK retains at most `maxQueueSize` queued or preparing events (default 10,000), plus one in-flight
 batch (at most `batchSize`, default 100). Each event is capped at 256 KiB; this is an event
 count limit, not a byte budget. Size the queue for your payloads and memory budget.
 `dropPolicy: 'oldest'` (default) keeps recent events; `'newest'` preserves queued history.
-`onDrop(event)` reports each overflow discard and `client.dropped` counts them;
-`client.queueSize` reports queued events. Exceptions from diagnostic callbacks never escape
-`track`. Failed batches re-enter the same bounded queue with the same drop policy.
-`track` is best effort; `flush` and `shutdown` reject on delivery failure so callers must
-handle them. Call shutdown in the host lifecycle and await it before exiting.
+`client.dropped` counts every drop, and `client.droppedByReason` gives the counts
+by reason. `onDrop(event, details)` receives `details.reason`, `mayBeStored`, and
+the approved rejection code or HTTP status when available. Queued drops carry
+the full serialized event snapshot. Local refusals before enqueue carry only
+bounded id and action fields. Keep these snapshots out of operational logs.
+If `mayBeStored` is true and you replay from an outbox, reuse the original id and
+content, including the original timestamp.
+`client.possiblyStoredDropsByReason` counts uncertain drops even when a notification
+could not be delivered. Pending resolver captures reserve queue capacity. A
+reservation that is already preparing cannot be displaced by a newer capture.
+
+`client.queueSize` reports queued events. Failed batches re-enter the same bounded
+queue with the same drop policy. Diagnostic callbacks run after queue mutations.
+The SDK observes rejected callback promises and counts failures in
+`client.failedNotifications`. It skips new notifications when 1024 are outstanding
+or 1024 have already been posted in the same event loop turn and counts those
+in `client.skippedNotifications`. Capture attempted synchronously inside a client
+diagnostic callback is counted as `diagnostic_reentry`. Flush and shutdown allow scheduled
+callbacks to start before settling. Callers own any asynchronous work in their callbacks.
 
 ```ts
 const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
@@ -109,7 +140,8 @@ receive time minus 3650 days through plus 24 hours. Only `action` is required, s
 epoch **seconds** — numbers below 1e11 —, or outside that window) never drops the event: it is stored at receive time,
 the original value is kept in `attributes['logbird.occurredAt.rejected']` and the payload, and the response lists it
 in `warnings[]` with the reason. Events without an `action` are per-event `rejected[]` entries; valid siblings are
-durably inserted. SDK partial rejections invoke `onDrop` for rejected indices and `onError` with reasons. Permanent
+durably inserted. SDK partial rejections invoke `onDrop` once per rejected position with its code when recognized
+and `onError` with the rejection count. Permanent
 HTTP errors (except 429) drop the batch and report; transient failures retain it for retry.
 
 ## Host context options (0.2)
@@ -132,17 +164,17 @@ track does nothing and flush/shutdown resolve immediately. Enabled clients requi
 Defaults are shallow merged under events; context and metadata merge one level deep.
 Explicit undefined values override defaults. beforeSend runs after defaults and id/time
 stamping. Redaction runs next, followed by the 256 KiB check on the resulting JSON.
-Returning null/undefined silently filters. A throwing hook refuses the event, increments
-the drop count, and reports the refusal through onError and onDrop.
+Returning null/undefined records a `filtered` drop. A throwing hook records a
+`before_send_failed` drop and reports through `onError`.
 
 ## Redaction
 
 Every event passes through client redaction, including events from framework
 adapters, `createAudit`, and BullMQ's `jobAudit`. The SDK applies the rules to the
 value returned by `beforeSend` and checks the size of the redacted JSON. It
-reports preparation, redaction and size failures through `onError`, counts them
-in `client.dropped`, and supplies only the action and last validated event ID to
-`onDrop` when available.
+reports preparation, redaction and size failures through `onError` and counts
+them by reason. A redaction failure is `redaction_failed`. These refusals supply
+only bounded action and event ID fields to `onDrop` with `mayBeStored: false`.
 
 Redaction is on by default. `DEFAULT_SECRET_KEYS` matches passwords, secrets,
 tokens, OTPs, API keys, authorization, cookies, credentials and private keys.
@@ -369,12 +401,15 @@ parse failure, the server checks every named row alone as a canary. A written
 canary is accepted and the rest of that attempt uses bisection; a failed canary permits
 exact-row rejection and prefix writes. All share the original isolation budgets
 (about three statements per bad row).
-The SDK retries with the identical previous body unless complete 503 details settle
-events; then it resends only unsettled events within the same send. It serializes
-each event once per send and reuses that exact JSON (including id and occurredAt)
+The SDK validates the acknowledgement envelope, credits each accepted id once
+per occurrence and settles each rejected position once. It retries only the
+remaining events with their cached JSON (including id and occurredAt)
 in every subset body. Response indices are mapped back to the original events,
-so rejections call `onDrop` once per send. Incomplete or malformed details keep
-the previous body unchanged. After its retry budget, only unsettled events stay
+so rejections call `onDrop` once per event. Incomplete 503 details keep the
+previous retry body, and valid rejections are still reported. A partial 2xx
+can settle unambiguous accepted rows. The SDK refuses
+to dispatch when four transport operations are still outstanding after cancellation.
+After its retry budget, only unsettled events stay
 queued and `flush()` rejects. The SDK always sends `Logbird-Retry: subset`. About
 five leading bad rows fit per attempt under the server's byte budget; subset retries
 converge. An attempt settling events and shrinking the body does not consume
