@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalDecimal, isRawJson, parseJsonExact, rawJsonNumber } from '@logbird/contracts';
 import type { ClickHouseClient } from './client';
 import { projectMaintenance } from './maintenance-tag';
-import { type EventRow, normalizeEvent } from './normalize';
+import { type EventRow, normalizeEvent, type StoredEventRow } from './normalize';
 import { deleteAndVerify, read } from './queries';
 import { resolveTimestamp } from './timestamp';
 
@@ -64,7 +64,7 @@ const legacyFields = [
   'schema_version',
   'attributes',
 ] as const satisfies readonly (keyof EventRow)[];
-export function legacyEventFingerprint(row: EventRow) {
+export function legacyEventFingerprint(row: StoredEventRow) {
   return digest(Object.fromEntries(legacyFields.map((key) => [key, row[key]])));
 }
 export function canonicalFingerprint(input: unknown, timestamp: string) {
@@ -72,7 +72,7 @@ export function canonicalFingerprint(input: unknown, timestamp: string) {
 }
 
 /** v1 hashes parsed input and resolved time, never search columns or admission rules. */
-export function eventFingerprint(row: EventRow) {
+export function eventFingerprint(row: Pick<EventRow, 'payload' | 'timestamp'>) {
   return canonicalFingerprint(parseJsonExact(row.payload), row.timestamp);
 }
 export function retryFingerprint(input: unknown, projectId: string, receivedAt: Date, eventId: string, expected = 'v1:', eventAt?: Date) {

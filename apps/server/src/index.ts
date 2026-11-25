@@ -11,6 +11,21 @@ import { ingest } from './ingest';
 import { startAuditDrainer } from './outbox-delivery';
 import { rateLimitStore } from './rate-limit';
 
+try {
+  const schema = await clickhouse.query({
+    query: 'SELECT changes_before_kind, changes_after_kind FROM events LIMIT 0',
+    format: 'JSONEachRow',
+  });
+  await schema.json();
+} catch (cause) {
+  throw new Error(
+    'Cannot read the ClickHouse change kind columns. Ensure ClickHouse is reachable and run the Logbird migrate step before starting the API.',
+    {
+      cause,
+    },
+  );
+}
+
 const server = serve({ fetch: app.fetch, port: env.PORT }, () =>
   console.log(JSON.stringify({ level: 'info', event: 'server.ready', port: env.PORT })),
 );

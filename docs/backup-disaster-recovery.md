@@ -335,7 +335,7 @@ background merges and cannot establish correctness.
 
 | Check | A: immediately after restore, workers stopped | B: after retention and failed/abandoned-run repair | <local-path>fter repeating repair |
 | --- | --- | --- | --- |
-| Raw events | Backup-boundary IDs/payloads and survival policy match the fixture manifest | Expired IDs absent; survivor IDs/payloads exact; no missing acknowledged survivors | Same survivors as B, no new rows or resurrection |
+| Raw events | Backup-boundary IDs, payloads, and stored change kind arrays (when present) match the fixture manifest | Expired IDs absent; survivor IDs, payloads, and kinds exact; no missing acknowledged survivors | Same survivors as B, no new rows or resurrection |
 | `events_by_minute` | `sum(events)` by the full minute/environment/action/outcome/actor/executor key matches raw events | Recompute the same map from survivors and compare every key/value | Identical logical map to B; no doubled counts |
 | `entities` | Group `(project_id,kind,entity_id)`: summed events, min first_seen, max last_seen and fixture labels agree with raw actor/tenant/executor/target expansion | Same invariants against survivors; expired-only entities gone | Same counts/extrema/fixture labels as B |
 | `attribute_keys` | Per project/key: summed count and max last_seen match raw map-key expansion; merged samples belong to the fixture's permitted values | Same invariants against survivors; expired-only keys gone | Same logical counts/extrema; merged samples remain valid |

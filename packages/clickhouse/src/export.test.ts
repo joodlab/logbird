@@ -36,7 +36,7 @@ it('keeps attribution, before/after values and context in a stable flat CSV sche
   const cells = Object.fromEntries(CSV_COLUMNS.map((key, i) => [key, values[i]]));
   expect(values).toHaveLength(CSV_COLUMNS.length);
   expect(cells).toMatchObject({ actor_id: 'effective', impersonator_id: 'support', executor_id: 'worker', job_id: 'job', job_attempt: '2' });
-  expect(JSON.parse(cells.changes ?? '')).toEqual([{ field: 'state', before: 'old', after: 'new' }]);
+  expect(JSON.parse(cells.changes ?? '')).toEqual([{ field: 'state', before: 'old', after: 'new', beforeKind: 'string', afterKind: 'string' }]);
   expect(JSON.parse(cells.targets ?? '')).toEqual(event.targets);
   expect(JSON.parse(cells.context ?? '')).toMatchObject({ ip: '203.0.113.1', requestId: 'req' });
 });
