@@ -511,17 +511,23 @@ function sharedArrays(field: string, by: string): SharedArrays | undefined {
  * 200 KB. Then they travel as MD5 digests, compared in SQL, and rows are matched back to parents by exact value.
  */
 const PARENTS_URL_BUDGET = 256 * 1024;
+/** A string as @clickhouse/client writes it inside an Array(String) parameter: quoted, with these five escapes. */
+const ESCAPES: Record<string, string> = { '\t': '\\t', '\n': '\\n', '\r': '\\r', "'": "\\'", '\\': '\\\\' };
+const paramLiteral = (text: string) => `'${text.replace(/[\t\n\r'\\]/g, (c) => ESCAPES[c] ?? c)}'`;
+/** The size of the `param_<name>` URL entry the driver would send for `texts`, exactly as form-encoded. */
+export function parentParamUrlBytes(name: string, texts: string[]) {
+  return new URLSearchParams({ [`param_${name}`]: `[${texts.map(paramLiteral).join(',')}]` }).toString().length;
+}
 function parentFilter(texts: string[], expr: string, name: string) {
-  const urlBytes = texts.reduce((n, t) => n + encodeURIComponent(t).length + 4, 0);
-  if (urlBytes <= PARENTS_URL_BUDGET) return { sql: `${expr} IN {${name}:Array(String)}`, params: { [name]: texts } };
+  if (parentParamUrlBytes(name, texts) <= PARENTS_URL_BUDGET) return { sql: `${expr} IN {${name}:Array(String)}`, params: { [name]: texts } };
   const digests = texts.map((t) => createHash('md5').update(t, 'utf8').digest('hex'));
   return { sql: `lower(hex(MD5(${expr}))) IN {${name}Digests:Array(String)}`, params: { [`${name}Digests`]: digests } };
 }
 /** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
 function facetLevel(field: string, n: number, sharedTargets = false, maskName = false, changeRef?: (column: string) => string) {
   const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
-  // An alias (actor.id, impersonator.id) gets the same label as its field.
-  const canonical = QUERY_FIELDS.find((f) => f.key === field || f.aliases?.includes(field))?.key ?? field;
+  // impersonator.id gets the same label as impersonator (actor.id keeps its existing label, the id).
+  const canonical = field === 'impersonator.id' ? 'impersonator' : field;
   let expr = col ?? `attributes[{attr${n}:String}]`;
   let join = '';
   let label = expr;

@@ -18,6 +18,7 @@ import { env } from './env';
  */
 const MAILPIT = process.env.MAILPIT_URL || 'http://127.0.0.1:8025';
 const BIG_VALUE = `long:${'x'.repeat(150 * 1024)}`;
+const BIG_VALUE_2 = `long2:${'y'.repeat(150 * 1024)}`;
 
 it('change values and the impersonator name are query fields; unknown changes.* keys are refused (real services)', async () => {
   const users: string[] = [];
@@ -195,6 +196,8 @@ it('change values and the impersonator name are query fields; unknown changes.* 
         // A 150 KB value: a second facet level must not send it back to ClickHouse as a URL parameter.
         changes: [{ field: 'body', before: 'v1', after: BIG_VALUE }],
       },
+      // A second 150 KB value with another field: together the two parents exceed the URL budget (digest path).
+      { id: 'big2', occurredAt: ts(9), action: 'article.updated', tenant, actor, changes: [{ field: 'notes', before: 'v1', after: BIG_VALUE_2 }] },
       // An impersonator sent with a name and no id: found by impersonator.name, shown as no impersonator (documented).
       { id: 'n1', occurredAt: ts(10), action: 'article.viewed', tenant, actor, impersonator: { name: 'Nameless Support' } },
       // Tenant t3: 100 distinct 900-character after-values, so a second facet level carries about 90 KB of parents.
@@ -276,7 +279,7 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       { q: 'changes.after:true', rows: ['c4'] },
       { q: 'changes.after:"[\\"a\\",\\"b\\"]"', rows: ['c4'] },
       { q: 'changes.after:"{\\"k\\":1}"', rows: ['c4'] },
-      { q: '_exists_:changes.before', rows: ['big1', 'c1', 'c2', 'c3', 'c4', 'l1'] },
+      { q: '_exists_:changes.before', rows: ['big1', 'big2', 'c1', 'c2', 'c3', 'c4', 'l1'] },
       { q: 'changes.after:SAME', rows: ['l1'] },
       { q: 'impersonator.name:"Rita Support"', rows: ['i1'] },
       { q: 'impersonator.name:Rita*', rows: ['i1'] },
@@ -339,6 +342,18 @@ it('change values and the impersonator name are query fields; unknown changes.* 
         expect(value?.groups?.map((g) => [g.value, g.count])).toEqual([[query.by === 'action' ? 'article.updated' : 'body', 1]]);
       }
     }
+    // Two 150 KB parents (over the 256 KB URL budget, so they travel as digests): each keeps its own child.
+    for (const bearer of [plain.secret, masked.secret]) {
+      const r = await get(
+        bearer,
+        `/facets?${new URLSearchParams({ field: 'changes.after', by: 'changes.field', from, limit: '50', q: 'id:(big1 OR big2)' })}`,
+      );
+      expect(r.status, r.text.slice(0, 200)).toBe(200);
+      const pairs = Object.fromEntries(
+        facetResponseSchema.parse(r.body).values.map((v) => [v.value.slice(0, 6), v.groups?.map((g) => [g.value, g.count])]),
+      );
+      expect(pairs).toEqual({ 'long:x': [['body', 1]], long2: [['notes', 1]] });
+    }
     // Many medium-length parents (about 90 KB of them) at the second level, masked and unmasked.
     for (const bearer of [reader.secret, masked3.secret]) {
       const r = await get(
@@ -355,6 +370,12 @@ it('change values and the impersonator name are query fields; unknown changes.* 
     const refusedSuggest = await suggest('changes.to');
     expect(refusedSuggest.status).toBe(422);
     expect((await refusedSuggest.json()).error).toMatchObject({ code: 'invalid_query', details: { reason: 'unknown_field' } });
+    const refusedFilter = await console_(
+      ownerCookie,
+      `/api/projects/${projectId}/suggest?${new URLSearchParams({ field: 'changes.after', q: 'changes.to:x', from })}`,
+    );
+    expect(refusedFilter.status).toBe(422);
+    expect((await refusedFilter.json()).error).toMatchObject({ code: 'invalid_query', details: { reason: 'unknown_field' } });
     const literalSuggest = await suggest('attr.changes.to');
     expect(literalSuggest.status, await literalSuggest.clone().text()).toBe(200);
     expect((await literalSuggest.json()).values.map((v: { value: string }) => v.value)).toContain('PUBLISHED');

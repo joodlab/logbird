@@ -39,6 +39,21 @@ export function queryHint(context: QueryCompletion, draft: string, caret: number
       tone: 'warn',
     };
   }
+  // A refused changes.* key: whatever the value syntax (plain, range or regex), the term is refused, so say that first.
+  if ((context.kind === 'value' || context.kind === 'range' || context.kind === 'regex') && isUnknownChangesKey(context.field))
+    return {
+      label: `${context.field} · not a field`,
+      parts: [
+        'Use ',
+        c('changes.field'),
+        ', ',
+        c('changes.before'),
+        ' or ',
+        c('changes.after'),
+        ' · a literal attribute is ',
+        c(`attr.${context.field}`),
+      ],
+    };
   switch (context.kind) {
     case 'key': {
       if (!draft.trim()) {
@@ -79,20 +94,6 @@ export function queryHint(context: QueryCompletion, draft: string, caret: number
     case 'phrase':
       return { label: 'Phrase', parts: ['Searches descriptions and actor, tenant and target names, case-insensitive'] };
     case 'value': {
-      if (isUnknownChangesKey(context.field))
-        return {
-          label: `${context.field} · not a field`,
-          parts: [
-            'Use ',
-            c('changes.field'),
-            ', ',
-            c('changes.before'),
-            ' or ',
-            c('changes.after'),
-            ' · a literal attribute is ',
-            c(`attr.${context.field}`),
-          ],
-        };
       const core = coreField(context.field);
       const name = core?.key ?? attributeKey(context.field);
       if (context.inGroup) {

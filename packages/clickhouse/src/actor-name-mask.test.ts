@@ -12,7 +12,7 @@ import {
 } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { compileMaskedQuery } from './field-mask';
-import { facets, searchEvents } from './queries';
+import { facets, parentParamUrlBytes, searchEvents } from './queries';
 import { compileQuery } from './query';
 
 // #333: under the actor_email mask, a reader cannot obtain the actor's address from the actor's own fields (email,
@@ -274,6 +274,26 @@ describe('facets under the actor_email mask', () => {
     expect(second?.query).toContain(
       "ORDER BY value,masked,count DESC,sipHash64Keyed(({orderKey0:UInt64},{orderKey1:UInt64}),concat(toString(gmasked),'|',grp)) LIMIT",
     );
+  });
+
+  it('measures the parent parameter exactly as the driver form-encodes it', () => {
+    // Apostrophes are escaped (\\') and percent-encoded (%5C%27): six bytes each. Spaces become '+': one byte each.
+    expect(parentParamUrlBytes('facetValues', ["'".repeat(1000)])).toBe('param_facetValues='.length + 3 + 3 + 1000 * 6 + 3 + 3);
+    expect(parentParamUrlBytes('facetValues', [' '.repeat(1000)])).toBe('param_facetValues='.length + 3 + 3 + 1000 + 3 + 3);
+  });
+
+  it('sends apostrophe-heavy parents as digests and space-heavy ones as exact values around the 256 KB budget', async () => {
+    const quotes = "'".repeat(180_000);
+    const spaces = ' '.repeat(200_000);
+    for (const [value, digests] of [
+      [quotes, true],
+      [spaces, false],
+    ] as const) {
+      const plain = client([[{ value, label: value, count: 1, total: 1 }], []]);
+      await facets(plain.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 });
+      const params = calls(plain.query)[1]?.query_params ?? {};
+      expect(Object.keys(params).includes('facetValuesDigests'), `${value.length} ${value[0]}`).toBe(digests);
+    }
   });
 
   it('keeps exact second-level parents in the URL unless they are large, then selects them by digest', async () => {
