@@ -30,7 +30,14 @@ import {
   RECENT_PROBLEM_SEVERITY,
 } from '@logbird/contracts';
 import type { z } from 'zod';
-import { ACTOR_NAME_MASK_PARAMS, facetOrderParams, facetOrderSql, MASKED_NAME_COLUMNS, maskActorNameInFilter, maskedFacetText } from './actor-name-mask';
+import {
+  ACTOR_NAME_MASK_PARAMS,
+  facetOrderParams,
+  facetOrderSql,
+  MASKED_NAME_COLUMNS,
+  maskActorNameInFilter,
+  maskedFacetText,
+} from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
