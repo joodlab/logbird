@@ -122,6 +122,21 @@ describe('masks', () => {
     expect(maskEvent(support, ['ip']).attributes['impersonator.email']).toBe('Rita@example.invalid');
     expect(maskEvent(support, ['ip']).impersonator?.name).toBe('Rita <Rita@example.invalid>');
   });
+  it('removes literal dotted copies of the masked names, which the name rule cannot judge', () => {
+    const copies = {
+      ...event,
+      attributes: { 'impersonator.name': 'rita@example.invalid', 'actor.name': 'lina@example.invalid', 'metadata.plan': 'pro' },
+    } as unknown as AuditEvent;
+    expect(maskEvent(copies, ['actor_email']).attributes).toEqual({ 'metadata.plan': 'pro' });
+    expect(maskEvent(copies, ['ip']).attributes['impersonator.name']).toBe('rita@example.invalid');
+  });
+  it('derives pseudonyms from a pinned HMAC input per role', () => {
+    // An independent vector: HMAC-SHA256 over the documented input, so an unkeyed or re-keyed change fails here.
+    const key = Buffer.alloc(32, 9);
+    const vector = (input: string) => `masked:${createHmac('sha256', key).update(input).digest('hex').slice(0, 24)}`;
+    expect(maskedEmail('p1', 'Rita@Example.invalid', key)).toBe(vector('p1\u0000rita@example.invalid'));
+    expect(maskedEmail('p1', 'Rita@Example.invalid', key, 'impersonator')).toBe(vector('\u0000impersonator\u0000p1\u0000rita@example.invalid'));
+  });
   it('hashes emails per project and case-insensitively', () => {
     const key = viewerTokenKey('z'.repeat(48));
     expect(maskedEmail('p1', 'A@example.invalid', key)).toBe(maskedEmail('p1', 'a@example.invalid', key));

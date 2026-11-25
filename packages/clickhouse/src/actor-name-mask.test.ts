@@ -83,7 +83,7 @@ describe('the pseudonym a sensitive name shows', () => {
     expect(maskedFacetText('p', 0, 'Bob', key)).toBe('Bob');
     expect(maskedFacetText('p', 1, 'a@b.example', key)).toBe(maskedEmail('p', 'a@b.example', key));
     expect(maskedFacetText('p', '2', 'a@b.example', key)).toBe(maskedEmail('p', 'a@b.example', key, 'impersonator'));
-    for (const flag of [3, -1, '', ' ', '01', '1.0', 'x'])
+    for (const flag of [3, -1, '', ' ', '01', '1.0', 'x', [0], ['0'], null, true] as unknown as (number | string)[])
       expect(() => maskedFacetText('p', flag, 'a@b.example', key), JSON.stringify(flag)).toThrow(/Unknown masked facet flag/);
   });
 });

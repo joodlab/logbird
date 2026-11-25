@@ -602,7 +602,11 @@ async function maskedFacets(
   const params = { ...ACTOR_NAME_MASK_PARAMS, ...facetOrderParams(key, p) };
   const show = (flag: number | string, text: string) => maskedFacetText(p, flag, text, key);
   // The selected label leaves SQL as two scalar columns (never a tuple, whose JSON shape depends on server settings).
-  const label = (flag: number | string, text: string, shown: string) => (text ? show(flag, text) : shown);
+  // The flag is checked even for an empty label, so a malformed flag never passes unseen.
+  const label = (flag: number | string, text: string, shown: string) => {
+    const masked = show(flag, text);
+    return text ? masked : shown;
+  };
   const w = await where(ch, p, q, compiled, scope);
   const one = facetLevel(q.field, 1, false, true);
   type Row = { value: string; masked: number; labf: number; labt: string; count: number; total: number };
