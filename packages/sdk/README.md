@@ -54,8 +54,10 @@ as the serving origin. A redirect produces a status-only error. Ingest
 acknowledgements are limited to 4 MiB and read pages to 64 MiB. The SDK cancels
 unused or oversized bodies. An unreadable or oversized acknowledgement leaves
 the covered events eligible for retry. Reads validate the returned event shape
-and have a 30-second deadline. A fetch transport with four pending read
-cancellations or abandoned requests refuses further reads until cleanup completes.
+and have a 30-second deadline. Before each dispatch, a fetch transport with
+four pending cancellations or abandoned reads refuses the new read until cleanup
+completes. Callers control read concurrency. Simultaneous aborts of reads already
+dispatched can put more than four operations into cleanup.
 
 Do not ship private ingest keys in a public browser bundle.
 
@@ -180,10 +182,14 @@ Before copying input or invoking `beforeSend`, the SDK checks a 1 MiB lower
 bound of its JSON size and a depth of 1,000 levels within metadata and each
 change value. The lower bound counts one
 byte per UTF-16 code unit of keys and values, plus JSON framing and literals.
+The guard is an approximation. A few hundred bytes of SDK-added framing can
+affect results near the limit, and TypeScript and .NET also estimate numeric
+values differently.
 An event outside those limits is reported as `input_too_large` or
 `input_too_deep`, even if redaction would have reduced the output. Supply
 ordinary JSON data and convert accessor-backed values to plain data at capture.
-The final 256 KiB cap measures the actual serialized UTF-8 bytes.
+The final 256 KiB cap measures the actual serialized UTF-8 bytes. A redaction
+result that exceeds this output limit is reported as `too_large`.
 
 `onWarning` receives a `party_id_normalization` code and the field name when
 party identifiers or target types may be indexed differently because of
@@ -194,8 +200,9 @@ the event.
 `LogbirdError` supports a stable `code` and safe numeric `status` and `count`
 fields when applicable. Use these fields for operational logs. The SDK reports
 approved rejection codes through `onDrop` and leaves its event snapshot
-available for recovery. Read cancellation supplied by the caller uses a
-standard `AbortError` with a fixed message.
+available for recovery. A read cancelled before dispatch rejects with the
+caller's abort reason. Cancellation after dispatch uses a standard `AbortError`
+with a fixed message.
 
 ## Redaction
 

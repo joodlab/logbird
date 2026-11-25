@@ -283,7 +283,12 @@ function compileRedactor(options: RedactionOptions, report?: (error: LogbirdErro
       return serialized;
     } catch (error) {
       const diagnostic = safeDiagnostic(error, 'redaction_failed');
-      if (diagnostic.code === 'input_too_large' || diagnostic.code === 'input_too_deep' || diagnostic.code === 'redaction_identifier_invalid')
+      if (
+        diagnostic.code === 'input_too_large' ||
+        diagnostic.code === 'input_too_deep' ||
+        diagnostic.code === 'event_too_large' ||
+        diagnostic.code === 'redaction_identifier_invalid'
+      )
         throw diagnostic;
       throw new LogbirdError('redaction_failed');
     }

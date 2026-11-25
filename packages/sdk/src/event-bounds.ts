@@ -139,6 +139,7 @@ type Replacer = (this: object, key: string, value: unknown) => unknown;
 export function stringifyEvent(event: unknown, replace?: Replacer): string {
   let remaining = MAX_INPUT_BYTES;
   let visited = 0;
+  const outputOverflow = replace ? 'event_too_large' : 'input_too_large';
   const positions = new WeakMap<object, Position>();
   return JSON.stringify(event, function guarded(this: object, key, value: unknown) {
     if (++visited > MAX_INPUT_BYTES) throw new LogbirdError('input_too_large');
@@ -151,17 +152,19 @@ export function stringifyEvent(event: unknown, replace?: Replacer): string {
     }
     let transformed = replace ? replace.call(this, key, value) : value;
     if (transformed && typeof transformed === 'object') {
-      if (Array.isArray(transformed) && transformed.length > MAX_INPUT_BYTES) throw new LogbirdError('input_too_large');
+      if (Array.isArray(transformed) && transformed.length > MAX_INPUT_BYTES) throw new LogbirdError(outputOverflow);
       // Measure the actual string conversion, including custom primitive conversion on a boxed string.
-      if (!Array.isArray(transformed) && boxedText(transformed) !== undefined) transformed = String(transformed);
-      else positions.set(transformed, position);
+      if (!Array.isArray(transformed) && boxedText(transformed) !== undefined) {
+        transformed = String(transformed);
+        if (lowerBound(transformed) > MAX_INPUT_BYTES) throw new LogbirdError('input_too_large');
+      } else positions.set(transformed, position);
     }
     const arrayMember = Array.isArray(this);
     if (!arrayMember && omitted(transformed)) return transformed;
     const finalBytes = transformed && typeof transformed === 'object' && !Array.isArray(transformed) ? scalarObjectBytes(transformed) : undefined;
     // Array indices are not written as property names, and omitted array values become null.
     remaining -= (arrayMember ? 1 : key.length + 4) + (finalBytes ?? (omitted(transformed) ? 4 : lowerBound(transformed)));
-    if (remaining < 0) throw new LogbirdError('input_too_large');
+    if (remaining < 0) throw new LogbirdError(outputOverflow);
     return transformed;
   });
 }

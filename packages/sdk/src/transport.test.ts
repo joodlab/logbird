@@ -48,6 +48,16 @@ it('sends redacted input within both limits when an array has many elements', as
   expect(sdk.dropped).toBe(0);
 });
 
+it('counts redaction expansion as a wire-size refusal', async () => {
+  const onError = vi.fn();
+  const sdk = client({ onError });
+  sdk.track({ action: 'redaction.expands', metadata: { rows: Array.from({ length: 80_000 }, () => ({ token: 0 })) } });
+  await sdk.shutdown();
+  expect(sdk.droppedByReason).toEqual({ too_large: 1 });
+  expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'event_too_large' }));
+  expect(sdk.queueSize).toBe(0);
+});
+
 it('bounds boxed strings returned by toJSON before serialization expands them', async () => {
   const sdk = client();
   const huge = '1'.repeat(2 * 1024 * 1024);
@@ -122,6 +132,48 @@ it('cancels an over-cap read response before consuming it', async () => {
   expect(cancel).toHaveBeenCalledOnce();
 });
 
+it('cancels a response that keeps emitting empty chunks', async () => {
+  const cancel = vi.fn();
+  const empty = new Uint8Array();
+  let pulls = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      // Keep a failing implementation from starving the test runner's timeout.
+      if (++pulls > 1024) controller.error(new Error('empty response watchdog'));
+      else controller.enqueue(empty);
+    },
+    cancel,
+  });
+  const fetcher = async () => new Response(body);
+  await expect(readAuditTrail({ endpoint, readKey: 'fictional', fetch: fetcher }, { q: 'timestamp:*' })).rejects.toMatchObject({
+    code: 'read_invalid_response',
+  });
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(pulls).toBeLessThan(1024);
+});
+
+it('preserves the caller reason and skips dispatch when read options abort the signal', async () => {
+  const abort = new AbortController();
+  const reason = new Error('caller stopped before dispatch');
+  const fetcher = vi.fn(async () => new Response());
+  const read = () =>
+    readAuditTrail(
+      {
+        endpoint,
+        fetch: fetcher,
+        get readKey() {
+          abort.abort(reason);
+          return 'fictional';
+        },
+      },
+      { q: 'timestamp:*' },
+      abort.signal,
+    );
+  await expect(read()).rejects.toBe(reason);
+  await expect(read()).rejects.toBe(reason);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
 it('preserves read cancellation without using the caller reason or waiting for an uncooperative fetcher', async () => {
   const abort = new AbortController();
   const fetcher = vi.fn(() => new Promise<Response>(() => undefined));
@@ -189,6 +241,46 @@ it('replaces transport-owned exceptions at both response boundaries', async () =
   await expect(flushing).rejects.toMatchObject({ code: 'ingest_unacknowledged', message: 'Logbird response did not acknowledge all events' });
   await expect(flushing).rejects.not.toHaveProperty('cause');
   expect(sdk.queueSize).toBe(1);
+});
+
+it('normalizes ingest status and retry headers before delivery classification', async () => {
+  const raw = new Error('fixture-transport-detail', { cause: 'fixture-cause' });
+  const invalidStatus = Object.defineProperty(new Response(null, { status: 401 }), 'status', { value: 'fixture-transport-detail' });
+  const malformedHeader = new Response(null, { status: 429 });
+  const throwingHeader = new Response(null, { status: 401 });
+  Object.defineProperty(malformedHeader.headers, 'get', {
+    value: () => ({
+      toString: () => {
+        throw raw;
+      },
+    }),
+  });
+  Object.defineProperty(throwingHeader, 'headers', {
+    get: () => {
+      throw raw;
+    },
+  });
+
+  const onDrop = vi.fn();
+  const sdk = client({ onDrop, maxRetries: 2 });
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(invalidStatus)
+    .mockResolvedValueOnce(malformedHeader)
+    .mockResolvedValueOnce(throwingHeader);
+  vi.stubGlobal('fetch', fetcher);
+  sdk.track({ action: 'fixture' });
+  const flushing = sdk.flush();
+  await expect(flushing).rejects.toMatchObject({ code: 'ingest_request_failed', status: undefined });
+  await expect(flushing).rejects.not.toHaveProperty('cause');
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(sdk.queueSize).toBe(1);
+  expect(onDrop).not.toHaveBeenCalled();
+  fetcher.mockRejectedValue(raw);
+  const closing = sdk.shutdown();
+  await expect(closing).rejects.toMatchObject({ code: 'ingest_request_failed' });
+  await expect(closing).rejects.not.toHaveProperty('cause');
+  expect(onDrop).toHaveBeenCalledWith(expect.anything(), { reason: 'shutdown', mayBeStored: true });
 });
 
 it('refuses pages containing malformed event rows', async () => {

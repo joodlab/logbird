@@ -28,6 +28,17 @@ const MAX_SEND_MS = 5 * 60_000;
 const MAX_PENDING_NOTIFICATIONS = 1024;
 const MAX_OUTSTANDING_REQUESTS = 4;
 
+function retryAfterSeconds(headers: Headers): number | undefined {
+  try {
+    const header = headers.get('Retry-After');
+    const text = header == null ? '' : String(header).trim();
+    const seconds = text ? Number(text) : Number.NaN;
+    if (Number.isFinite(seconds)) return seconds;
+  } catch {
+    // Use the normal retry backoff when a transport returns an unreadable header.
+  }
+}
+
 /**
  * A string id, or a JavaScript number from an integer key. A JS number cannot hold integers above 2^53 − 1: send
  * 64-bit ids as strings. The server indexes a numeric id as the plain decimal of its value.
@@ -404,7 +415,9 @@ export class Logbird {
       entry = { event: copy, wireId: copy.id.trim(), serialized, bytes, uncertain: false, sending: false };
     } catch (error) {
       const bound = failure === 'before_send_failed' ? undefined : inputBoundReason(error);
-      if (bound) {
+      if (failure === 'redaction_failed' && error instanceof LogbirdError && error.code === 'event_too_large') {
+        this.refuse(identity, 'too_large', new LogbirdError('event_too_large'));
+      } else if (bound) {
         this.refuse(identity, bound, new LogbirdError(bound));
       } else {
         const code = failure === 'before_send_failed' || failure === 'redaction_failed' ? failure : 'event_invalid';
@@ -515,7 +528,7 @@ export class Logbird {
     if (this.outstandingRequests >= MAX_OUTSTANDING_REQUESTS) throw new LogbirdError('ingest_requests_outstanding');
     const body = `{"events":[${batch.map((entry) => entry.serialized).join(',')}]}`;
     let status = 0;
-    let retryAfter: string | null = null;
+    let retryAfter: number | undefined;
     let redirected = false;
     const answer = () => ({ status, retryAfter, redirected, result: undefined as unknown, bodyFailure: undefined as LogbirdError | undefined });
     try {
@@ -544,10 +557,16 @@ export class Logbird {
           }
           let ok: boolean;
           try {
-            status = response.status;
-            redirected = isRedirect(response, status);
-            retryAfter = response.headers.get('Retry-After');
+            const code = response.status;
+            if (!Number.isInteger(code) || code < 100 || code > 599) {
+              cancellation = cancelBody(response);
+              return answer();
+            }
+            const redirect = isRedirect(response, code);
             ok = response.ok;
+            retryAfter = retryAfterSeconds(response.headers);
+            status = code;
+            redirected = redirect;
           } catch {
             cancellation = cancelBody(response);
             return answer();
@@ -641,8 +660,7 @@ export class Logbird {
         if (success) throw new LogbirdError('ingest_unacknowledged', { status });
         throw new LogbirdError(status ? 'ingest_http_error' : 'ingest_request_failed', { status });
       }
-      const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
-      const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
+      const delay = retryAfter === undefined ? Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random()) : retryAfter * 1000;
       if (!progressed) retries++;
       await this.timed(Math.max(0, Math.min(60_000, delay, deadline - monotonicNow())), () => undefined);
     }

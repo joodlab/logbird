@@ -2,6 +2,7 @@ import { LogbirdError } from './errors';
 
 export const ACKNOWLEDGEMENT_BYTES = 4 * 1024 * 1024;
 export const READ_RESPONSE_BYTES = 64 * 1024 * 1024;
+const MAX_CONSECUTIVE_EMPTY_CHUNKS = 32;
 
 export function cancelBody(response: Response) {
   return cancelStream(() => response.body?.cancel());
@@ -55,6 +56,7 @@ export async function readJson(
   signal.addEventListener('abort', cancel, { once: true });
   let bytes = new Uint8Array(Math.min(8192, limit));
   let length = 0;
+  let emptyChunks = 0;
   let consumed = false;
   const tooLarge = Symbol('response too large');
   try {
@@ -63,6 +65,11 @@ export async function readJson(
       const { done, value } = await bodyReader.read();
       signal.throwIfAborted();
       if (done) break;
+      if (value.byteLength === 0) {
+        if (++emptyChunks >= MAX_CONSECUTIVE_EMPTY_CHUNKS) throw new Error('Response stream made no progress');
+        continue;
+      }
+      emptyChunks = 0;
       const next = length + value.byteLength;
       if (next > limit) throw tooLarge;
       if (next > bytes.length) {

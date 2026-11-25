@@ -416,6 +416,7 @@ function isStoredEvent(value: unknown): boolean {
  * `q: 'timestamp:*'` to read a whole project on purpose.
  */
 export async function readAuditTrail(options: ReadOptions, query: SearchInput, signal?: AbortSignal): Promise<SearchResponse> {
+  signal?.throwIfAborted();
   if (typeof window !== 'undefined') throw new LogbirdError('read_server_only');
   let snapshot: SearchSnapshot;
   try {
@@ -427,8 +428,10 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
   try {
     url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events`);
   } catch {
+    signal?.throwIfAborted();
     throw new LogbirdError('read_request_failed');
   }
+  signal?.throwIfAborted();
   for (const field of SEARCH_FIELDS) {
     const value = snapshot[field];
     if (value !== undefined) url.searchParams.set(field, String(value));
@@ -447,15 +450,16 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
     if (signal?.aborted) throw new DOMException('Logbird read aborted', 'AbortError');
     if (timeout.aborted) throw new LogbirdError('read_timeout');
   };
-  aborted();
   let fetcher: typeof fetch;
-  let readKey: string;
+  let authorization: string;
   try {
     fetcher = options.fetch ?? fetch;
-    readKey = options.readKey;
+    authorization = `Bearer ${options.readKey}`;
   } catch {
+    signal?.throwIfAborted();
     throw new LogbirdError('read_request_failed');
   }
+  signal?.throwIfAborted();
   if ((abandonedReads.get(fetcher) ?? 0) >= MAX_ABANDONED_READS) throw new LogbirdError('read_requests_outstanding');
   const cancel = () => controller.abort();
   signal?.addEventListener('abort', cancel, { once: true });
@@ -471,7 +475,7 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
     let response: Response;
     try {
       response = await fetcher(url, {
-        headers: { Authorization: `Bearer ${readKey}` },
+        headers: { Authorization: authorization },
         redirect: 'manual',
         signal: readSignal,
       });
@@ -518,18 +522,20 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
       throw new LogbirdError('read_invalid_response', { status });
     return result;
   };
-  const work = send().finally(() => {
-    settled = true;
-  });
+  let work: Promise<SearchResponse> | undefined;
   try {
+    signal?.throwIfAborted();
+    work = send().finally(() => {
+      settled = true;
+    });
     const result = await Promise.race([work, interrupted]);
     aborted();
     return result;
   } catch (error) {
-    aborted();
+    if (work) aborted();
     throw error;
   } finally {
-    if (!settled || cancellation) retainRead(fetcher, work, () => cancellation);
+    if (work && (!settled || cancellation)) retainRead(fetcher, work, () => cancellation);
     signal?.removeEventListener('abort', cancel);
     timeout.removeEventListener('abort', cancel);
     readSignal.removeEventListener('abort', interrupt);
