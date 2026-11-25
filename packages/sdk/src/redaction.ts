@@ -62,6 +62,7 @@ const PATH_PART = /(?:\\.|[^.\\])+/gs;
 const PATH_ESCAPE = /\\([.*\\])/g;
 const ASCII_UPPER = /[A-Z]/g;
 const asciiLower = (value: string) => value.replace(ASCII_UPPER, (letter) => letter.toLowerCase());
+const isRawJSON = (JSON as { isRawJSON?: (value: unknown) => value is { readonly rawJSON: string } }).isRawJSON;
 
 function parsePath(value: string, option: 'paths' | 'keepPaths', index: number): Segment[] {
   const parts = typeof value === 'string' ? value.match(PATH_PART) : null;
@@ -200,7 +201,7 @@ export function createRedactor(options: RedactionOptions = {}, report?: (error: 
       }
     };
     const isObject = (value: unknown): value is Record<string, unknown> =>
-      !!value && typeof value === 'object' && !Array.isArray(value) && !brands.some((unbox) => hasBrand(value, unbox));
+      !!value && typeof value === 'object' && !Array.isArray(value) && !isRawJSON?.(value) && !brands.some((unbox) => hasBrand(value, unbox));
     const keep = (value: unknown, context: Context) => {
       if (value && typeof value === 'object') contexts.set(value, context);
       return value;
@@ -215,12 +216,16 @@ export function createRedactor(options: RedactionOptions = {}, report?: (error: 
       let changed: boolean;
       if (own === undefined) changed = 'field' in entry;
       else if (!('value' in own) || !own.enumerable) changed = true;
-      else if (typeof own.value === 'string') changed = fields ? matches(fields, own.value) : matchesKey(own.value);
-      else
-        changed =
-          !!own.value &&
-          (typeof own.value === 'object' || typeof own.value === 'function') &&
-          (typeof (own.value as { toJSON?: unknown }).toJSON === 'function' || hasBrand(own.value, String.prototype.valueOf));
+      else {
+        // JSON.rawJSON can supply a primitive string without using a JS string or toJSON.
+        const field: unknown = isRawJSON?.(own.value) ? JSON.parse(own.value.rawJSON) : own.value;
+        if (typeof field === 'string') changed = fields ? matches(fields, field) : matchesKey(field);
+        else
+          changed =
+            !!field &&
+            (typeof field === 'object' || typeof field === 'function') &&
+            (typeof (field as { toJSON?: unknown }).toJSON === 'function' || hasBrand(field, String.prototype.valueOf));
+      }
       return keep(entry, { level: 'change', whole: false, changed, paths });
     };
     function replacer(this: unknown, key: string, value: unknown): unknown {

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type EventInput, IDENTIFIER_FIELDS, Logbird, redact } from './index';
 import { createAudit, jobAudit } from './integration';
 
+const rawJSON = (JSON as { rawJSON?: (value: string) => object }).rawJSON;
+
 it('redacts nested metadata, actor fields, arrays and change values without mutation', () => {
   const event = {
     id: 'token-id',
@@ -204,12 +206,23 @@ describe('a change whose field JSON cannot tell fails closed', () => {
     expect(values({ field: new Object(7), before: 'b', after: 'a' })).toEqual(['b', 'a']);
   });
 
+  it.skipIf(!rawJSON)('matches native raw JSON strings using the serialized field name', () => {
+    expect(values({ field: rawJSON?.('"pass\\u0077ord"'), before: 'b', after: 'a' })).toEqual(redacted);
+    expect(values({ field: rawJSON?.('"public"'), before: 'b', after: 'a' })).toEqual(['b', 'a']);
+    expect(values({ field: rawJSON?.('7'), before: 'b', after: 'a' })).toEqual(['b', 'a']);
+  });
+
   it('keeps the shared rule for a plain own field', () => {
     expect(values({ field: 'public', before: 'b', after: 'a' })).toEqual(['b', 'a']);
     expect(values({ field: 'password', before: 'b', after: 'a' })).toEqual(redacted);
     expect(values({ field: 7, before: 'b', after: 'a' })).toEqual(['b', 'a']);
     expect(values({ before: 'b', after: 'a' })).toEqual(['b', 'a']);
   });
+});
+
+it.skipIf(!rawJSON)('redacts native raw JSON primitives like other scalar party and target values', () => {
+  const event = { action: 'a', actor: rawJSON?.('"fictional"'), targets: [rawJSON?.('"fictional"')] } as unknown as EventInput;
+  expect(redact({ keys: /^actor$|^0$/ })(event)).toEqual({ action: 'a', actor: '[redacted]', targets: ['[redacted]'] });
 });
 
 it('lists the same identifier fields as the .NET SDK', () => {
