@@ -40,7 +40,7 @@ const STORED = {
   tenant: { id: 't1', name: '' },
   source: null,
   targets: [{ type: 'invoice', id: 'inv_1', name: 'INV-1' }],
-  changes: [{ field: 'status', before: 'draft', after: 'sent' }],
+  changes: [{ field: 'status', before: 'draft', after: 'sent', beforeKind: 'string', afterKind: 'string' }],
   context: { operationId: 'op', parentEventId: '', requestId: 'req', traceId: '', ip: '', userAgent: '' },
   attributes: { 'metadata.plan': 'pro' },
   conformance: 77.8,
@@ -213,6 +213,7 @@ try {
   const page = await readAuditTrail({ endpoint, readKey: 'lb_read_fictional' }, trailQuery({ target: { type: 'invoice', id: 'inv_1' } }));
   const stored = page.data[0];
   expect(page.total === 1 && stored?.actor?.id === 'u1' && stored.changes[0]?.after === 'sent', 'the stored event read back');
+  expect(stored?.changes[0]?.afterKind === 'string', 'the stored change kind read back');
   expect((searches.at(-1)?.searchParams.get('q') ?? '').includes('inv_1'), 'the trail query to name the target');
   let threw = false;
   try {

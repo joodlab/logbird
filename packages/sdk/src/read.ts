@@ -380,6 +380,13 @@ const storedEventText = [
   'sdk',
 ] as const satisfies readonly (keyof AuditEvent)[];
 
+const valueKinds = new Set<unknown>(['absent', 'null', 'string', 'number', 'boolean', 'json'] satisfies ChangeValueKind[]);
+
+function isStoredChange(change: unknown): boolean {
+  if (!textFields(change, ['field', 'before', 'after'])) return false;
+  return (change.beforeKind === undefined || valueKinds.has(change.beforeKind)) && (change.afterKind === undefined || valueKinds.has(change.afterKind));
+}
+
 function isStoredEvent(value: unknown): boolean {
   if (!textFields(value, storedEventText)) return false;
   const { actor, impersonator, executor, tenant, source, targets, changes, context, attributes, conformance } = value;
@@ -392,7 +399,7 @@ function isStoredEvent(value: unknown): boolean {
     Array.isArray(targets) &&
     targets.every((target) => textFields(target, ['type', 'id', 'name'])) &&
     Array.isArray(changes) &&
-    changes.every((change) => textFields(change, ['field', 'before', 'after'])) &&
+    changes.every(isStoredChange) &&
     textFields(context, ['operationId', 'parentEventId', 'requestId', 'traceId', 'ip', 'userAgent']) &&
     isObject(attributes) &&
     !Array.isArray(attributes) &&
