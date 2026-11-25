@@ -4,6 +4,7 @@ import type { EventInput } from './index';
 interface CaptureQueue {
   defer(identity: EventInput, prepare: () => Promise<EventInput>, onFailure: (error: LogbirdError) => void): Promise<void> | undefined;
   notify(callback: ((error: LogbirdError) => void) | undefined, error: unknown): void;
+  refuse(identity: EventInput): void;
 }
 
 // The client and its adapter can resolve the same SDK version from different installed copies.

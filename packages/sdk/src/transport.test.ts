@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { type EventInput, Logbird, redact } from './index';
+import { type EventInput, Logbird, LogbirdError, redact } from './index';
 import { readAuditTrail } from './read';
 
 afterEach(() => {
@@ -36,6 +36,43 @@ it('refuses oversized input before the default redactor calls toJSON', async () 
   expect(toJSON).not.toHaveBeenCalled();
   expect(sdk.droppedByReason).toEqual({ input_too_large: 1 });
   await sdk.shutdown();
+});
+
+it('sends redacted input within both limits when an array has many elements', async () => {
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => acknowledgement(init));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client();
+  sdk.track({ action: 'array', metadata: { values: new Array<number>(100_000).fill(0), token: 'a'.repeat(600_000) } });
+  await sdk.shutdown();
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(sdk.dropped).toBe(0);
+});
+
+it('bounds boxed strings returned by toJSON before serialization expands them', async () => {
+  const sdk = client();
+  const huge = '1'.repeat(2 * 1024 * 1024);
+  const rawJSON = (JSON as typeof JSON & { rawJSON?: (value: string) => unknown }).rawJSON;
+  sdk.track({ action: 'boxed', metadata: { value: { toJSON: () => new Object(huge) } } });
+  sdk.track({ action: 'boxed', metadata: { value: { toJSON: () => Object.assign(new Object('1'), { toString: () => huge }) } } });
+  if (rawJSON) sdk.track({ action: 'raw', metadata: { value: { toJSON: () => rawJSON(huge) } } });
+  expect(sdk.droppedByReason).toEqual({ input_too_large: rawJSON ? 3 : 2 });
+  await sdk.shutdown();
+});
+
+it('uses the per-data depth budget for metadata and change values', async () => {
+  const nested = (depth: number) => {
+    let value: unknown = 0;
+    for (let i = 1; i < depth; i++) value = { child: value };
+    return value;
+  };
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => acknowledgement(init));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client();
+  sdk.track({ action: 'at-limit', metadata: { child: nested(999) }, changes: [{ field: 'value', before: nested(1000) }] });
+  sdk.track({ action: 'over-limit', changes: [{ field: 'value', before: nested(1001) }] });
+  await sdk.shutdown();
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(sdk.droppedByReason).toEqual({ input_too_deep: 1 });
 });
 
 it('cancels the ingest response when streamed bytes exceed the acknowledgement cap', async () => {
@@ -93,6 +130,86 @@ it('preserves read cancellation without using the caller reason or waiting for a
   abort.abort(new Error('fixture-private-value'));
   await cancelled;
   expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('keeps abandoned reads charged through late body cancellation and restores capacity', async () => {
+  const late: ((answer: Response) => void)[] = [];
+  const cancellations: (() => void)[] = [];
+  const fetcher = vi.fn(() => new Promise<Response>((resolve) => late.push(resolve)));
+  const options = { endpoint, readKey: 'fictional', fetch: fetcher };
+  const read = (signal?: AbortSignal) => readAuditTrail(options, { q: 'timestamp:*' }, signal);
+  for (let i = 0; i < 4; i++) {
+    const abort = new AbortController();
+    const result = expect(read(abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    abort.abort();
+    await result;
+  }
+  const verifyFull = async () => {
+    const abort = new AbortController();
+    const rejected = expect(read(abort.signal)).rejects.toMatchObject({ code: 'read_requests_outstanding' });
+    await Promise.resolve();
+    abort.abort();
+    await rejected;
+  };
+  await verifyFull();
+  for (const respond of late) {
+    respond(new Response(new ReadableStream({ cancel: () => new Promise<void>((resolve) => cancellations.push(resolve)) })));
+  }
+  await verifyFull();
+  expect(cancellations).toHaveLength(4);
+  cancellations[0]?.();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  fetcher.mockResolvedValueOnce(Response.json({ data: [], nextCursor: null, total: 0, tookMs: 0 }));
+  await expect(read()).resolves.toMatchObject({ data: [] });
+  expect(fetcher).toHaveBeenCalledTimes(5);
+  for (const finish of cancellations) finish();
+});
+
+it('replaces transport-owned exceptions at both response boundaries', async () => {
+  const privateValue = 'fixture-private-value';
+  const forged = Object.assign(new LogbirdError('response_too_large'), { message: privateValue, cause: privateValue });
+  const response = () => new Response(new ReadableStream({ start: (controller) => controller.error(forged) }), { status: 202 });
+  const read = (fetch: typeof globalThis.fetch) => readAuditTrail({ endpoint, readKey: 'fictional', fetch }, { q: 'timestamp:*' });
+  const body = read(async () => response());
+  await expect(body).rejects.toMatchObject({ code: 'read_invalid_response', message: 'Invalid Logbird read response' });
+  await expect(body).rejects.not.toHaveProperty('cause');
+  const header = read(async () =>
+    Object.defineProperty(new Response(), 'ok', {
+      get: () => {
+        throw forged;
+      },
+    }),
+  );
+  await expect(header).rejects.toMatchObject({ code: 'read_invalid_response', message: 'Invalid Logbird read response' });
+  await expect(header).rejects.not.toHaveProperty('cause');
+  vi.stubGlobal('fetch', async () => response());
+  const sdk = client();
+  sdk.track({ action: 'fixture' });
+  const flushing = sdk.flush();
+  await expect(flushing).rejects.toMatchObject({ code: 'ingest_unacknowledged', message: 'Logbird response did not acknowledge all events' });
+  await expect(flushing).rejects.not.toHaveProperty('cause');
+  expect(sdk.queueSize).toBe(1);
+});
+
+it('refuses pages containing malformed event rows', async () => {
+  for (const row of [null, {}]) {
+    const fetcher = async () => Response.json({ data: [row], nextCursor: null, total: 1, tookMs: 0 });
+    await expect(readAuditTrail({ endpoint, readKey: 'fictional', fetch: fetcher }, { q: 'timestamp:*' })).rejects.toMatchObject({
+      code: 'read_invalid_response',
+    });
+  }
+});
+
+it('replaces throwing options getters with a stable constructor diagnostic', () => {
+  expect(
+    () =>
+      new Logbird({
+        endpoint,
+        get apiKey(): string {
+          throw new Error('fixture-private-value', { cause: 'fixture-private-value' });
+        },
+      }),
+  ).toThrow(expect.objectContaining({ code: 'options_invalid', message: 'Invalid batching options' }));
 });
 
 it('sets manual redirects on both authenticated requests', async () => {

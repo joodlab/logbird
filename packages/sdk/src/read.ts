@@ -332,6 +332,64 @@ export interface ReadOptions {
   readKey: string;
   fetch?: typeof fetch;
 }
+
+const MAX_ABANDONED_READS = 4;
+// Distinct fetch transports have independent cleanup limits. All default reads share the built-in transport.
+const abandonedReads = new WeakMap<typeof fetch, number>();
+
+function retainRead(fetcher: typeof fetch, work: Promise<unknown>, cleanup: () => Promise<void> | undefined) {
+  abandonedReads.set(fetcher, (abandonedReads.get(fetcher) ?? 0) + 1);
+  const release = async () => {
+    await cleanup();
+    const remaining = (abandonedReads.get(fetcher) ?? 1) - 1;
+    if (remaining) abandonedReads.set(fetcher, remaining);
+    else abandonedReads.delete(fetcher);
+  };
+  void work.then(release, release);
+}
+
+function textFields(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
+  if (!isObject(value) || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return fields.every((field) => typeof record[field] === 'string');
+}
+
+const storedEventText = [
+  'id',
+  'projectId',
+  'timestamp',
+  'receivedAt',
+  'environment',
+  'action',
+  'category',
+  'outcome',
+  'severity',
+  'description',
+  'schemaVersion',
+  'sdk',
+] as const satisfies readonly (keyof AuditEvent)[];
+
+function isStoredEvent(value: unknown): boolean {
+  if (!textFields(value, storedEventText)) return false;
+  const { actor, impersonator, executor, tenant, source, targets, changes, context, attributes, conformance } = value;
+  return (
+    (actor === null || textFields(actor, ['type', 'id', 'name', 'email'])) &&
+    (impersonator === null || textFields(impersonator, ['id', 'name'])) &&
+    (executor === null || (textFields(executor, ['type', 'id', 'name', 'jobId']) && Number.isFinite(executor.attempt))) &&
+    (tenant === null || textFields(tenant, ['id', 'name'])) &&
+    (source === null || typeof source === 'string') &&
+    Array.isArray(targets) &&
+    targets.every((target) => textFields(target, ['type', 'id', 'name'])) &&
+    Array.isArray(changes) &&
+    changes.every((change) => textFields(change, ['field', 'before', 'after'])) &&
+    textFields(context, ['operationId', 'parentEventId', 'requestId', 'traceId', 'ip', 'userAgent']) &&
+    isObject(attributes) &&
+    !Array.isArray(attributes) &&
+    Object.values(attributes).every((item) => typeof item === 'string') &&
+    Number.isFinite(conformance)
+  );
+}
+
 /**
  * One page of events for an explicit search query. The query passes the boundary first (`snapshotSearchQuery`): only
  * its known fields are sent, each read once. It always needs a non-blank `q`: build it with `trailQuery`, or pass
@@ -370,6 +428,15 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
     if (timeout.aborted) throw new LogbirdError('read_timeout');
   };
   aborted();
+  let fetcher: typeof fetch;
+  let readKey: string;
+  try {
+    fetcher = options.fetch ?? fetch;
+    readKey = options.readKey;
+  } catch {
+    throw new LogbirdError('read_request_failed');
+  }
+  if ((abandonedReads.get(fetcher) ?? 0) >= MAX_ABANDONED_READS) throw new LogbirdError('read_requests_outstanding');
   const cancel = () => controller.abort();
   signal?.addEventListener('abort', cancel, { once: true });
   timeout.addEventListener('abort', cancel, { once: true });
@@ -378,50 +445,71 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
     interrupt = () => reject(new LogbirdError('read_request_failed'));
   });
   readSignal.addEventListener('abort', interrupt, { once: true });
-  try {
+  let cancellation: Promise<void> | undefined;
+  let settled = false;
+  const send = async () => {
     let response: Response;
     try {
-      const request = (options.fetch ?? fetch)(url, {
-        headers: { Authorization: `Bearer ${options.readKey}` },
+      response = await fetcher(url, {
+        headers: { Authorization: `Bearer ${readKey}` },
         redirect: 'manual',
         signal: readSignal,
-      }).then((answer) => {
-        if (readSignal.aborted) cancelBody(answer);
-        return answer;
       });
-      response = await Promise.race([request, interrupted]);
     } catch {
-      aborted();
       throw new LogbirdError('read_request_failed');
     }
     if (readSignal.aborted) {
-      cancelBody(response);
-      aborted();
+      cancellation = cancelBody(response);
+      throw new LogbirdError('read_request_failed');
     }
-    const redirected = isRedirect(response);
-    if (!response.ok || redirected) {
-      cancelBody(response);
-      throw new LogbirdError(redirected ? 'read_redirect' : 'read_http_error', { status: response.status });
-    }
+    let status: number;
+    let redirected: boolean;
+    let ok: boolean;
     try {
-      const result = (await readJson(response, READ_RESPONSE_BYTES, readSignal)) as SearchResponse | null;
-      if (
-        !result ||
-        !Array.isArray(result.data) ||
-        !(result.nextCursor === null || typeof result.nextCursor === 'string') ||
-        !Number.isSafeInteger(result.total) ||
-        !Number.isFinite(result.tookMs) ||
-        (result.totalExact !== undefined && typeof result.totalExact !== 'boolean')
-      ) {
-        throw new LogbirdError('read_invalid_response');
-      }
-      return result;
-    } catch (error) {
-      aborted();
-      if (error instanceof LogbirdError && error.code === 'response_too_large') throw error;
+      status = response.status;
+      redirected = isRedirect(response, status);
+      ok = response.ok;
+    } catch {
+      cancellation = cancelBody(response);
       throw new LogbirdError('read_invalid_response');
     }
+    if (!ok || redirected) {
+      cancellation = cancelBody(response);
+      throw new LogbirdError(redirected ? 'read_redirect' : 'read_http_error', { status });
+    }
+    let value: unknown;
+    try {
+      value = await readJson(response, READ_RESPONSE_BYTES, readSignal, status, (completion) => {
+        cancellation = completion;
+      });
+    } catch (error) {
+      throw new LogbirdError(error instanceof LogbirdError && error.code === 'response_too_large' ? error.code : 'read_invalid_response', { status });
+    }
+    const result = value as SearchResponse | null;
+    if (
+      !result ||
+      !Array.isArray(result.data) ||
+      !result.data.every(isStoredEvent) ||
+      !(result.nextCursor === null || typeof result.nextCursor === 'string') ||
+      !Number.isSafeInteger(result.total) ||
+      !Number.isFinite(result.tookMs) ||
+      (result.totalExact !== undefined && typeof result.totalExact !== 'boolean')
+    )
+      throw new LogbirdError('read_invalid_response', { status });
+    return result;
+  };
+  const work = send().finally(() => {
+    settled = true;
+  });
+  try {
+    const result = await Promise.race([work, interrupted]);
+    aborted();
+    return result;
+  } catch (error) {
+    aborted();
+    throw error;
   } finally {
+    if (!settled || cancellation) retainRead(fetcher, work, () => cancellation);
     signal?.removeEventListener('abort', cancel);
     timeout.removeEventListener('abort', cancel);
     readSignal.removeEventListener('abort', interrupt);

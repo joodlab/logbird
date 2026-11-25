@@ -12,14 +12,15 @@
 
 ```ts
 import { Hono } from 'hono';
-import { Logbird } from '@logbird/sdk';
+import { Logbird, type LogbirdError } from '@logbird/sdk';
 import { logbird, type AuditVariables } from '@logbird/hono';
+const reportAudit = ({ code, status, count }: LogbirdError) => console.error('Logbird audit', { code, status, count });
 const client = new Logbird({
   endpoint: process.env.LOGBIRD_ENDPOINT!,
   apiKey: process.env.LOGBIRD_INGEST_KEY!,
-  onError: ({ code, status, count }) => console.error('Logbird delivery', { code, status, count }),
+  onError: reportAudit,
 });
-const capture = logbird({ client, actor: c => ({ type: 'user', id: 'resolved-session-user' }), tenant: c => ({ id: 'resolved-session-tenant' }), autoTrack: {} });
+const capture = logbird({ client, actor: c => ({ type: 'user', id: 'resolved-session-user' }), tenant: c => ({ id: 'resolved-session-tenant' }), autoTrack: {}, onError: reportAudit });
 const app = new Hono<{ Variables: AuditVariables }>();
 app.use(capture);
 app.post('/records', c => { c.var.audit('record.created', { targets: [{ type: 'record', id: '123' }] }); return c.json({ ok: true }); });

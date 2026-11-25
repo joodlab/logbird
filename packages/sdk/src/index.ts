@@ -261,24 +261,30 @@ export class Logbird {
     this.drop(entry.event, { reason, mayBeStored: entry.sending || entry.uncertain, ...extra });
   }
   constructor(options: LogbirdOptions) {
-    const snapshot: LogbirdOptions = {
-      apiKey: options.apiKey,
-      endpoint: options.endpoint,
-      enabled: options.enabled,
-      defaults: options.defaults,
-      beforeSend: options.beforeSend,
-      redaction: options.redaction,
-      batchSize: options.batchSize,
-      flushIntervalMs: options.flushIntervalMs,
-      shutdownTimeoutMs: options.shutdownTimeoutMs,
-      maxRetries: options.maxRetries,
-      onError: options.onError,
-      onWarning: options.onWarning,
-      maxQueueSize: options.maxQueueSize,
-      dropPolicy: options.dropPolicy,
-      onDrop: options.onDrop,
-    };
+    let snapshot: LogbirdOptions;
+    try {
+      snapshot = {
+        apiKey: options.apiKey,
+        endpoint: options.endpoint,
+        enabled: options.enabled,
+        defaults: options.defaults,
+        beforeSend: options.beforeSend,
+        redaction: options.redaction,
+        batchSize: options.batchSize,
+        flushIntervalMs: options.flushIntervalMs,
+        shutdownTimeoutMs: options.shutdownTimeoutMs,
+        maxRetries: options.maxRetries,
+        onError: options.onError,
+        onWarning: options.onWarning,
+        maxQueueSize: options.maxQueueSize,
+        dropPolicy: options.dropPolicy,
+        onDrop: options.onDrop,
+      };
+    } catch {
+      throw new LogbirdError('options_invalid');
+    }
     if (snapshot.enabled !== false && (!snapshot.apiKey || !snapshot.endpoint)) throw new LogbirdError('credentials_required');
+    if (snapshot.endpoint !== undefined && typeof snapshot.endpoint !== 'string') throw new LogbirdError('options_invalid');
     this.endpoint = (snapshot.endpoint ?? '').replace(/\/$/, '');
     this.capacity = snapshot.maxQueueSize ?? 10_000;
     this.batchSize = snapshot.batchSize ?? 100;
@@ -305,6 +311,9 @@ export class Logbird {
     attachCaptureQueue(this, {
       defer: (identity, prepare, onFailure) => this.deferCapture(identity, prepare, onFailure),
       notify: (callback, error) => this.notify(callback, safeDiagnostic(error, 'capture_failed')),
+      refuse: (identity) => {
+        if (snapshot.enabled !== false) this.refuse(identity, 'invalid');
+      },
     });
     if (snapshot.redaction !== false) {
       this.serializeRedacted = createRedactor(snapshot.redaction, (error) => this.report(error));
@@ -338,7 +347,9 @@ export class Logbird {
       checkEventBounds(event);
       if (defaults) checkEventBounds(defaults);
       let prepared: EventInput = { ...defaults, ...event };
-      const id = typeof prepared.id === 'string' && prepared.id.trim() ? prepared.id : uuidv7();
+      const inputId: unknown = prepared.id;
+      checkEventBounds(inputId);
+      const id = typeof inputId === 'string' && inputId.trim() ? inputId : uuidv7();
       prepared.id = id;
       identity = dropIdentity(prepared);
       prepared.context = { ...defaults?.context, ...event.context };
@@ -363,6 +374,7 @@ export class Logbird {
         checkEventBounds(prepared);
       }
       const supplied: unknown = prepared.id;
+      checkEventBounds(supplied);
       const hookId = typeof supplied === 'string' && supplied.trim() ? supplied : undefined;
       const outgoingId = options?.preserveId ? id : (hookId ?? uuidv7());
       if (supplied !== outgoingId) prepared = { ...prepared, id: outgoingId };
@@ -530,15 +542,22 @@ export class Logbird {
             cancellation = cancelBody(response);
             return answer();
           }
-          status = response.status;
-          redirected = isRedirect(response);
-          retryAfter = response.headers.get('Retry-After');
-          if (redirected || (!response.ok && status !== 503)) {
+          let ok: boolean;
+          try {
+            status = response.status;
+            redirected = isRedirect(response, status);
+            retryAfter = response.headers.get('Retry-After');
+            ok = response.ok;
+          } catch {
+            cancellation = cancelBody(response);
+            return answer();
+          }
+          if (redirected || (!ok && status !== 503)) {
             cancellation = cancelBody(response);
             return answer();
           }
           try {
-            const result = await readJson(response, ACKNOWLEDGEMENT_BYTES, signal, (completion) => {
+            const result = await readJson(response, ACKNOWLEDGEMENT_BYTES, signal, status, (completion) => {
               cancellation = completion;
             });
             return { ...answer(), result };

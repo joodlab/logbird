@@ -50,9 +50,11 @@ export interface CaptureOptions<C> {
   useRequestIdHeader?: boolean;
   onError?: (error: LogbirdError) => void;
 }
-export function report(onError: CaptureOptions<unknown>['onError'], error: unknown, client?: Logbird): void {
+export function report(onError: CaptureOptions<unknown>['onError'], error: unknown, client?: Logbird, refusedAction?: string): void {
   if (client) {
-    getCaptureQueue(client).notify(onError, error);
+    const queue = getCaptureQueue(client);
+    if (refusedAction !== undefined) queue.refuse({ action: refusedAction });
+    queue.notify(onError, error);
     return;
   }
   if (onError)
@@ -140,7 +142,8 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
       { action, id },
       async () => {
         if (invalidId) throw new LogbirdError('capture_failed');
-        checkEventBounds(event);
+        checkEventBounds(event, action.length);
+        checkEventBounds(supplied);
         const fields = Object.fromEntries(
           Object.keys(event)
             .filter((key) => key !== 'id')
@@ -162,10 +165,10 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
   audit.pending = async () => {
     while (local.size) await Promise.allSettled([...local]);
   };
-  audit.carrier = (partial = {}) => {
-    const { actor, impersonator, tenant, ...correlation } = partial;
-    return register(
-      resolve(
+  const prepareCarrier = async (partial: Partial<AuditCarrier>) => {
+    try {
+      const { actor, impersonator, tenant, ...correlation } = partial;
+      const event = await resolve(
         {
           ...('actor' in partial ? { actor } : {}),
           ...('impersonator' in partial ? { impersonator } : {}),
@@ -173,22 +176,23 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
           context: correlation,
         },
         true,
-      ).then(
-        (event) =>
-          JSON.parse(
-            JSON.stringify({
-              operationId: event.context?.operationId ?? envelope.context?.operationId,
-              requestId: event.context?.requestId,
-              traceId: event.context?.traceId,
-              parentEventId: event.context?.parentEventId,
-              actor: event.actor,
-              impersonator: event.impersonator,
-              tenant: event.tenant,
-            }),
-          ) as AuditCarrier,
-      ),
-    );
+      );
+      return JSON.parse(
+        JSON.stringify({
+          operationId: event.context?.operationId ?? envelope.context?.operationId,
+          requestId: event.context?.requestId,
+          traceId: event.context?.traceId,
+          parentEventId: event.context?.parentEventId,
+          actor: event.actor,
+          impersonator: event.impersonator,
+          tenant: event.tenant,
+        }),
+      ) as AuditCarrier;
+    } catch {
+      throw new LogbirdError('capture_failed');
+    }
   };
+  audit.carrier = (partial = {}) => register(prepareCarrier(partial));
   return audit;
 }
 export interface JobAuditOptions {

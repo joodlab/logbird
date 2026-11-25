@@ -140,7 +140,7 @@ function childPaths(nodes: readonly PathNode[], key: string): readonly PathNode[
  * both. It returns the event as JSON will send it: redaction runs inside `JSON.stringify` itself (as its replacer), so
  * every value is read, and every `toJSON` applied, exactly as sending the event reads them, and a matched value is
  * replaced before it is serialized (a value JSON cannot hold, such as a `BigInt` under a secret key, never stops the
- * event). An object reached twice becomes two copies, and an event with a cycle throws a `TypeError`, as sending it would.
+ * event). An object reached twice becomes two copies. A cycle throws a `LogbirdError` with code `redaction_failed`.
  *
  * The contract: `redact()` is exact for JSON data, which is what `EventInput` types: plain objects, arrays, primitives,
  * and `toJSON` values (such as `Date`) without side effects on other parts of the event. Getters or `toJSON` with side

@@ -53,7 +53,9 @@ Ingest and read requests use manual redirect handling. Configure the endpoint
 as the serving origin. A redirect produces a status-only error. Ingest
 acknowledgements are limited to 4 MiB and read pages to 64 MiB. The SDK cancels
 unused or oversized bodies. An unreadable or oversized acknowledgement leaves
-the covered events eligible for retry.
+the covered events eligible for retry. Reads validate the returned event shape
+and have a 30-second deadline. A fetch transport with four pending read
+cancellations or abandoned requests refuses further reads until cleanup completes.
 
 Do not ship private ingest keys in a public browser bundle.
 
@@ -171,7 +173,8 @@ Returning null/undefined records a `filtered` drop. A throwing hook records a
 `before_send_failed` drop and reports through `onError`.
 
 Before copying input or invoking `beforeSend`, the SDK checks a 1 MiB lower
-bound of its JSON size and a depth of 1,000 levels. The lower bound counts one
+bound of its JSON size and a depth of 1,000 levels within metadata and each
+change value. The lower bound counts one
 byte per UTF-16 code unit of keys and values, plus JSON framing and literals.
 An event outside those limits is reported as `input_too_large` or
 `input_too_deep`, even if redaction would have reduced the output. Supply
@@ -231,8 +234,7 @@ Use `\.`, `\*` or `\\` in a path to match a literal dot, star or backslash.
 Double the backslashes in a JavaScript string, as in `'metadata.guest\\.email'` for
 the key `guest.email`. Paths match existing JSON locations. They support
 one-segment wildcards only and do not match value contents or select changes
-by field name. Invalid paths throw during setup and name the option and
-zero-based entry index.
+by field name. Invalid paths throw during setup with code `redaction_options_invalid`.
 
 The SDK preserves top-level `id` and `action` and the party identifiers listed in
 `IDENTIFIER_FIELDS`. It reports rules that directly match identifiers once via

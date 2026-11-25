@@ -19,6 +19,7 @@ export type LogbirdErrorCode =
   | 'response_invalid'
   | 'read_server_only'
   | 'read_request_failed'
+  | 'read_requests_outstanding'
   | 'read_http_error'
   | 'read_redirect'
   | 'read_invalid_response'
@@ -53,6 +54,7 @@ const messages: Record<LogbirdErrorCode, string> = {
   response_invalid: 'Invalid Logbird response',
   read_server_only: 'Logbird read keys are server-only',
   read_request_failed: 'Logbird read request failed',
+  read_requests_outstanding: 'Logbird read transport has too many outstanding requests',
   read_http_error: 'Logbird read HTTP failure',
   read_redirect: 'Logbird read redirect refused',
   read_invalid_response: 'Invalid Logbird read response',
