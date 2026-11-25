@@ -29,8 +29,8 @@ await audit.shutdown();
 `track(event): void` never throws, even when `onError` throws. It snapshots the
 event, assigns UUIDv7 and a timestamp when absent, and batches by rows, bytes and
 time. `flush(): Promise<void>` covers events queued or already sending at the
-call. It settles independently of later captures and rejects with unresolved
-events retained for retry. Await the adapter's `audit.pending()` first to include
+call, including a call made during shutdown. It settles independently of later
+captures and rejects with unresolved events retained for retry. Await the adapter's `audit.pending()` first to include
 pending preparation in a direct flush. `shutdown(): Promise<void>` closes capture
 and drains under one `shutdownTimeoutMs` budget (default 10,000 ms, 0 to stop
 immediately). The budget includes pending integration context resolution, an active

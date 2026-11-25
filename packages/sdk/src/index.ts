@@ -681,7 +681,6 @@ export class Logbird {
     this.flushWaiters = merged;
   }
   flush(): Promise<void> {
-    if (this.stopping) return this.stopping;
     if (this.options.enabled === false || (!this.inFlight.length && !this.queue.length)) return Promise.resolve();
     if (this.flushWaiters.size >= 2 * (this.capacity + this.batchSize)) this.coalesceFlushTargets();
     const target = this.queue.at(-1)?.sequence ?? this.inFlight.at(-1)?.sequence ?? this.lastSequence;

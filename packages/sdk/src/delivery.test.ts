@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { type EventInput, Logbird } from './index';
+import { createAudit } from './integration';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -133,6 +134,32 @@ it('waits at shutdown for events captured beyond an earlier flush target', async
   await Promise.all([first, closing]);
   expect(flushedBeforeShutdown).toBe(true);
   expect(closed).toHaveBeenCalledOnce();
+});
+
+it('settles a flush started during shutdown independently of pending capture preparation', async () => {
+  vi.useFakeTimers();
+  let reply!: (response: Response) => void;
+  const fetcher = vi.fn(
+    () =>
+      new Promise<Response>((done) => {
+        reply = done;
+      }),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  const onDrop = vi.fn();
+  const sdk = client({ batchSize: 1, shutdownTimeoutMs: 25, onDrop });
+  sdk.track(event('already-sending'));
+  const audit = await createAudit({ client: sdk, actor: () => new Promise<undefined>(() => undefined) }, {}, new Request('http://example.invalid'));
+  const preparingId = audit('preparing');
+  const closing = sdk.shutdown();
+  const settlements = Promise.allSettled([sdk.flush(), closing]);
+  reply(accepted('already-sending'));
+  await vi.advanceTimersByTimeAsync(25);
+  const [flushing, stopped] = await settlements;
+  expect(flushing).toEqual({ status: 'fulfilled', value: undefined });
+  expect(stopped).toMatchObject({ status: 'rejected', reason: expect.any(Error) });
+  expect(onDrop).toHaveBeenCalledWith({ id: preparingId, action: 'preparing' }, { reason: 'shutdown', mayBeStored: false });
+  expect(fetcher).toHaveBeenCalledOnce();
 });
 
 it('retains an event when HTTP 200 lacks an acknowledgement envelope', async () => {
