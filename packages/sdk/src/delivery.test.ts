@@ -24,6 +24,117 @@ it('flushes an event queued between two flush calls after an empty drain', async
   expect(sdk.queueSize).toBe(0);
 });
 
+it('resolves the earlier flush when a later event exhausts its retries', async () => {
+  let reply!: (response: Response) => void;
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((done) => {
+          reply = done;
+        }),
+    )
+    .mockResolvedValueOnce(new Response(null, { status: 500 }));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client({ batchSize: 1 });
+  sdk.track(event('first'));
+  const first = expect(sdk.flush()).resolves.toBeUndefined();
+  sdk.track(event('later'));
+  const later = expect(sdk.flush()).rejects.toThrow('Logbird HTTP 500');
+  reply(accepted('first'));
+  await Promise.all([first, later]);
+  expect(sdk.queueSize).toBe(1);
+});
+
+it('resolves a flush at its target while additional captures keep arriving', async () => {
+  let reply!: (response: Response) => void;
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((done) => {
+          reply = done;
+        }),
+    )
+    .mockImplementation(() => {
+      sdk.track(event('arrived-during-send'));
+      return new Promise<Response>(() => undefined);
+    });
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client({ batchSize: 1, shutdownTimeoutMs: 0 });
+  sdk.track(event('first'));
+  const first = sdk.flush();
+  sdk.track(event('later'));
+  reply(accepted('first'));
+  try {
+    await first;
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(sdk.queueSize).toBe(1);
+  } finally {
+    await sdk.shutdown().catch(() => undefined);
+  }
+}, 600);
+
+it('keeps a later event out of the batch for an outstanding flush target', async () => {
+  let reply!: (response: Response) => void;
+  const requests: string[][] = [];
+  const fetcher = vi.fn((_url: string, init: RequestInit) => {
+    const ids = (JSON.parse(String(init.body)).events as { id: string }[]).map((item) => item.id);
+    requests.push(ids);
+    if (ids[0] === 'active')
+      return new Promise<Response>((done) => {
+        reply = done;
+      });
+    if (ids.includes('later')) return Promise.resolve(new Response(null, { status: 500 }));
+    return Promise.resolve(accepted(...ids));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client({ batchSize: 2 });
+  sdk.track(event('active'));
+  const active = sdk.flush();
+  sdk.track(event('target'));
+  const covered = sdk.flush();
+  sdk.track(event('later'));
+  const later = expect(sdk.flush()).rejects.toThrow('Logbird HTTP 500');
+  reply(accepted('active'));
+  await Promise.all([active, covered, later]);
+  expect(requests).toEqual([['active'], ['target'], ['later']]);
+});
+
+it('waits at shutdown for events captured beyond an earlier flush target', async () => {
+  let firstReply!: (response: Response) => void;
+  let laterReply!: (response: Response) => void;
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((done) => {
+          firstReply = done;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((done) => {
+          laterReply = done;
+        }),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client({ batchSize: 1 });
+  sdk.track(event('first'));
+  const firstDone = vi.fn();
+  const first = sdk.flush().then(firstDone);
+  sdk.track(event('later'));
+  const closed = vi.fn();
+  const closing = sdk.shutdown().then(closed);
+  firstReply(accepted('first'));
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  const flushedBeforeShutdown = firstDone.mock.calls.length === 1 && closed.mock.calls.length === 0;
+  laterReply(accepted('later'));
+  await Promise.all([first, closing]);
+  expect(flushedBeforeShutdown).toBe(true);
+  expect(closed).toHaveBeenCalledOnce();
+});
+
 it('retains an event when HTTP 200 lacks an acknowledgement envelope', async () => {
   vi.stubGlobal(
     'fetch',
@@ -106,6 +217,23 @@ it('clears lost-answer uncertainty when the server definitively rejects the cont
     code: 'duplicate_id_conflict',
     mayBeStored: false,
   });
+});
+
+it('keeps prior delivery uncertainty when a retry returns an unknown rejection code', async () => {
+  const onDrop = vi.fn();
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockRejectedValueOnce(new Error('response lost after storage'))
+      .mockResolvedValueOnce(Response.json({ accepted: 0, ids: [], rejected: [{ index: 0, code: 'future_code', reason: 'fixture' }] })),
+  );
+  const sdk = client({ onDrop });
+  sdk.track(event('uncertain'));
+  await expect(sdk.flush()).rejects.toThrow();
+  await sdk.flush();
+  expect(onDrop).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ reason: 'rejected', mayBeStored: true }));
+  expect(sdk.possiblyStoredDropsByReason.rejected).toBe(1);
 });
 
 it('accounts for an indexed rejection even when the 202 accepted count is malformed', async () => {
@@ -208,6 +336,39 @@ it('shuts down queued events even when the original options object is changed', 
   await sdk.shutdown();
   expect(fetcher).toHaveBeenCalledOnce();
   expect(sdk.queueSize).toBe(0);
+});
+
+it('reads supported prototype options once and preserves inherited filters and enabled state', async () => {
+  const onKeyRead = vi.fn();
+  const beforeSend = vi.fn((value: EventInput) => (value.id === 'filtered' ? null : value));
+  class Options {
+    endpoint = 'http://example.invalid';
+    get apiKey() {
+      onKeyRead();
+      return 'fictional';
+    }
+    get beforeSend() {
+      return beforeSend;
+    }
+  }
+  class DisabledOptions extends Options {
+    get enabled() {
+      return false;
+    }
+  }
+  const fetcher = vi.fn(async (_url: string, _init: RequestInit) => accepted('kept'));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = new Logbird(new Options());
+  sdk.track(event('filtered'));
+  sdk.track(event('kept'));
+  await sdk.shutdown();
+  expect(onKeyRead).toHaveBeenCalledOnce();
+  expect(beforeSend).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[0]?.[1].headers).toMatchObject({ Authorization: 'Bearer fictional' });
+  const disabled = new Logbird(new DisabledOptions());
+  disabled.track(event('never-sent'));
+  await disabled.shutdown();
+  expect(fetcher).toHaveBeenCalledOnce();
 });
 
 it('counts closed, hook, serialization and size refusals and filters individually', async () => {
@@ -318,6 +479,18 @@ it('caps abandoned requests when a transport ignores cancellation', async () => 
     await failure;
   }
   expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(sdk.queueSize).toBe(1);
+});
+
+it.each([429, 502])('cancels open HTTP %i bodies and holds the request slots until cleanup settles', async (status) => {
+  const cancel = vi.fn(() => new Promise<void>(() => undefined));
+  const fetcher = vi.fn(async () => new Response(new ReadableStream({ cancel }), { status }));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client();
+  sdk.track(event('retained'));
+  for (let attempt = 0; attempt < 5; attempt++) await expect(sdk.flush()).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(cancel).toHaveBeenCalledTimes(4);
   expect(sdk.queueSize).toBe(1);
 });
 

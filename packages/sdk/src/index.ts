@@ -122,11 +122,18 @@ export interface LogbirdOptions {
 
 interface QueuedEvent {
   event: EventInput;
+  sequence: number;
   wireId: string;
   serialized: string;
   bytes: number;
   uncertain: boolean;
   sending: boolean;
+}
+
+interface FlushWaiter {
+  promise: Promise<void>;
+  resolve: (result?: void | Promise<void>) => void;
+  reject: (error: unknown) => void;
 }
 
 interface PreparingEvent {
@@ -155,6 +162,9 @@ function dropIdentity(event: EventInput): EventInput {
 
 export class Logbird {
   private readonly queue: QueuedEvent[] = [];
+  private inFlight: QueuedEvent[] = [];
+  private lastSequence = 0;
+  private flushWaiters = new Map<number, FlushWaiter>();
   private readonly preparing = new Set<PreparingEvent>();
   private readonly options: LogbirdOptions;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -242,17 +252,33 @@ export class Logbird {
     this.drop(entry.event, { reason, mayBeStored: entry.sending || entry.uncertain, ...extra });
   }
   constructor(options: LogbirdOptions) {
-    if (options.enabled !== false && (!options.apiKey || !options.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
-    this.endpoint = (options.endpoint ?? '').replace(/\/$/, '');
-    this.capacity = options.maxQueueSize ?? 10_000;
-    this.batchSize = options.batchSize ?? 100;
-    this.interval = options.flushIntervalMs ?? 1000;
-    this.shutdownTimeout = options.shutdownTimeoutMs ?? 10_000;
-    this.retries = options.maxRetries ?? 5;
+    const snapshot: LogbirdOptions = {
+      apiKey: options.apiKey,
+      endpoint: options.endpoint,
+      enabled: options.enabled,
+      defaults: options.defaults,
+      beforeSend: options.beforeSend,
+      redaction: options.redaction,
+      batchSize: options.batchSize,
+      flushIntervalMs: options.flushIntervalMs,
+      shutdownTimeoutMs: options.shutdownTimeoutMs,
+      maxRetries: options.maxRetries,
+      onError: options.onError,
+      maxQueueSize: options.maxQueueSize,
+      dropPolicy: options.dropPolicy,
+      onDrop: options.onDrop,
+    };
+    if (snapshot.enabled !== false && (!snapshot.apiKey || !snapshot.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
+    this.endpoint = (snapshot.endpoint ?? '').replace(/\/$/, '');
+    this.capacity = snapshot.maxQueueSize ?? 10_000;
+    this.batchSize = snapshot.batchSize ?? 100;
+    this.interval = snapshot.flushIntervalMs ?? 1000;
+    this.shutdownTimeout = snapshot.shutdownTimeoutMs ?? 10_000;
+    this.retries = snapshot.maxRetries ?? 5;
     if (
       !Number.isInteger(this.capacity) ||
       this.capacity < 1 ||
-      (options.dropPolicy !== undefined && !['oldest', 'newest'].includes(options.dropPolicy)) ||
+      (snapshot.dropPolicy !== undefined && !['oldest', 'newest'].includes(snapshot.dropPolicy)) ||
       !Number.isInteger(this.batchSize) ||
       this.batchSize < 1 ||
       this.batchSize > 1000 ||
@@ -265,13 +291,13 @@ export class Logbird {
       this.retries < 0
     )
       throw new Error('Invalid batching options');
-    this.options = { ...options };
+    this.options = snapshot;
     attachCaptureQueue(this, {
       defer: (identity, prepare, onFailure) => this.deferCapture(identity, prepare, onFailure),
       notify: (callback, error) => this.notify(callback, error instanceof Error ? error : new Error('Logbird capture failed')),
     });
-    if (options.redaction !== false) {
-      this.serializeRedacted = createRedactor(options.redaction, (error) => this.report(error));
+    if (snapshot.redaction !== false) {
+      this.serializeRedacted = createRedactor(snapshot.redaction, (error) => this.report(error));
     }
   }
   private report(error: unknown) {
@@ -294,7 +320,7 @@ export class Logbird {
       this.refuse(event, 'shutdown', 'Logbird is shut down');
       return;
     }
-    let entry: QueuedEvent;
+    let entry: Omit<QueuedEvent, 'sequence'>;
     let failure: DropReason = 'invalid';
     let identity = dropIdentity(event);
     try {
@@ -362,14 +388,14 @@ export class Logbird {
     }
     // beforeSend is host code and can shut down the client before preparation returns.
     if (this.closed && (!duringShutdown || this.stop.signal.aborted)) {
-      this.dropQueued(entry, 'shutdown');
+      this.drop(entry.event, { reason: 'shutdown', mayBeStored: false });
       return;
     }
     if (!this.makeRoom()) {
-      this.dropQueued(entry, 'queue_full');
+      this.drop(entry.event, { reason: 'queue_full', mayBeStored: false });
       return;
     }
-    this.queue.push(entry);
+    this.queue.push({ ...entry, sequence: ++this.lastSequence });
     if (this.queue.length >= this.batchSize) this.backgroundFlush();
     else this.schedule();
   }
@@ -378,6 +404,7 @@ export class Logbird {
     const evicted = this.options.dropPolicy === 'newest' ? undefined : this.queue.shift();
     if (!evicted) return false;
     this.dropQueued(evicted, 'queue_full');
+    this.completeFlushes();
     return true;
   }
   private deferCapture(identity: EventInput, prepare: () => Promise<EventInput>, onFailure: () => void): Promise<void> | undefined {
@@ -451,6 +478,7 @@ export class Logbird {
     const answer = () => ({ status, retryAfter, result: undefined as unknown });
     try {
       return await this.timed(Math.max(1, Math.floor(Math.min(30_000, remainingMs))), answer, async (signal) => {
+        let cancellation: Promise<void> | undefined;
         this.outstandingRequests++;
         try {
           this.checkShutdownDeadline();
@@ -468,15 +496,24 @@ export class Logbird {
             signal,
           });
           if (signal.aborted) {
-            if (response.body) void response.body.cancel().catch(() => undefined);
+            cancellation = response.body?.cancel().catch(() => undefined);
             return answer();
           }
           status = response.status;
           retryAfter = response.headers.get('Retry-After');
-          const result: unknown = response.ok || status === 503 ? await response.json().catch(() => undefined) : undefined;
+          if (!response.ok && status !== 503) {
+            cancellation = response.body?.cancel().catch(() => undefined);
+            return answer();
+          }
+          const result: unknown = await response.json().catch(() => undefined);
           return { status, retryAfter, result };
         } finally {
-          this.outstandingRequests--;
+          if (cancellation) {
+            // Return the classification immediately but keep owning transport cleanup until it finishes.
+            void cancellation.then(() => {
+              this.outstandingRequests--;
+            });
+          } else this.outstandingRequests--;
         }
       });
     } catch {
@@ -513,8 +550,8 @@ export class Logbird {
           for (const [index, code] of ack.rejected) {
             const entry = wire[index];
             if (!entry || !unsettled.delete(entry)) continue;
-            const ambiguous = code === 'stored_event_unreadable' || code === 'unverified_after_parse_failure';
-            this.drop(entry.event, { reason: 'rejected', code, mayBeStored: ambiguous && entry.uncertain });
+            const definitive = code === 'invalid_event' || code === 'invalid_event_id' || code === 'duplicate_id_conflict';
+            this.drop(entry.event, { reason: 'rejected', code, mayBeStored: entry.uncertain && !definitive });
             rejectedCount++;
           }
           if (rejectedCount) this.report(new Error(`${rejectedCount} events rejected by Logbird`));
@@ -525,6 +562,7 @@ export class Logbird {
             }
           const remaining = batch.filter((entry) => unsettled.has(entry));
           batch.splice(0, batch.length, ...remaining);
+          this.completeFlushes();
           if (!batch.length) return;
           if (ack.delivered && batch.length < wire.length) {
             wire = batch.slice();
@@ -538,6 +576,7 @@ export class Logbird {
       if (!retry) {
         for (const entry of batch.splice(0)) this.dropQueued(entry, 'http_error', { status });
         this.report(new Error(`Logbird HTTP ${status}; batch dropped`));
+        this.completeFlushes();
         return;
       }
       if ((!progressed && retries >= this.retries) || attempt >= maxAttempts) {
@@ -571,19 +610,23 @@ export class Logbird {
     try {
       while (this.queue.length) {
         this.stop.signal.throwIfAborted();
+        this.completeFlushes();
+        const boundary = this.flushWaiters.keys().next().value ?? Number.POSITIVE_INFINITY;
         const batch: QueuedEvent[] = [];
         let bytes = 32;
         while (batch.length < this.batchSize) {
           const next = this.queue[0];
-          if (!next) break;
+          if (!next || next.sequence > boundary) break;
           if (batch.length && bytes + next.bytes + 1 > 5 * 1024 * 1024) break;
           this.queue.shift();
           batch.push(next);
           bytes += next.bytes + 1;
         }
+        this.inFlight = batch;
         try {
           await this.send(batch);
         } catch (error) {
+          this.inFlight = [];
           this.queue.unshift(...batch);
           while (this.queue.length + this.preparing.size > this.capacity && !this.closed) {
             const evicted = this.options.dropPolicy === 'newest' ? this.queue.pop() : this.queue.shift();
@@ -591,7 +634,12 @@ export class Logbird {
           }
           throw error;
         }
+        this.inFlight = [];
       }
+      this.completeFlushes();
+    } catch (error) {
+      this.completeFlushes({ error });
+      throw error;
     } finally {
       this.pending = undefined;
       this.explicit = false;
@@ -599,8 +647,58 @@ export class Logbird {
       this.timer = undefined;
     }
   }
+  private completeFlushes(failure?: { error: unknown }) {
+    const oldest = this.inFlight[0]?.sequence ?? this.queue[0]?.sequence ?? Number.POSITIVE_INFINITY;
+    for (const [target, waiter] of this.flushWaiters) {
+      if (target < oldest) waiter.resolve();
+      else if (failure) waiter.reject(failure.error);
+      else break;
+      this.flushWaiters.delete(target);
+    }
+    if (!this.closed && !this.flushWaiters.size) {
+      this.explicit = false;
+      this.operationTimer?.unref?.();
+    }
+  }
+  private coalesceFlushTargets() {
+    // Dropped or acknowledged targets can become equivalent while an older event is still pending.
+    // Share those settlements without extending any caller's coverage to a newer event.
+    const outstanding = [...this.inFlight, ...this.queue];
+    const merged = new Map<number, FlushWaiter>();
+    let index = 0;
+    for (const [target, waiter] of this.flushWaiters) {
+      for (let entry = outstanding[index]; entry && entry.sequence <= target; entry = outstanding[++index]) {
+        // Advance to the last outstanding event covered by this target.
+      }
+      const covered = outstanding[index - 1]?.sequence;
+      if (covered === undefined) waiter.resolve();
+      else {
+        const shared = merged.get(covered);
+        if (shared) waiter.resolve(shared.promise);
+        else merged.set(covered, waiter);
+      }
+    }
+    this.flushWaiters = merged;
+  }
   flush(): Promise<void> {
-    return this.stopping ?? this.drain(true);
+    if (this.stopping) return this.stopping;
+    if (this.options.enabled === false || (!this.inFlight.length && !this.queue.length)) return Promise.resolve();
+    if (this.flushWaiters.size >= 2 * (this.capacity + this.batchSize)) this.coalesceFlushTargets();
+    const target = this.queue.at(-1)?.sequence ?? this.inFlight.at(-1)?.sequence ?? this.lastSequence;
+    const existing = this.flushWaiters.get(target);
+    if (existing) return existing.promise;
+    let resolve!: FlushWaiter['resolve'];
+    let reject!: FlushWaiter['reject'];
+    const promise = new Promise<void>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    this.flushWaiters.set(target, { promise, resolve, reject });
+    if (this.pending) {
+      this.explicit = true;
+      this.operationTimer?.ref?.();
+    } else void this.drain(true).catch(() => undefined);
+    return promise;
   }
   shutdown(): Promise<void> {
     if (this.stopping) return this.stopping;
@@ -626,6 +724,7 @@ export class Logbird {
       }
       this.preparing.clear();
       await this.pending?.catch(() => undefined);
+      this.completeFlushes({ error });
       for (const entry of this.queue.splice(0)) this.dropQueued(entry, 'shutdown');
       throw error;
     } finally {

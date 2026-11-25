@@ -143,7 +143,13 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
             .filter((key) => key !== 'id')
             .map((key) => [key, event[key]]),
         );
-        return resolve({ ...fields, action, id, occurredAt: fields.occurredAt ?? timestamp });
+        const occurredAt = fields.occurredAt;
+        return resolve({
+          ...fields,
+          action,
+          id,
+          occurredAt: typeof occurredAt === 'string' || typeof occurredAt === 'number' ? occurredAt : timestamp,
+        });
       },
       () => queue.notify(options.onError, new Error('Logbird capture failed')),
     );

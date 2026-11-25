@@ -28,13 +28,20 @@ await audit.shutdown();
 
 `track(event): void` never throws, even when `onError` throws. It snapshots the
 event, assigns UUIDv7 and a timestamp when absent, and batches by rows, bytes and
-time. `flush(): Promise<void>` settles all events queued when called or rejects with
-unresolved events retained for retry. `shutdown(): Promise<void>` closes capture
+time. `flush(): Promise<void>` covers events queued or already sending at the
+call. It settles independently of later captures and rejects with unresolved
+events retained for retry. Await the adapter's `audit.pending()` first to include
+pending preparation in a direct flush. `shutdown(): Promise<void>` closes capture
 and drains under one `shutdownTimeoutMs` budget (default 10,000 ms, 0 to stop
 immediately). The budget includes pending integration context resolution, an active
 batch, retries and the queued tail.
 If delivery fails or takes too long, shutdown reports each remaining event as a
 `shutdown` drop and rejects. Always await shutdown in the host's lifecycle.
+
+Pass plain JSON data with own enumerable fields to `track()`. Call `flush()`
+and `shutdown()` from the host lifecycle outside `beforeSend`, `onDrop` and
+`onError`. An event still inside `beforeSend` when shutdown starts can be
+refused and counted as a `shutdown` drop.
 
 The defaults are 100 rows, a 1000 ms batching interval and 5 retries. Requests
 stay below 5 MB and 1000 rows, with a 256 KiB per-event limit. Each request has
