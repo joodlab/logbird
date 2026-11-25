@@ -190,6 +190,10 @@ const detail = first ? await readAuditEvent(options, first.id) : null; // parent
 
 ### Reading a whole trail
 
+The console's record page shows a record's history; `iterateAuditTrail` with that record as `target: { type, id }` (a
+`record:` selector) and an explicit `range` is its programmatic equivalent, and the `range` each page reports is the
+window the server applied.
+
 `iterateAuditTrail(options, trail)` needs `range: { from }` with `Z` or an offset (or `Date`s); `to` is optional. It reads
 the trail and options once, when called, and every page through the same bounded read as `readAuditTrail`. **A pass
 that completes** has yielded, once each, every event the server returned for the window the first page reported, which
