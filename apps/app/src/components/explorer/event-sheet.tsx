@@ -627,7 +627,8 @@ function EventDetailBody({
   const ctx = e.context;
   const caused = useChildren(detail, { updatedAt: detailUpdatedAt, fetching: detailFetching }, e, projectId);
   const depth = detail?.parents.length ?? 0;
-  const cuts = ingestCuts(e);
+  // Shown only once the original payload confirms the counts (and so is there to point to).
+  const cuts = ingestCuts(e, detail?.payload);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -796,8 +797,8 @@ function EventDetailBody({
           <Section title={cuts.targets ? `Targets · ${cuts.targets.indexed} of ${cuts.targets.sent}` : `Targets · ${e.targets.length}`}>
             {cuts.targets ? (
               <CutNote>
-                {formatNumber(cuts.targets.indexed)} of {formatNumber(cuts.targets.sent)} targets indexed. A search by record does not find this event
-                for the other {formatNumber(cuts.targets.sent - cuts.targets.indexed)}; the raw payload below has them all.
+                {formatNumber(cuts.targets.indexed)} of {formatNumber(cuts.targets.sent)} targets indexed: only those find this event by record. The
+                raw payload below has all {formatNumber(cuts.targets.sent)}.
               </CutNote>
             ) : null}
             <TargetList key={e.id} onFilter={onFilter} projectId={projectId} targets={e.targets} />

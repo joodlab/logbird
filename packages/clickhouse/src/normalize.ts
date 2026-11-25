@@ -101,7 +101,7 @@ function truncations(e: Record<string, unknown>, indexedTargets: number, changes
       sent: sentTargets,
       indexed: indexedTargets,
       limit: EVENT_LIMITS.targets,
-      reason: `${plural(sentTargets, 'target', 'targets')} sent, ${indexedTargets} indexed (at most ${EVENT_LIMITS.targets} per event, in the order sent; a numeric id too long to index is left out). A search by record does not find this event for the others; the stored payload keeps them all.`,
+      reason: `${plural(sentTargets, 'target', 'targets')} sent, ${indexedTargets} indexed (at most ${EVENT_LIMITS.targets} per event, in the order sent; a numeric id too long to index is left out). Only the first ${EVENT_LIMITS.targets} entries feed the record index, so a record named only after them does not find this event; the stored payload keeps them all.`,
     });
   const sentChanges = Array.isArray(e.changes) ? e.changes.length : 0;
   if (changes.length < sentChanges)
@@ -111,7 +111,7 @@ function truncations(e: Record<string, unknown>, indexedTargets: number, changes
       sent: sentChanges,
       indexed: changes.length,
       limit: EVENT_LIMITS.changes,
-      reason: `${plural(sentChanges, 'change', 'changes')} sent, the first ${changes.length} indexed (at most ${EVENT_LIMITS.changes} per event). The stored payload keeps them all.`,
+      reason: `${plural(sentChanges, 'change', 'changes')} sent, the first ${changes.length} indexed (at most ${EVENT_LIMITS.changes} per event), so a field changed only after them is not found by changes.field. The stored payload keeps them all.`,
     });
   // The same test as the column cap: a field longer than the cap after trimming is cut (see textOf).
   const cut = changes.filter((c) => typeof c.field === 'string' && wellFormed(c.field.trim()).length > EVENT_LIMITS.changeField).length;
@@ -155,6 +155,8 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   const attributes: Record<string, string> = Object.create(null);
   let invalidAttributeKey = false;
   const flatten = (v: unknown, path: string, depth: number) => {
+    // Reserved for Logbird's own cut counts: a producer value there is never indexed, so it cannot use up the budget.
+    if (!ctx.legacyColumns && (path === TRUNCATED_ATTRIBUTE_PREFIX || path.startsWith(`${TRUNCATED_ATTRIBUTE_PREFIX}.`))) return;
     if (Object.keys(attributes).length >= EVENT_LIMITS.attributes) return;
     // Reject instead of repairing keys: replacement could merge distinct attribute paths.
     if (/[\uD800-\uDFFF]/u.test(path)) {

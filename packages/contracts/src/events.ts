@@ -65,6 +65,11 @@ export const REQUEST_LIMITS = {
   facetGroups: 20,
   /** UTF-8 bytes of `q` (422 invalid_query above). */
   queryBytes: 4096,
+  /** Terms in `q`, and nesting levels of parentheses (422 invalid_query above). */
+  queryTerms: 64,
+  queryDepth: 16,
+  /** Body of a viewer-token request (413 payload_too_large above). */
+  viewerTokenBodyBytes: 16 * 1024,
   /** Search `total` stops counting here (`totalExact: false`). */
   countCap: 10_001,
   /** Parents an event detail walks up `context.parentEventId`. */
@@ -164,18 +169,29 @@ export const ingestRejectionCodeSchema = z.enum([
  * `limit` (code units kept). Warnings without a code (an adjusted occurredAt, a numeric id) carry only `reason`.
  */
 export const INGEST_WARNING_CODES = ['targets_truncated', 'changes_truncated', 'change_fields_truncated'] as const;
-export const ingestWarningSchema = z.object({
-  index: z.number().int().meta({ description: 'Position of the event in the request.' }),
-  reason: z.string().meta({ description: 'What was adjusted, in words. Never contains event data.' }),
-  code: z
-    .enum(INGEST_WARNING_CODES)
-    .optional()
-    .meta({ description: 'Set on a cut: targets_truncated, changes_truncated or change_fields_truncated. Absent on other warnings.' }),
-  sent: z.number().int().optional().meta({ description: 'targets_truncated, changes_truncated: how many the event had.' }),
-  indexed: z.number().int().optional().meta({ description: 'targets_truncated, changes_truncated: how many are indexed (searchable).' }),
-  cut: z.number().int().optional().meta({ description: 'change_fields_truncated: how many change field names were shortened.' }),
-  limit: z.number().int().optional().meta({ description: 'The limit that applied (a count, or code units for field names).' }),
+const warningIndex = z.number().int().nonnegative().meta({ description: 'Position of the event in the request.' });
+const warningReason = z.string().meta({ description: 'What was adjusted, in words. Never contains event data.' });
+const count = z.number().int().nonnegative();
+/** A cut of targets or changes: how many the event had, how many are indexed, and the limit. */
+const listCutWarningSchema = z.strictObject({
+  index: warningIndex,
+  reason: warningReason,
+  code: z.enum(['targets_truncated', 'changes_truncated']),
+  sent: count.meta({ description: 'How many the event had.' }),
+  indexed: count.meta({ description: 'How many are indexed (searchable).' }),
+  limit: count.meta({ description: 'The most that one event indexes.' }),
 });
+/** Change field names that were cut: how many, and the code units kept. */
+const fieldCutWarningSchema = z.strictObject({
+  index: warningIndex,
+  reason: warningReason,
+  code: z.literal('change_fields_truncated'),
+  cut: z.number().int().positive().meta({ description: 'How many change field names were shortened.' }),
+  limit: count.meta({ description: 'The UTF-16 code units of a field name that are indexed.' }),
+});
+/** Any other adjustment (an unusable occurredAt stored at receive time, a numeric id): words only. */
+const plainWarningSchema = z.strictObject({ index: warningIndex, reason: warningReason });
+export const ingestWarningSchema = z.union([listCutWarningSchema, fieldCutWarningSchema, plainWarningSchema]);
 export type IngestWarning = z.infer<typeof ingestWarningSchema>;
 export const ingestResponseSchema = z.object({
   accepted: z.number().int(),

@@ -73,7 +73,11 @@ beforeAll(async () => {
   secrets.read = keys.read.secret;
   secrets.scoped = keys.scoped.secret;
   secrets.masked = keys.masked.secret;
+  // One ingest for every test, so each read test also runs alone.
+  const response = await f.post(events);
+  ingested = { status: response.status, body: await response.json() };
 });
+let ingested: { status: number; body: { accepted: number; rejected: unknown[]; warnings: Record<string, unknown>[] } };
 afterAll(async () => {
   await f.cleanup();
 });
@@ -89,9 +93,8 @@ const get = async <T>(path: string, params: Record<string, string>, secret = sec
 const cutKeys = (e: Event) => Object.fromEntries(Object.entries(e.attributes).filter(([k]) => k.startsWith('logbird.truncated')));
 
 it('accepts every event, and warns once per cut with a stable code and counts, never event data', async () => {
-  const response = await f.post(events);
-  expect(response.status).toBe(202);
-  const body = (await response.json()) as { accepted: number; rejected: unknown[]; warnings: Record<string, unknown>[] };
+  expect(ingested.status).toBe(202);
+  const { body } = ingested;
   expect(body.accepted).toBe(events.length);
   expect(body.rejected).toEqual([]);
   expect(body.warnings).toEqual([
@@ -144,4 +147,16 @@ it('shows the counts to a tenant-scoped key and under a field mask, which has no
   expect(masked.payload).toBeNull();
   const page = await get<{ data: Event[] }>('/v1/events', { ...range, q: `attr.${TRUNCATED_ATTRIBUTES.changeFields}:*` }, secrets.masked);
   expect(page.data.map((e) => e.id)).toEqual(['cut-field']);
+});
+
+it('sends no cut warning for an event it rejects: a conflicting id keeps the event stored before it', async () => {
+  expect(
+    (await f.post({ id: 'cut-conflict', action: 'doc.updated', occurredAt, tenant: { id: 't1' }, targets: [{ type: 'doc', id: 'doc_1' }] })).status,
+  ).toBe(202);
+  const conflict = await f.post({ id: 'cut-conflict', action: 'doc.updated', occurredAt, tenant: { id: 't1' }, targets: events[0]?.targets });
+  const body = (await conflict.json()) as { accepted: number; rejected: { code: string }[]; warnings: unknown[] };
+  expect(body).toMatchObject({ accepted: 0, rejected: [{ code: 'duplicate_id_conflict' }], warnings: [] });
+  const stored = await get<{ event: Event }>('/v1/events/cut-conflict', {});
+  expect(stored.event.targets).toHaveLength(1);
+  expect(cutKeys(stored.event)).toEqual({});
 });

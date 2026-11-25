@@ -73,7 +73,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
       supportsSubsetRetry,
       (index, reason) => {
         // Only the occurredAt warning (no code) can change at acceptance; cuts do not depend on the clock.
-        const warning = warnings.findIndex((item) => item.index === index && item.code === undefined);
+        const warning = warnings.findIndex((item) => item.index === index && !('code' in item));
         if (warning >= 0) warnings.splice(warning, 1);
         if (reason) warnings.push({ index, reason });
       },
@@ -110,7 +110,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
       throw error;
     }
   }
-  return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected, warnings });
+  return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected, warnings: settledWarnings(warnings, rejected) });
 }
 function organizationIdForStream(projectId: string, organizationId?: string) {
   return organizationId ?? projectId.slice('ws:'.length);
@@ -170,6 +170,15 @@ export async function requireProjectReadable(projectId: string) {
   });
 }
 
+/**
+ * A cut warning says what the stored event holds, so it is only for an event that was stored: never for a rejected
+ * index (a conflicting id keeps the event stored before it) or one still unsettled in a 503. Other warnings are
+ * returned as they always were.
+ */
+function settledWarnings(warnings: IngestWarning[], rejected: { index: number }[], unsettled: number[] = []) {
+  const skip = new Set([...rejected.map((r) => r.index), ...unsettled]);
+  return warnings.filter((w) => !('code' in w) || !skip.has(w.index));
+}
 function settledDetails(error: ApiError, rejected: { index: number; reason: string; code: string }[], warnings: IngestWarning[]) {
   if (!['ingest_pending', 'ingest_unavailable'].includes(error.code) || !error.details) return error;
   const details = ingestPendingDetailsSchema.parse(error.details);
@@ -177,7 +186,11 @@ function settledDetails(error: ApiError, rejected: { index: number; reason: stri
     503,
     error.code,
     error.message,
-    ingestPendingDetailsSchema.parse({ ...details, rejected: [...rejected, ...details.rejected], warnings }),
+    ingestPendingDetailsSchema.parse({
+      ...details,
+      rejected: [...rejected, ...details.rejected],
+      warnings: settledWarnings(warnings, [...rejected, ...details.rejected], details.indices),
+    }),
     error.retryAfter,
   );
 }

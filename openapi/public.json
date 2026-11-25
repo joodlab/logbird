@@ -631,56 +631,116 @@
                     "warnings": {
                       "default": [],
                       "items": {
-                        "properties": {
-                          "code": {
-                            "description": "Set on a cut: targets_truncated, changes_truncated or change_fields_truncated. Absent on other warnings.",
-                            "enum": [
-                              "targets_truncated",
-                              "changes_truncated",
-                              "change_fields_truncated"
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "code": {
+                                "enum": [
+                                  "targets_truncated",
+                                  "changes_truncated"
+                                ],
+                                "type": "string"
+                              },
+                              "index": {
+                                "description": "Position of the event in the request.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "indexed": {
+                                "description": "How many are indexed (searchable).",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "limit": {
+                                "description": "The most that one event indexes.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "reason": {
+                                "description": "What was adjusted, in words. Never contains event data.",
+                                "type": "string"
+                              },
+                              "sent": {
+                                "description": "How many the event had.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "index",
+                              "reason",
+                              "code",
+                              "sent",
+                              "indexed",
+                              "limit"
                             ],
-                            "type": "string"
+                            "type": "object"
                           },
-                          "cut": {
-                            "description": "change_fields_truncated: how many change field names were shortened.",
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "code": {
+                                "const": "change_fields_truncated",
+                                "type": "string"
+                              },
+                              "cut": {
+                                "description": "How many change field names were shortened.",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991,
+                                "type": "integer"
+                              },
+                              "index": {
+                                "description": "Position of the event in the request.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "limit": {
+                                "description": "The UTF-16 code units of a field name that are indexed.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "reason": {
+                                "description": "What was adjusted, in words. Never contains event data.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "index",
+                              "reason",
+                              "code",
+                              "cut",
+                              "limit"
+                            ],
+                            "type": "object"
                           },
-                          "index": {
-                            "description": "Position of the event in the request.",
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "indexed": {
-                            "description": "targets_truncated, changes_truncated: how many are indexed (searchable).",
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "limit": {
-                            "description": "The limit that applied (a count, or code units for field names).",
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "reason": {
-                            "description": "What was adjusted, in words. Never contains event data.",
-                            "type": "string"
-                          },
-                          "sent": {
-                            "description": "targets_truncated, changes_truncated: how many the event had.",
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "index": {
+                                "description": "Position of the event in the request.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "reason": {
+                                "description": "What was adjusted, in words. Never contains event data.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "index",
+                              "reason"
+                            ],
+                            "type": "object"
                           }
-                        },
-                        "required": [
-                          "index",
-                          "reason"
-                        ],
-                        "type": "object"
+                        ]
                       },
                       "type": "array"
                     }

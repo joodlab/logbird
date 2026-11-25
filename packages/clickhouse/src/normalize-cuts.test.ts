@@ -98,3 +98,19 @@ describe('cuts at ingest', () => {
     expect(big).toMatchObject({ ok: false, reason: 'event exceeds 256 KB' });
   });
 });
+
+describe('the reserved prefix and the attribute budget', () => {
+  it('never spends the 256-key budget on producer keys under logbird.truncated', () => {
+    const reserved = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`k${i}`, 'x']));
+    const result = normalized({ logbird: { truncated: reserved }, after: 'kept' });
+    expect(Object.keys(result.row.attributes)).toEqual(['after']);
+  });
+
+  it('adds its own reserved keys after a full budget', () => {
+    const full = Object.fromEntries(Array.from({ length: EVENT_LIMITS.attributes + 10 }, (_, i) => [`a${i}`, 'x']));
+    const result = normalized({ metadata: full, targets: targets(65) });
+    const keys = Object.keys(result.row.attributes);
+    expect(keys.filter((k) => k.startsWith('metadata.'))).toHaveLength(EVENT_LIMITS.attributes);
+    expect(result.row.attributes[TRUNCATED_ATTRIBUTES.targets]).toBe('65');
+  });
+});
