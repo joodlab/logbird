@@ -123,7 +123,7 @@ it('allows an explicit carrier impersonator override or omission', async () => {
   expect(await audit.carrier({ impersonator: { id: 'other-support' } })).toMatchObject({ impersonator: { id: 'other-support' } });
   expect(await audit.carrier({ impersonator: undefined })).not.toHaveProperty('impersonator');
 });
-it('shutdown waits for pending resolutions before closing the client', async () => {
+it('shutdown starts immediately and waits for pending resolutions within its budget', async () => {
   const { client, track } = fixture();
   let finish!: (actor: { id: string }) => void;
   const options = {
@@ -138,11 +138,55 @@ it('shutdown waits for pending resolutions before closing the client', async () 
   audit('pending');
   const closing = shutdown(options);
   await Promise.resolve();
-  expect(close).not.toHaveBeenCalled();
+  expect(close).toHaveBeenCalledOnce();
   finish({ id: 'late' });
   await closing;
   expect(track).toHaveBeenCalledOnce();
   expect(close).toHaveBeenCalledOnce();
+});
+
+it('registers against a client created by a separate instance of the SDK module', async () => {
+  const { client, track } = fixture();
+  vi.resetModules();
+  const separate = await import('./integration');
+  const audit = await separate.createAudit({ client }, {}, new Request('http://host'));
+  const id = audit('separate');
+  await audit.pending();
+  expect(track).toHaveBeenCalledWith(expect.objectContaining({ id }), { preserveId: true });
+});
+
+it('preserves inherited and getter-backed ids without reading them twice', async () => {
+  const { client, track } = fixture();
+  const audit = await createAudit({ client }, {}, new Request('http://host'));
+  const valid = vi.fn(() => 'stable');
+  const getter = Object.defineProperty({}, 'id', { enumerable: true, get: valid });
+  expect(audit('getter', getter)).toBe('stable');
+  expect(audit('inherited', Object.create({ id: 'inherited' }))).toBe('inherited');
+  await audit.pending();
+  expect(valid).toHaveBeenCalledOnce();
+  expect(track.mock.calls.map(([event]) => event.id)).toEqual(['stable', 'inherited']);
+});
+
+it('bounds resolver diagnostic callbacks even while completed captures free their slots', async () => {
+  const { client } = fixture();
+  const onError = vi.fn(() => new Promise<void>(() => undefined));
+  const audit = await createAudit(
+    {
+      client,
+      onError,
+      actor: () => {
+        throw new Error('fixture');
+      },
+    },
+    {},
+    new Request('http://host'),
+  );
+  for (let index = 0; index < 1025; index++) {
+    audit('fixture');
+    await audit.pending();
+  }
+  expect(onError).toHaveBeenCalledTimes(1024);
+  expect(client.skippedNotifications).toBe(1);
 });
 it('ignores inbound correlation headers unless the application opts in to each (#321)', async () => {
   const { client, track } = fixture();
