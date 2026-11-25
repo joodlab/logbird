@@ -112,7 +112,7 @@ describe('history change summary', () => {
     render(<ChangeSummary changes={entries} onOpen={vi.fn()} />, (host) => {
       expect(host.textContent).toBe(`note: ${expected}`);
     });
-    expect(changeSummaryLabel(entries)).toBe(`note: ${expected.replace(' → ', ' to ')}`);
+    expect(changeSummaryLabel(entries)).toBe(`note: before ${expected.replace(' → ', ', after ')}`);
   });
 
   it('names a creation, removal and legacy change without guessing absent kinds', () => {

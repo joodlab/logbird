@@ -13,7 +13,7 @@ function changePreview(change: EventChange): string {
   const parts = changeDisplayParts(change);
   const before = middleTruncate(changeValueText(change.before, change.beforeKind), VALUE_LIMIT);
   const after = middleTruncate(changeValueText(change.after, change.afterKind), VALUE_LIMIT);
-  const text = parts.before && parts.after ? `${before} to ${after}` : parts.after ? `set to ${after}` : `removed (was ${before})`;
+  const text = parts.before && parts.after ? `before ${before}, after ${after}` : parts.after ? `set to ${after}` : `removed (was ${before})`;
   return `${middleTruncate(changeFieldLabel(change.field), FIELD_LIMIT)}: ${text}`;
 }
 
