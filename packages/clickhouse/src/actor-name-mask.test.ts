@@ -251,6 +251,16 @@ describe('facets under the actor_email mask', () => {
     );
   });
 
+  it('refuses a malformed second-level row even when it matches no returned parent', async () => {
+    const { ch } = client([
+      [{ value: 'usr_1', masked: 0, labf: 0, labt: 'Bob', count: 1, total: 1 }],
+      [{ value: 'usr_9', masked: 0, grp: 'x', gmasked: 'bad', labf: 0, labt: 'x', count: 1, total: 1 }],
+    ]);
+    await expect(facets(ch, 'proj_1', { ...range, field: 'actor', by: 'actor.name', limit: 10 }, scope, undefined, key)).rejects.toThrow(
+      /Unknown masked facet flag/,
+    );
+  });
+
   it('orders tied second-level groups by the keyed hash too', async () => {
     const { ch, query } = client([[{ value: 'usr_1', masked: 0, labf: 0, labt: 'Bob', count: 2, total: 2 }], []]);
     await facets(ch, 'proj_1', { ...range, field: 'actor', by: 'impersonator', limit: 10, byLimit: 1 }, scope, undefined, key);

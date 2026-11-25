@@ -230,7 +230,16 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         action: 'article.updated',
         tenant,
         actor,
-        impersonator: { id: 'sup_rita', name: 'Rita\uFF20example.invalid', email: 'Rita@example.invalid' },
+        impersonator: { id: 'sup_fw', name: 'Rita\uFF20example.invalid', email: 'Rita@example.invalid' },
+      },
+      // The small commercial at (U+FE6B), with no email: the name hashes its normalised self.
+      {
+        id: 'qa-imp-14',
+        occurredAt: ts(14),
+        action: 'article.updated',
+        tenant,
+        actor,
+        impersonator: { id: 'sup_small', name: 'Solo\uFE6Bexample.invalid' },
       },
     ];
     const ingested = await app.request('/v1/events', {
@@ -284,6 +293,7 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       solo: imp('solo@example.invalid'),
       moved: imp('omar.new@example.invalid'),
       zw: imp(ZW_511),
+      small: imp('solo\uFE6Bexample.invalid'),
       n511: imp(NAME_511.replace(/\s/g, '').toLowerCase()),
       ritaActor: maskedEmail(projectId, 'rita@example.invalid', key),
     };
@@ -299,6 +309,8 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       sup_511: p.n511,
       sup_move: p.moved,
       sup_zw: p.zw,
+      sup_fw: p.rita,
+      sup_small: p.small,
       '': '',
     };
     // Expected two-level facets, computed from the fixture: value -> { count, groups: { group -> count } }.
@@ -361,6 +373,7 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       'qa-imp-11': { name: p.moved, attributes: { 'impersonator.email': p.moved } },
       'qa-imp-12': { name: p.zw, attributes: {} },
       'qa-imp-13': { name: p.rita, attributes: { 'impersonator.email': p.rita } },
+      'qa-imp-14': { name: p.small, attributes: {} },
     };
     type Event = { id: string; impersonator: { id: string; name: string } | null; attributes: Record<string, string> };
     const impersonatorOf = (e: Event) => ({
@@ -447,7 +460,7 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       }
 
       // Facets: impersonator labels at both levels and as a second level; the name pseudonyms match the events'.
-      const byImpersonator = await facets(bearer, { field: 'impersonator' });
+      const byImpersonator = await facets(bearer, { field: 'impersonator', limit: '50' });
       expect(byImpersonator.text, label).not.toMatch(ADDRESS);
       expect(byImpersonator.text, label).not.toContain(LONG_LOCAL);
       expect(Object.fromEntries(byImpersonator.body.values.map((v) => [v.value, [v.label, v.count]])), label).toEqual(
@@ -460,7 +473,7 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         { field: 'impersonator', by: 'action' },
         { field: 'actor', by: 'impersonator' },
       ]) {
-        const f = await facets(bearer, { ...query, byLimit: '10' });
+        const f = await facets(bearer, { ...query, limit: '50', byLimit: '20' });
         expect(f.text, `${label} ${JSON.stringify(query)}`).not.toMatch(ADDRESS);
         expect(f.text, `${label} ${JSON.stringify(query)}`).not.toContain(LONG_LOCAL);
         // Exactly the fixture's values and groups, nothing dropped or merged.
@@ -468,22 +481,22 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         expect(f.body.otherCount, `${label} ${JSON.stringify(query)}`).toBe(0);
         for (const v of f.body.values) expect(v.groupsOtherCount ?? 0, `${label} ${JSON.stringify(query)}`).toBe(0);
       }
-      const actionsBySupport = await facets(bearer, { field: 'action', by: 'impersonator', byLimit: '10' });
+      const actionsBySupport = await facets(bearer, { field: 'action', by: 'impersonator', byLimit: '20' });
       // Limits with ties: the top two impersonators (two events each) and the rest counted; a third pick among the
       // one-event ties keeps its masked label; one group per action at the second level, the rest counted.
       const top2 = await facets(bearer, { field: 'impersonator', limit: '2' });
       expect(Object.fromEntries(top2.body.values.map((v) => [v.value, [v.label, v.count]])), label).toEqual({
-        sup_rita: [p.rita, 3],
+        sup_rita: [p.rita, 2],
         sup_omar: ['Omar Support', 2],
       });
-      expect(top2.body.otherCount, label).toBe(ALL.length - 5);
+      expect(top2.body.otherCount, label).toBe(ALL.length - 4);
       const top3 = await facets(bearer, { field: 'impersonator', limit: '3' });
       expect(
         top3.body.values.map((v) => v.count),
         label,
-      ).toEqual([3, 2, 1]);
+      ).toEqual([2, 2, 1]);
       for (const v of top3.body.values) expect(v.label, label).toBe(LABEL[v.value] || v.value);
-      expect(top3.body.otherCount, label).toBe(ALL.length - 6);
+      expect(top3.body.otherCount, label).toBe(ALL.length - 5);
       const byOne = await facets(bearer, { field: 'action', by: 'impersonator', byLimit: '1' });
       expect(byOne.text, label).not.toMatch(ADDRESS);
       const expectedByOne = expectedFacet('action', 'impersonator');
