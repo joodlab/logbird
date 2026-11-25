@@ -1,11 +1,12 @@
 # Limits
 
 The limits that decide what Logbird stores and what a read returns, with what happens past each. Request validation
-has more bounds than these (each one is described on its parameter in `openapi/public.json`). The numbers are read from the
+has more bounds than these: the request schemas in `packages/contracts` are the full list. The numbers are read from the
 code (`EVENT_LIMITS` and `REQUEST_LIMITS` in `packages/contracts/src/events.ts`, the occurredAt bounds in
 `packages/clickhouse/src/timestamp.ts`, and the server environment for rate limits);
-`packages/clickhouse/src/limits-doc.test.ts` fails when the number in the Value column of the first two tables drifts
-from the code (and, for page sizes, query terms, nesting and the default window, when the stated behaviour does).
+`packages/clickhouse/src/limits-doc.test.ts` fails when the number in the Value column of a row it checks drifts from the
+code (and, for page sizes, query terms, nesting and the default window, when the stated behaviour does). It does not
+check the wording of the other columns, nor the event id, viewer-token lifetime, facet path and export rows.
 
 ## Per event
 
@@ -20,8 +21,8 @@ the complete export (`format=jsonl-evidence`) return the original.
 | Event id | 256 UTF-16 code units (after trimming) | An id that is longer, holds NUL or an unpaired surrogate is **rejected** | `rejected[]`, `invalid_event_id` |
 | Event size | 262144 bytes (256 KiB), the event as JSON once parsed | The event is **rejected** | `rejected[]`, `invalid_event` |
 | Number depth | 1000 levels of nesting | An event that nests deeper than this and also holds, anywhere, a number a double cannot keep exactly is **rejected** | `rejected[]`, `invalid_event` |
-| Targets indexed | 64 | Only the first 64 entries, in the order sent, feed the target index (a numeric id too long to index never does). A record (type and id) named only after them is not found by `record:<type>:<id>` or a target scope; `target:<id>` matches ids alone, so it can still match through an indexed target with the same id. | Warning `targets_truncated`, attribute `logbird.truncated.targets` |
-| Changes indexed | 256 | Only the first 256 entries, in the order sent, are indexed. A field changed only after them is not found by `changes.field:`. | Warning `changes_truncated`, attribute `logbird.truncated.changes` |
+| Targets indexed | 64 | Only the first 64 entries, in the order sent, feed the target index (a numeric id too long to index never does). Later entries add nothing to the index: `record:`, `target:` and a target scope find the event only through an indexed target (which can still match a later one by the same, or a shortened, value). | Warning `targets_truncated`, attribute `logbird.truncated.targets` |
+| Changes indexed | 256 | Only the first 256 entries, in the order sent, are indexed; later entries add nothing to the index, so `changes.field:` finds the event only through an indexed field. | Warning `changes_truncated`, attribute `logbird.truncated.changes` |
 | Change field name | 256 UTF-16 code units | Among the indexed changes, a longer name is indexed cut to at most 256 code units (after trimming surrounding whitespace). A long name only past the 256th change is covered by `changes_truncated`. | Warning `change_fields_truncated`, attribute `logbird.truncated.changeFields` |
 | Attributes indexed | 256 keys | Fields outside the envelope are flattened into attributes; keys past the 256th are not indexed. A producer value under a reserved key (`logbird.occurredAt.rejected`, `logbird.truncated.*`) takes a slot like any key and is then dropped or replaced; Logbird's own values are added after the 256 and do not count. | No |
 | Attribute value | 2048 UTF-8 bytes | The value is indexed cut to at most 2048 bytes; a number that does not fit is not indexed. | No |
@@ -51,12 +52,14 @@ From this release on, only Logbird writes under `logbird.truncated`: a value a p
 events need care:
 
 - Events stored by an earlier release (or by an earlier server during a rolling upgrade) carry no Logbird-issued
-  count even when they were cut, and may hold a producer value under these keys. An exact retry of such an event is
-  accepted without storing anything new: its answer warns about the cut, and the stored event keeps no count.
+  count even when they were cut, and may hold a producer value under these keys. An exact retry of such an event (the
+  same string `id`, with a stored identity that still matches) is accepted without storing anything new: its answer warns
+  about the cut, and the stored event keeps no count. A retry whose stored identity no longer matches is a
+  `duplicate_id_conflict`, with no cut warning.
 - The original payload tells whether a count is true (`targets.length`, `changes.length`), not who wrote it. The
   console compares the two and shows its cut notes only when they agree. A masked reader has no payload to compare
   with, and `attr.logbird.truncated.targets:*` can also find such an older producer value.
-- An exact retry needs the same string `id`: an event resent without one gets a new id and is stored again.
+- An event resent without a string `id` gets a new id and is stored again.
 
 Every reader of the event sees these attributes, including tenant-scoped keys, viewer tokens and masked scopes: they
 are counts, never values. A masked scope gets `payload: null` and no complete export, so it can see that an event was

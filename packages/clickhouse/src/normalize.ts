@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import {
+  type ChangeValueKind,
   canonicalDecimal,
   EVENT_LIMITS,
   EXACT_NUMBER_MAX_DEPTH,
   hasDeepRawNumbers,
   isRawJson,
   mayHoldInexactNumbers,
+  parseJsonExact,
   plainDecimal,
   rawJsonText,
   TRUNCATED_ATTRIBUTE_PREFIX,
@@ -59,6 +61,50 @@ function numericId(v: unknown, maxLength: number): string | null {
   return scientific !== null && scientific.length <= maxLength ? scientific : null;
 }
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
+// Non-string values already have JSON text here, including exact numbers represented internally by JSON.rawJSON.
+function indexedChangeKind(input: unknown, text: string): ChangeValueKind | undefined {
+  if (typeof input === 'string') return 'string';
+  switch (text[0]) {
+    case undefined:
+      return 'absent';
+    case 'n':
+      return 'null';
+    case '"':
+      // An in-process value with toJSON serialized to a string including its quotes.
+      return;
+    case 't':
+    case 'f':
+      return 'boolean';
+    case '{':
+    case '[':
+      return 'json';
+    default:
+      return 'number';
+  }
+}
+function wireChangeKind(input: unknown): ChangeValueKind {
+  if (input === null) return 'null';
+  const kind = typeof input;
+  if (kind === 'object') return isRawJson(input) ? 'number' : 'json';
+  if (kind === 'string' || kind === 'number' || kind === 'boolean') return kind;
+  return 'absent';
+}
+function verifiedChangeKinds(
+  wireChanges: unknown[],
+  indexedFields: unknown[],
+  indexedKinds: (ChangeValueKind | undefined)[],
+  side: 'before' | 'after',
+): ChangeValueKind[] {
+  if (Math.min(wireChanges.length, 256) !== indexedFields.length) return [];
+  const kinds: ChangeValueKind[] = [];
+  for (const [index, field] of indexedFields.entries()) {
+    const change = object(wireChanges[index]);
+    const kind = wireChangeKind(change[side]);
+    if (change.field !== field || kind !== indexedKinds[index]) return [];
+    kinds.push(kind);
+  }
+  return kinds;
+}
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
 // executor.attempt truncated toward zero from the exact decimal (1.99999999999999999 is 1, not 2), clamped to UInt16
 // as JSON.parse gave (1e400 is 65535, negatives 0). Legacy (pre-v1) columns keep the double conversion.
@@ -91,7 +137,7 @@ export type IngestCut =
   | { code: 'targets_truncated' | 'changes_truncated'; reason: string; sent: number; indexed: number; limit: number }
   | { code: 'change_fields_truncated'; reason: string; cut: number; limit: number };
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-function truncations(e: Record<string, unknown>, indexedTargets: number, changes: Record<string, unknown>[]) {
+function truncations(e: Record<string, unknown>, indexedTargets: number, indexedChanges: number, fields: unknown[]) {
   const cuts: (IngestCut & { attribute: string })[] = [];
   const sentTargets = Array.isArray(e.targets) ? e.targets.length : 0;
   if (indexedTargets < sentTargets)
@@ -101,20 +147,20 @@ function truncations(e: Record<string, unknown>, indexedTargets: number, changes
       sent: sentTargets,
       indexed: indexedTargets,
       limit: EVENT_LIMITS.targets,
-      reason: `${plural(sentTargets, 'target', 'targets')} sent, ${indexedTargets} indexed (at most ${EVENT_LIMITS.targets} per event, in the order sent; a numeric id too long to index is left out). Only the first ${EVENT_LIMITS.targets} entries feed the record index, so a record named only after them does not find this event; the stored payload keeps them all.`,
+      reason: `${plural(sentTargets, 'target', 'targets')} sent, ${indexedTargets} indexed (at most ${EVENT_LIMITS.targets} per event, in the order sent; a numeric id too long to index is left out). Only the first ${EVENT_LIMITS.targets} entries feed the target index; later entries add nothing to it. The stored payload keeps them all.`,
     });
   const sentChanges = Array.isArray(e.changes) ? e.changes.length : 0;
-  if (changes.length < sentChanges)
+  if (indexedChanges < sentChanges)
     cuts.push({
       code: 'changes_truncated',
       attribute: TRUNCATED_ATTRIBUTES.changes,
       sent: sentChanges,
-      indexed: changes.length,
+      indexed: indexedChanges,
       limit: EVENT_LIMITS.changes,
-      reason: `${plural(sentChanges, 'change', 'changes')} sent, the first ${changes.length} indexed (at most ${EVENT_LIMITS.changes} per event), so a field changed only after them is not found by changes.field. The stored payload keeps them all.`,
+      reason: `${plural(sentChanges, 'change', 'changes')} sent, the first ${indexedChanges} indexed (at most ${EVENT_LIMITS.changes} per event); later entries add nothing to the index. The stored payload keeps them all.`,
     });
   // The same test as the column cap: a field longer than the cap after trimming is cut (see textOf).
-  const cut = changes.filter((c) => typeof c.field === 'string' && wellFormed(c.field.trim()).length > EVENT_LIMITS.changeField).length;
+  const cut = fields.filter((field) => typeof field === 'string' && wellFormed(field.trim()).length > EVENT_LIMITS.changeField).length;
   if (cut)
     cuts.push({
       code: 'change_fields_truncated',
@@ -228,6 +274,21 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   });
   if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
   const changes = Array.isArray(e.changes) ? e.changes.slice(0, EVENT_LIMITS.changes).map(object) : [];
+  // In-process callers may supply keyed toJSON hooks. Check the payload snapshot, which ingest also uses for identity,
+  // before labeling the existing text. An untrustworthy side keeps an empty kind array, like a legacy write.
+  const payloadInput = changes.length ? parseJsonExact(payload) : undefined;
+  const payloadChanges = object(payloadInput).changes;
+  const wireChanges = Array.isArray(payloadChanges) ? payloadChanges : [];
+  const indexedFields: unknown[] = [];
+  const beforeKinds: (ChangeValueKind | undefined)[] = [];
+  const afterKinds: (ChangeValueKind | undefined)[] = [];
+  const indexSide = (side: 'before' | 'after', kinds: (ChangeValueKind | undefined)[]) =>
+    changes.map((change, i) => {
+      const input = change[side];
+      const storedText = wellFormed(value(input));
+      kinds[i] = indexedChangeKind(input, storedText);
+      return storedText;
+    });
   const actor = object(e.actor),
     executor = object(e.executor),
     tenant = object(e.tenant),
@@ -248,13 +309,6 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   // Cuts of targets, changes and change field names: the event is kept whole in payload; the indexed columns hold
   // the first ones. Each cut is recorded on the event (reserved attributes, counts only) and returned as a warning.
   // Legacy columns are frozen as the pre-v1 normalizer wrote them, which recorded no cuts.
-  const cuts = ctx.legacyColumns ? [] : truncations(e, recordTargets.length, changes);
-  if (!ctx.legacyColumns) {
-    // Reserved: only Logbird writes under logbird.truncated, so a producer can neither forge a cut nor hide one.
-    for (const key of Object.keys(attributes))
-      if (key === TRUNCATED_ATTRIBUTE_PREFIX || key.startsWith(`${TRUNCATED_ATTRIBUTE_PREFIX}.`)) delete attributes[key];
-    for (const cut of cuts) attributes[cut.attribute] = String(cut.code === 'change_fields_truncated' ? cut.cut : cut.sent);
-  }
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
@@ -291,9 +345,16 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     target_types: recordTargets.map((t) => text(t.type, 64)),
     target_ids: recordTargets.map((t) => idText(t.id)),
     target_names: recordTargets.map((t) => text(t.name)),
-    changes_fields: changes.map((c) => text(c.field, EVENT_LIMITS.changeField)),
-    changes_before: changes.map((c) => wellFormed(value(c.before))),
-    changes_after: changes.map((c) => wellFormed(value(c.after))),
+    // Preserve the old indexing order for in-process getters and toJSON hooks.
+    changes_fields: changes.map((change, i) => {
+      const { field } = change;
+      indexedFields[i] = field;
+      return text(field, EVENT_LIMITS.changeField);
+    }),
+    changes_before: indexSide('before', beforeKinds),
+    changes_after: indexSide('after', afterKinds),
+    changes_before_kind: verifiedChangeKinds(wireChanges, indexedFields, beforeKinds, 'before'),
+    changes_after_kind: verifiedChangeKinds(wireChanges, indexedFields, afterKinds, 'after'),
     operation_id: idText(context.operationId),
     parent_event_id: idText(context.parentEventId),
     request_id: idText(context.requestId),
@@ -320,6 +381,17 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     schema_version: idText(e.schemaVersion, 32),
     sdk: text(ctx.sdk, 128),
   };
-  return { ok: true as const, row, id, warning, cuts: cuts.map(({ attribute: _attribute, ...cut }) => cut) };
+  // Computed after the row, from the field names it read: each change's field is read once, in the old order.
+  const cuts = ctx.legacyColumns ? [] : truncations(e, recordTargets.length, changes.length, indexedFields);
+  if (!ctx.legacyColumns) {
+    // Reserved: only Logbird writes under logbird.truncated, so a producer can neither forge a cut nor hide one.
+    for (const key of Object.keys(attributes))
+      if (key === TRUNCATED_ATTRIBUTE_PREFIX || key.startsWith(`${TRUNCATED_ATTRIBUTE_PREFIX}.`)) delete attributes[key];
+    for (const cut of cuts) attributes[cut.attribute] = String(cut.code === 'change_fields_truncated' ? cut.cut : cut.sent);
+  }
+  return { ok: true as const, row, id, warning, payloadInput, cuts: cuts.map(({ attribute: _attribute, ...cut }) => cut) };
 }
 export type EventRow = Extract<ReturnType<typeof normalizeEvent>, { ok: true }>['row'];
+type ChangeKindColumns = 'changes_before_kind' | 'changes_after_kind';
+/** Legacy JSONEachRow writers and stored rows can omit the kind columns. normalizeEvent always emits both. */
+export type StoredEventRow = Omit<EventRow, ChangeKindColumns> & Partial<Pick<EventRow, ChangeKindColumns>>;

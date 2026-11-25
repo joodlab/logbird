@@ -53,7 +53,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
     const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(), sdk });
     if (normalized.ok) {
       // Internal audit callers can pass Dates/toJSON values; identity is always the parsed wire payload.
-      candidates.push({ index, input: parseJsonExact(normalized.row.payload), row: normalized.row });
+      candidates.push({ index, input: normalized.payloadInput ?? parseJsonExact(normalized.row.payload), row: normalized.row });
       if (normalized.warning) warnings.push({ index, reason: normalized.warning });
       // One entry per cut (targets, changes, field names), with a stable code and counts only.
       for (const cut of normalized.cuts) warnings.push({ index, ...cut });

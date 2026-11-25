@@ -24,6 +24,8 @@ export interface AuditEvent {
         field: string;
         before: string;
         after: string;
+        beforeKind?: ChangeValueKind;
+        afterKind?: ChangeValueKind;
     }[];
     // (undocumented)
     conformance: number;
@@ -83,6 +85,9 @@ export interface AuditEvent {
     // (undocumented)
     timestamp: string;
 }
+
+// @public
+export type ChangeValueKind = 'absent' | 'null' | 'string' | 'number' | 'boolean' | 'json';
 
 // @public
 export function isTrailQueryError(error: unknown): error is TrailQueryError;
