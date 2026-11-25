@@ -39,6 +39,7 @@ import { NotRecorded } from '@/components/not-recorded';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries';
+import { changeFieldLabel } from '@/lib/change-values';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import {
   actorAttributeHint,
@@ -801,7 +802,7 @@ function EventDetailBody({
                   {e.changes.map((c, index) => (
                     // biome-ignore lint/suspicious/noArrayIndexKey: the event's change list is positional and can repeat field names
                     <tr key={`${index}:${c.field}`}>
-                      <td className="px-3 py-2 align-top font-mono text-[12px] [overflow-wrap:anywhere]">{c.field}</td>
+                      <td className="px-3 py-2 align-top font-mono text-[12px] [overflow-wrap:anywhere]">{changeFieldLabel(c.field)}</td>
                       <td className="px-3 py-2 align-top">
                         <ChangeValue before kind={c.beforeKind} text={c.before} />
                       </td>

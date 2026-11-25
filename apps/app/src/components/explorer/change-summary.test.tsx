@@ -76,6 +76,19 @@ describe('change values', () => {
 });
 
 describe('history change summary', () => {
+  it('keeps visually significant whitespace and labels unnamed fields', () => {
+    const entry = change('', 'A  B', 'A B', 'string', 'string');
+    const filter = vi.fn();
+    render(<ChangeSummary changes={[entry]} onField={filter} onOpen={vi.fn()} />, (host) => {
+      const button = host.querySelector('button');
+      expect(button?.textContent).toBe('Unnamed field');
+      expect(button?.getAttribute('aria-label')).toBe('Filter history by Unnamed field');
+      act(() => button?.click());
+      expect(filter).toHaveBeenCalledExactlyOnceWith('');
+      expect([...host.querySelectorAll('.whitespace-pre-wrap')].map((node) => node.textContent)).toEqual(['"A  B"', '"A B"']);
+    });
+  });
+
   it('names a creation, removal and legacy change without guessing absent kinds', () => {
     const creation = change('title', '', '', 'absent', 'string');
     const removal = change('note', 'null', '', 'null', 'absent');

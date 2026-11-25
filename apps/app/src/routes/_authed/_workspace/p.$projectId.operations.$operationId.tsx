@@ -80,6 +80,15 @@ function buildTree(events: AuditEvent[]): Node[] {
   return out;
 }
 
+function StepExecutor({ executor }: Pick<AuditEvent, 'executor'>) {
+  const label = executor?.name || executor?.id || executor?.type;
+  return label ? (
+    <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={label}>
+      Performed by <bdi>{label}</bdi>
+    </span>
+  ) : null;
+}
+
 function OperationPage() {
   const { projectId, operationId } = Route.useParams();
   const search = Route.useSearch();
@@ -278,11 +287,7 @@ function OperationPage() {
                           <ActionName action={e.action} className="text-[11px]" />
                           {e.executor && e.executor.attempt > 1 ? <TypePill tone="warning">attempt {e.executor.attempt}</TypePill> : null}
                         </span>
-                        {e.executor?.name || e.executor?.id || e.executor?.type ? (
-                          <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                            Performed by <bdi>{e.executor.name || e.executor.id || e.executor.type}</bdi>
-                          </span>
-                        ) : null}
+                        <StepExecutor executor={e.executor} />
                       </span>
                     </span>
                     <span className="relative hidden h-full min-h-11 items-center px-4 md:flex">
@@ -339,10 +344,13 @@ function OperationPage() {
                     type="button"
                   >
                     <OutcomeDot outcome={e.outcome} />
-                    <bdi className="min-w-0 flex-1 truncate" dir="auto">
-                      {eventSentence(e)}
-                    </bdi>
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">names {e.context.parentEventId} as parent</span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <bdi className="truncate" dir="auto">
+                        {eventSentence(e)}
+                      </bdi>
+                      <StepExecutor executor={e.executor} />
+                      <span className="break-all font-mono text-[11px] text-muted-foreground">names {e.context.parentEventId} as parent</span>
+                    </span>
                   </button>
                 </li>
               ))}

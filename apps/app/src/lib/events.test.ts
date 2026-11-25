@@ -49,7 +49,27 @@ describe('eventSentence', () => {
       targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
       changes: [{ field: 'subtitle', before: 'Planning your trip', after: '', beforeKind: 'string', afterKind: 'string' }],
     });
-    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s subtitle from Planning your trip to ""');
+    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s subtitle from "Planning your trip" to ""');
+  });
+
+  it('describes a legacy blank without guessing whether it was absent', () => {
+    const e = event({
+      action: 'article.updated',
+      actor: vera,
+      targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
+      changes: [{ field: 'subtitle', before: 'Draft', after: '' }],
+    });
+    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s subtitle');
+  });
+
+  it('keeps quoted text distinct from an equal-looking boolean', () => {
+    const e = event({
+      action: 'article.updated',
+      actor: vera,
+      targets: [{ type: 'article', name: 'Spring guide', id: 'art_1' }],
+      changes: [{ field: 'featured', before: 'false', after: 'false', beforeKind: 'string', afterKind: 'boolean' }],
+    });
+    expect(eventSentence(e)).toBe('Vera Validator changed Spring guide’s featured from "false" to false');
   });
 
   it('keeps a producer description', () => {

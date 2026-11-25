@@ -20,7 +20,7 @@ export function ChangeValue({
   const shown = limit === undefined ? value : middleTruncate(value, limit);
   const neutral = kind === 'absent' || text === REDACTED_CHANGE_VALUE;
   const className = cn(
-    'font-mono [overflow-wrap:anywhere]',
+    'whitespace-pre-wrap font-mono [overflow-wrap:anywhere]',
     limit === undefined ? 'text-[12px]' : 'text-[11px]',
     neutral
       ? 'text-muted-foreground italic'
@@ -54,7 +54,11 @@ export function ChangeValue({
       >
         {shown}
       </TooltipTrigger>
-      <TooltipContent className="max-h-[50svh] max-w-[min(32rem,85vw)] overflow-auto font-mono [overflow-wrap:anywhere]" dir="auto" role="tooltip">
+      <TooltipContent
+        className="max-h-[50svh] max-w-[min(32rem,85vw)] overflow-auto whitespace-pre-wrap font-mono [overflow-wrap:anywhere]"
+        dir="auto"
+        role="tooltip"
+      >
         {value}
       </TooltipContent>
     </Tooltip>

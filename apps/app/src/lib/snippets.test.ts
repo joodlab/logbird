@@ -102,7 +102,8 @@ describe('the first-event snippets, executed', () => {
 
   it('shows the install that works today, and says the key belongs in the environment', () => {
     // Both publication states, so flipping SDK_PUBLISHED needs no test change; the panel shows the current one.
-    expect(sdkInstall(false)).toContain('pnpm add @logbird/sdk@link:../logbird/packages/sdk');
+    expect(sdkInstall(false)).toContain('https://github.com/joodlab/logbird/releases/download/v$version');
+    expect(sdkInstall(false)).toContain('pnpm add "$base/logbird-sdk-$version.tgz"');
     expect(sdkInstall(false)).toContain('pnpm dlx tsx first-event.mts');
     expect(sdkInstall(false)).not.toMatch(/^pnpm add @logbird\/sdk$/m);
     expect(sdkInstall(true)).toBe('pnpm add @logbird/sdk');

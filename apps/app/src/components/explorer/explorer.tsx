@@ -11,6 +11,7 @@ import { ArrowUpIcon, ChevronDownIcon, CircleAlertIcon, FilterIcon, PanelLeftClo
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EventHistogram } from '@/components/charts/event-histogram';
+import { RecordHistoryFilters } from '@/components/entities/record-history-filters';
 import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
 import { TimeZoneInline } from '@/components/time-zone-control';
@@ -20,8 +21,9 @@ import { entitySearchQuery, eventQuery, eventsInfiniteQuery, fieldsQuery, histog
 import { allTimeCheckNeedsAsking, otherDatesAction, otherDatesCheck, otherDatesLine } from '@/lib/empty-state';
 import { ENTITY_SECTIONS, entityQuery, idFromFreeText, sectionForKind, settledIdMatches } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
+import { applyHistoryFilter } from '@/lib/history-filters';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
-import { andQuery, includeTerm, scopedQuery } from '@/lib/query-language';
+import { andQuery, scopedQuery } from '@/lib/query-language';
 import { isKnownFieldName, lintQuery, suggestedConversion } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { ALL_RANGE, absoluteRange, isValidRange, rangeInSentence, rangeLabel, resolveRange } from '@/lib/range';
@@ -60,7 +62,7 @@ interface ExplorerProps {
   /** The range already covers everything there is (an entity's full history): never suggest widening it. */
   rangeComplete?: boolean;
   showChanges?: boolean;
-  filterChangeFields?: boolean;
+  recordHistory?: boolean;
   className?: string;
 }
 
@@ -118,7 +120,7 @@ function ProjectExplorer({
   rangeLabel: rangeLabelOverride,
   rangeComplete = false,
   showChanges = false,
-  filterChangeFields = false,
+  recordHistory = false,
   className,
 }: ExplorerProps) {
   useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
@@ -521,6 +523,16 @@ function ProjectExplorer({
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
       {/* The page's heading for screen-reader navigation; the visible title is the breadcrumb. */}
       {embedded ? null : <h1 className="sr-only">Events</h1>}
+      {recordHistory && baseQuery ? (
+        <RecordHistoryFilters
+          baseQuery={baseQuery}
+          live={liveActive}
+          onChange={(q) => onChange({ q, ev: undefined })}
+          projectId={projectId}
+          query={q}
+          rows={rows}
+        />
+      ) : null}
       <div className="flex flex-col gap-2 border-b px-3 py-2.5 sm:px-4">
         <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           {embedded ? null : (
@@ -745,12 +757,12 @@ function ProjectExplorer({
               loading={resultsLoading}
               onCursorChange={setCursorId}
               onChangeField={
-                filterChangeFields && !problem
+                recordHistory && !problem
                   ? (field) => {
                       // Keep focus with the results while the current row unmounts. Focusing the query would open
                       // suggestions over the history just as the filtered rows arrive.
                       results.current?.focus({ preventScroll: true });
-                      onChange({ q: includeTerm(q, 'changes.field', field), ev: undefined });
+                      onChange({ q: applyHistoryFilter(q, 'changes.field', field), ev: undefined });
                     }
                   : undefined
               }

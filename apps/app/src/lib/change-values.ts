@@ -4,6 +4,8 @@ export type EventChange = AuditEvent['changes'][number];
 
 export const REDACTED_CHANGE_VALUE = '[redacted]';
 
+export const changeFieldLabel = (field: string) => field || 'Unnamed field';
+
 export function changeValueText(text: string, kind?: ChangeValueKind): string {
   if (text === REDACTED_CHANGE_VALUE) return 'value redacted';
   if (kind === 'absent') return 'not set';

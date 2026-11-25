@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { cn } from '@logbird/ui/lib/utils';
-import { changeDisplayParts, changeValueText, type EventChange, middleTruncate } from '@/lib/change-values';
+import { changeDisplayParts, changeFieldLabel, changeValueText, type EventChange, middleTruncate } from '@/lib/change-values';
 import { formatNumber } from '@/lib/format';
 import { ChangeValue } from './change-value';
 
@@ -14,7 +14,7 @@ function changePreview(change: EventChange): string {
   const before = middleTruncate(changeValueText(change.before, change.beforeKind), VALUE_LIMIT);
   const after = middleTruncate(changeValueText(change.after, change.afterKind), VALUE_LIMIT);
   const text = parts.before && parts.after ? `${before} to ${after}` : parts.after ? `set to ${after}` : `removed (was ${before})`;
-  return `${middleTruncate(change.field, FIELD_LIMIT)}: ${text}`;
+  return `${middleTruncate(changeFieldLabel(change.field), FIELD_LIMIT)}: ${text}`;
 }
 
 export function changeSummaryLabel(changes: AuditEvent['changes']): string {
@@ -46,7 +46,8 @@ export function ChangeSummary({
     <div className={cn('flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 text-muted-foreground text-xs', className)}>
       {changes.slice(0, SHOWN).map((change, index) => {
         const parts = changeDisplayParts(change);
-        const field = middleTruncate(change.field, FIELD_LIMIT);
+        const name = changeFieldLabel(change.field);
+        const field = middleTruncate(name, FIELD_LIMIT);
         return (
           <span
             className="min-w-0 [overflow-wrap:anywhere]"
@@ -55,7 +56,7 @@ export function ChangeSummary({
           >
             {onField ? (
               <button
-                aria-label={`Filter history by ${change.field}`}
+                aria-label={`Filter history by ${name}`}
                 className={cn(CONTROL, 'text-start font-mono text-[11px] text-foreground underline decoration-muted-foreground/50')}
                 dir="auto"
                 onClick={(event) => {
@@ -63,7 +64,7 @@ export function ChangeSummary({
                   onField(change.field);
                 }}
                 tabIndex={tabIndex}
-                title={`Filter history by ${change.field}`}
+                title={`Filter history by ${name}`}
                 type="button"
               >
                 {field}

@@ -1,5 +1,5 @@
 import { type AuditEvent, supportsExactJson } from '@logbird/contracts';
-import { REDACTED_CHANGE_VALUE } from './change-values';
+import { changeValueText, REDACTED_CHANGE_VALUE } from './change-values';
 import { formatRetention } from './format';
 
 const VERB_PAST: Record<string, string> = {
@@ -159,20 +159,22 @@ export function changeSentence(changes: AuditEvent['changes'] | undefined, targe
   if (list.length > 1) return `changed ${owner} ${joinWords([...new Set(list.map((c) => fieldLabel(c.field)))])}`;
   const [c] = list as [AuditEvent['changes'][number]];
   const label = fieldLabel(c.field);
-  const inlineValue = (text: string, kind: typeof c.beforeKind) =>
-    kind === 'absent' ? '' : !text && kind === 'string' ? '""' : text ? fieldValue(c.field, text) : '';
+  const inlineValue = (text: string, kind: typeof c.beforeKind) => {
+    if (kind === 'absent' || (!kind && !text)) return '';
+    return kind ? changeValueText(text, kind) : fieldValue(c.field, text);
+  };
   const before = inlineValue(c.before, c.beforeKind);
   const after = inlineValue(c.after, c.afterKind);
   const showable = (v: string) => v.length <= MAX_INLINE_VALUE;
   if (c.before === REDACTED_CHANGE_VALUE || c.after === REDACTED_CHANGE_VALUE) return `changed ${owner} ${label}`;
   if (!(showable(before) && showable(after))) return `changed ${owner} ${label}`;
-  if (before && after) {
+  if (before && after && before.replace(/\s+/g, ' ') !== after.replace(/\s+/g, ' ')) {
     // "from 90 to 180 days" rather than "from 90 days to 180 days".
     const unit = / days$/.exec(before)?.[0] && / days$/.test(after) ? ' days' : '';
     return `changed ${owner} ${label} from ${unit ? before.slice(0, -unit.length) : before} to ${after}`;
   }
-  if (after) return `set ${owner} ${label} to ${after}`;
-  if (before) return `cleared ${owner} ${label}`;
+  if (c.beforeKind === 'absent' && after) return `set ${owner} ${label} to ${after}`;
+  if (c.afterKind === 'absent' && before) return `removed ${owner} ${label}`;
   return `changed ${owner} ${label}`;
 }
 

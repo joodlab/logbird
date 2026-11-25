@@ -36,7 +36,7 @@ Quote the whole pair if it contains whitespace or grammar punctuation such as pa
 
 Add `tenant:<id>` when the same record ID is used by multiple tenants, or `changes.field:<name>` to see events that changed a specific field.
 
-Search orders events by timestamp and breaks ties by event ID. Read causation from `parentEventId`. Within each loaded page of a console history, events with the same timestamp follow their parent links, with the child after its parent in oldest-first order and before its parent in newest-first order.
+Search orders events by timestamp and breaks ties by event ID. Read causation from `parentEventId`. Within each loaded search page of a record, actor, or tenant history, the console shows same-timestamp children before their parents in its newest-first list. Live updates follow arrival order.
 
 Record pairs support negation and value groups, such as `-record:(page:1 OR site:7)`. `record:*` and `_exists_:record` match events with any target. Use `attr.record` to search a custom attribute named `record`.
 
