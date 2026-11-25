@@ -16,12 +16,12 @@ namespace Logbird.Tests;
 /// </summary>
 public class RedactionParityTests
 {
-    private static JsonArray Cases()
-        => (JsonArray)JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "redaction-parity.json"), Encoding.UTF8))!["cases"]!;
+    private static JsonNode Fixture()
+        => JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "redaction-parity.json"), Encoding.UTF8))!;
 
-    public static IEnumerable<object[]> Names() => Cases()
-        .Where(c => c!["paths"] is null && c["keepPaths"] is null)
-        .Select(c => new object[] { (string)c!["name"]! });
+    private static JsonArray Cases() => Fixture()["cases"]!.AsArray();
+
+    public static IEnumerable<object[]> Names() => Cases().Select(c => new object[] { (string)c!["name"]! });
 
     private static RedactionOptions Options(JsonNode parityCase)
     {
@@ -44,6 +44,16 @@ public class RedactionParityTests
             options.AddKeys(added.Select(key => (string)key!).ToArray());
         }
 
+        if (parityCase["paths"] is JsonArray paths)
+        {
+            options.AddPaths(paths.Select(path => (string)path!).ToArray());
+        }
+
+        if (parityCase["keepPaths"] is JsonArray kept)
+        {
+            options.KeepPaths(kept.Select(path => (string)path!).ToArray());
+        }
+
         return options;
     }
 
@@ -60,6 +70,20 @@ public class RedactionParityTests
 
         Assert.True(JsonNode.DeepEquals(parityCase["expectedDotnet"] ?? parityCase["expected"], result), name + ": " + result.ToJsonString());
         Assert.Equal(original, input.ToJsonString());
+    }
+
+    [Fact]
+    public void Refuses_the_same_malformed_identifier_containers_as_typescript()
+    {
+        foreach (var test in Fixture()["invalidIdentifiers"]!.AsArray())
+        {
+            var input = test!["input"]!.AsObject();
+            var original = input.ToJsonString();
+            var redactor = new RedactionOptions().AddPaths((string)test["path"]!).CreateRedactor()!;
+            var error = Assert.Throws<ArgumentException>(() => redactor.Redact(input));
+            Assert.Equal("An identifier must serialize to a scalar.", error.Message);
+            Assert.Equal(original, input.ToJsonString());
+        }
     }
 
     public static IEnumerable<object[]> ClientCases() => Cases()

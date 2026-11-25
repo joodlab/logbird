@@ -1,5 +1,17 @@
 {
   "description": "Redaction parity for the TypeScript and .NET SDKs. Both use the same expected JSON. keys and changeFields are pattern sources (ignoreCase applies the native case-insensitive flag to both); null uses the default (changeFields defaults to keys plus addKeys). replacement null uses [redacted]. Cases with paths or keepPaths exercise the path options. expectedDotnet documents a native regex difference.",
+  "invalidIdentifiers": [
+    {
+      "name": "an object-valued actor identifier",
+      "input": { "id": "e", "action": "a", "actor": { "id": { "token": "fictional" } } },
+      "path": "actor.id.token"
+    },
+    {
+      "name": "an array-valued target identifier",
+      "input": { "id": "e", "action": "a", "targets": [{ "type": "record", "id": ["fictional"] }] },
+      "path": "targets.*.id.0"
+    }
+  ],
   "cases": [
     {
       "name": "the default pattern redacts nested secrets, array entries and change values",

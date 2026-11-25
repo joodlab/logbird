@@ -269,6 +269,43 @@ Reference, Assemblies), because the client's constructors accept an `HttpClient`
 process, create the client once at startup instead and dispose it when the process stops. On .NET 8 you can write
 `await using var logbird = ...`. To send what is queued without disposing, call `logbird.Flush(TimeSpan.FromSeconds(5))`.
 
+## Configure redaction
+
+The client redacts common secret keys by default. It applies the policy after
+`BeforeSend`, then checks the size of the JSON it will send. This policy keeps
+the actor's name and email and the impersonator's name while masking guest
+data in metadata and changes.
+
+```csharp
+options.Redaction
+    .AddKeys("name", "email", "phone", "notes")
+    .AddPaths("metadata.guest.contact")
+    .KeepPaths("actor.name", "actor.email", "impersonator.name");
+```
+
+`AddKeys` adds literal substrings, ignoring ASCII letter case. `AddPaths`
+forces redaction at existing locations. `KeepPaths` exempts the specified
+node from its own key match, and its descendants are still checked. Paths
+are case-sensitive and start at the event root. For example,
+`targets.*.name` addresses each target name. A whole `*` segment matches one
+key or array index. Escape a literal dot, star or backslash with a backslash,
+as in the C# verbatim string `@"metadata.guest\.email"`. Paths have no
+recursive wildcard or value-matching syntax. Invalid paths throw when the
+client is constructed, with the option name and zero-based entry index.
+
+The client protects identifiers first. It then applies explicit paths,
+matching change fields, whole-party matches, keep paths, and key patterns in
+that order. For example, `KeepPaths("actor.email")` preserves the email from
+an `email` key match, while a match on the entire `actor` still redacts it.
+To prevent a key pattern from matching the entire party, keep `actor` itself.
+
+Custom `Keys` and `ChangeFields` use each platform's native regex engine.
+For example, `^label$` matches a key ending in a line feed in .NET because
+`$` also matches before a final line feed. JavaScript requires the actual
+end for this pattern. For a strict end anchor in a shared expression, use
+`^label(?![\s\S])` (equivalent to `^label\z` in .NET). Prefer `AddKeys`
+whenever a literal substring is enough.
+
 ## Going further
 
 - [`Logbird` package README](../sdks/dotnet/README.md): every option, the exact failure contract, redaction (values under

@@ -36,7 +36,11 @@ namespace Logbird;
 /// final line feed, so use <c>\z</c> for "end of key"; case-insensitive options fold case differently), so keep custom
 /// patterns to what means the same in both. <see cref="Redactor.Redact"/> accepts event JSON up to 1,008 levels deep.
 /// </para>
-/// <para>The default pattern does not cover personal data: add your own keys with <see cref="AddKeys"/>.</para>
+/// <para>
+/// Use <see cref="AddPaths"/> to force redaction at exact locations and <see cref="KeepPaths"/> to exempt an exact
+/// location from its own key match. The default pattern covers common secrets. Add literal names for personal data
+/// with <see cref="AddKeys"/>.
+/// </para>
 /// </remarks>
 public sealed class RedactionOptions
 {
@@ -44,6 +48,8 @@ public sealed class RedactionOptions
     public bool Enabled { get; set; } = true;
 
     private readonly List<string> _added = [];
+    private readonly List<string> _paths = [];
+    private readonly List<string> _keptPaths = [];
 
     /// <summary>
     /// Object keys whose values are replaced, matched as substrings (see the remarks). Defaults to
@@ -89,8 +95,42 @@ public sealed class RedactionOptions
         return this;
     }
 
+    /// <summary>The exact redaction paths added with <see cref="AddPaths"/>, in order.</summary>
+    public IReadOnlyList<string> Paths => Internal.ReadOnly.List(_paths);
+
+    /// <summary>The exact key-match exemptions added with <see cref="KeepPaths"/>, in order.</summary>
+    public IReadOnlyList<string> KeptPaths => Internal.ReadOnly.List(_keptPaths);
+
+    /// <summary>
+    /// Redacts existing locations in the outgoing event. Paths have case-sensitive dot-separated segments.
+    /// A whole <c>*</c> segment matches one object key or array index. Escape a literal dot, star or backslash with a
+    /// backslash. Identifier fields are preserved even when a path matches.
+    /// </summary>
+    /// <param name="paths">Paths relative to the event root, for example <c>metadata.guest.email</c>.</param>
+    /// <returns>These options.</returns>
+    public RedactionOptions AddPaths(params string[] paths)
+    {
+        _paths.AddRange(Guard.NotNull(paths, nameof(paths)));
+        return this;
+    }
+
+    /// <summary>
+    /// Exempts exact paths from their own key match. Descendants still get checked. An explicit redaction path,
+    /// matching change field or whole-party match takes precedence over an exemption at a child field.
+    /// </summary>
+    /// <param name="paths">Paths relative to the event root, using the syntax of <see cref="AddPaths"/>.</param>
+    /// <returns>These options.</returns>
+    public RedactionOptions KeepPaths(params string[] paths)
+    {
+        _keptPaths.AddRange(Guard.NotNull(paths, nameof(paths)));
+        return this;
+    }
+
     internal Redactor? CreateRedactor()
-        => Enabled ? new Redactor(Keys, ChangeFields, Replacement, AddedPattern()) : null;
+    {
+        var paths = RedactionPath.Compile(_paths, _keptPaths, out var identifiersMatched);
+        return Enabled ? new Redactor(Keys, ChangeFields, Replacement, AddedPattern(), paths, identifiersMatched) : null;
+    }
 
     /// <summary>The added names as one pattern of their own, with the timeout of <see cref="Keys"/>; null when there are none.</summary>
     private Regex? AddedPattern()
@@ -151,6 +191,8 @@ public sealed class Redactor
     private readonly Regex? _added;
     private readonly Regex? _changeFields;
     private readonly string _replacement;
+    private readonly IReadOnlyList<RedactionPath>? _paths;
+    private readonly IReadOnlyList<string> _pathIdentifiersMatched = Array.Empty<string>();
 
     /// <summary>Creates a redactor.</summary>
     /// <param name="keys">Key pattern; defaults to <see cref="DefaultSecretKeys"/>.</param>
@@ -163,11 +205,18 @@ public sealed class Redactor
         _replacement = replacement ?? DefaultReplacement;
     }
 
-    /// <summary>A redactor that also matches the names <see cref="RedactionOptions.AddKeys"/> added, as their own pattern.</summary>
-    internal Redactor(Regex? keys, Regex? changeFields, string? replacement, Regex? added)
+    internal Redactor(
+        Regex? keys,
+        Regex? changeFields,
+        string? replacement,
+        Regex? added,
+        IReadOnlyList<RedactionPath>? paths,
+        IReadOnlyList<string> pathIdentifiersMatched)
         : this(keys, changeFields, replacement)
     {
         _added = added;
+        _paths = paths;
+        _pathIdentifiersMatched = pathIdentifiersMatched;
     }
 
     internal bool IsKey(string key) => _keys.IsMatch(key) || (_added?.IsMatch(key) ?? false);
@@ -176,7 +225,9 @@ public sealed class Redactor
 
     /// <summary>Returns a redacted deep copy of an event JSON object. The input is not changed.</summary>
     /// <param name="eventJson">The event as JSON.</param>
-    /// <exception cref="ArgumentException">The JSON nests deeper than 1,008 levels (1,000 inside metadata, plus the event envelope).</exception>
+    /// <exception cref="ArgumentException">
+    /// The JSON nests deeper than 1,008 levels (1,000 inside metadata, plus the event envelope) or an identifier is a JSON container.
+    /// </exception>
     public JsonObject Redact(JsonObject eventJson)
     {
         if (JsonSize.Exceeds(Guard.NotNull(eventJson, nameof(eventJson)), JsonSize.MaxEventJson))
@@ -221,6 +272,7 @@ public sealed class Redactor
             }
         }
 
+        matched.AddRange(_pathIdentifiersMatched.Where(field => !matched.Contains(field)));
         return matched;
     }
 
@@ -248,7 +300,7 @@ public sealed class Redactor
             }
         }
 
-        Walk(copy, Level.Top);
+        Walk(copy);
     }
 
     private enum Level
@@ -284,19 +336,21 @@ public sealed class Redactor
         _ => Level.Nested,
     };
 
+    private bool Matches(string key, IReadOnlyList<RedactionPath>? paths)
+        => paths?.Any(path => path.Redact) == true || (paths?.Any(path => path.Keep) != true && IsKey(key));
+
     /// <summary>
-    /// Replaces matching values without recursion: nodes still to visit wait on an explicit stack, so any depth the size
-    /// limit allows is redacted on any thread's stack. Each decision depends only on the node's own key and level, so the
-    /// visiting order does not change the result.
+    /// Replaces matching values without recursion. Each pending node carries the path branches for its location,
+    /// so a key can match a literal branch, a wildcard branch, or both.
     /// </summary>
-    private void Walk(JsonNode? root, Level rootLevel)
+    private void Walk(JsonObject root)
     {
-        // Whole: the party's own key matched, so every field of it other than its identifier fields is replaced.
-        var pending = new Stack<(JsonNode? Node, Level Level, bool Whole)>();
-        pending.Push((root, rootLevel, false));
+        // Whole: the party path or key matched, so replace its non-identifier fields.
+        var pending = new Stack<(JsonNode? Node, Level Level, bool Whole, IReadOnlyList<RedactionPath>? Paths)>();
+        pending.Push((root, Level.Top, false, _paths));
         while (pending.Count > 0)
         {
-            var (node, level, whole) = pending.Pop();
+            var (node, level, whole, paths) = pending.Pop();
             switch (node)
             {
                 case JsonObject obj:
@@ -305,6 +359,11 @@ public sealed class Redactor
                         // Event identity and the parties' identifier fields are structural: never replaced.
                         if (IsIdentity(level, key))
                         {
+                            if (obj[key] is JsonObject or JsonArray)
+                            {
+                                throw new ArgumentException("An identifier must serialize to a scalar.");
+                            }
+
                             continue;
                         }
 
@@ -315,12 +374,13 @@ public sealed class Redactor
                         }
 
                         var party = level == Level.Top ? PartyLevel(key) : Level.Nested;
-                        var matched = IsKey(key);
+                        var childPaths = RedactionPath.Children(paths, key);
+                        var matched = Matches(key, childPaths);
                         var value = obj[key];
                         if (party != Level.Nested && (party == Level.Targets ? value is JsonArray : value is JsonObject))
                         {
                             // A party is never replaced as a whole; a match redacts everything but its identity.
-                            pending.Push((value, party, matched));
+                            pending.Push((value, party, matched, childPaths));
                         }
                         else if (matched)
                         {
@@ -328,7 +388,7 @@ public sealed class Redactor
                         }
                         else
                         {
-                            pending.Push((value, Level.Nested, false));
+                            pending.Push((value, Level.Nested, false, childPaths));
                         }
                     }
 
@@ -339,29 +399,21 @@ public sealed class Redactor
                     // index (or the targets key) redacts the entry's other fields, and a scalar entry is replaced.
                     for (var i = 0; i < array.Count; i++)
                     {
-                        if (level == Level.Targets)
+                        var key = i.ToString(CultureInfo.InvariantCulture);
+                        var childPaths = RedactionPath.Children(paths, key);
+                        var matched = whole || Matches(key, childPaths);
+                        var value = array[i];
+                        if (level == Level.Targets && value is JsonObject)
                         {
-                            var entryMatched = whole || IsKey(i.ToString(CultureInfo.InvariantCulture));
-                            if (array[i] is JsonObject)
-                            {
-                                pending.Push((array[i], Level.Target, entryMatched));
-                            }
-                            else if (entryMatched)
-                            {
-                                array[i] = _replacement;
-                            }
-                            else
-                            {
-                                pending.Push((array[i], Level.Nested, false));
-                            }
+                            pending.Push((value, Level.Target, matched, childPaths));
                         }
-                        else if (IsKey(i.ToString(CultureInfo.InvariantCulture)))
+                        else if (matched)
                         {
                             array[i] = _replacement;
                         }
                         else
                         {
-                            pending.Push((array[i], Level.Nested, false));
+                            pending.Push((value, Level.Nested, false, childPaths));
                         }
                     }
 
