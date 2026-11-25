@@ -1,6 +1,5 @@
 import { type AuditEvent, supportsExactJson } from '@logbird/contracts';
-import { changeValueText, REDACTED_CHANGE_VALUE } from './change-values';
-import { formatRetention } from './format';
+import { changeValuePreview, REDACTED_CHANGE_VALUE } from './change-values';
 
 const VERB_PAST: Record<string, string> = {
   created: 'created',
@@ -128,20 +127,10 @@ function withArticle(noun: string): string {
   return `${/^[aeiou]/i.test(noun) && !/^(user|uni|eu)/i.test(noun) ? 'an' : 'a'} ${noun}`;
 }
 
-/** Field names as people say them; values formatted per field (roles by label, retention in days or years). */
+/** Field names as people say them. */
 function fieldLabel(field: string): string {
   if (field === 'retentionDays') return 'retention';
   return humanizeNoun(field);
-}
-
-function fieldValue(field: string, value: string): string {
-  if (field === 'role')
-    return value
-      .split(',')
-      .map((r) => ROLE_LABEL[r] ?? r)
-      .join(', ');
-  if (field === 'retentionDays' && /^\d+$/.test(value)) return formatRetention(Number(value));
-  return value;
 }
 
 function joinWords(words: string[]): string {
@@ -149,7 +138,7 @@ function joinWords(words: string[]): string {
 }
 
 /**
- * "changed ‹target›’s role from Admin to Member" for one recorded change; "changed ‹target›’s name and description"
+ * "changed ‹target›’s role from admin to member" for one recorded change; "changed ‹target›’s name and description"
  * for several. Null when there are no changes to describe.
  */
 export function changeSentence(changes: AuditEvent['changes'] | undefined, targetName: string): string | null {
@@ -161,21 +150,14 @@ export function changeSentence(changes: AuditEvent['changes'] | undefined, targe
   const label = fieldLabel(c.field);
   const inlineValue = (text: string, kind: typeof c.beforeKind) => {
     if (kind === 'absent' || (!kind && !text)) return '';
-    return kind ? changeValueText(text, kind) : fieldValue(c.field, text);
+    return changeValuePreview(text, kind);
   };
   const before = inlineValue(c.before, c.beforeKind);
   const after = inlineValue(c.after, c.afterKind);
   const showable = (v: string) => v.length <= MAX_INLINE_VALUE;
   if (c.before === REDACTED_CHANGE_VALUE || c.after === REDACTED_CHANGE_VALUE) return `changed ${owner} ${label}`;
   if (!(showable(before) && showable(after))) return `changed ${owner} ${label}`;
-  if (before && after && before !== after) {
-    // "from 90 to 180 days" rather than "from 90 days to 180 days".
-    const unit =
-      c.field === 'retentionDays' && /^\d+$/.test(c.before) && /^\d+$/.test(c.after) && before.endsWith(' days') && after.endsWith(' days')
-        ? ' days'
-        : '';
-    return `changed ${owner} ${label} from ${unit ? before.slice(0, -unit.length) : before} to ${after}`;
-  }
+  if (before && after && before !== after) return `changed ${owner} ${label} from ${before} to ${after}`;
   if (c.beforeKind === 'absent' && after) return `set ${owner} ${label} to ${after}`;
   if (c.afterKind === 'absent' && before) return `removed ${owner} ${label}`;
   return `changed ${owner} ${label}`;

@@ -21,4 +21,11 @@ describe('record history controls', () => {
     expect(query).toBe('NOT (changes.field:status outcome:denied) changes.field:""');
     expect(removeHistoryFilter(query, 'changes.field', '')).toBe('NOT (changes.field:status outcome:denied)');
   });
+
+  it('switches grouped exact filters in a conjunction and preserves OR and NOT groups', () => {
+    expect(applyHistoryFilter('(tenant:east)', 'tenant', 'west')).toBe('tenant:west');
+    const query = '((tenant:east outcome:failure)) (tenant:north OR tenant:south) NOT (tenant:central)';
+    expect(historyFilterTerms(query, 'tenant').map((term) => term.value)).toEqual(['east']);
+    expect(applyHistoryFilter(query, 'tenant', 'west')).toBe('((outcome:failure)) (tenant:north OR tenant:south) NOT (tenant:central) tenant:west');
+  });
 });

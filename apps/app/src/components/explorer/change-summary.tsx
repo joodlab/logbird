@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { cn } from '@logbird/ui/lib/utils';
-import { changeDisplayParts, changeFieldLabel, changeValueText, type EventChange, middleTruncate } from '@/lib/change-values';
+import { changeDisplayParts, changeFieldLabel, changeValuePreview, type EventChange, middleTruncate } from '@/lib/change-values';
 import { formatNumber } from '@/lib/format';
 import { ChangeValue } from './change-value';
 
@@ -11,8 +11,8 @@ const CONTROL = 'rounded-sm underline-offset-2 hover:underline focus-visible:rin
 
 function changePreview(change: EventChange): string {
   const parts = changeDisplayParts(change);
-  const before = middleTruncate(changeValueText(change.before, change.beforeKind), VALUE_LIMIT);
-  const after = middleTruncate(changeValueText(change.after, change.afterKind), VALUE_LIMIT);
+  const before = middleTruncate(changeValuePreview(change.before, change.beforeKind), VALUE_LIMIT);
+  const after = middleTruncate(changeValuePreview(change.after, change.afterKind), VALUE_LIMIT);
   const text = parts.before && parts.after ? `before ${before}, after ${after}` : parts.after ? `set to ${after}` : `removed (was ${before})`;
   return `${middleTruncate(changeFieldLabel(change.field), FIELD_LIMIT)}: ${text}`;
 }

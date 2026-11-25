@@ -97,7 +97,22 @@ describe('history change summary', () => {
         <ChangeValue kind="string" text={value} />
       </>,
       (host) => {
-        expect([...host.querySelectorAll('.whitespace-break-spaces')].map((node) => node.textContent)).toEqual([encoded, '"C"', encoded]);
+        expect([...host.querySelectorAll('.whitespace-break-spaces')].map((node) => node.textContent)).toEqual([encoded, '"C"']);
+        expect(host.querySelector('.whitespace-pre-wrap')?.textContent).toBe(encoded);
+      },
+    );
+  });
+
+  it('keeps legacy whitespace literal in the full value and marks the line break in the preview', () => {
+    const stored = ' a  b\n c\t d ';
+    render(
+      <>
+        <ChangeSummary changes={[change('title', stored, 'C')]} onOpen={vi.fn()} />
+        <ChangeValue text={stored} />
+      </>,
+      (host) => {
+        expect(host.querySelector('.whitespace-break-spaces')?.textContent).toBe(' a  b↵ c⇥ d ');
+        expect(host.querySelector('.whitespace-pre-wrap')?.textContent).toBe(stored);
       },
     );
   });

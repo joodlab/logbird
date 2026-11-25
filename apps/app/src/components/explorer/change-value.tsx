@@ -1,7 +1,7 @@
 import type { ChangeValueKind } from '@logbird/contracts';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { cn } from '@logbird/ui/lib/utils';
-import { CHANGE_VALUE_WHITESPACE, changeValueText, middleTruncate, REDACTED_CHANGE_VALUE } from '@/lib/change-values';
+import { CHANGE_VALUE_WRAP, changeValuePreview, changeValueText, middleTruncate, REDACTED_CHANGE_VALUE } from '@/lib/change-values';
 
 export function ChangeValue({
   text,
@@ -16,13 +16,13 @@ export function ChangeValue({
   limit?: number;
   tabIndex?: number;
 }) {
-  const value = changeValueText(text, kind);
-  const shown = limit === undefined ? value : middleTruncate(value, limit);
+  const preview = limit === undefined ? changeValueText(text, kind) : changeValuePreview(text, kind);
+  const shown = limit === undefined ? preview : middleTruncate(preview, limit);
   const neutral = kind === 'absent' || text === REDACTED_CHANGE_VALUE;
   const className = cn(
-    CHANGE_VALUE_WHITESPACE,
+    CHANGE_VALUE_WRAP,
     'font-mono',
-    limit === undefined ? 'text-[12px]' : 'text-[11px]',
+    limit === undefined ? 'whitespace-pre-wrap text-[12px]' : 'whitespace-break-spaces text-[11px]',
     neutral
       ? 'text-muted-foreground italic'
       : !kind && !text
@@ -32,13 +32,14 @@ export function ChangeValue({
           : 'text-diff-add',
   );
 
-  if (shown === value) {
+  if (shown === preview) {
     return (
       <span className={className} dir="auto">
-        {value}
+        {shown}
       </span>
     );
   }
+  const value = changeValueText(text, kind);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -56,7 +57,7 @@ export function ChangeValue({
         {shown}
       </TooltipTrigger>
       <TooltipContent
-        className={cn(CHANGE_VALUE_WHITESPACE, 'max-h-[50svh] max-w-[min(32rem,85vw)] overflow-auto font-mono')}
+        className={cn(CHANGE_VALUE_WRAP, 'max-h-[50svh] max-w-[min(32rem,85vw)] overflow-auto whitespace-pre-wrap font-mono')}
         dir="auto"
         role="tooltip"
       >

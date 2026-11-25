@@ -39,7 +39,7 @@ import { NotRecorded } from '@/components/not-recorded';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries';
-import { CHANGE_VALUE_WHITESPACE, changeFieldLabel } from '@/lib/change-values';
+import { CHANGE_VALUE_WRAP, changeFieldLabel } from '@/lib/change-values';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import {
   actorAttributeHint,
@@ -426,7 +426,7 @@ function ClampedTitle({ text }: { text: string }) {
           facts below stay reachable on a phone. */}
       <div className={cn('w-full', open && 'max-h-[40svh] overflow-y-auto')}>
         <SheetTitle
-          className={cn(CHANGE_VALUE_WHITESPACE, 'font-semibold text-[17px] leading-snug tracking-tight', !open && 'line-clamp-3')}
+          className={cn(CHANGE_VALUE_WRAP, 'whitespace-break-spaces font-semibold text-[17px] leading-snug tracking-tight', !open && 'line-clamp-3')}
           dir="auto"
           ref={ref}
         >

@@ -5,19 +5,26 @@ export function ingestOrigin(): string {
   return typeof window === 'undefined' ? 'http://localhost:4600' : window.location.origin;
 }
 
-/** Until the SDK is on npm, use the SDK-only release URL recipe from packages/sdk/README.md. */
+/**
+ * Whether `@logbird/sdk` is on npm. Until it is, the TypeScript tab installs it the way packages/sdk/README.md does
+ * (linked from a Logbird checkout): `pnpm add @logbird/sdk` answers 404 today. When the package is published, flip this
+ * one value (T4 holds the publication-state PRs) and every install line follows.
+ */
 export const SDK_PUBLISHED = false;
 
-/** Install instructions shown as comments above the TypeScript snippet. */
+/**
+ * The SDK install for either publication state, one line each, shown as comments above the TypeScript snippet. The
+ * linked source package is TypeScript, so it also says how to run the snippet (the published one ships JavaScript).
+ */
 export const sdkInstall = (published: boolean) =>
   published
     ? 'pnpm add @logbird/sdk'
-    : `Install the SDK from a GitHub release with a tarball.
-Choose X.Y.Z from https://github.com/joodlab/logbird/releases
-version=X.Y.Z
-base="https://github.com/joodlab/logbird/releases/download/v$version"
-pnpm add "$base/logbird-sdk-$version.tgz"
-On Node 20+, save this example as first-event.mts and run
+    : `@logbird/sdk is not on npm yet. Link it from a Logbird checkout
+(packages/sdk/README.md):
+git clone https://github.com/joodlab/logbird.git ../logbird
+pnpm -C ../logbird install
+pnpm add @logbird/sdk@link:../logbird/packages/sdk
+It is TypeScript source: save this as first-event.mts and run
 pnpm dlx tsx first-event.mts`;
 export const SDK_INSTALL = sdkInstall(SDK_PUBLISHED);
 

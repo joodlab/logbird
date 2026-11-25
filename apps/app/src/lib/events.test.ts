@@ -189,20 +189,20 @@ describe('eventSentence for Logbird management actions', () => {
       action: 'member.role.changed',
       description: 'member.role.changed',
       targets: [{ type: 'user', id: 'usr_2', name: 'member2@logbird.local' }],
-      changes: [{ field: 'role', before: 'admin', after: 'member' }],
+      changes: [{ field: 'role', before: 'a,b', after: 'member' }],
     });
-    expect(eventSentence(e)).toBe('Ada Admin changed member2@logbird.local’s role from Admin to Member');
+    expect(eventSentence(e)).toBe('Ada Admin changed member2@logbird.local’s role from a,b to member');
   });
 
-  it('reads a retention change in days', () => {
+  it('uses the stored retention values', () => {
     const e = audit({
       action: 'project.retention.changed',
       targets: [{ type: 'project', id: 'prj_1', name: 'Validator2 Empty' }],
       changes: [{ field: 'retentionDays', before: '90', after: '180' }],
     });
-    expect(eventSentence(e)).toBe('Ada Admin changed Validator2 Empty’s retention from 90 to 180 days');
+    expect(eventSentence(e)).toBe('Ada Admin changed Validator2 Empty’s retention from 90 to 180');
     const years = audit({ ...e, changes: [{ field: 'retentionDays', before: '90', after: '365' }] });
-    expect(eventSentence(years)).toBe('Ada Admin changed Validator2 Empty’s retention from 90 days to 1 year');
+    expect(eventSentence(years)).toBe('Ada Admin changed Validator2 Empty’s retention from 90 to 365');
   });
 
   it('names what changed when the change list is absent', () => {

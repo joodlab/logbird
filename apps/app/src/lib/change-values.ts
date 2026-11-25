@@ -3,7 +3,7 @@ import type { AuditEvent, ChangeValueKind } from '@logbird/contracts';
 export type EventChange = AuditEvent['changes'][number];
 
 export const REDACTED_CHANGE_VALUE = '[redacted]';
-export const CHANGE_VALUE_WHITESPACE = 'whitespace-break-spaces [overflow-wrap:anywhere]';
+export const CHANGE_VALUE_WRAP = '[overflow-wrap:anywhere]';
 
 export const changeFieldLabel = (field: string) => field || 'Unnamed field';
 
@@ -13,6 +13,12 @@ export function changeValueText(text: string, kind?: ChangeValueKind): string {
   if (kind === 'null') return 'null';
   if (kind === 'string') return JSON.stringify(text);
   return text || '∅';
+}
+
+/** Keep whitespace visible in compact views while full values retain the stored text. */
+export function changeValuePreview(text: string, kind?: ChangeValueKind): string {
+  const value = changeValueText(text, kind);
+  return kind === undefined ? value.replace(/\r\n|[\r\n\t]/g, (character) => (character === '\t' ? '⇥' : '↵')) : value;
 }
 
 export function middleTruncate(text: string, limit: number): string {

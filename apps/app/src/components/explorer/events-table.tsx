@@ -517,7 +517,7 @@ export function EventsTable({
                     <div className="flex min-w-0 flex-col gap-1" role="gridcell">
                       <span className="flex min-w-0 items-center gap-2">
                         <OutcomeDot outcome={e.outcome} />
-                        <span className="truncate" dir="auto">
+                        <span className="overflow-hidden text-ellipsis [text-wrap-mode:nowrap] [white-space-collapse:preserve-spaces]" dir="auto">
                           {mobileSentence}
                         </span>
                         {showActor ? <bdi className="max-w-[45%] shrink-0 truncate text-muted-foreground text-xs">· {actor}</bdi> : null}
