@@ -158,6 +158,13 @@ jobs:
           pattern: digest-${{ matrix.role }}-*
           path: digests
           merge-multiple: true
+      # This role's receipt from an earlier attempt of this run, if any: written only after that attempt verified the
+      # two-platform index. A first attempt has none.
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: image-${{ matrix.role }}
+          path: previous
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -171,20 +178,27 @@ jobs:
         shell: bash
         run: |
           # Once this version's GitHub Release is published, its exact tag is never written again: a re-run (even one that
-          # rebuilt a platform image with another digest) reuses the index the release's images.txt records, after
-          # checking the tag still points at it.
+          # rebuilt a platform image with another digest) keeps the index this run verified and released. It requires the
+          # release's images.txt, the live tag and this run's earlier receipt to name the same digest. The registry is
+          # written only when the releases list shows, explicitly, no published release for the tag.
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
-          if jq -e --arg tag "v$VERSION" '[.[][] | select(.tag_name == $tag and (.draft | not))] | length > 0' releases.json > /dev/null; then
+          released="$(jq -er --arg tag "v$VERSION" '[.[][] | select(.tag_name == $tag and (.draft | not))] | length' releases.json)"
+          if [[ ! "$released" =~ ^[0-9]+$ ]]; then
+            echo "Could not read the published releases ('$released')" >&2
+            exit 1
+          fi
+          if (( released > 0 )); then
             gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern images.txt --dir released
             line="$(grep -E "^${IMAGE//./\\.}:${VERSION//./\\.}@sha256:[0-9a-f]{64}$" released/images.txt || true)"
             digest="${line##*@}"
             current="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -er '.digest')"
-            if [[ -z "$line" || "$current" != "$digest" ]]; then
-              echo "v$VERSION is released, and $IMAGE:$VERSION ($current) does not match its images.txt ('$line'). Investigate; see docs/releases.md." >&2
+            earlier="$(cat "previous/image-${{ matrix.role }}.txt" 2>/dev/null || true)"
+            if [[ -z "$line" || "$current" != "$digest" || "$earlier" != "$line" ]]; then
+              echo "v$VERSION is released; $IMAGE:$VERSION ($current), its images.txt line ('$line') and this run's verified receipt ('$earlier') must all agree. Investigate; see docs/releases.md." >&2
               exit 1
             fi
             echo "::notice::v$VERSION is already released; $IMAGE:$VERSION is left at $digest."
-            printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$digest" > "image-${{ matrix.role }}.txt"
+            printf '%s\n' "$line" > "image-${{ matrix.role }}.txt"
             exit 0
           fi
 
@@ -228,6 +242,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Read only: the exact image tags are resolved and compared with their receipts before the release is created.
+      packages: read
     steps:
       # Only the asset and alias checks run from the repository here; they use Node built-ins only (nothing is installed).
       - uses: actions/checkout@v7
@@ -268,6 +284,26 @@ jobs:
             printf '%s\n' "$line" >> images.txt
           done
           cat images.txt
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Each exact tag must still resolve to the index its receipt records (a release-only retry could otherwise publish
+      # a release whose images.txt no longer matches the registry).
+      - name: Check the exact image tags
+        shell: bash
+        run: |
+          while IFS= read -r line; do
+            reference="${line%@*}"
+            digest="${line##*@}"
+            current="$(docker buildx imagetools inspect "$reference" --format '{{json .Manifest}}' | jq -er '.digest')"
+            if [[ "$current" != "$digest" ]]; then
+              echo "::error::$reference resolves to $current, not $digest as its receipt records. Investigate; see docs/releases.md."
+              exit 1
+            fi
+          done < images.txt
       # The npm job's artifact, checked again right before attaching: exactly one tarball per package at the release
       # version, and SHA256SUMS matching them. The npm workflow's "Release assets (dry run)" job runs the same check on
       # pull requests.

@@ -26,14 +26,15 @@ Commit `vendor/logbird/` and the lockfile; the lockfile pins the tarball's SHA-5
 You can also depend on the Release URL directly:
 `pnpm add https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`,
 or the same with `npm install` (npm 12 first needs `allow-remote=root` in the project's
-`.npmrc`). Installing an integration (`@logbird/hono`, `@logbird/vue`, `@logbird/nuxt`,
-`@logbird/tanstack-start`) as well needs an override so it uses the same SDK tarball: see
+`.npmrc`). With `@logbird/hono` as well, an override makes it use the same SDK tarball: see
 [Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
-for the full recipe for pnpm and npm.
+for that recipe for pnpm and npm. `@logbird/vue`, `@logbird/nuxt` (which also depends on `@logbird/vue`) and
+`@logbird/tanstack-start` are attached to the same release and type-checked from those tarballs, but there is
+no tested install recipe for them yet.
 
 Requirements: Node 20 or later (`engines.node` `>=20`), or a runtime with Fetch and Web
-Crypto. ES modules only (no CommonJS build); TypeScript needs `moduleResolution` `nodenext`,
-`node16` or `bundler`, and the declarations are checked with TypeScript 6 and 7. A source
+Crypto. ES modules only (no CommonJS build); the declarations are checked with TypeScript
+6 and 7 under `moduleResolution` `nodenext` and `bundler`. A source
 checkout of this repository is for contributors ([CONTRIBUTING.md](https://github.com/joodlab/logbird/blob/master/CONTRIBUTING.md)).
 
 ## Capture

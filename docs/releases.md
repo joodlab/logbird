@@ -110,10 +110,12 @@ becomes current:
    changes here.
 2. **The GitHub Release.** Once all four indexes publish, the release job requires one
    well-formed receipt per role (a missing role fails instead of shrinking `images.txt`),
-   verifies the npm tarballs again, refuses to continue if the tag already has a release
-   or a draft, and creates the release with `images.txt`, the five npm tarballs and their
-   `SHA256SUMS`. It takes the "Latest release" mark only when no newer stable release is
-   published.
+   checks that each exact tag still resolves to its receipt's digest, verifies the npm
+   tarballs again, and creates the release with `images.txt`, the five npm tarballs and
+   their `SHA256SUMS`. It takes the "Latest release" mark only when no newer stable release
+   is published. A draft for the tag, or a published release with other files, stops it; a
+   published release holding exactly these files (a retry after the runner was lost) is
+   accepted as this run's own, and the aliases follow.
 3. **Moving aliases.** Only after the release exists does a job per role move `X.Y` and
    `latest` to the verified X.Y.Z index, after checking that X.Y.Z still points at it.
    `scripts/release-aliases.mjs` reads the published releases first: `latest` moves only
@@ -126,8 +128,9 @@ aliases; pin exact versions or digests for controlled upgrades. Publish releases
 increasing version order. Never rebuild a completed published release under the same
 version.
 
-Preflight also rejects a tag that already has a GitHub Release, preserving a
-completed publication on full-workflow retries. Notes contain the reviewed
+Preflight also rejects a tag that already has a GitHub Release, so a full-workflow rerun
+never rebuilds a completed publication; "Re-run failed jobs" keeps the earlier preflight
+and follows the recovery rules below. Notes contain the reviewed
 Highlights, conventional-type groups in a collapsible changelog with PR/commit
 links, and a thank-you section. Human authors and co-authors are deduplicated by
 GitHub handle across email aliases; people absent before the baseline are marked
@@ -218,23 +221,28 @@ use "Re-run failed jobs" within that time):
   a published release only when it holds exactly this run's `images.txt` and npm files,
   byte for byte, and then lets the alias jobs run. Any other published release for the tag
   stops it; investigate rather than delete a published release. Once a version is released,
-  a re-run never rewrites its exact image tags: the image jobs reuse the indexes its
-  `images.txt` records, and fail if a tag no longer matches.
+  a re-run never rewrites its exact image tags: the image jobs keep the index this run
+  verified, and fail unless the release's `images.txt`, the live tag and this run's earlier
+  receipt agree.
 - **After the release, while moving aliases**: the release is live and some aliases may
-  still point at the previous version (the registry takes one tag at a time). Re-run the
-  failed alias jobs, then check each alias with `docker buildx imagetools inspect`: an
-  alias the job moved (its log names them) resolves to the X.Y.Z digest in `images.txt`;
-  an alias it left alone because a newer release is published (`latest` for a patch on an
-  older line, or both for a superseded re-run) still resolves to that newer release.
+  still point at an older version (the registry takes one tag at a time). Re-run the failed
+  alias jobs. Then check each alias on its own with `docker buildx imagetools inspect`:
+  - `X.Y` resolves to the newest published X.Y.N release's digest (from that release's
+    `images.txt`); a late patch on an older line, such as 0.2.2 after 0.3.0, still moves
+    its own `0.2`;
+  - `latest` resolves to the newest published stable release's digest.
+  An alias that points anywhere else belongs to the run that should have moved it: re-run
+  that newer release's failed alias jobs (within its seven days), not this one's, which
+  leaves it alone on purpose.
 - **More than seven days later**, the digest, receipt and npm artifacts are gone and a
   re-run cannot finish. Do not rebuild under the same version: release the next patch
-  version. Any X.Y.Z image tags the stopped run published stay unannounced.
+  version. If the stopped run never published its GitHub Release, the X.Y.Z image tags it
+  wrote stay unannounced; if the release did go live, those tags are announced by it, and
+  any alias it did not move stays where it was until the next release moves it.
 
-An existing GitHub Release blocks a full rerun in preflight; retrying only release
-creation fails rather than replacing its reviewed notes. A re-run of an older version
-after a newer one has shipped publishes its own exact tags and release and leaves both
-aliases and the "Latest release" mark where they are. No Coolify deployment runs
-automatically.
+A re-run of an older version after a newer one has shipped publishes its own exact tags
+and release, moves its `X.Y` only if no newer X.Y.N is published, and never moves `latest`
+or the "Latest release" mark. No Coolify deployment runs automatically.
 
 `.github/workflows/docker.yml` separately builds all four targets on native amd64
 and arm64 runners on PRs changing Dockerfiles, Compose, Docker context exclusions
@@ -276,7 +284,8 @@ packages, and the release's `npm` job calls it with the release version. It:
    and 7, run, API reports; Node 20 and 22; hono at the floor of its peer range, at the
    version its lockfile pins and, on pull requests and master pushes only, the latest 4.x),
    `tests/npm-consumer-adapters` (both fail if installing the tarballs resolves any package
-   outside their committed lockfile), and `tests/npm-release-install`, which follows the
+   outside their committed lockfile, other than the Logbird tarballs themselves and, in a
+   floor or latest cell, the exact hono version that cell asks for), and `tests/npm-release-install`, which follows the
    documented install recipes (`@logbird/sdk` alone, and with `@logbird/hono`) from a
    local stand-in for the Release URL under pnpm 10 and 12 and npm 10 and 12, reinstalls with a
    frozen lockfile, type-checks and runs under TypeScript 6, and requires an altered

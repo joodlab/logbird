@@ -190,7 +190,7 @@ as two):
   ids of the actor, impersonator, executor, tenant, targets and `context` 256; names and
   the actor's email 512; types 64; `context.ip` 64 and `context.userAgent` 1,024.
 - **Targets and changes:** the first 64 `targets` and the first 256 `changes` (a change's
-  `field`, `before` and `after`; other keys on a change entry are not indexed).
+  `field`, up to 256, and its `before` and `after`; other keys on a change entry are not indexed).
 - **Every other field is an attribute**, found by its dotted path (`metadata.plan:pro`):
   `metadata` and any other top-level field you add, extra keys on `actor`, `impersonator`,
   `executor`, `tenant` and `context` (`actor.department`), and extra keys on a target
