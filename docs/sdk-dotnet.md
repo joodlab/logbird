@@ -306,6 +306,11 @@ end for this pattern. For a strict end anchor in a shared expression, use
 `^label(?![\s\S])` (equivalent to `^label\z` in .NET). Prefer `AddKeys`
 whenever a literal substring is enough.
 
+The public `Redactor.Redact(JsonObject)` helper uses the input object's lookup
+rules when it finds the changes array. On a case-insensitive object,
+`Changes` can be treated as `changes`. The typed client emits lowercase
+`changes`, and exact paths always use case-sensitive segments.
+
 ## Going further
 
 - [`Logbird` package README](../sdks/dotnet/README.md): every option, the exact failure contract, redaction (values under

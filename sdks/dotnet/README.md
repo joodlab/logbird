@@ -376,6 +376,11 @@ share between the SDKs to plain alternatives and `^` anchors. Set `Redaction.Ena
 `Redaction.Keys` with your own pattern. `BeforeSend` runs before redaction on a copy of each event; return `null`
 to skip an event.
 
+The public `Redactor.Redact(JsonObject)` helper uses the input object's lookup
+rules to find changes. A case-insensitive object can expose `Changes` as
+`changes`. The typed client emits lowercase `changes`, and exact path
+segments use case-sensitive matching.
+
 ## Read the audit trail
 
 Use a **read key** (`lb_read_…`) on the server only. Reading throws `LogbirdApiException` on failure, because the

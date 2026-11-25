@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Logbird.Internal;
@@ -225,6 +226,10 @@ public sealed class Redactor
 
     /// <summary>Returns a redacted deep copy of an event JSON object. The input is not changed.</summary>
     /// <param name="eventJson">The event as JSON.</param>
+    /// <remarks>
+    /// Change discovery honors a caller-supplied object's key comparer. A case-insensitive object can expose
+    /// <c>Changes</c> as <c>changes</c>; the typed client emits <c>changes</c>.
+    /// </remarks>
     /// <exception cref="ArgumentException">
     /// The JSON nests deeper than 1,008 levels (1,000 inside metadata, plus the event envelope) or an identifier is a JSON container.
     /// </exception>
@@ -424,10 +429,18 @@ public sealed class Redactor
 
     private static bool IsText(JsonNode? field, out string text)
     {
-        if (field is JsonValue value && Internal.JsJson.TryGetString(value, out var found))
+        if (field is JsonValue value)
         {
-            text = found;
-            return true;
+            if (JsJson.TryGetString(value, out text))
+            {
+                return true;
+            }
+
+            // A caller-built JsonValue can serialize as a string without containing a CLR string (for example, char).
+            if (value.GetValueKind() == JsonValueKind.String && JsonNode.Parse(value.ToJsonString()) is JsonValue serialized)
+            {
+                return JsJson.TryGetString(serialized, out text);
+            }
         }
 
         text = string.Empty;

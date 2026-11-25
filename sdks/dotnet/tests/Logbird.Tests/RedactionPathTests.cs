@@ -84,6 +84,24 @@ public class RedactionPathTests
     }
 
     [Fact]
+    public void The_public_helper_matches_caller_built_fields_that_serialize_as_strings()
+    {
+        var input = new JsonObject
+        {
+            ["changes"] = new JsonArray(
+                new JsonObject { ["field"] = JsonValue.Create('x'), ["after"] = "fictional" },
+                new JsonObject { ["field"] = JsonValue.Create(Guid.Empty), ["after"] = "fictional" },
+                new JsonObject { ["field"] = 7, ["after"] = "kept" }),
+        };
+        var redactor = new Redactor(changeFields: new Regex("^(x|00000000-0000-0000-0000-000000000000|7)$", RegexOptions.CultureInvariant));
+        var result = redactor.Redact(input);
+        var expected = JsonNode.Parse("""
+            {"changes":[{"field":"x","after":"[redacted]"},{"field":"00000000-0000-0000-0000-000000000000","after":"[redacted]"},{"field":7,"after":"kept"}]}
+            """);
+        Assert.True(JsonNode.DeepEquals(expected, JsonNode.Parse(result.ToJsonString())));
+    }
+
+    [Fact]
     public async Task Reports_identifier_matches_once_and_leaves_the_identifiers_on_the_wire()
     {
         var errors = new ConcurrentQueue<Exception>();
