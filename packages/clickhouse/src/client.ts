@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { type ClickHouseClient, createClient } from '@clickhouse/client';
-import type { EventRow } from './normalize';
+import type { StoredEventRow } from './normalize';
 
 export type { ClickHouseClient } from '@clickhouse/client';
 export function createClickHouseClient(env = process.env): ClickHouseClient {
@@ -158,7 +158,7 @@ function isViewFailure(error: unknown, body?: string) {
 }
 export async function insertEvents(
   ch: ClickHouseClient,
-  rows: EventRow[],
+  rows: StoredEventRow[],
   leaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS,
   serializedBody?: string,
 ) {
