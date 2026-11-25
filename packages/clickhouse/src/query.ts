@@ -78,9 +78,11 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[], options: C
     let expr = col ?? `attributes[${attrParameter}]`;
     const numeric = operator !== '=' || info?.type === 'number' || info?.type === 'date';
     const presence = token.wildcard && token.value === '*';
-    // `field:>*` is a comparison, not presence: refused like any comparison on a field that is not a number or date.
+    // `field:>*` is a comparison, not presence: refused like any comparison on a field that is not a number or date,
+    // and on any field (attributes included) without a value to compare with. Open bounds inside ranges never get here.
     if (operator !== '=' && info && !['number', 'date'].includes(info.type))
       fail('type', token.start, token.end, `${field} does not support comparisons`);
+    if (operator !== '=' && presence) fail('type', token.start, token.end, `A comparison needs a value; use ${field}:* for presence`);
     if (numeric && !presence) {
       if (info && !['number', 'date'].includes(info.type)) fail('type', token.start, token.end, `${field} does not support comparisons`);
       const date = info?.type === 'date' || (!info && /^(?:\d{4}-\d{2}-\d{2}|now(?:$|[-+/]))/.test(token.value));

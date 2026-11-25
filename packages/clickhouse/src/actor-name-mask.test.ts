@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ACTOR_NAME_IS_SENSITIVE_SQL,
@@ -273,6 +274,23 @@ describe('facets under the actor_email mask', () => {
     expect(second?.query).toContain(
       "ORDER BY value,masked,count DESC,sipHash64Keyed(({orderKey0:UInt64},{orderKey1:UInt64}),concat(toString(gmasked),'|',grp)) LIMIT",
     );
+  });
+
+  it('selects long second-level parents by digest, at both facet paths', async () => {
+    const long = `x${'y'.repeat(2000)}`;
+    const md5 = (text: string) => createHash('md5').update(text, 'utf8').digest('hex');
+    const masked = client([[{ value: long, masked: 0, labf: 0, labt: long, count: 1, total: 1 }], []]);
+    await facets(masked.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 }, scope, undefined, key);
+    const [, maskedSecond] = calls(masked.query);
+    expect(maskedSecond?.query_params.facetKeysDigests).toEqual([md5(`0|${long}`)]);
+    expect(maskedSecond?.query_params).not.toHaveProperty('facetKeys');
+    const plain = client([[{ value: long, label: long, count: 1, total: 1 }], []]);
+    await facets(plain.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 });
+    const [, plainSecond] = calls(plain.query);
+    expect(plainSecond?.query).toContain('lower(hex(MD5(value))) IN {facetValuesDigests:Array(String)}');
+    expect(plainSecond?.query_params.facetValuesDigests).toEqual([md5(long)]);
+    // Two change levels share one zipped expansion of just the two columns they read.
+    expect(plainSecond?.query).toContain('ARRAY JOIN arrayZip(changes_after,changes_fields) AS facet_changes');
   });
 
   it('never interprets text by its content: a producer string that looks masked stays as it is', async () => {

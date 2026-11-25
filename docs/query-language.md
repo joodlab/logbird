@@ -100,14 +100,21 @@ as `Changes.field`) is refused with 422 `invalid_query`, reason `unknown_field`:
 as attributes, so such a key could never match. Use `attr.changes.<x>` to look up a custom attribute with that name
 (an event can carry one as a literal top-level dotted key).
 
-Core fields always win over a literal attribute of the same name: `changes.before`, `changes.after` and
-`impersonator.name` read the event's columns, so an attribute literally named `changes.after` (sent as a top-level
-dotted key) is reached only as `attr.changes.after`. Before these fields existed, such a term read that attribute.
+Core fields always win over a literal attribute of the same name: `changes.before`, `changes.after`,
+`impersonator.name` and `impersonator.id` read the event's columns, so an attribute literally named `changes.after`
+(sent as a top-level dotted key) is reached only as `attr.changes.after`. Before these fields existed, such a term
+read that attribute.
+
+A refused key fails the whole query, not just its term: `action:invoice.paid OR changes.to:x` and
+`NOT changes.to:x` answer 422, and a webhook endpoint whose stored filter contains such a key is held for an edit.
+Write `attr.changes.to` for a literal attribute, or remove the term.
 
 `impersonator.name` is the display name of the support person acting as the actor, and `impersonator.id` is an alias
 of `impersonator`. Other `impersonator.*` keys are attribute lookups, because ingest keeps any other field sent with
 the impersonator as an attribute (`impersonator.email`, `impersonator.type`); a misspelled key such as
-`impersonator.nmae` therefore matches only events that carry that attribute. Under a scope with the
+`impersonator.nmae` therefore matches only events that carry that attribute. An impersonator sent with a name and
+no id is stored by name only: `impersonator.name` finds the event, but the event shows no impersonator (events show
+one only when it has an id). Under a scope with the
 `actor_email` mask, a name that carries an address reads as an empty name, as for `actor.name`
 ([scoped read access](scoped-read-access.md#masks)).
 

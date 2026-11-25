@@ -360,7 +360,9 @@ describe('change values and the impersonator name', () => {
     // Presence, _exists_ and a fully open range stay presence; numbers and dates keep their comparisons.
     expect(compileQuery('changes.after:*').sql).toBe("(arrayExists(x -> x != '', changes_after))");
     expect(compileQuery('_exists_:impersonator.name').sql).toBe("(impersonator_name != '')");
-    expect(compileQuery('attempt:>*').sql).toBe('(1)');
+    for (const q of ['attempt:>*', 'impersonator.type:>*', 'attr.changes.to:<=*', 'occurredAt:<*'])
+      expect(() => compileQuery(q), q).toThrow(/comparison needs a value/);
+    expect(compileQuery('attempt:[2 TO *]').sql).toBe('(job_attempt >= {q0:Float64})');
   });
 
   it('reads impersonator.id as the impersonator id', () => {

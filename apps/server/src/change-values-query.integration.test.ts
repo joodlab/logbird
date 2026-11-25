@@ -17,6 +17,7 @@ import { env } from './env';
  * webhook filters, through the real server on real ClickHouse and Postgres.
  */
 const MAILPIT = process.env.MAILPIT_URL || 'http://127.0.0.1:8025';
+const BIG_VALUE = `long:${'x'.repeat(150 * 1024)}`;
 
 it('change values and the impersonator name are query fields; unknown changes.* keys are refused (real services)', async () => {
   const users: string[] = [];
@@ -107,8 +108,12 @@ it('change values and the impersonator name are query fields; unknown changes.* 
     expect(refusedHook.status).toBe(422);
     expect((await refusedHook.json()).error).toMatchObject({ code: 'invalid_query', details: { reason: 'unknown_field' } });
     const cursorFrom = new Date(+(await webhookCursorClock(prisma)).now - 60_000);
+    // Loopback, never a third party: a delivery worker sharing this database could otherwise claim the queued rows.
     for (const id of [...hooks.map((h) => h.id), staleId])
-      await prisma.webhookEndpoint.update({ where: { id }, data: { createdAt: cursorFrom, cursorReceivedAt: cursorFrom } });
+      await prisma.webhookEndpoint.update({
+        where: { id },
+        data: { createdAt: cursorFrom, cursorReceivedAt: cursorFrom, url: 'http://127.0.0.1:9/qa-change-values' },
+      });
     const patched = await console_(ownerCookie, `/api/projects/${projectId}/webhooks/${hooks[0]?.id}`, 'PATCH', { filterQuery: 'changes.to:x' });
     expect(patched.status, await patched.clone().text()).toBe(422);
     expect((await patched.json()).error).toMatchObject({ code: 'invalid_query', details: { reason: 'unknown_field' } });
@@ -181,6 +186,17 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       },
       // Another tenant: a t1 scope must never see it.
       {
+        id: 'big1',
+        occurredAt: ts(9),
+        action: 'article.updated',
+        tenant,
+        actor,
+        // A 150 KB value: a second facet level must not send it back to ClickHouse as a URL parameter.
+        changes: [{ field: 'body', before: 'v1', after: BIG_VALUE }],
+      },
+      // An impersonator sent with a name and no id: found by impersonator.name, shown as no impersonator (documented).
+      { id: 'n1', occurredAt: ts(10), action: 'article.viewed', tenant, actor, impersonator: { name: 'Nameless Support' } },
+      {
         id: 'o1',
         occurredAt: ts(8),
         action: 'article.status_changed',
@@ -250,12 +266,12 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       { q: 'changes.after:true', rows: ['c4'] },
       { q: 'changes.after:"[\\"a\\",\\"b\\"]"', rows: ['c4'] },
       { q: 'changes.after:"{\\"k\\":1}"', rows: ['c4'] },
-      { q: '_exists_:changes.before', rows: ['c1', 'c2', 'c3', 'c4', 'l1'] },
+      { q: '_exists_:changes.before', rows: ['big1', 'c1', 'c2', 'c3', 'c4', 'l1'] },
       { q: 'changes.after:SAME', rows: ['l1'] },
       { q: 'impersonator.name:"Rita Support"', rows: ['i1'] },
       { q: 'impersonator.name:Rita*', rows: ['i1'] },
       { q: 'impersonator.name:"rita@example.invalid"', rows: ['i2'] },
-      { q: '_exists_:impersonator.name', rows: ['i1', 'i2'] },
+      { q: '_exists_:impersonator.name', rows: ['i1', 'i2', 'n1'] },
     ];
     // The t1 scoped key: exactly the fixture rows. The project read key also sees the t2 event.
     for (const { q, rows } of PROBES) expect(await ids(plain.secret, q), q).toEqual(rows);
@@ -263,7 +279,7 @@ it('change values and the impersonator name are query fields; unknown changes.* 
     expect(await ids(reader.secret, 'changes.field:status changes.before:DRAFT')).toEqual(['c1', 'c3', 'o1']);
     // impersonator.id is the impersonator id; letter case of the changes namespace does not bypass the refusal.
     expect(await ids(plain.secret, 'impersonator.id:sup_rita')).toEqual(['i1']);
-    for (const q of ['Changes.field:status', 'changes.after:>*'])
+    for (const q of ['Changes.field:status', 'changes.after:>*', 'impersonator.type:>*', 'attr.changes.to:<=*'])
       expect((await get(plain.secret, `/events?${new URLSearchParams({ q, from })}`)).status, q).toBe(422);
 
     // Unknown changes.* keys: 422 invalid_query (unknown_field) naming the valid fields, in search, facets and export.
@@ -300,6 +316,29 @@ it('change values and the impersonator name are query fields; unknown changes.* 
     expect(grouped.status).toEqual({ PUBLISHED: 1, ARCHIVED: 1, REVIEW: 1 });
     expect(grouped.label).toEqual({ PUBLISHED: 1 });
     expect(grouped.title).toEqual({ New: 1 });
+    // A very long parent value at either level and masked or not: the second level still answers (parents travel as digests).
+    for (const bearer of [plain.secret, masked.secret]) {
+      for (const query of [
+        { field: 'changes.after', by: 'changes.field' },
+        { field: 'changes.after', by: 'action' },
+      ]) {
+        const r = await get(bearer, `/facets?${new URLSearchParams({ ...query, from, limit: '50', q: 'id:big1' })}`);
+        expect(r.status, `${JSON.stringify(query)} ${r.text.slice(0, 200)}`).toBe(200);
+        const [value] = facetResponseSchema.parse(r.body).values;
+        expect(value?.value.length).toBe(BIG_VALUE.length);
+        expect(value?.groups?.map((g) => [g.value, g.count])).toEqual([[query.by === 'action' ? 'article.updated' : 'body', 1]]);
+      }
+    }
+    // The alias gets the same labels as the field, at both levels.
+    for (const bearer of [plain.secret, masked.secret]) {
+      const facet = async (query: Record<string, string>) =>
+        facetResponseSchema.parse((await get(bearer, `/facets?${new URLSearchParams({ ...query, from, limit: '50' })}`)).body).values;
+      expect(await facet({ field: 'impersonator.id' })).toEqual(await facet({ field: 'impersonator' }));
+      expect(await facet({ field: 'action', by: 'impersonator.id' })).toEqual(await facet({ field: 'action', by: 'impersonator' }));
+    }
+    // A name-only impersonator: impersonator.name finds the event, whose projection shows no impersonator (id required).
+    expect(await ids(plain.secret, 'impersonator.name:"Nameless Support"')).toEqual(['n1']);
+    expect((await get(plain.secret, '/events/n1')).body.event.impersonator).toBeNull();
 
     // Under the actor_email mask: change values filter as usual; an address-carrying impersonator name reads as empty
     // in filters and shows as the address's pseudonym in facets, while an ordinary name still filters.
@@ -337,6 +376,7 @@ it('change values and the impersonator name are query fields; unknown changes.* 
     const held = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: staleId } });
     expect([held.filterReviewRequired, held.filterReviewReason, +held.cursorReceivedAt]).toEqual([true, 'invalid_filter', +cursorFrom]);
     expect(await prisma.webhookDelivery.count({ where: { endpointId: staleId } })).toBe(0);
+    await prisma.webhookEndpoint.updateMany({ where: { projectId }, data: { enabled: false } });
     passed = true;
   } finally {
     const failures: unknown[] = [];

@@ -8,7 +8,11 @@ const SPARSE_COLUMNS = new Set(['impersonator_id']);
 
 export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<typeof suggestQuerySchema>): Promise<SuggestResponse> {
   const f = QUERY_FIELDS.find((f) => f.key === q.field || f.aliases?.includes(q.field));
-  if (f?.suggest === 'none') return { field: q.field, values: [], complete: true };
+  // A supplied filter is validated even when the field has no suggestions, so a refused query never looks complete.
+  if (f?.suggest === 'none') {
+    if (q.q?.trim()) await where(ch, p, { ...q, to: q.to ?? new Date().toISOString() });
+    return { field: q.field, values: [], complete: true };
+  }
   const record = f?.type === 'record';
   const recordValue = (type: string, id: string) =>
     `concat(replaceAll(replaceAll(${type}, {recordSlash:String}, {recordDoubleSlash:String}), ':', {recordEscapedColon:String}), ':', ${id})`;

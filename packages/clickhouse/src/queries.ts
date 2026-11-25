@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   AuditEvent,
   Entity,
@@ -491,18 +491,35 @@ const TARGET_COLUMNS = ['target_ids', 'target_types', 'target_names'];
 /** Two target-level facets expand ONE (id, type, name) tuple, so an id is never paired with another target's type. */
 const SHARED_TARGETS = 'ARRAY JOIN arrayZip(target_ids,target_types,target_names) AS facet_targets';
 const CHANGE_COLUMNS = ['changes_fields', 'changes_before', 'changes_after'];
-/** Two change-level facets expand ONE (field, before, after) tuple, so a value is never paired with another field. */
-const SHARED_CHANGES = 'ARRAY JOIN arrayZip(changes_fields,changes_before,changes_after) AS facet_changes';
-/** The zipped expansion both facet levels share, when both read the same array family. */
-function sharedArrays(field: string, by: string) {
+type SharedArrays = { join: string; changeRef?: (column: string) => string };
+/**
+ * The one expansion both facet levels share when both read the same array family, so an element is never paired with
+ * another element of the same event (an id with another target's type, a value with another change's field). Change
+ * levels zip only the columns they read (one column when both levels read the same one).
+ */
+function sharedArrays(field: string, by: string): SharedArrays | undefined {
   const a = facetColumn(field) ?? '';
   const b = facetColumn(by) ?? '';
-  if (TARGET_COLUMNS.includes(a) && TARGET_COLUMNS.includes(b)) return SHARED_TARGETS;
-  if (CHANGE_COLUMNS.includes(a) && CHANGE_COLUMNS.includes(b)) return SHARED_CHANGES;
+  if (TARGET_COLUMNS.includes(a) && TARGET_COLUMNS.includes(b)) return { join: SHARED_TARGETS };
+  if (!CHANGE_COLUMNS.includes(a) || !CHANGE_COLUMNS.includes(b)) return undefined;
+  if (a === b) return { join: `ARRAY JOIN ${a} AS facet_change`, changeRef: () => 'facet_change' };
+  return { join: `ARRAY JOIN arrayZip(${a},${b}) AS facet_changes`, changeRef: (column) => `facet_changes.${column === a ? 1 : 2}` };
+}
+/**
+ * How the second facet level selects its parents. Values travel as a query parameter as before; when one is long (a
+ * change value can be 200 KB, too long for a URL parameter) they travel as MD5 digests instead, compared in SQL.
+ */
+const PARENT_VALUE_MAX = 1024;
+function parentFilter(texts: string[], expr: string, name: string) {
+  if (texts.every((t) => t.length <= PARENT_VALUE_MAX)) return { sql: `${expr} IN {${name}:Array(String)}`, params: { [name]: texts } };
+  const digests = texts.map((t) => createHash('md5').update(t, 'utf8').digest('hex'));
+  return { sql: `lower(hex(MD5(${expr}))) IN {${name}Digests:Array(String)}`, params: { [`${name}Digests`]: digests } };
 }
 /** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
-function facetLevel(field: string, n: number, sharedTargets = false, maskName = false) {
+function facetLevel(field: string, n: number, sharedTargets = false, maskName = false, changeRef?: (column: string) => string) {
   const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
+  // An alias (actor.id, impersonator.id) gets the same label as its field.
+  const canonical = QUERY_FIELDS.find((f) => f.key === field || f.aliases?.includes(field))?.key ?? field;
   let expr = col ?? `attributes[{attr${n}:String}]`;
   let join = '';
   let label = expr;
@@ -513,9 +530,9 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     // The caller adds SHARED_TARGETS once for both levels.
     expr = `facet_targets.${TARGET_COLUMNS.indexOf(col) + 1}`;
     label = col === 'target_ids' ? 'facet_targets.3' : expr;
-  } else if (sharedTargets && col && CHANGE_COLUMNS.includes(col)) {
-    // The caller adds SHARED_CHANGES once for both levels.
-    expr = `facet_changes.${CHANGE_COLUMNS.indexOf(col) + 1}`;
+  } else if (changeRef && col && CHANGE_COLUMNS.includes(col)) {
+    // The caller adds the shared change expansion once for both levels.
+    expr = changeRef(col);
     label = expr;
   } else if (expr === 'target_ids') {
     join = `ARRAY JOIN arrayZip(target_ids,target_names) AS facet_target${n}`;
@@ -524,10 +541,10 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
   } else if (['target_types', 'target_names', 'changes_fields', 'changes_before', 'changes_after'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
-  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) {
+  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(canonical)) {
     // Under the mask, the actor's and the impersonator's labels follow the name rule (#333).
-    const masked = maskName ? MASKED_NAME_COLUMNS[`${field}_name`] : undefined;
-    label = masked?.text ?? `${field}_name`;
+    const masked = maskName ? MASKED_NAME_COLUMNS[`${canonical}_name`] : undefined;
+    label = masked?.text ?? `${canonical}_name`;
     if (masked) labelFlag = masked.flag;
   } else if (!col) {
     // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
@@ -582,14 +599,20 @@ export async function facets(
   // Second level (#140): the top `byLimit` values of `by` within each returned value, and the count of the rest.
   // One bounded query: the outer filter keeps only the returned first-level values.
   const sharedJoin = sharedArrays(q.field, q.by);
-  const shared = Boolean(sharedJoin);
-  const both = shared ? { one: facetLevel(q.field, 1, true), two: facetLevel(q.by, 2, true) } : { one, two: facetLevel(q.by, 2) };
+  const both = sharedJoin
+    ? { one: facetLevel(q.field, 1, true, false, sharedJoin.changeRef), two: facetLevel(q.by, 2, true, false, sharedJoin.changeRef) }
+    : { one, two: facetLevel(q.by, 2) };
   const two = both.two;
-  const joins = sharedJoin ?? `${one.join} ${two.join}`;
+  const joins = sharedJoin?.join ?? `${one.join} ${two.join}`;
+  const parents = parentFilter(
+    values.map((v) => v.value),
+    'value',
+    'facetValues',
+  );
   const groups = await read<{ value: string; grp: string; label: string; count: number; total: number }>(
     ch,
-    `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE value IN {facetValues:Array(String)} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
-    { ...w.params, ...one.params, ...two.params, facetValues: values.map((v) => v.value), byLimit: q.byLimit ?? 5 },
+    `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE ${parents.sql} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
+    { ...w.params, ...one.params, ...two.params, ...parents.params, byLimit: q.byLimit ?? 5 },
   );
   for (const v of values) {
     const mine = groups.filter((g) => g.value === v.value);
@@ -648,17 +671,21 @@ async function maskedFacets(
   const strip = () => values.map(({ key: _key, ...v }) => v);
   if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values: strip(), otherCount };
   const sharedJoin = sharedArrays(q.field, q.by);
-  const shared = Boolean(sharedJoin);
-  const both = shared
-    ? { one: facetLevel(q.field, 1, true, true), two: facetLevel(q.by, 2, true, true) }
+  const both = sharedJoin
+    ? { one: facetLevel(q.field, 1, true, true, sharedJoin.changeRef), two: facetLevel(q.by, 2, true, true, sharedJoin.changeRef) }
     : { one, two: facetLevel(q.by, 2, false, true) };
   const two = both.two;
-  const joins = sharedJoin ?? `${one.join} ${two.join}`;
+  const joins = sharedJoin?.join ?? `${one.join} ${two.join}`;
   type Group = { value: string; masked: number; grp: string; gmasked: number; labf: number; labt: string; count: number; total: number };
+  const parents = parentFilter(
+    values.map((v) => v.key),
+    "concat(toString(masked),'|',value)",
+    'facetKeys',
+  );
   const groups = await read<Group>(
     ch,
-    `SELECT value,masked,grp,gmasked,tupleElement(argMaxIf(tuple(glf,glabel),received_at,glabel!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE concat(toString(masked),'|',value) IN {facetKeys:Array(String)} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
-    { ...w.params, ...one.params, ...two.params, ...params, facetKeys: values.map((v) => v.key), byLimit: q.byLimit ?? 5 },
+    `SELECT value,masked,grp,gmasked,tupleElement(argMaxIf(tuple(glf,glabel),received_at,glabel!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE ${parents.sql} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
+    { ...w.params, ...one.params, ...two.params, ...params, ...parents.params, byLimit: q.byLimit ?? 5 },
   );
   // Every flag of every second-level row is checked before rows are matched to parents, so a malformed row fails the
   // request even when it would match no parent.
