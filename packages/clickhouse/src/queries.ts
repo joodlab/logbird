@@ -169,7 +169,7 @@ export function timeRange(q: RangeQuery, now = Date.now()): AppliedRange {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   // A bound past what DateTime64 can hold would reach ClickHouse as calendar text it reads differently (year 0000 as
   // 1970), so the window applied would differ from the one stated. No stored event lies outside these limits, so a bound
-  // beyond them is moved onto them: the stated window stays the applied one, and it holds the same events.
+  // beyond them is moved onto them: the stated window stays the applied one (an event at exactly the last storable millisecond is outside any window, as the docs say).
   const clamped = { from: clampToStore(from.getTime()), to: clampToStore(to.getTime()) };
   if (clamped.from >= clamped.to) throw new Error('Invalid time range');
   return { from: new Date(clamped.from).toISOString(), to: new Date(clamped.to).toISOString() };
@@ -480,7 +480,7 @@ export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: st
   return (
     await read<EventRow>(
       ch,
-      `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={p:String} AND received_at >= {since:DateTime64(3)} AND (${compiled.sql}) ORDER BY received_at DESC,event_id DESC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+      `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={p:String} AND received_at >= {since:DateTime64(3, 'UTC')} AND (${compiled.sql}) ORDER BY received_at DESC,event_id DESC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
       { p, since: q.since, limit: q.limit, ...compiled.params },
     )
   ).map(toEvent);
@@ -735,7 +735,7 @@ export async function overview(ch: ClickHouseClient, p: string, q: RangeQuery): 
     projectStats(ch, [p]),
     read<{ ts: string; count: number }>(
       ch,
-      'SELECT bucket ts,sum(events) count FROM events_by_minute WHERE project_id={p:String} AND bucket >= {hour:DateTime64(3)} GROUP BY bucket ORDER BY bucket',
+      `SELECT bucket ts,sum(events) count FROM events_by_minute WHERE project_id={p:String} AND bucket >= {hour:DateTime64(3, 'UTC')} GROUP BY bucket ORDER BY bucket`,
       { p, hour },
     ),
   ]);
