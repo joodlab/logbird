@@ -100,10 +100,15 @@ describe('cuts at ingest', () => {
 });
 
 describe('the reserved prefix and the attribute budget', () => {
-  it('never spends the 256-key budget on producer keys under logbird.truncated', () => {
-    const reserved = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`k${i}`, 'x']));
-    const result = normalized({ logbird: { truncated: reserved }, after: 'kept' });
-    expect(Object.keys(result.row.attributes)).toEqual(['after']);
+  it('admits exactly what it admitted before: a producer key under logbird.truncated still takes its budget slot', () => {
+    // One reserved key, 255 ordinary ones, then a key with a lone surrogate: the budget is full before that key, so it
+    // is skipped (never checked), as before this change. The reserved key is then dropped.
+    const fields: Record<string, unknown> = { 'logbird.truncated.targets': '9' };
+    for (let i = 0; i < EVENT_LIMITS.attributes - 1; i++) fields[`a${i}`] = 'x';
+    fields[`bad${String.fromCharCode(0xd8_00)}key`] = 'x';
+    const result = normalized(fields);
+    expect(Object.keys(result.row.attributes)).toHaveLength(EVENT_LIMITS.attributes - 1);
+    expect(result.row.attributes[TRUNCATED_ATTRIBUTES.targets]).toBeUndefined();
   });
 
   it('adds its own reserved keys after a full budget', () => {

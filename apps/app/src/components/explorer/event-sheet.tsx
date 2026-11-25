@@ -627,8 +627,8 @@ function EventDetailBody({
   const ctx = e.context;
   const caused = useChildren(detail, { updatedAt: detailUpdatedAt, fetching: detailFetching }, e, projectId);
   const depth = detail?.parents.length ?? 0;
-  // Shown only once the original payload confirms the counts (and so is there to point to).
-  const cuts = ingestCuts(e, detail?.payload);
+  // Shown only when the raw payload below shows the payload (no error) and it confirms the counts.
+  const cuts = ingestCuts(e, detailError ? undefined : detail?.payload);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

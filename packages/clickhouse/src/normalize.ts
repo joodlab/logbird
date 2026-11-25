@@ -155,8 +155,6 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   const attributes: Record<string, string> = Object.create(null);
   let invalidAttributeKey = false;
   const flatten = (v: unknown, path: string, depth: number) => {
-    // Reserved for Logbird's own cut counts: a producer value there is never indexed, so it cannot use up the budget.
-    if (!ctx.legacyColumns && (path === TRUNCATED_ATTRIBUTE_PREFIX || path.startsWith(`${TRUNCATED_ATTRIBUTE_PREFIX}.`))) return;
     if (Object.keys(attributes).length >= EVENT_LIMITS.attributes) return;
     // Reject instead of repairing keys: replacement could merge distinct attribute paths.
     if (/[\uD800-\uDFFF]/u.test(path)) {

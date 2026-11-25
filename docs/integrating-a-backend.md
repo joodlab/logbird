@@ -242,9 +242,9 @@ rejected on its own and the rest of the batch is stored; an otherwise valid even
 first); more than 1000 events or more than 5 MB refuses the whole request with
 `413 payload_too_large`. Inspect even a 202 response:
 `rejected` lists individual failures and `warnings` reports normalization, including
-one entry per cut (`targets_truncated`, `changes_truncated`, `change_fields_truncated`) when an event has more than
-64 targets or 256 changes, or a change field name longer than 256 UTF-16 code units: the event is stored whole but only the
-first ones are searchable. See [limits](limits.md).
+one entry per cut of a stored event (`targets_truncated`, `changes_truncated`, `change_fields_truncated`): more than
+64 targets or 256 changes, or, among the first 256 changes, a field name longer than 256 UTF-16 code units. The event is
+stored whole, but only the first 64 targets and 256 changes are indexed. See [limits](limits.md).
 Definite native storage parse failures are isolated into `invalid_event` rejections
 with zero-based indices and code-first reasons. Healthy siblings remain accepted;
 the server checks every named row alone as a canary, then inserts the parse-proven

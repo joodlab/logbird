@@ -1,26 +1,29 @@
 # Limits
 
-Every limit Logbird applies to one event and to one request, with what happens past it. The numbers are read from the
+The limits that decide what Logbird stores and what a read returns, with what happens past each. Request validation
+has more bounds than these (each one is described on its parameter in `openapi/public.json`). The numbers are read from the
 code (`EVENT_LIMITS` and `REQUEST_LIMITS` in `packages/contracts/src/events.ts`, the occurredAt bounds in
 `packages/clickhouse/src/timestamp.ts`, and the server environment for rate limits);
-`packages/clickhouse/src/limits-doc.test.ts` fails when a number in the first two tables drifts from the code.
+`packages/clickhouse/src/limits-doc.test.ts` fails when the number in the Value column of the first two tables drifts
+from the code (and, for page sizes, query terms, nesting and the default window, when the stated behaviour does).
 
 ## Per event
 
-Two limits reject an event: its size, and numbers nested too deep to store exactly. The event is then listed in
-`rejected[]` (code `invalid_event`) and the other events of the request are still stored. Past every other limit
+Three limits reject an event: its id, its size, and numbers nested too deep to store exactly. The event is then listed
+in `rejected[]` and the other events of the request are still stored. Past every other limit
 below, the event is accepted and its stored `payload` keeps everything that was sent; what is cut is the indexed copy
 that search, facets, `record:`, scoped reads and exports read. The event detail (`GET /v1/events/{id}`, `payload`) and
 the complete export (`format=jsonl-evidence`) return the original.
 
 | Limit | Value | Past it | Flagged |
 | --- | --- | --- | --- |
+| Event id | 256 UTF-16 code units (after trimming) | An id that is longer, holds NUL or an unpaired surrogate is **rejected** | `rejected[]`, `invalid_event_id` |
 | Event size | 262144 bytes (256 KiB), the event as JSON once parsed | The event is **rejected** | `rejected[]`, `invalid_event` |
-| Number depth | 1000 levels of nesting | An event holding a number deeper than this is **rejected** (it could not be stored exactly) | `rejected[]`, `invalid_event` |
-| Targets indexed | 64 | Only the first 64 entries, in the order sent, feed the record index (a numeric id too long to index never does). A record named only after them does not find the event by `record:`, `target:` or a target scope. | Warning `targets_truncated`, attribute `logbird.truncated.targets` |
+| Number depth | 1000 levels of nesting | An event that nests deeper than this and also holds, anywhere, a number a double cannot keep exactly is **rejected** | `rejected[]`, `invalid_event` |
+| Targets indexed | 64 | Only the first 64 entries, in the order sent, feed the target index (a numeric id too long to index never does). A record (type and id) named only after them is not found by `record:<type>:<id>` or a target scope; `target:<id>` matches ids alone, so it can still match through an indexed target with the same id. | Warning `targets_truncated`, attribute `logbird.truncated.targets` |
 | Changes indexed | 256 | Only the first 256 entries, in the order sent, are indexed. A field changed only after them is not found by `changes.field:`. | Warning `changes_truncated`, attribute `logbird.truncated.changes` |
-| Change field name | 256 UTF-16 code units | The name is indexed cut to at most 256 code units (after trimming surrounding whitespace). | Warning `change_fields_truncated`, attribute `logbird.truncated.changeFields` |
-| Attributes indexed | 256 keys | Fields outside the envelope are flattened into attributes; keys past the 256th are not indexed. Logbird's own reserved keys (`logbird.occurredAt.rejected`, `logbird.truncated.*`) are added after them and do not count. | No |
+| Change field name | 256 UTF-16 code units | Among the indexed changes, a longer name is indexed cut to at most 256 code units (after trimming surrounding whitespace). A long name only past the 256th change is covered by `changes_truncated`. | Warning `change_fields_truncated`, attribute `logbird.truncated.changeFields` |
+| Attributes indexed | 256 keys | Fields outside the envelope are flattened into attributes; keys past the 256th are not indexed. A producer value under a reserved key (`logbird.occurredAt.rejected`, `logbird.truncated.*`) takes a slot like any key and is then dropped or replaced; Logbird's own values are added after the 256 and do not count. | No |
 | Attribute value | 2048 UTF-8 bytes | The value is indexed cut to at most 2048 bytes; a number that does not fit is not indexed. | No |
 | Attribute depth | 6 levels of nesting | An object nested deeper is indexed as JSON text at the sixth level. A key that itself contains dots adds more segments to the indexed path. | No |
 | Description | 4096 UTF-16 code units | Indexed cut to at most 4096. | No |
@@ -50,8 +53,10 @@ events need care:
 - Events stored by an earlier release (or by an earlier server during a rolling upgrade) carry no Logbird-issued
   count even when they were cut, and may hold a producer value under these keys. An exact retry of such an event is
   accepted without storing anything new: its answer warns about the cut, and the stored event keeps no count.
-- To be sure a count was issued by Logbird, compare it with the original payload (`targets.length`, `changes.length`).
-  The console does this, and shows its cut notes only when the payload confirms them.
+- The original payload tells whether a count is true (`targets.length`, `changes.length`), not who wrote it. The
+  console compares the two and shows its cut notes only when they agree. A masked reader has no payload to compare
+  with, and `attr.logbird.truncated.targets:*` can also find such an older producer value.
+- An exact retry needs the same string `id`: an event resent without one gets a new id and is stored again.
 
 Every reader of the event sees these attributes, including tenant-scoped keys, viewer tokens and masked scopes: they
 are counts, never values. A masked scope gets `payload: null` and no complete export, so it can see that an event was
@@ -74,6 +79,9 @@ To stay under the limits, split a bulk operation into several events that share 
 | Search count (`total`) | 10001 | `total` stops there and `totalExact` is false |
 | Detail parent walk | 100 parents | `parents` holds at most the 100 nearest ancestors (furthest first). The walk also stops at a parent that is not stored or not visible to the reader. |
 | Viewer-token request body | 16384 bytes (16 KiB) | 413 `payload_too_large` |
+| Viewer-token lifetime (`ttlSeconds`) | 60 to 3600 seconds (default 900) | 422 `validation_error` |
+| Facet attribute path (`attr.<path>`) | 4096 characters after the prefix | 422 `validation_error` |
+| Exports running at once | 1 per API key or console user, 2 per workspace, and a server-wide cap | 429 `export_busy` until one ends |
 | Time window of search, facets and export without `from` | 24 hours before `to` | Older events are not read: pass `from` for a longer history. Event detail by id has no window. |
 
 ### Rate limits
