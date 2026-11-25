@@ -8,7 +8,7 @@
 // <folder> holds the release asset set (scripts/npm-release-assets.mjs pack writes it). Without --manager and --source
 // it runs every combination. Each one:
 // 1. "downloads" the assets over HTTP from the stand-in (which redirects, as GitHub does) and, for --source=file,
-//    verifies them against SHA256SUMS the way the docs do (`sha256sum --check --ignore-missing` where it exists);
+//    verifies them against SHA256SUMS the way the docs do (`grep … SHA256SUMS | sha256sum --check` where it exists);
 // 2. writes a consumer with both packages as dependencies and the override that points the integration's own
 //    @logbird/sdk dependency at the same tarball (pnpm: pnpm-workspace.yaml; npm: package.json), then installs;
 // 3. requires the lockfile to pin both tarballs with the sha512 integrity of the released files and to hold a single
@@ -156,7 +156,11 @@ try {
             .digest('hex');
           check(sums.get(file) === digest, `${file} matches ${SUMS}`);
         }
-        if (!isWindows && spawnSync('sha256sum', ['--version']).status === 0) await run('sha256sum', ['--check', '--ignore-missing', SUMS], vendor);
+        // The documented command where sha256sum exists: only the selected tarballs' lines, and none may be missing.
+        if (!isWindows && spawnSync('sha256sum', ['--version']).status === 0) {
+          const pattern = ` logbird-(sdk|hono)-${version.replaceAll('.', '\\.')}\\.tgz$`;
+          await run('sh', ['-c', `grep -E '${pattern}' ${SUMS} | sha256sum --check`], vendor);
+        }
         for (const [name, file] of Object.entries(files)) spec[name] = `file:vendor/logbird/${file}`;
       } else {
         for (const [name, file] of Object.entries(files)) spec[name] = `${releaseUrl}${file}`;

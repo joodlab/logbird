@@ -1,11 +1,11 @@
 /**
- * Sends one event with every kind of party through the TypeScript SDK's redact(), with a pattern matching every party
+ * Sends one event with every kind of party through the TypeScript SDK's client redaction, with a pattern matching every party
  * key, to a live Logbird server, and prints its id, so the .NET live test
  * Both_sdks_store_the_same_parties_when_a_pattern_matches_every_party_key can read it back and compare it with the
  * event the .NET SDK sends. Run from the repository root:
  *   LOGBIRD_IT_ENDPOINT=... LOGBIRD_IT_INGEST_KEY=... pnpm exec tsx sdks/dotnet/tests/cross-sdk/send-redacted-event.ts
  */
-import { Logbird, redact, uuidv7 } from '../../../../packages/sdk/src/index';
+import { Logbird, uuidv7 } from '../../../../packages/sdk/src/index';
 
 const endpoint = process.env.LOGBIRD_IT_ENDPOINT;
 const apiKey = process.env.LOGBIRD_IT_INGEST_KEY;
@@ -15,7 +15,7 @@ let failure: Error | undefined;
 const client = new Logbird({
   endpoint,
   apiKey,
-  beforeSend: redact({ keys: /actor|impersonator|executor|tenant|targets/ }),
+  redaction: { keys: /actor|impersonator|executor|tenant|targets/ },
   onError: (error) => {
     failure = error;
   },

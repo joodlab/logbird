@@ -8,15 +8,18 @@ require a private workspace package. Keep envelope additions synchronized with c
 
 `@logbird/sdk` is not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases)
 attaches it as `logbird-sdk-X.Y.Z.tgz` (built JavaScript and type declarations) with a
-`SHA256SUMS` file. Download both, verify, and install the file:
+`SHA256SUMS` file. Download both, verify, and install the file. The commands are one
+chain, so a failed download or a checksum that does not match stops it before the install
+(on macOS, use `shasum -a 256 --check` for `sha256sum --check`; with npm, `npm install` for
+`pnpm add`):
 
 ```sh
 version=X.Y.Z
 base="https://github.com/joodlab/logbird/releases/download/v$version"
-mkdir -p vendor/logbird && cd vendor/logbird
-curl -fsSLO "$base/SHA256SUMS" && curl -fsSLO "$base/logbird-sdk-$version.tgz"
-sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
-cd ../.. && pnpm add ./vendor/logbird/logbird-sdk-$version.tgz   # or: npm install ./vendor/logbird/…
+mkdir -p vendor/logbird && cd vendor/logbird &&
+  curl -fsSLO "$base/SHA256SUMS" && curl -fsSLO "$base/logbird-sdk-$version.tgz" &&
+  grep " logbird-sdk-$version.tgz\$" SHA256SUMS | sha256sum --check &&
+  cd ../.. && pnpm add "./vendor/logbird/logbird-sdk-$version.tgz"
 ```
 
 Commit `vendor/logbird/` and the lockfile; the lockfile pins the tarball's SHA-512 integrity.
@@ -145,13 +148,12 @@ HTTP errors (except 429) drop the batch and report; transient failures retain it
 ## Host context options (0.2)
 
 ```ts
-import { Logbird, redact } from '@logbird/sdk';
+import { Logbird } from '@logbird/sdk';
 const client = new Logbird({
   endpoint: process.env.LOGBIRD_ENDPOINT,
   apiKey: process.env.LOGBIRD_INGEST_KEY,
   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY),
   defaults: { environment: 'staging' },
-  beforeSend: redact(),
   onError: () => console.warn('Audit delivery failed'),
 });
 client.track({ action: 'record.updated', metadata: { token: 'never stored' } });
@@ -162,43 +164,104 @@ An unset key requires `enabled: false`. Disabled clients require neither endpoin
 track does nothing and flush/shutdown resolve immediately. Enabled clients require both.
 Defaults are shallow merged under events; context and metadata merge one level deep.
 Explicit undefined values override defaults. beforeSend runs after defaults and id/time
-stamping, before serialization and size checks. Returning null/undefined silently filters;
-a throwing hook fails closed and reports onError. Neither counts as an overflow drop.
+stamping. Redaction runs next, followed by the 256 KiB check on the resulting JSON.
+Returning null/undefined silently filters. A throwing hook refuses the event, increments
+the drop count, and reports the refusal through onError and onDrop.
 
-`redact({ keys?, changeFields?, replacement? })` deep copies the event, redacts matching
-object-key values throughout objects/arrays, retaining the keys, and replaces present
-before/after values of matching change fields. Default replacement is `[redacted]`.
-Keys match as substrings (the default also redacts `tokenCount` and `secretary`; anchor
-your own pattern, `/^token$/`, to match whole keys). Identity is never redacted: the
-top-level `id` and `action`, and `IDENTIFIER_FIELDS` (the actor's type and id, the
-impersonator's and tenant's id, the executor's type, id, jobId and attempt, and each
-target's type and id). A pattern matching a party's own key (`actor`, `impersonator`,
-`executor`, `tenant` or `targets`), or a target's index, redacts that party's other
-fields, such as its name and email, and keeps its identifier fields; a party object is
-never replaced as a whole (a party that is not an object, such as a string `actor`, is
-replaced like any other value). A change's values are replaced when its `field` is a string the
-change pattern matches. The .NET SDK redacts by the same rules, checked against one shared
-fixture: with `DEFAULT_SECRET_KEYS` both redact exactly the same keys. A pattern of your
-own runs on each platform's engine, which differ at the edges (in .NET `$` also matches
-before a final line feed, and flags such as `i` fold case differently), so keep a pattern
-you share between the SDKs to plain alternatives and anchors. `redact()` is exact for JSON
-data, which is what `EventInput` types (plain objects, arrays, primitives, and `toJSON`
-values such as `Date` without side effects on other parts of the event); getters or
-`toJSON` with such side effects are outside that contract. A change whose `field` is a
-getter, an inherited or non-enumerable property, or a value (an object or a function) with a
-`toJSON` has its `before` and `after` redacted, whatever the pattern; any other non-string
-`field`, or none, is not matched.
-`DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
-cookies, credentials and private keys. Add email/phone patterns for your PII policy;
-the default secret pattern does not cover all PII. Supplying `keys` replaces the default pattern; combine them to retain secret protection. `changeFields` defaults to the resulting `keys` pattern. Hooks compose:
+## Redaction
+
+Every event passes through client redaction, including events from framework
+adapters, `createAudit`, and BullMQ's `jobAudit`. The SDK applies the rules to the
+value returned by `beforeSend` and checks the size of the redacted JSON. It
+reports preparation, redaction and size failures through `onError`, counts them
+in `client.dropped`, and supplies only the action and last validated event ID to
+`onDrop` when available.
+
+Redaction is on by default. `DEFAULT_SECRET_KEYS` matches passwords, secrets,
+tokens, OTPs, API keys, authorization, cookies, credentials and private keys.
+Pass `redaction: false` to disable client redaction. Use these options to set
+your policy.
+
+| Option | Behavior |
+| --- | --- |
+| `keys` | A regular expression that replaces the default pattern. It matches any part of a key at any depth unless you anchor it, as in `/^token$/`. The default also matches keys such as `tokenCount` and `secretary`. |
+| `addKeys` | Extra literal substrings checked separately from `keys`. ASCII letter case is ignored. Non-ASCII characters match exactly, and characters such as `.` are literal. |
+| `changeFields` | A regular expression for the `field` name of a change. This rule replaces its present `before` and `after` values and keeps the field name. Omit it to use `keys` and `addKeys` for matching change fields. |
+| `replacement` | A string that replaces each matched value. Defaults to `[redacted]`. |
+| `paths` | Exact locations to redact regardless of their key. |
+| `keepPaths` | Exact locations exempt from the key match at that node. Descendants still get checked. |
+
+After protecting the identifier fields, the SDK applies these rules in order.
+
+1. An explicit `paths` match forces redaction.
+2. A matching change field forces redaction of its present `before` and `after` values.
+3. A whole-party match redacts the party's non-identifier fields. For example,
+   `keys: /actor/` redacts the staff email even with `keepPaths: ['actor.email']`.
+4. A `keepPaths` match exempts the node from its own key match. For example,
+   keeping `actor` prevents `/actor/` from triggering whole-party redaction.
+5. The `keys` and `addKeys` rules redact matching keys and indices.
+
+Paths start at the event root. Each dot separates a case-sensitive segment.
+A segment of `*` matches exactly one object key or array index.
+For example, `targets.*.name` addresses every target's display name and
+`changes.0.after.email` addresses an object within the first change.
+Use `\.`, `\*` or `\\` in a path to match a literal dot, star or backslash.
+Double the backslashes in a JavaScript string, as in `'metadata.guest\\.email'` for
+the key `guest.email`. Paths match existing JSON locations. They support
+one-segment wildcards only and do not match value contents or select changes
+by field name. Invalid paths throw during setup and name the option and
+zero-based entry index.
+
+The SDK preserves top-level `id` and `action` and the party identifiers listed in
+`IDENTIFIER_FIELDS`. It reports rules that directly match identifiers once via
+`onError` when the client is constructed. An identifier that serializes to a
+JSON object or array causes the event to be refused. Matching an entire `actor`,
+`impersonator`, `executor`, `tenant`, or target object redacts all its other
+fields while preserving its identifiers. Matching `targets` applies that rule
+to every target. Malformed scalar party values can be replaced in full.
+
+This configuration keeps staff names and email addresses, redacts default secrets
+throughout the event, and masks guest personal data in metadata and changes.
 
 ```ts
-import { DEFAULT_SECRET_KEYS, redact } from '@logbird/sdk';
-
-const keys = new RegExp(DEFAULT_SECRET_KEYS.source + '|email|phone', 'i');
-const hide = redact({ keys });
-const beforeSend = event => event.action === 'health.checked' ? null : hide(event);
+const client = new Logbird({
+  endpoint,
+  apiKey,
+  redaction: {
+    addKeys: ['email', 'phone', 'notes', 'name'],
+    keepPaths: ['actor.name', 'actor.email', 'impersonator.name', 'impersonator.email'],
+  },
+});
+client.track({
+  action: 'guest.updated',
+  actor: { id: 'staff_42', name: 'Fictional Operator', email: 'staff@example.invalid' },
+  metadata: { guest: { email: 'guest@example.invalid', phone: '555-0100', notes: 'Fictional note' } },
+  changes: [{ field: 'guest.email', after: 'guest@example.invalid' }],
+});
 ```
+
+The added names apply to every event location and to change field names, with the
+four staff identity exemptions shown here. Filter outgoing data at the source as
+well, especially personal data in free text or under other key names.
+
+The exported `redact(options)` helper uses the same rules to produce a redacted
+copy and still works as a `beforeSend` hook. Client rules run on the hook result,
+so a value already replaced by the hook cannot be recovered by a client
+exemption. For hooks that must remain the sole redaction policy, set
+`redaction: false`. Redaction operates on the JSON representation, including
+values returned by `toJSON`. Supply plain data and serialization methods without
+side effects. If a change field comes from a getter, an inherited or
+non-enumerable property, a boxed string, a bigint, or a value with a `toJSON`
+method, the SDK redacts its change values.
+
+The default rules and literal `addKeys` matching use the same ASCII case rules
+in both SDKs. Custom `keys` and `changeFields` run on each platform's regex engine
+and agree where the engines interpret the pattern the same way. For example,
+`^label$` matches a key ending in a line feed in .NET, where `$` also matches
+before a final line feed. JavaScript requires the actual end for this pattern.
+For a strict end anchor in a shared expression, use a pattern such as
+`^label(?![\s\S])` (equivalent to `^label\z` in .NET). Prefer `addKeys` whenever
+a literal substring is enough.
 
 ## Standard Webhooks
 

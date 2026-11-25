@@ -7,7 +7,8 @@ tarballs, never the workspace sources, and check them the way a user would.
   - type-checks with `strict`, `exactOptionalPropertyTypes` and `skipLibCheck: false` (so the published declarations are
     checked too), under TypeScript 6.0 and 7.0, with `nodenext` and `bundler` resolution;
   - runs `src/main.ts` on Node against an in-process stand-in for the Logbird server: capture through the client and the
-    Hono middleware, `createAudit`, a read with `trailQuery`, webhook signing and verification, and redaction's identity rule.
+    Hono middleware, `createAudit`, a read with `trailQuery`, webhook signing and verification, client-level redaction,
+    and redaction's identity rule.
 - **`tests/npm-consumer-adapters`** covers `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start`, not
   published yet. It type-checks `src/adapters.ts` under TypeScript 6.0 and 7.0 (`skipLibCheck: true`, since the
   frameworks' own declarations are not ours to fix), at the framework versions tested today.

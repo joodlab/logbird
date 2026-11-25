@@ -164,7 +164,9 @@ for (const { name, reports } of project.report) {
   // this folder, so its own imports still resolve), and the config is written into that copy. Otherwise a shared
   // declaration chunk (dist/index-<hash>.d.mts) would be reported as an opaque import and its members never compared.
   const folder = join(temp, name.replace('/', '__'));
-  cpSync(join(here, 'node_modules', ...name.split('/')), folder, { recursive: true });
+  // The tarballs contain declarations but no original sources. API Extractor can resolve an unmapped source-map
+  // entry to the dist directory and try to read it as a file. Analyze the published declarations directly.
+  cpSync(join(here, 'node_modules', ...name.split('/')), folder, { recursive: true, filter: (path) => !path.endsWith('.map') });
   for (const [reportName, entry] of Object.entries(reports)) {
     const report = `${reportName}.api.md`;
     const config = {

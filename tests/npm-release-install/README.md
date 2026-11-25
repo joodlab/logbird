@@ -7,7 +7,7 @@ application outside this repository that installs `@logbird/sdk` and `@logbird/h
 for each package manager and source:
 
 - **downloaded tarballs** (`file:`, the recommended recipe): downloads the two tarballs and `SHA256SUMS`, verifies
-  them (with `sha256sum --check --ignore-missing` where it exists);
+  them (with the documented `grep … SHA256SUMS | sha256sum --check` where `sha256sum` exists);
 - **Release URLs**: depends on the URLs directly (npm gets `allow-remote=root` in `.npmrc`, which npm 12 requires);
 
 then requires:

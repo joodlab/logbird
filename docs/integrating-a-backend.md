@@ -43,16 +43,18 @@ Requirements, as the packages' manifests state them:
 ```sh
 version=X.Y.Z
 base="https://github.com/joodlab/logbird/releases/download/v$version"
-mkdir -p vendor/logbird
-cd vendor/logbird
-curl -fsSLO "$base/SHA256SUMS"
-curl -fsSLO "$base/logbird-sdk-$version.tgz"
-curl -fsSLO "$base/logbird-hono-$version.tgz"   # only the integrations you use
-sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
-cd ../..
+mkdir -p vendor/logbird && cd vendor/logbird &&
+  curl -fsSLO "$base/SHA256SUMS" &&
+  curl -fsSLO "$base/logbird-sdk-$version.tgz" &&
+  curl -fsSLO "$base/logbird-hono-$version.tgz" &&
+  grep -E " logbird-(sdk|hono)-$version\.tgz\$" SHA256SUMS | sha256sum --check &&
+  cd ../..
 ```
 
-Every downloaded tarball must print `OK`. Commit `vendor/logbird/` with your project: the
+Download only the integrations you use, and name each one in the `grep` pattern. On
+macOS, use `shasum -a 256 --check` for `sha256sum --check`. Every tarball must print `OK`;
+the chain stops at a failed download or a mismatch, and you must not install from that
+folder until it passes. Commit `vendor/logbird/` with your project: the
 build then installs the same bytes every time and never depends on GitHub being reachable.
 
 **2. Depend on the files.** `@logbird/hono` (like every integration) depends on
@@ -114,14 +116,15 @@ A source checkout of this repository is for contributing to Logbird
 ([CONTRIBUTING.md](../CONTRIBUTING.md)), not for installing it in an application.
 
 ```ts
-import { DEFAULT_SECRET_KEYS, Logbird, redact } from '@logbird/sdk';
+import { Logbird } from '@logbird/sdk';
 
 const audit = new Logbird({
   endpoint: process.env.LOGBIRD_ENDPOINT!,
   apiKey: process.env.LOGBIRD_INGEST_KEY!,
-  beforeSend: redact({
-    keys: new RegExp(DEFAULT_SECRET_KEYS.source + '|email|phone', 'i'),
-  }),
+  redaction: {
+    addKeys: ['email', 'phone', 'notes', 'name'],
+    keepPaths: ['actor.name', 'actor.email', 'impersonator.name', 'impersonator.email'],
+  },
   maxQueueSize: 1000,
   onError: () => console.warn('Audit delivery failed'),
   onDrop: () => console.warn('Audit event dropped'),
@@ -148,17 +151,16 @@ SDK error objects that may contain sensitive details.
 
 Copy only allowlisted fields. Avoid request bodies, session objects, customer
 messages and full database rows. Prefer IDs over personal information.
-`redact()` deep copies the event and replaces matching object-key values and
-matching change fields' `before`/`after` values with `[redacted]`; keys remain.
-Keys match as substrings. Identifier fields (party ids and types, an executor's
-job id and attempt, each target's type and id) are never redacted; a pattern that
-matches a party's own key, such as `actor`, redacts its name, email and other
-fields and keeps its identifiers. The .NET SDK follows the same rules.
-Supplying `keys` replaces `DEFAULT_SECRET_KEYS`, so combine the patterns as above
-to retain default secret protection while adding personal-data fields.
-`changeFields` defaults to that same combined pattern. Inspect the stored raw
-payload as well as attributes.
-See [SDK redaction options](../packages/sdk/README.md#host-context-options-02).
+The client redacts common secret keys by default, after `beforeSend` and
+before checking the size of the outgoing JSON. The configuration above also
+redacts keys containing `email`, `phone`, `notes`, or `name` wherever they occur,
+while keeping the staff names and emails at the four listed paths. A change
+whose `field` is `guest.email` has its present `before` and `after` values replaced
+and keeps the field name. The extra key names are literal substrings that ignore
+ASCII case. Use `paths` to redact a specific location such as
+`metadata.guest.contact` regardless of its key. An exemption applies at its exact path.
+Inspect the stored raw payload as well as indexed attributes.
+See [SDK redaction options](../packages/sdk/README.md#redaction).
 
 ### What search can find
 

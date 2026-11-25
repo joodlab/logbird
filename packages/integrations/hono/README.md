@@ -15,7 +15,7 @@
 
 Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches
 `logbird-hono-X.Y.Z.tgz` and `logbird-sdk-X.Y.Z.tgz` with a `SHA256SUMS` file. Download both
-into `vendor/logbird/`, verify them with `sha256sum --check --ignore-missing SHA256SUMS`,
+into `vendor/logbird/`, verify both against `SHA256SUMS` (stop if either does not print `OK`),
 depend on both files, and override `@logbird/sdk` to the same SDK tarball (this package
 depends on the SDK at exactly its own version, which no registry serves yet):
 

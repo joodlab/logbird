@@ -250,9 +250,9 @@ is tagged or attached and the run fails. A pull request's run of the npm workflo
 the asset set a release of that commit would attach.
 
 With assets, `gh release create` creates a draft, uploads every file and publishes the
-release only when all uploads succeed. If an upload fails, a draft release is left
-behind: delete that draft, then use "Re-run failed jobs" (the artifacts are kept for
-seven days).
+release only when all uploads succeed. If an upload fails, it deletes that draft itself;
+then use "Re-run failed jobs" (the artifacts are kept for seven days). Only if the job log
+shows that the cleanup failed too, delete the leftover draft release before re-running.
 
 ## NuGet packages (.NET SDK)
 

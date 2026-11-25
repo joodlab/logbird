@@ -6,13 +6,14 @@ const sourceInstall = `git clone ${SELF_HOST_VERSION ? `--branch v${SELF_HOST_VE
 pnpm -C ../logbird install
 pnpm add @logbird/sdk@link:../logbird/packages/sdk`;
 
-const quickstart = `import { Logbird } from '@logbird/sdk';
+const quickstart = `import { Logbird, redact } from '@logbird/sdk';
 
 const client = new Logbird({
   endpoint: process.env.LOGBIRD_ENDPOINT, // your Logbird origin, e.g. https://audit.example.com
   apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
   defaults: { environment: 'production' },
+  beforeSend: redact(),
   onError: (error) => console.error(error.message), // capture errors, permanent rejections and background flush failures
   onDrop: (event) => console.warn('audit event dropped', event.action), // events the server rejects or a full queue discards
 });
@@ -224,7 +225,7 @@ export const developers = {
       'Keep ingest keys on the server. Never ship one in a browser bundle.',
     ],
     limit:
-      '**Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.',
+      '**Redaction:** The tagged quickstart uses `beforeSend: redact()` to replace common secret values before sending. SDK builds with client redaction apply the secret-key rules by default and support `addKeys` and `keepPaths` for your own policy. When you switch to client redaction, remove the hook before relying on `keepPaths` because the hook masks values first.',
     sourceInstallTitle: 'From source (not on npm yet)',
     quickstartTitle: 'server.ts',
     npmNote: byRepo(SITE, {
