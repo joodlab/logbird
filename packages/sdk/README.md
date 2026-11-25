@@ -207,7 +207,8 @@ event stored during the pass with a timestamp behind your position (or before `f
 time in `q` (`receivedAt:>now-1h`) moves with each request. To pick up late arrivals, read again later over a window
 that covers when they can have occurred, with `receivedAt:>=` in `q` starting well before the last `receivedAt` you saw
 (receipt times are not a strict sequence), and skip ids you already have. Breaking out of the loop stops the pass before
-its next request.
+its next request. To drop repeats, a pass keeps every id it has yielded (roughly 100 bytes per event), so its memory grows with the
+trail: split a very large window into several passes.
 
 `readAuditEvent(options, id)` returns one event with its nearest ancestors (`parents`, furthest first), how many events
 name it as their parent (`childCount`; list them with `parent:` and the id quoted by the query language rules, over a

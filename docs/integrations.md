@@ -12,8 +12,9 @@ Ingest runs only on servers. Never put an ingest or read key in public runtime c
 components or browser bundles. Vue only calls an application-owned, authenticated backend.
 The backend must authorize the requested tenant/record, including every cursor request.
 A project read key is project-wide; a query filter is not authorization.
-`trailQuery` never widens a read: it throws a `TypeError` for a trail with no target, actor, tenant or query, and for a
-selector key passed without a value (`tenant: session.tenantId` with no tenant id), and the Vue and TanStack integrations
+`trailQuery` never widens a read or silently shortens one: it throws a `TypeError` for a trail with no target, actor,
+tenant or query, for a selector key passed without a value (`tenant: session.tenantId` with no tenant id), and for a
+trail without `range.from` (pass `range: SERVER_DEFAULT_RANGE` to read the last 24 hours on purpose), and the Vue and TanStack integrations
 then report an error instead of fetching. The one exception is the Nuxt composable: it talks only to its own read route,
 whose `authorize` decides the scope on the server, so `useAuditTrail({})` sends an empty trail there; the route refuses
 a trusted query without `q`. Every read helper first copies its input into a frozen snapshot of strings and numbers,
