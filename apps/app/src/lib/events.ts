@@ -1,5 +1,6 @@
 import { type AuditEvent, supportsExactJson } from '@logbird/contracts';
 import { changeValuePreview, REDACTED_CHANGE_VALUE } from './change-values';
+import { formatRetention } from './format';
 
 const VERB_PAST: Record<string, string> = {
   created: 'created',
@@ -95,7 +96,7 @@ export function eventSentence(e: AuditEvent): string {
   // cancellation policy from flexible to strict"), else from the rest of the action ("member.role.changed" → "changed
   // ‹target›’s role").
   if (target?.name && CHANGE_VERBS.has(verb)) {
-    const fromChanges = changeSentence(e.changes, target.name);
+    const fromChanges = changeSentence(e, target.name);
     if (fromChanges) return `${who} ${fromChanges}`;
     const attribute = ownKind ? '' : noun.split('.').slice(1).join('.');
     if (attribute) return `${who} ${verbText} ${possessive(target.name)} ${humanizeNoun(attribute)}`;
@@ -137,19 +138,38 @@ function joinWords(words: string[]): string {
   return words.length <= 1 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
 }
 
+function isWholeDayCount(text: string): boolean {
+  const days = Number(text);
+  return days >= 0 && Number.isSafeInteger(days) && String(days) === text;
+}
+
 /**
  * "changed ‹target›’s role from admin to member" for one recorded change; "changed ‹target›’s name and description"
  * for several. Null when there are no changes to describe.
  */
-export function changeSentence(changes: AuditEvent['changes'] | undefined, targetName: string): string | null {
-  const list = (changes ?? []).filter((c) => c.field);
+function changeSentence(event: AuditEvent, targetName: string): string | null {
+  const list = (event.changes ?? []).filter((c) => c.field);
   if (list.length === 0) return null;
   const owner = possessive(targetName);
   if (list.length > 1) return `changed ${owner} ${joinWords([...new Set(list.map((c) => fieldLabel(c.field)))])}`;
   const [c] = list as [AuditEvent['changes'][number]];
   const label = fieldLabel(c.field);
+  // The read API uses the server-assigned ws:<organizationId> project ID for workspace audit events.
+  const workspaceActivity = event.projectId?.startsWith('ws:');
+  const retention =
+    workspaceActivity &&
+    c.field === 'retentionDays' &&
+    (c.beforeKind === undefined || c.beforeKind === 'number') &&
+    (c.afterKind === undefined || c.afterKind === 'number') &&
+    isWholeDayCount(c.before) &&
+    isWholeDayCount(c.after);
   const inlineValue = (text: string, kind: typeof c.beforeKind) => {
     if (kind === 'absent' || (!kind && !text)) return '';
+    if (workspaceActivity && c.field === 'role' && (kind === undefined || kind === 'string')) {
+      const roles = text.split(',').map((token) => token.trim());
+      if (roles.every((role) => Object.hasOwn(ROLE_LABEL, role))) return roles.map((role) => ROLE_LABEL[role]).join(', ');
+    }
+    if (retention) return formatRetention(Number(text));
     return changeValuePreview(text, kind);
   };
   const before = inlineValue(c.before, c.beforeKind);
@@ -157,7 +177,10 @@ export function changeSentence(changes: AuditEvent['changes'] | undefined, targe
   const showable = (v: string) => v.length <= MAX_INLINE_VALUE;
   if (c.before === REDACTED_CHANGE_VALUE || c.after === REDACTED_CHANGE_VALUE) return `changed ${owner} ${label}`;
   if (!(showable(before) && showable(after))) return `changed ${owner} ${label}`;
-  if (before && after && before !== after) return `changed ${owner} ${label} from ${before} to ${after}`;
+  if (before && after && before !== after) {
+    const unit = retention && before.endsWith(' days') && after.endsWith(' days') ? ' days' : '';
+    return `changed ${owner} ${label} from ${unit ? before.slice(0, -unit.length) : before} to ${after}`;
+  }
   if (c.beforeKind === 'absent' && after) return `set ${owner} ${label} to ${after}`;
   if (c.afterKind === 'absent' && before) return `removed ${owner} ${label}`;
   return `changed ${owner} ${label}`;
