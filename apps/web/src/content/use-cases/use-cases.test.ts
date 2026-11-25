@@ -114,7 +114,7 @@ describe('the customer page authorize() sample', () => {
   it("forwards only the signed-in account's tenant term, quoted, with the cursor, ignoring the browser's filter", async () => {
     const trusted = await load({ canViewHistory: true, tenantId: 'biz_7' }).authorize({}, browser);
     const { from, ...rest } = trusted as { from: string };
-    expect(rest).toStrictEqual({ q: 'tenant:"biz_7"', cursor: 'next-page', limit: undefined });
+    expect(rest).toStrictEqual({ q: 'tenant:"biz_7"', cursor: 'next-page' });
     // The sample names a fixed window.
     expect(from).toBe('2026-01-01T00:00:00Z');
     const quoted = await load({ canViewHistory: true, tenantId: 'a" OR tenant:"b' }).authorize({}, {});

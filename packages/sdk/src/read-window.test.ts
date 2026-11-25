@@ -467,3 +467,96 @@ describe('round three: shapes and ownership', () => {
     }
   });
 });
+
+describe('closed check: inherited fields, single pages and wire shapes', () => {
+  const reply = (pages: unknown[]) => {
+    let i = 0;
+    const fetch = vi.fn(async () => json(pages[Math.min(i++, pages.length - 1)]));
+    return { fetch, options: { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch } };
+  };
+  const collect = async (options: Parameters<typeof iterateAuditTrail>[0], trail: WholeTrailQuery) => {
+    const seen: string[] = [];
+    let error: unknown;
+    try {
+      for await (const e of iterateAuditTrail(options, trail)) seen.push(e.id);
+    } catch (cause) {
+      error = cause;
+    }
+    return { seen, error: (error as { code?: string } | undefined)?.code ?? (error instanceof Error ? error.message : undefined) };
+  };
+  const withProto = async (fields: Record<string, unknown>, run: () => Promise<void>) => {
+    const proto = Object.prototype as Record<string, unknown>;
+    Object.assign(proto, fields);
+    try {
+      await run();
+    } finally {
+      for (const key of Object.keys(fields)) delete proto[key];
+    }
+  };
+
+  it('never starts a pass at a cursor or ends it at a bound inherited from Object.prototype', async () => {
+    const { options, fetch } = reply([{ data: [event('a')], nextCursor: null, total: 1, range: { from: FROM, to: TO }, tookMs: 1 }]);
+    await withProto({ cursor: 'mid-window', to: '2026-11-01T00:00:00.500Z' }, async () => {
+      const trail = Object.assign(Object.create(null), { tenant: 'acme', range: Object.assign(Object.create(null), { from: FROM }) });
+      expect(await collect(options, trail)).toEqual({ seen: ['a'], error: undefined });
+      const sent = new URL(String((fetch.mock.calls[0] as unknown as [URL])[0])).searchParams;
+      expect([sent.get('cursor'), sent.get('to')]).toEqual([null, null]);
+      // trailQuery's result has no prototype, so a later reader of it cannot pick those up either.
+      expect(Object.getPrototypeOf(trailQuery({ tenant: 'acme', range: { from: FROM } }))).toBeNull();
+    });
+  });
+
+  it('refuses a page whose cursor or ids are only inherited, before yielding it', async () => {
+    const noCursor = { data: [event('a')], total: 1, range: { from: FROM, to: TO }, tookMs: 1 };
+    const noIds = {
+      data: [
+        { ...event('a'), id: undefined },
+        { ...event('b'), id: undefined },
+      ],
+      nextCursor: null,
+      total: 2,
+      range: { from: FROM, to: TO },
+      tookMs: 1,
+    };
+    await withProto({ nextCursor: null, id: 'inherited' }, async () => {
+      expect(await collect(reply([noCursor]).options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+        seen: [],
+        error: 'read_invalid_response',
+      });
+      expect(await collect(reply([JSON.parse(JSON.stringify(noIds))]).options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+        seen: [],
+        error: 'read_invalid_response',
+      });
+    });
+  });
+
+  it('refuses a single page from a server that reports no window when the trail has no `to`', async () => {
+    const future = { data: [{ ...event('a'), timestamp: '2099-01-01T00:00:00.000Z' }], nextCursor: null, total: 1, tookMs: 1 };
+    expect(await collect(reply([future]).options, { tenant: 'acme', range: { from: FROM } })).toEqual({ seen: [], error: 'read_window_unverified' });
+  });
+
+  it('answers an impossible calendar date in a reported window with its code, not a RangeError', async () => {
+    const bad = { data: [event('a')], nextCursor: null, total: 1, range: { from: FROM, to: '2026-13-01T00:00:00.000Z' }, tookMs: 1 };
+    expect(await collect(reply([bad]).options, { tenant: 'acme', range: { from: FROM } })).toEqual({ seen: [], error: 'read_window_unverified' });
+  });
+
+  it('turns a throwing transport getter into a LogbirdError', () => {
+    const options = {
+      endpoint: 'https://logbird.test',
+      readKey: 'k',
+      get fetch(): typeof globalThis.fetch {
+        throw new Error('secret host detail');
+      },
+    };
+    expect(() => iterateAuditTrail(options, { tenant: 'acme', range: { from: FROM } })).toThrow(
+      expect.objectContaining({ code: 'read_request_failed' }),
+    );
+  });
+
+  it('refuses a detail whose attributes are a number', async () => {
+    const body = `{"event":${JSON.stringify(event('e1')).replace('"attributes":{}', '"attributes":9007199254740993')},"payload":null,"parents":[],"childCount":0,"operationSize":1}`;
+    const fetch = vi.fn(async () => new Response(body, { status: 200 }));
+    const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+    await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: 'read_invalid_response' });
+  });
+});

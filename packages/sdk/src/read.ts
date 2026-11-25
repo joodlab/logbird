@@ -1,4 +1,4 @@
-import { isExactNumber, parseJsonExact, supportsExactJson } from '@logbird/contracts/json';
+import { isExactNumber, isRawJson, parseJsonExact, supportsExactJson } from '@logbird/contracts/json';
 import { parseQueryExpression } from '@logbird/contracts/query-syntax';
 import { formatRecordTerm, quoteQueryValue } from '@logbird/contracts/record-selector';
 
@@ -364,7 +364,10 @@ function assertSelfContained(q: string) {
  */
 export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
   const trail = snapshotTrail(input);
-  const { target, actor, tenant, q } = trail;
+  const target = own(trail, 'target');
+  const actor = own(trail, 'actor');
+  const tenant = own(trail, 'tenant');
+  const q = own(trail, 'q');
   if (q !== undefined) assertSelfContained(q);
   if (!target && actor === undefined && tenant === undefined && q === undefined)
     fail('trailQuery', 'a trail needs a target, actor, tenant or query; an empty trail would be the whole project.');
@@ -377,7 +380,16 @@ export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
   const window = trailWindow(trail);
   // `order` only when the trail gives one, so a caller's own order around the result is not overwritten.
   const order = own(trail, 'order');
-  return { ...window, q: terms.join(' AND '), ...(order ? { order } : {}), limit: trail.limit, cursor: trail.cursor };
+  const limit = own(trail, 'limit');
+  const cursor = own(trail, 'cursor');
+  // A null-prototype result: a field it does not hold can never be read through Object.prototype downstream.
+  return Object.assign(Object.create(null) as Partial<SearchQuery>, {
+    ...window,
+    q: terms.join(' AND '),
+    ...(order ? { order } : {}),
+    ...(limit === undefined ? {} : { limit }),
+    ...(cursor === undefined ? {} : { cursor }),
+  });
 }
 /** A snapshot field the snapshot itself holds: never one inherited through Object.prototype. */
 const own = <K extends keyof TrailSnapshot>(trail: TrailSnapshot, key: K): TrailSnapshot[K] | undefined =>
@@ -424,7 +436,7 @@ function retainRead(fetcher: typeof fetch, work: Promise<unknown>, cleanup: () =
 function textFields(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
   if (!isObject(value) || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
-  return fields.every((field) => typeof record[field] === 'string');
+  return fields.every((field) => Object.hasOwn(record, field) && typeof record[field] === 'string');
 }
 
 const storedEventText = [
@@ -453,7 +465,10 @@ function isStoredChange(change: unknown): boolean {
 
 function isStoredEvent(value: unknown): boolean {
   if (!textFields(value, storedEventText)) return false;
+  const required = ['actor', 'impersonator', 'executor', 'tenant', 'source', 'targets', 'changes', 'context', 'attributes', 'conformance'];
+  if (!required.every((field) => Object.hasOwn(value, field))) return false;
   const { actor, impersonator, executor, tenant, source, targets, changes, context, attributes, conformance } = value;
+  if (isRawJson(attributes)) return false;
   return (
     (actor === null || textFields(actor, ['type', 'id', 'name', 'email'])) &&
     (impersonator === null || textFields(impersonator, ['id', 'name'])) &&
@@ -510,6 +525,7 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
     const result = value as SearchResponse | null;
     if (
       !result ||
+      !['data', 'nextCursor', 'total', 'tookMs'].every((field) => Object.hasOwn(result, field)) ||
       !Array.isArray(result.data) ||
       !result.data.every(isStoredEvent) ||
       !(result.nextCursor === null || typeof result.nextCursor === 'string') ||
@@ -712,7 +728,10 @@ const sameBound = (asked: string, applied: string) => Date.parse(applied) === Ma
 const UNAMBIGUOUS_BOUND = /(?:Z|[+-]\d{2}:?\d{2})$|^\d{4}-\d{2}-\d{2}$/i;
 /** The server's instant form: ISO 8601 UTC with exactly three fractional digits. */
 const instant = (value: unknown): value is string =>
-  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && new Date(value).toISOString() === value;
+  typeof value === 'string' &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
+  Number.isFinite(Date.parse(value)) &&
+  new Date(value).toISOString() === value;
 const validRange = (range: unknown): range is { from: string; to: string } =>
   !!range &&
   typeof range === 'object' &&
@@ -747,7 +766,12 @@ export function iterateAuditTrail(options: ReadOptions, trail: WholeTrailQuery, 
       fail('iterateAuditTrail', 'a bound has no time zone: give it `Z` or an offset (or pass a Date), so each page can be checked.');
   if (!isRecord(options)) fail('iterateAuditTrail', 'expects an options object.');
   // Read once: the pass uses the endpoint, key and transport given when it was created.
-  const transport: unknown = options.fetch;
+  let transport: unknown;
+  try {
+    transport = options.fetch;
+  } catch {
+    throw new LogbirdError('read_request_failed');
+  }
   if (transport !== undefined && typeof transport !== 'function') fail('iterateAuditTrail', '`fetch` must be a function.');
   const reader: ReadOptions = Object.freeze({
     endpoint: text('iterateAuditTrail', 'endpoint', options.endpoint),
@@ -771,16 +795,17 @@ async function* pages(reader: ReadOptions, first: Partial<SearchQuery>, signal?:
         throw new LogbirdError('read_window_unverified');
       pinned = { from: reported.from, to: reported.to };
     }
+    // Without a reported window or a `to` there is no end to check rows against: refuse before yielding anything.
+    if (!pinned && asked.to === undefined) throw new LogbirdError('read_window_unverified');
     const start = Date.parse(pinned?.from ?? asked.from);
-    const end = Date.parse(pinned?.to ?? asked.to ?? '');
+    const end = Date.parse((pinned?.to ?? asked.to) as string);
     for (const event of page.data) {
       const at = Date.parse(event.timestamp);
-      if (!(at >= start && (Number.isNaN(end) || at < end))) throw new LogbirdError('read_window_unverified');
+      if (!(at >= start && at < end)) throw new LogbirdError('read_window_unverified');
     }
     const next = page.nextCursor;
-    if (next !== null && (used.has(next) || (!pinned && asked.to === undefined)))
-      // A repeated cursor would loop; without a reported window or a `to`, the next page's end would move.
-      throw new LogbirdError(used.has(next) ? 'read_invalid_response' : 'read_window_unverified');
+    // A repeated cursor would loop.
+    if (next !== null && used.has(next)) throw new LogbirdError('read_invalid_response');
     for (const event of page.data) {
       signal?.throwIfAborted();
       if (yielded.has(event.id)) continue; // an id stored at two positions (older data) is yielded once

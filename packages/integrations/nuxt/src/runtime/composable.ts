@@ -41,7 +41,11 @@ export function useAuditTrail(options: MaybeRefOrGetter<NuxtAuditTrailOptions>) 
       trail,
       range && typeof range === 'object' ? { range: Object.assign(Object.create(null), bounds) } : {},
     );
-    const query = empty ? { ...bounds, ...(order ? { order } : {}), limit: trail.limit } : trailQuery(own as TrailQuery);
+    const limit = Object.hasOwn(trail, 'limit') ? trail.limit : undefined;
+    // Null prototypes all the way to the fetcher: no field it lacks can be read through Object.prototype later.
+    const query = empty
+      ? Object.assign(Object.create(null), { ...bounds, ...(order ? { order } : {}), ...(limit === undefined ? {} : { limit }) })
+      : trailQuery(own as TrailQuery);
     return { query, fetcher, session };
   });
 }

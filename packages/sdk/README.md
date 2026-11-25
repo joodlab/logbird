@@ -202,7 +202,7 @@ is sent with that window and must report it, every yielded event lies in it, and
 no next cursor. A page that fails any of these checks fails the pass with a `LogbirdError` (`read_window_unverified`
 or `read_invalid_response`) before any of its events is yielded, so a pass never yields a row twice or from outside the
 window, and never stops early without an error. Against a server that does not report its window, a trail without
-`to` fails before its second page. **It does not guarantee** a snapshot: each page is read when it is requested, so an
+`to` fails before yielding anything. **It does not guarantee** a snapshot: each page is read when it is requested, so an
 event stored during the pass with a timestamp behind your position (or before `from`) is not returned, and a relative
 time in `q` (`receivedAt:>now-1h`) moves with each request. To pick up late arrivals, read again later over a window
 that covers when they can have occurred, with `receivedAt:>=` in `q` starting well before the last `receivedAt` you saw
