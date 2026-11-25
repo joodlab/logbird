@@ -7,9 +7,10 @@
  * name is sensitive when it:
  * - contains `@`; or
  * - equals the email; or
- * - was cut at its 512-unit storage cap (511 or more UTF-16 units stored) and is a non-empty prefix of the email.
- * A sensitive name shows as a pseudonym: of the stored email when the name contains it (or is that capped prefix), so
- * it matches the email's own pseudonym; otherwise of the normalised name. It masks more than strictly needed; never less.
+ * - was cut at its 512-unit storage cap (511 or more UTF-16 units stored): the cut can fall inside an address, leaving
+ *   its local part without the `@` (and with no email to compare against), so a capped name always counts.
+ * A sensitive name shows as a pseudonym: of the stored email when the name contains it (or is a capped prefix of it),
+ * so it matches the email's own pseudonym; otherwise of the normalised name. It masks more than strictly needed; never less.
  */
 import { createHmac } from 'node:crypto';
 
@@ -29,12 +30,13 @@ const ASTRAL_RE2 = '[\\x{10000}-\\x{10FFFF}]';
 const NAME_CAP_REACHED = 511;
 
 const normalized = (value: string) => value.replace(SPACES, '').toLowerCase();
-const cappedPrefix = (name: string, n: string, e: string) => name.length >= NAME_CAP_REACHED && n !== '' && e.startsWith(n);
+const capped = (name: string) => name.length >= NAME_CAP_REACHED;
+const cappedPrefix = (name: string, n: string, e: string) => capped(name) && n !== '' && e.startsWith(n);
 /** Whether an actor name carries an address under the mask rule. */
 export function actorNameIsSensitive(name: string, email: string) {
   const n = normalized(name);
   const e = normalized(email);
-  return n.includes('@') || (e !== '' && (n === e || cappedPrefix(name, n, e)));
+  return n.includes('@') || (e !== '' && n === e) || capped(name);
 }
 /** What a sensitive name's pseudonym hashes: the stored email when the name contains it, else the normalised name. */
 export function actorNamePseudonymInput(name: string, email: string) {
@@ -60,9 +62,10 @@ const IMPERSONATOR: Party = { name: 'impersonator_name', email: `attributes['${I
 function partySql({ name, email }: Party) {
   const N = sqlNormalized(name);
   const E = sqlNormalized(email);
-  const cappedPrefix = `(${sqlUtf16Length(name)}>=${NAME_CAP_REACHED} AND ${N}!='' AND startsWith(${E},${N}))`;
+  const capped = `${sqlUtf16Length(name)}>=${NAME_CAP_REACHED}`;
+  const cappedPrefix = `(${capped} AND ${N}!='' AND startsWith(${E},${N}))`;
   /** SQL form of `actorNameIsSensitive` over the stored columns (UInt8). */
-  const sensitive = `(position(${N},'@')>0 OR (${E}!='' AND (${N}=${E} OR ${cappedPrefix})))`;
+  const sensitive = `(position(${N},'@')>0 OR (${E}!='' AND ${N}=${E}) OR ${capped})`;
   /** SQL form of `actorNamePseudonymInput`, lower-cased as `maskedEmail` lower-cases its input. */
   const pseudonymInput = `if(${E}!='' AND (position(${N},${E})>0 OR ${cappedPrefix}),lowerUTF8(${email}),${N})`;
   return { sensitive, text: `if(${sensitive},${pseudonymInput},${name})` };

@@ -41,13 +41,18 @@ describe('the name rule shared by events and SQL', () => {
     [510, false],
     [511, true],
     [512, true],
-  ])('a name of %i UTF-16 units that is a prefix of the address is the address: %s', (units, expected) => {
+  ])('a name of %i UTF-16 units (cut at the cap from 511 on) is treated as an address: %s', (units, expected) => {
     const email = 'alice@example.com';
     const name = `alice${' '.repeat(units - 5)}`;
     expect(name.length).toBe(units);
     expect(actorNameIsSensitive(name, email)).toBe(expected);
-    // A prefix that is not the address's start never counts, at any length.
-    expect(actorNameIsSensitive(`bob${' '.repeat(units - 3)}`, email)).toBe(false);
+    // A capped name counts whatever it ends with, with or without an email: the cut can fall inside an address and
+    // leave only its local part ("... rita.long" from "... rita.long@example.org").
+    expect(actorNameIsSensitive(`bob${' '.repeat(units - 3)}`, email)).toBe(expected);
+    const label = `Support ${'-'.repeat(units - 17)}rita.long`;
+    expect(label.length).toBe(units);
+    expect(actorNameIsSensitive(label, '')).toBe(expected);
+    expect(actorNameIsSensitive(label, 'rita.long@example.org')).toBe(expected);
   });
 });
 

@@ -10,7 +10,7 @@ import {
 } from './actor-name-mask';
 import { facetColumn } from './queries';
 import { type CompileOptions, compileQuery, QueryError } from './query';
-import { MASKED_ATTRIBUTES, MASKED_COLUMNS, maskedAttribute, pseudonymizedAttribute } from './scope';
+import { belowPseudonymizedAttribute, MASKED_ATTRIBUTES, MASKED_COLUMNS, maskedAttribute, pseudonymizedAttribute } from './scope';
 
 type Masks = ReadScope['mask'];
 
@@ -45,8 +45,10 @@ export function maskEvent(event: AuditEvent, mask: Masks, secret?: Buffer): Audi
       if (actorNameIsSensitive(name, email))
         masked.impersonator = { ...masked.impersonator, name: maskedEmail(event.projectId, actorNamePseudonymInput(name, email), secret) };
     }
+    // The email shows as its pseudonym; paths below it are dropped whole, since their keys are producer text.
     for (const [key, value] of Object.entries(masked.attributes))
-      if (pseudonymizedAttribute(mask, key)) masked.attributes[key] = maskedEmail(event.projectId, value, secret);
+      if (belowPseudonymizedAttribute(mask, key)) delete masked.attributes[key];
+      else if (pseudonymizedAttribute(mask, key)) masked.attributes[key] = maskedEmail(event.projectId, value, secret);
   }
   for (const preset of mask) for (const key of MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];
   return masked;

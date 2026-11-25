@@ -97,6 +97,7 @@ describe('masks', () => {
       attributes: {
         'impersonator.email': 'Rita@example.invalid',
         'impersonator.email.work': 'rita.work@example.invalid',
+        'impersonator.email.desk@example.invalid': 'primary',
         'impersonator.type': 'user',
         'metadata.plan': 'pro',
       },
@@ -104,7 +105,8 @@ describe('masks', () => {
     const masked = maskEvent(support, ['actor_email']);
     const asActor = maskEvent({ ...event, actor: { ...event.actor, email: 'rita@example.invalid' } } as AuditEvent, ['actor_email']);
     expect(masked.attributes['impersonator.email']).toBe(asActor.actor?.email);
-    expect(masked.attributes['impersonator.email.work']).toMatch(/^masked:[0-9a-f]{24}$/);
+    // Paths below the email are dropped whole: their keys are producer text and can be an address themselves.
+    expect(Object.keys(masked.attributes).sort()).toEqual(['impersonator.email', 'impersonator.type', 'metadata.plan']);
     expect(masked.impersonator).toEqual({ id: 'sup_1', name: asActor.actor?.email });
     expect(masked.attributes['impersonator.type']).toBe('user');
     expect(JSON.stringify(masked)).not.toMatch(/example\.invalid/i);
