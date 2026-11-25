@@ -17,8 +17,8 @@ it('reads the counts ingest recorded and compares them with what was indexed', (
 it('shows no cut without the reserved attributes, for an unreadable value, or when nothing is missing', () => {
   const none = { targets: null, changes: null, changeFields: null };
   expect(ingestCuts({ attributes: {}, targets: targets(64), changes: changes(256) })).toEqual(none);
-  expect(ingestCuts({ attributes: { 'logbird.truncated.targets': 'many', 'logbird.truncated.changeFields': '0' }, targets: [], changes: [] })).toEqual(
-    none,
-  );
+  expect(
+    ingestCuts({ attributes: { 'logbird.truncated.targets': 'many', 'logbird.truncated.changeFields': '0' }, targets: [], changes: [] }),
+  ).toEqual(none);
   expect(ingestCuts({ attributes: { 'logbird.truncated.targets': '3' }, targets: targets(3), changes: [] })).toEqual(none);
 });
