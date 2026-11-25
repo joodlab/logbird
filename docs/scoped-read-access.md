@@ -85,7 +85,8 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   cut always counts). That covers a producer that used the address as the display name, put
   it inside the name (`Ada <ada@example.org>`), or sent an address only as the name.
   Events, facets (values, groups and labels), filters and masked webhook filters treat such a name the same way:
-  - It shows as a pseudonym (the email's own when the name contains it).
+  - It shows as a pseudonym: the email's own whenever there is an email (so the pair never shows whether the name
+    holds that address or another one), otherwise one of the name.
   - Filters read it as an empty name. An `actor.name` filter for the address, a prefix of it or a wildcard never
     matches it, but a filter that an empty name satisfies does (for example `NOT actor.name:"x"`, or a regex that
     accepts an empty string).
@@ -96,12 +97,15 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   the impersonator's id and name as fields, and an `email` sent with them as the attribute `impersonator.email` (an
   object there becomes paths below it, such as `impersonator.email.work`). Under the mask:
   - `attributes["impersonator.email"]` shows as `masked:<24 hex>`, stable per project like the actor's, but keyed by
-    role: the same address never has the same pseudonym as an impersonator and as an actor. A reader who saw
-    impersonator addresses in clear before the mask covered them therefore can't match them to actor pseudonyms.
+    role: the two roles hash disjoint inputs, so an impersonator's pseudonym does not match the actor pseudonym of the
+    same address. A reader who saw impersonator addresses in clear before the mask covered them therefore can't use
+    them to identify actor pseudonyms.
   - Paths below it are removed from the event: their keys are producer text and can be an address themselves.
   - The impersonator's name follows the actor name rule above, judged against `impersonator.email`: a name that
     carries an address shows as a pseudonym, in events and in facet labels (`impersonator`, at both levels).
-  - Filters and facets on `impersonator.email` or a path below it are refused like `actor.email` (see the last item).
+  - Filters on `impersonator.email` or a path below it, and facets on them (`field=attr.impersonator.email`; a facet
+    field without the `attr.` or `attributes.` prefix is not an attribute facet and answers 422 `validation_error`),
+    are refused like `actor.email` (see the last item).
   - This holds for search results, event detail (the event and its parents), facets, CSV and JSONL exports, viewer
     tokens minted with the mask, and webhook bodies and filters of masked endpoints. Free text never searches the
     impersonator's fields, masked or not.

@@ -366,7 +366,7 @@ export const readScopeSchema = z
       .meta({
         example: ['ip', 'user_agent'],
         description:
-          'Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they never equal an actor pseudonym), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.',
+          'Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. A masked scope cannot filter or facet on the masked fields or attribute paths, such as `field=attr.impersonator.email` (422 `invalid_query`, reason `not_allowed`); filters on a name read an address-carrying name as empty. Any mask drops the original payload. See docs/scoped-read-access.md#masks.',
       }),
   })
   .strict();

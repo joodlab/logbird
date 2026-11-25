@@ -7,6 +7,7 @@ import {
   IMPERSONATOR_NAME_IS_SENSITIVE_SQL,
   maskActorNameInFilter,
   maskedEmail,
+  maskedFacetText,
 } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { compileMaskedQuery } from './field-mask';
@@ -61,10 +62,23 @@ describe('the pseudonym a sensitive name shows', () => {
     ['ada@example.org', 'ada@example.org', 'ada@example.org'],
     ['Ada <ada@example.org>', 'ada@example.org', 'ada@example.org'],
     ['contact@acme.example', '', 'contact@acme.example'],
-    ['bob@other.example', 'alice@example.com', 'bob@other.example'],
+    // Whenever there is an email, the name hashes the email: whether the name holds that address or another one never
+    // shows as equal or different pseudonyms.
+    ['bob@other.example', 'alice@example.com', 'alice@example.com'],
+    ['Support <old@example.org>', 'new@example.org', 'new@example.org'],
     ['ada@example.org', `ada${' '.repeat(509)}`, `ada${' '.repeat(509)}`],
+    // A capped name that normalises to nothing (zero-width spaces) still gets a pseudonym, of the name as stored.
+    ['​'.repeat(511), '', '​'.repeat(511)],
   ])('%j with email %j hashes %j', (name, email, input) => {
     expect(actorNamePseudonymInput(name, email)).toBe(input);
+  });
+
+  it('never shows a flagged facet text under a flag it does not know', () => {
+    const key = Buffer.alloc(32, 3);
+    expect(maskedFacetText('p', 0, 'Bob', key)).toBe('Bob');
+    expect(maskedFacetText('p', 1, 'a@b.example', key)).toBe(maskedEmail('p', 'a@b.example', key));
+    expect(maskedFacetText('p', '2', 'a@b.example', key)).toBe(maskedEmail('p', 'a@b.example', key, 'impersonator'));
+    expect(() => maskedFacetText('p', 3, 'a@b.example', key)).toThrow(/Unknown masked facet flag/);
   });
 });
 

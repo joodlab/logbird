@@ -17,8 +17,9 @@ import { clearTokenKeyCache } from './read-access';
 
 /**
  * Under an actor_email mask, the impersonator (a support person acting as the actor) is masked like the actor: the email
- * ingest keeps as the attribute `impersonator.email` (and any path below it) shows as the pseudonym the same address has
- * as an actor email, and an impersonator name that carries an address shows as a pseudonym. For a masked scoped key and
+ * ingest keeps as the attribute `impersonator.email` shows as a role-keyed pseudonym (never the one the same address
+ * has as an actor), attribute paths below it are removed (their keys can be addresses), and an impersonator name that
+ * carries an address shows as a pseudonym (the email's whenever there is one). For a masked scoped key and
  * a viewer token minted with that mask, the address never comes out of search results, event detail (event and
  * parents), facets (values, labels, groups), export (CSV, JSONL), or webhook bodies; filters and facets on the
  * attribute are refused (422 not_allowed), also in webhook filters. Unmasked readers see the stored values. Real
@@ -35,6 +36,8 @@ const LONG_PREFIX = 'Support desk ';
 /** 510 and 511 UTF-16 units, one astral character (two units) each: below and at the capped-name rule's threshold. */
 const NAME_510 = `Support \u{1F600}${'a'.repeat(500)}`;
 const NAME_511 = `Support \u{1F600}${'a'.repeat(501)}`;
+/** 511 zero-width spaces: at the cap rule's threshold, and empty once whitespace is removed. */
+const ZW_511 = '​'.repeat(511);
 const LONG_LABEL = `${LONG_PREFIX}${'-'.repeat(512 - LONG_PREFIX.length - LONG_LOCAL.length)}${LONG_LOCAL}@example.invalid`;
 
 it("a masked reader cannot get the impersonator's address out of any read, export, facet, filter, token or webhook (real services)", async () => {
@@ -204,6 +207,18 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       // SQL (facet labels) and TypeScript (events) must count UTF-16 units alike.
       { id: 'qa-imp-9', occurredAt: ts(9), action: 'article.updated', tenant, actor, impersonator: { id: 'sup_510', name: NAME_510 } },
       { id: 'qa-imp-10', occurredAt: ts(10), action: 'article.updated', tenant, actor, impersonator: { id: 'sup_511', name: NAME_511 } },
+      // A name holding an old address while the email is a new one: the name still shows the email's pseudonym, so a
+      // reader cannot tell from equal or different pseudonyms whether the name holds the stored address.
+      {
+        id: 'qa-imp-11',
+        occurredAt: ts(11),
+        action: 'article.updated',
+        tenant,
+        actor,
+        impersonator: { id: 'sup_move', name: 'Moved <omar.old@example.invalid>', email: 'omar.new@example.invalid' },
+      },
+      // A capped name that normalises to nothing (zero-width spaces), with no email: still a pseudonym.
+      { id: 'qa-imp-12', occurredAt: ts(12), action: 'article.updated', tenant, actor, impersonator: { id: 'sup_zw', name: ZW_511 } },
     ];
     const ingested = await app.request('/v1/events', {
       method: 'POST',
@@ -254,6 +269,8 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       omar: imp('omar@example.invalid'),
       nadia: imp('nadia@example.invalid'),
       solo: imp('solo@example.invalid'),
+      moved: imp('omar.new@example.invalid'),
+      zw: imp(ZW_511),
       n511: imp(NAME_511.replace(/\s/g, '').toLowerCase()),
       ritaActor: maskedEmail(projectId, 'rita@example.invalid', key),
     };
@@ -267,6 +284,8 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       sup_long: p.long,
       sup_510: NAME_510,
       sup_511: p.n511,
+      sup_move: p.moved,
+      sup_zw: p.zw,
       '': '',
     };
     // Expected two-level facets, computed from the fixture: value -> { count, groups: { group -> count } }.
@@ -326,6 +345,8 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       'qa-imp-8': { name: undefined as unknown as string, attributes: {} },
       'qa-imp-9': { name: NAME_510, attributes: {} },
       'qa-imp-10': { name: p.n511, attributes: {} },
+      'qa-imp-11': { name: p.moved, attributes: { 'impersonator.email': p.moved } },
+      'qa-imp-12': { name: p.zw, attributes: {} },
     };
     type Event = { id: string; impersonator: { id: string; name: string } | null; attributes: Record<string, string> };
     const impersonatorOf = (e: Event) => ({
@@ -344,9 +365,9 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
     const REFUSED_FILTERS: { q: string; rows: string[] }[] = [
       { q: 'impersonator.email:"Rita@example.invalid"', rows: ['qa-imp-1'] },
       { q: 'attr.impersonator.email:rita*', rows: ['qa-imp-2'] },
-      { q: 'attributes.impersonator.email:/.*@.*/', rows: ['qa-imp-1', 'qa-imp-2', 'qa-imp-3', 'qa-imp-4'] },
-      { q: '_exists_:impersonator.email', rows: ['qa-imp-1', 'qa-imp-2', 'qa-imp-3', 'qa-imp-4'] },
-      { q: 'impersonator.email:*', rows: ['qa-imp-1', 'qa-imp-2', 'qa-imp-3', 'qa-imp-4'] },
+      { q: 'attributes.impersonator.email:/.*@.*/', rows: ['qa-imp-1', 'qa-imp-11', 'qa-imp-2', 'qa-imp-3', 'qa-imp-4'] },
+      { q: '_exists_:impersonator.email', rows: ['qa-imp-1', 'qa-imp-11', 'qa-imp-2', 'qa-imp-3', 'qa-imp-4'] },
+      { q: 'impersonator.email:*', rows: ['qa-imp-1', 'qa-imp-11', 'qa-imp-2', 'qa-imp-3', 'qa-imp-4'] },
       { q: 'NOT impersonator.email:"omar@example.invalid" AND impersonator:sup_omar', rows: ['qa-imp-6'] },
       { q: 'impersonator.email:(omar@example.invalid OR nadia@example.invalid)', rows: ['qa-imp-3', 'qa-imp-4'] },
       { q: 'impersonator.email.work:"omar.work@example.invalid"', rows: ['qa-imp-6'] },
@@ -373,6 +394,20 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       expect((data.find((e) => e.id === 'qa-imp-8') as Event & { actor: { email: string } }).actor.email, label).toBe(p.ritaActor);
       expect(PSEUDONYM.test(p.rita) && PSEUDONYM.test(p.ritaActor), label).toBe(true);
       for (const e of data) expect(Object.keys(e.attributes).join(' '), `${label} ${e.id} keys`).not.toMatch(ADDRESS);
+
+      // Paging: three at a time, newest first, the same order and total as the unmasked reader's.
+      const paged: string[] = [];
+      let cursor: string | null = null;
+      for (let n = 0; n === 0 || cursor; n++) {
+        if (n === 10) throw new Error('paging did not end');
+        const r = await get(bearer, `/events?${new URLSearchParams({ from, limit: '3', ...(cursor ? { cursor } : {}) })}`);
+        expect(r.status, label).toBe(200);
+        expect([r.body.total, r.body.totalExact], label).toEqual([ALL.length, true]);
+        expect(r.text, label).not.toMatch(ADDRESS);
+        paged.push(...(r.body.data as Event[]).map((e) => e.id));
+        cursor = r.body.nextCursor;
+      }
+      expect(paged, label).toEqual((plainPage.body.data as Event[]).map((e) => e.id));
 
       // Event detail: the event and its impersonated parent, payload dropped.
       const detail = await get(bearer, '/events/qa-imp-2');
@@ -418,6 +453,34 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         for (const v of f.body.values) expect(v.groupsOtherCount ?? 0, `${label} ${JSON.stringify(query)}`).toBe(0);
       }
       const actionsBySupport = await facets(bearer, { field: 'action', by: 'impersonator', byLimit: '10' });
+      // Limits with ties: the top two impersonators (two events each) and the rest counted; a third pick among the
+      // one-event ties keeps its masked label; one group per action at the second level, the rest counted.
+      const top2 = await facets(bearer, { field: 'impersonator', limit: '2' });
+      expect(Object.fromEntries(top2.body.values.map((v) => [v.value, [v.label, v.count]])), label).toEqual({
+        sup_rita: [p.rita, 2],
+        sup_omar: ['Omar Support', 2],
+      });
+      expect(top2.body.otherCount, label).toBe(ALL.length - 4);
+      const top3 = await facets(bearer, { field: 'impersonator', limit: '3' });
+      expect(
+        top3.body.values.map((v) => v.count),
+        label,
+      ).toEqual([2, 2, 1]);
+      for (const v of top3.body.values) expect(v.label, label).toBe(LABEL[v.value] || v.value);
+      expect(top3.body.otherCount, label).toBe(ALL.length - 5);
+      const byOne = await facets(bearer, { field: 'action', by: 'impersonator', byLimit: '1' });
+      expect(byOne.text, label).not.toMatch(ADDRESS);
+      const expectedByOne = expectedFacet('action', 'impersonator');
+      for (const v of byOne.body.values) {
+        expect(v.groups?.length, `${label} ${v.value}`).toBe(1);
+        const [group] = v.groups ?? [];
+        const best = Math.max(...Object.values(expectedByOne[v.value]?.groups ?? {}));
+        expect(group?.count, `${label} ${v.value}`).toBe(best);
+        expect(group?.label, `${label} ${v.value}`).toBe(LABEL[group?.value ?? ''] || group?.value);
+        expect(v.groupsOtherCount, `${label} ${v.value}`).toBe(v.count - best);
+      }
+      expect(byOne.body.values.find((v) => v.value === 'article.updated')?.groups?.[0]?.value, label).toBe('sup_omar');
+
       // Group labels follow the same rule as first-level labels.
       for (const v of actionsBySupport.body.values)
         for (const g of v.groups ?? []) expect(g.label, `${label} ${v.value} ${g.value}`).toBe(LABEL[g.value] || g.value);

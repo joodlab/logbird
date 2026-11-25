@@ -9,8 +9,9 @@
  * - equals the email; or
  * - was cut at its 512-unit storage cap (511 or more UTF-16 units stored): the cut can fall inside an address, leaving
  *   its local part without the `@` (and with no email to compare against), so a capped name always counts.
- * A sensitive name shows as a pseudonym: of the stored email when the name contains it (or is a capped prefix of it),
- * so it matches the email's own pseudonym; otherwise of the normalised name. It masks more than strictly needed; never less.
+ * A sensitive name shows as a pseudonym: of the stored email whenever there is one, so it always equals the email's own
+ * pseudonym and the pair says nothing about how the name relates to the email; with no email, of the normalised name
+ * (or of the name as stored, when normalising leaves nothing). It masks more than strictly needed; never less.
  */
 import { createHmac } from 'node:crypto';
 
@@ -39,18 +40,17 @@ const NAME_CAP_REACHED = 511;
 
 const normalized = (value: string) => value.replace(SPACES, '').toLowerCase();
 const capped = (name: string) => name.length >= NAME_CAP_REACHED;
-const cappedPrefix = (name: string, n: string, e: string) => capped(name) && n !== '' && e.startsWith(n);
 /** Whether an actor name carries an address under the mask rule. */
 export function actorNameIsSensitive(name: string, email: string) {
   const n = normalized(name);
   const e = normalized(email);
   return n.includes('@') || (e !== '' && n === e) || capped(name);
 }
-/** What a sensitive name's pseudonym hashes: the stored email when the name contains it, else the normalised name. */
+/** What a sensitive name's pseudonym hashes: the stored email if any, else the normalised name, else the name. */
 export function actorNamePseudonymInput(name: string, email: string) {
+  if (normalized(email) !== '') return email;
   const n = normalized(name);
-  const e = normalized(email);
-  return e !== '' && (n.includes(e) || cappedPrefix(name, n, e)) ? email : n;
+  return n !== '' ? n : name;
 }
 
 /** Query parameters every masked expression below needs; merge them into the query's params. */
@@ -71,11 +71,10 @@ function partySql({ name, email }: Party) {
   const N = sqlNormalized(name);
   const E = sqlNormalized(email);
   const capped = `${sqlUtf16Length(name)}>=${NAME_CAP_REACHED}`;
-  const cappedPrefix = `(${capped} AND ${N}!='' AND startsWith(${E},${N}))`;
   /** SQL form of `actorNameIsSensitive` over the stored columns (UInt8). */
   const sensitive = `(position(${N},'@')>0 OR (${E}!='' AND ${N}=${E}) OR ${capped})`;
   /** SQL form of `actorNamePseudonymInput`, lower-cased as `maskedEmail` lower-cases its input. */
-  const pseudonymInput = `if(${E}!='' AND (position(${N},${E})>0 OR ${cappedPrefix}),lowerUTF8(${email}),${N})`;
+  const pseudonymInput = `if(${E}!='',lowerUTF8(${email}),if(${N}!='',${N},${name}))`;
   return { sensitive, text: `if(${sensitive},${pseudonymInput},${name})` };
 }
 const actorSql = partySql(ACTOR);
@@ -101,8 +100,11 @@ export const MASKED_NAME_COLUMNS: Record<string, { text: string; flag: string }>
 };
 /** A facet value or label under the mask: flagged text becomes the pseudonym of the flag's role. */
 export function maskedFacetText(projectId: string, flag: number | string, text: string, secret: Buffer) {
+  if (Number(flag) === 0) return text;
   const role = FACET_FLAG_ROLE[Number(flag)];
-  return role ? maskedEmail(projectId, text, secret, role) : text;
+  // Fail closed: text under a flag this code does not know may be the address.
+  if (!role) throw new Error(`Unknown masked facet flag ${String(flag)}`);
+  return maskedEmail(projectId, text, secret, role);
 }
 
 /**

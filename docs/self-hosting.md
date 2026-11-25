@@ -1184,7 +1184,7 @@ delivery. Replace the scope through PATCH to resume processing.
 the same [field masks as scoped reads](scoped-read-access.md#masks), with empty
 IP and user agent, stable project-keyed hashes for the actor's and the
 impersonator's email (and for a name that carries one; the impersonator's are
-keyed by role, so they never equal an actor's), and the corresponding
+keyed by role, so they don't match an actor's), and the corresponding
 attribute paths removed (`context.ip`, `context.userAgent`, `actor.email`, and
 the paths below `impersonator.email`). The webhook body is the event projection. It excludes
 the original document. Create and PATCH reject filters on masked fields with
@@ -1197,8 +1197,10 @@ before enabling masks, and disable masked endpoints before rolling workers back
 to code that predates masks. Releases before the impersonator was covered by
 `actor_email` send and return the impersonator's email in clear to masked
 readers: upgrade every API and worker replica together (or drain the old ones)
-before relying on it, and disable masked endpoints and masked keys before
-rolling back past that change.
+before relying on it. Before rolling back past that change, disable masked
+endpoints and masked keys, stop minting viewer tokens with masks (any read key
+can mint one), and keep viewer-token reads on upgraded replicas until the tokens
+already issued have expired (at most one hour, plus 30 seconds of clock skew).
 
 Secret rotation accepts an
 `overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH
