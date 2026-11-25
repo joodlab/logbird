@@ -81,6 +81,7 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   <!-- source: packages/sdk/README.md; docs/integrations.md §Design -->
 - **side note ("Redaction"):** **Redaction:** The tagged quickstart uses `beforeSend: redact()` to replace common secret values before sending.
   SDK builds with client redaction apply the secret-key rules by default and support `addKeys` and `keepPaths` for your own policy.
+  When you switch to client redaction, remove the hook before relying on `keepPaths` because the hook masks values first.
   <!-- source: packages/sdk/README.md §Host context options -->
 - **visual:** code sample
 

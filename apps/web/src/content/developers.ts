@@ -225,7 +225,7 @@ export const developers = {
       'Keep ingest keys on the server. Never ship one in a browser bundle.',
     ],
     limit:
-      '**Redaction:** The tagged quickstart uses `beforeSend: redact()` to replace common secret values before sending. SDK builds with client redaction apply the secret-key rules by default and support `addKeys` and `keepPaths` for your own policy.',
+      '**Redaction:** The tagged quickstart uses `beforeSend: redact()` to replace common secret values before sending. SDK builds with client redaction apply the secret-key rules by default and support `addKeys` and `keepPaths` for your own policy. When you switch to client redaction, remove the hook before relying on `keepPaths` because the hook masks values first.',
     sourceInstallTitle: 'From source (not on npm yet)',
     quickstartTitle: 'server.ts',
     npmNote: byRepo(SITE, {

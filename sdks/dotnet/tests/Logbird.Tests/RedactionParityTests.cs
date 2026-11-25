@@ -76,6 +76,7 @@ public class RedactionParityTests
         {
             Id = (string)input["id"]!,
             Metadata = input["metadata"]!.AsObject(),
+            Context = new AuditContext(),
         };
         foreach (var item in input["changes"]!.AsArray())
         {
@@ -98,8 +99,6 @@ public class RedactionParityTests
         Assert.True(await client.FlushAsync());
         var result = JsonNode.Parse(Assert.Single(Assert.Single(server.Requests).RawEvents))!.AsObject();
         Assert.True(result.Remove("occurredAt"));
-        Assert.Empty(result["context"]!.AsObject());
-        Assert.True(result.Remove("context"));
         Assert.True(JsonNode.DeepEquals(parityCase["expected"], result), name + ": " + result.ToJsonString());
     }
 

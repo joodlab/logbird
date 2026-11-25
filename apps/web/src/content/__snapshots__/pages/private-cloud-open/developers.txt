@@ -47,7 +47,7 @@ track(event) never throws and never waits for the network.
 flush() and shutdown() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through onError and onDrop instead.
 Call shutdown() from your host's own exit hook. The SDK installs no process handlers.
 Keep ingest keys on the server. Never ship one in a browser bundle.
-Redaction: The tagged quickstart uses beforeSend: redact() to replace common secret values before sending. SDK builds with client redaction apply the secret-key rules by default and support addKeys and keepPaths for your own policy.
+Redaction: The tagged quickstart uses beforeSend: redact() to replace common secret values before sending. SDK builds with client redaction apply the secret-key rules by default and support addKeys and keepPaths for your own policy. When you switch to client redaction, remove the hook before relying on keepPaths because the hook masks values first.
 server.ts
 pre| import { Logbird, redact } from '@logbird/sdk';
 pre|

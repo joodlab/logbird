@@ -588,6 +588,7 @@
       "input": {
         "id": "e",
         "action": "a",
+        "context": {},
         "metadata": {
           "workEMAIL": "guest@example.invalid",
           "A.B": 1,
@@ -614,6 +615,7 @@
       "expected": {
         "id": "e",
         "action": "a",
+        "context": {},
         "metadata": {
           "workEMAIL": "hidden",
           "A.B": "hidden",
@@ -647,6 +649,7 @@
       "input": {
         "id": "e",
         "action": "a",
+        "context": {},
         "metadata": {
           "Email": "guest@example.invalid",
           "password": "fictional"
@@ -669,6 +672,7 @@
       "expected": {
         "id": "e",
         "action": "a",
+        "context": {},
         "metadata": {
           "Email": "",
           "password": ""
