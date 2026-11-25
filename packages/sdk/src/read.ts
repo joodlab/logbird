@@ -384,7 +384,9 @@ const valueKinds = new Set<unknown>(['absent', 'null', 'string', 'number', 'bool
 
 function isStoredChange(change: unknown): boolean {
   if (!textFields(change, ['field', 'before', 'after'])) return false;
-  return (change.beforeKind === undefined || valueKinds.has(change.beforeKind)) && (change.afterKind === undefined || valueKinds.has(change.afterKind));
+  return (
+    (change.beforeKind === undefined || valueKinds.has(change.beforeKind)) && (change.afterKind === undefined || valueKinds.has(change.afterKind))
+  );
 }
 
 function isStoredEvent(value: unknown): boolean {

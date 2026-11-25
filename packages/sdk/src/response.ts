@@ -56,7 +56,7 @@ export async function readJson(
   let bytes = new Uint8Array(Math.min(8192, limit));
   let length = 0;
   let consumed = false;
-  const tooLarge = Symbol();
+  const tooLarge = Symbol('response too large');
   try {
     signal.throwIfAborted();
     while (true) {
