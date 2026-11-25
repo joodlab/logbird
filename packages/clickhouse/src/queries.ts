@@ -178,9 +178,7 @@ export async function where(ch: ClickHouseClient, projectId: string, q: RangeQue
   };
 }
 const iso = (s: string) => new Date(s.endsWith('Z') ? s : `${s.replace(' ', 'T')}Z`).toISOString();
-type ChangeKindColumns = 'changes_before_kind' | 'changes_after_kind';
-type ReadEventRow = Omit<EventRow, ChangeKindColumns> & Partial<Pick<EventRow, ChangeKindColumns>> & { category?: string };
-export function toEvent(r: ReadEventRow): AuditEvent {
+export function toEvent(r: EventRow & { category?: string }): AuditEvent {
   // Parts written by older servers have empty kind arrays. Never infer a kind from ambiguous text.
   const beforeKinds = r.changes_before_kind?.length === r.changes_fields.length ? r.changes_before_kind : undefined;
   const afterKinds = r.changes_after_kind?.length === r.changes_fields.length ? r.changes_after_kind : undefined;

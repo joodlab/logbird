@@ -307,4 +307,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   };
   return { ok: true as const, row, id, warning };
 }
-export type EventRow = Extract<ReturnType<typeof normalizeEvent>, { ok: true }>['row'];
+type NormalizedEventRow = Extract<ReturnType<typeof normalizeEvent>, { ok: true }>['row'];
+type ChangeKindColumns = 'changes_before_kind' | 'changes_after_kind';
+/** Legacy JSONEachRow writers and stored rows can omit the kind columns. normalizeEvent always emits both. */
+export type EventRow = Omit<NormalizedEventRow, ChangeKindColumns> & Partial<Pick<NormalizedEventRow, ChangeKindColumns>>;

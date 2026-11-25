@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { eventInputSchema } from '@logbird/contracts';
 import { expect, it } from 'vitest';
 import { canonicalFingerprint, eventFingerprint, legacyEventFingerprint, retryFingerprint } from './identity';
-import { normalizeEvent } from './normalize';
+import { type EventRow, normalizeEvent } from './normalize';
 
 const receivedAt = new Date('2026-11-07T12:00:00Z');
 const digest = (input: Record<string, unknown>) => {
@@ -48,14 +48,7 @@ it.each([undefined, 'invalid', 123])('uses original receive clock for occurredAt
 });
 const goldens = JSON.parse(readFileSync(new URL('./fixtures/identity-goldens.json', import.meta.url), 'utf8')) as {
   sourceRevision: string;
-  cases: {
-    input: Record<string, unknown>;
-    projectId: string;
-    receivedAt: string;
-    row: Parameters<typeof legacyEventFingerprint>[0];
-    legacy: string;
-    v1: string;
-  }[];
+  cases: { input: Record<string, unknown>; projectId: string; receivedAt: string; row: EventRow; legacy: string; v1: string }[];
 };
 it.each(goldens.cases)('preserves frozen 3a1541f legacy and v1 vectors for $row.event_id', (vector) => {
   expect(goldens.sourceRevision).toBe('3a1541f632ce4be4c42b022a7da0d83fa6e7fbbd');

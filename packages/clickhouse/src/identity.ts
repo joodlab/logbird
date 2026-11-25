@@ -64,7 +64,7 @@ const legacyFields = [
   'schema_version',
   'attributes',
 ] as const satisfies readonly (keyof EventRow)[];
-export function legacyEventFingerprint(row: Pick<EventRow, (typeof legacyFields)[number]>) {
+export function legacyEventFingerprint(row: EventRow) {
   return digest(Object.fromEntries(legacyFields.map((key) => [key, row[key]])));
 }
 export function canonicalFingerprint(input: unknown, timestamp: string) {
