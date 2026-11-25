@@ -1,22 +1,30 @@
 #!/usr/bin/env node
-// The release install check (README.md): installs @logbird/sdk and @logbird/hono the way docs/integrating-a-backend.md
-// tells a user to install a release, from a local stand-in for the GitHub Release download URL, into a fresh project
-// outside this repository. From the repository root:
+// The release install check (README.md): installs the released tarballs the way docs/integrating-a-backend.md and the
+// SDK README tell a user to, from a local stand-in for the GitHub Release download URL, into a fresh application outside
+// this repository. From the repository root:
 //
-//   node tests/npm-release-install/run.mjs --packages=<folder> [--manager=pnpm|npm] [--source=file|url]
+//   node tests/npm-release-install/run.mjs --packages=<folder> [--manager=pnpm|npm] [--source=file|url] [--shape=sdk|hono]
 //
-// <folder> holds the release asset set (scripts/npm-release-assets.mjs pack writes it). Without --manager and --source
-// it runs every combination. Each one:
+// <folder> holds the release asset set (scripts/npm-release-assets.mjs pack writes it). Without the filters it runs every
+// combination. Shapes: `sdk` installs @logbird/sdk alone (no override); `hono` installs @logbird/sdk and @logbird/hono
+// with the override that points the integration's own @logbird/sdk dependency at the same tarball. Each combination:
 // 1. "downloads" the assets over HTTP from the stand-in (which redirects, as GitHub does) and, for --source=file,
 //    verifies them against SHA256SUMS the way the docs do (`grep … SHA256SUMS | sha256sum --check` where it exists);
-// 2. writes a consumer with both packages as dependencies and the override that points the integration's own
-//    @logbird/sdk dependency at the same tarball (pnpm: pnpm-workspace.yaml; npm: package.json), then installs;
-// 3. requires the lockfile to pin both tarballs with the sha512 integrity of the released files and to hold a single
-//    @logbird/sdk, which is also the copy @logbird/hono resolves at run time;
+// 2. installs: shape `sdk` runs the documented command (`pnpm add <file or URL>`, `npm install <file or URL>`); shape
+//    `hono` writes the documented package.json and override (pnpm: pnpm-workspace.yaml; npm: package.json) and installs;
+// 3. requires the lockfile to pin each released tarball with the sha512 integrity of the released file and to hold a
+//    single @logbird/sdk (for `hono`, also the copy @logbird/hono resolves at run time), and every registry package to be
+//    exactly the pinned one (below);
 // 4. deletes node_modules and the package cache and installs again with a frozen lockfile (`pnpm install
 //    --frozen-lockfile`, `npm ci`), fetching the tarballs again;
-// 5. type-checks tests/npm-consumer/src/main.ts under TypeScript 6 (strict, skipLibCheck false), compiles and runs it;
+// 5. type-checks, compiles and runs a consumer under TypeScript 6 (strict, skipLibCheck false): `hono` runs
+//    tests/npm-consumer/src/main.ts, `sdk` runs src/sdk-only.ts;
 // 6. replaces the released SDK tarball with other bytes and requires a frozen install with an empty cache to refuse it.
+//
+// Nothing here resolves an unpinned version: the application's registry packages (hono, TypeScript 6, @types/node and
+// its one dependency, undici-types) are pinned to exact versions, undici-types through an override at the version
+// tests/npm-consumer/package-lock.json locks. That pin belongs to this test application, not to the documented recipe;
+// it keeps the check deterministic, so the release workflow can run it.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
@@ -43,19 +51,44 @@ const version = /^logbird-sdk-(.+)\.tgz$/.exec(sdkFile)[1];
 // The whole asset set, exactly as the release attaches it.
 verifyAssets(packages, version);
 
-/** The consumer installs these two; the versions of its registry dependencies follow tests/npm-consumer. */
-const RELEASED = ['@logbird/sdk', '@logbird/hono'];
+// The pinned registry packages. hono and @types/node follow tests/npm-consumer; TypeScript 6 is installed under its own
+// name, as a TypeScript 6 application has it. None has dependencies except @types/node (undici-types).
 const consumerManifest = JSON.parse(readFileSync(join(repo, 'tests', 'npm-consumer', 'package.json'), 'utf8'));
-const REGISTRY = {
-  dependencies: { hono: consumerManifest.devDependencies.hono },
-  // TypeScript 6 under its own name, as a TypeScript 6 application has it.
-  devDependencies: { typescript: '6.0.3', '@types/node': consumerManifest.devDependencies['@types/node'] },
+const consumerLock = JSON.parse(readFileSync(join(repo, 'tests', 'npm-consumer', 'package-lock.json'), 'utf8'));
+const locked = (name) => {
+  const found = consumerLock.packages[`node_modules/${name}`]?.version;
+  if (!found) throw new Error(`tests/npm-consumer/package-lock.json locks no ${name}`);
+  return found;
+};
+const HONO = consumerManifest.devDependencies.hono;
+const TYPES_NODE = consumerManifest.devDependencies['@types/node'];
+if (locked('@types/node') !== TYPES_NODE) throw new Error('tests/npm-consumer: @types/node in package.json and package-lock.json differ');
+const PINNED_OVERRIDES = { 'undici-types': locked('undici-types') };
+const DEV = { typescript: '6.0.3', '@types/node': TYPES_NODE };
+
+const SHAPES = {
+  sdk: {
+    released: ['@logbird/sdk'],
+    registry: {},
+    program: join(here, 'src', 'sdk-only.ts'),
+    passed: /sdk-only consumer: all \d+ checks passed/,
+  },
+  hono: {
+    released: ['@logbird/sdk', '@logbird/hono'],
+    registry: { hono: HONO },
+    program: join(repo, 'tests', 'npm-consumer', 'src', 'main.ts'),
+    passed: /npm consumer: all \d+ checks passed/,
+  },
 };
 
-const managers = option('manager') ? [option('manager')] : ['pnpm', 'npm'];
-const sources = option('source') ? [option('source')] : ['file', 'url'];
-for (const value of managers) if (!['pnpm', 'npm'].includes(value)) throw new Error(`unknown --manager=${value}`);
-for (const value of sources) if (!['file', 'url'].includes(value)) throw new Error(`unknown --source=${value}`);
+const pick = (name, all) => {
+  const value = option(name);
+  if (value && !all.includes(value)) throw new Error(`unknown --${name}=${value}; use ${all.join(' or ')}`);
+  return value ? [value] : all;
+};
+const managers = pick('manager', ['pnpm', 'npm']);
+const sources = pick('source', ['file', 'url']);
+const shapes = pick('shape', ['sdk', 'hono']);
 
 // Through cmd (pnpm and npm are .cmd shims on Windows), an argument with a space or metacharacter must be quoted.
 const quote = (arg) => (/[\s"&|<>^()]/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg);
@@ -98,6 +131,23 @@ const check = (condition, message) => {
   console.log(`ok - ${message}`);
 };
 
+/** Every package a lockfile resolved from the registry, as name → version (the released tarballs are left out). */
+function registryPackages(manager, lock) {
+  const found = {};
+  if (manager === 'npm') {
+    for (const [key, entry] of Object.entries(JSON.parse(lock).packages)) {
+      if (!key || key.includes('@logbird/')) continue;
+      found[key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length)] = entry.version;
+    }
+    return found;
+  }
+  const section = lock.split(/^packages:$/m)[1]?.split(/^\S/m)[0] ?? '';
+  for (const match of section.matchAll(/^ {2}'?((?:@[^/'\s]+\/)?[^@'\s]+)@([^':\s]+)'?:\s*$/gm)) {
+    if (!match[1].startsWith('@logbird/')) found[match[1]] = match[2];
+  }
+  return found;
+}
+
 // The stand-in for https://github.com/joodlab/logbird/releases/download/v<version>/<asset>: it answers with a redirect
 // to the file, as GitHub does, and can serve other bytes in place of an asset (step 6).
 const served = new Map(readdirSync(packages).map((file) => [file, readFileSync(join(packages, file))]));
@@ -128,146 +178,186 @@ const releaseUrl = `http://127.0.0.1:${server.address().port}${downloadPath}`;
 const work = mkdtempSync(join(tmpdir(), 'logbird-release-install-'));
 const passed = [];
 try {
-  for (const manager of managers) {
-    for (const source of sources) {
-      const label = `${manager}, ${source === 'file' ? 'downloaded tarballs (file:)' : 'Release URLs'}`;
-      console.log(`\n== ${label}`);
-      const dir = join(work, `${manager}-${source}`);
-      mkdirSync(join(dir, 'src'), { recursive: true });
-      const caches = join(work, `${manager}-${source}-caches`);
-      let cacheRound = 0;
-      const freshCache = () => join(caches, String(++cacheRound));
+  for (const shapeName of shapes) {
+    const shape = SHAPES[shapeName];
+    for (const manager of managers) {
+      for (const source of sources) {
+        const label = `${shapeName === 'sdk' ? '@logbird/sdk alone' : '@logbird/sdk + @logbird/hono'}, ${manager}, ${
+          source === 'file' ? 'downloaded tarballs (file:)' : 'Release URLs'
+        }`;
+        console.log(`\n== ${label}`);
+        const dir = join(work, `${shapeName}-${manager}-${source}`);
+        mkdirSync(join(dir, 'src'), { recursive: true });
+        const caches = join(work, `${shapeName}-${manager}-${source}-caches`);
+        let cacheRound = 0;
+        const freshCache = () => join(caches, String(++cacheRound));
+        const managerVersion = (await run(manager, ['--version'], dir, { capture: true })).trim();
 
-      // 1. The specifier of each released package, and for file: the verified download.
-      const files = Object.fromEntries(RELEASED.map((name) => [name, tarballName(name, version)]));
-      const spec = {};
-      if (source === 'file') {
-        const vendor = join(dir, 'vendor', 'logbird');
-        mkdirSync(vendor, { recursive: true });
-        for (const file of [...Object.values(files), SUMS]) {
-          const response = await fetch(`${releaseUrl}${file}`);
-          check(response.ok, `downloaded ${file} from the Release URL (after its redirect)`);
-          writeFileSync(join(vendor, file), Buffer.from(await response.arrayBuffer()));
+        // 1. The specifier of each released package, and for file: the verified download.
+        const files = Object.fromEntries(shape.released.map((name) => [name, tarballName(name, version)]));
+        const spec = {};
+        if (source === 'file') {
+          const vendor = join(dir, 'vendor', 'logbird');
+          mkdirSync(vendor, { recursive: true });
+          for (const file of [...Object.values(files), SUMS]) {
+            const response = await fetch(`${releaseUrl}${file}`);
+            check(response.ok, `downloaded ${file} from the Release URL (after its redirect)`);
+            writeFileSync(join(vendor, file), Buffer.from(await response.arrayBuffer()));
+          }
+          const sums = parseSums(readFileSync(join(vendor, SUMS), 'utf8'));
+          for (const file of Object.values(files)) {
+            const digest = createHash('sha256')
+              .update(readFileSync(join(vendor, file)))
+              .digest('hex');
+            check(sums.get(file) === digest, `${file} matches ${SUMS}`);
+          }
+          // The documented command where sha256sum exists: only the selected tarballs' lines, and none may be missing.
+          if (!isWindows && spawnSync('sha256sum', ['--version']).status === 0) {
+            const names = shapeName === 'sdk' ? 'sdk' : '(sdk|hono)';
+            const pattern = ` logbird-${names}-${version.replaceAll('.', '\\.')}\\.tgz$`;
+            await run('sh', ['-c', `grep -E '${pattern}' ${SUMS} | sha256sum --check`], vendor);
+          }
+          for (const [name, file] of Object.entries(files)) spec[name] = `file:vendor/logbird/${file}`;
+        } else {
+          for (const [name, file] of Object.entries(files)) spec[name] = `${releaseUrl}${file}`;
         }
-        const sums = parseSums(readFileSync(join(vendor, SUMS), 'utf8'));
-        for (const file of Object.values(files)) {
-          const digest = createHash('sha256')
-            .update(readFileSync(join(vendor, file)))
-            .digest('hex');
-          check(sums.get(file) === digest, `${file} matches ${SUMS}`);
+
+        // 2. The application and the documented install.
+        const manifest = {
+          name: 'logbird-release-install-check',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
+          dependencies: shapeName === 'sdk' ? { ...shape.registry } : { ...spec, ...shape.registry },
+          devDependencies: DEV,
+        };
+        const overrides = shapeName === 'sdk' ? { ...PINNED_OVERRIDES } : { '@logbird/sdk': spec['@logbird/sdk'], ...PINNED_OVERRIDES };
+        if (manager === 'npm') manifest.overrides = overrides;
+        writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+        if (manager === 'pnpm') {
+          const lines = Object.entries(overrides).map(([name, value]) => `  '${name}': ${value}`);
+          writeFileSync(join(dir, 'pnpm-workspace.yaml'), `overrides:\n${lines.join('\n')}\n`);
         }
-        // The documented command where sha256sum exists: only the selected tarballs' lines, and none may be missing.
-        if (!isWindows && spawnSync('sha256sum', ['--version']).status === 0) {
-          const pattern = ` logbird-(sdk|hono)-${version.replaceAll('.', '\\.')}\\.tgz$`;
-          await run('sh', ['-c', `grep -E '${pattern}' ${SUMS} | sha256sum --check`], vendor);
-        }
-        for (const [name, file] of Object.entries(files)) spec[name] = `file:vendor/logbird/${file}`;
-      } else {
-        for (const [name, file] of Object.entries(files)) spec[name] = `${releaseUrl}${file}`;
-      }
+        // npm 12 refuses URL dependencies unless allowed; `root` allows the URLs named in this package.json only.
+        if (manager === 'npm' && source === 'url') writeFileSync(join(dir, '.npmrc'), 'allow-remote=root\n');
+        copyFileSync(shape.program, join(dir, 'src', 'main.ts'));
+        copyFileSync(join(repo, 'tests', 'npm-consumer', 'tsconfig.json'), join(dir, 'tsconfig.json'));
 
-      // 2. The consumer, exactly as the docs write it.
-      const manifest = {
-        name: 'logbird-release-install-check',
-        version: '0.0.0',
-        private: true,
-        type: 'module',
-        dependencies: { ...spec, ...REGISTRY.dependencies },
-        devDependencies: REGISTRY.devDependencies,
-      };
-      if (manager === 'npm') manifest.overrides = { '@logbird/sdk': spec['@logbird/sdk'] };
-      writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-      if (manager === 'pnpm') writeFileSync(join(dir, 'pnpm-workspace.yaml'), `overrides:\n  '@logbird/sdk': ${spec['@logbird/sdk']}\n`);
-      // npm 12 refuses URL dependencies unless allowed; `root` allows the URLs named in this package.json only.
-      if (manager === 'npm' && source === 'url') writeFileSync(join(dir, '.npmrc'), 'allow-remote=root\n');
-      copyFileSync(join(repo, 'tests', 'npm-consumer', 'src', 'main.ts'), join(dir, 'src', 'main.ts'));
-      copyFileSync(join(repo, 'tests', 'npm-consumer', 'tsconfig.json'), join(dir, 'tsconfig.json'));
-      const managerVersion = (await run(manager, ['--version'], dir, { capture: true })).trim();
-
-      const install = async (frozen) =>
-        manager === 'pnpm'
-          ? // In CI pnpm defaults to --frozen-lockfile, so the first install says it may write the lockfile.
-            await run('pnpm', ['install', frozen ? '--frozen-lockfile' : '--no-frozen-lockfile', '--store-dir', freshCache()], dir)
-          : await run('npm', [frozen ? 'ci' : 'install', '--no-audit', '--no-fund', '--cache', freshCache()], dir);
-      // pnpm 12 blocks a sub-dependency resolved from a URL (blockExoticSubdeps, on by default), which is what the
-      // override makes of @logbird/hono's @logbird/sdk. The docs say so and send pnpm users to the downloaded tarballs,
-      // which pnpm trusts; this proves the refusal is that rule and not something else.
-      if (manager === 'pnpm' && source === 'url' && Number(managerVersion.split('.')[0]) >= 12) {
-        const refused = await attempt('pnpm', ['install', '--no-frozen-lockfile', '--store-dir', freshCache()], dir);
-        check(refused.status !== 0 && /blockExoticSubdeps/.test(refused.output), `pnpm ${managerVersion} refuses Release URLs (blockExoticSubdeps)`);
-        passed.push(`${label}: pnpm ${managerVersion} refuses it (blockExoticSubdeps), as documented`);
-        continue;
-      }
-      await install(false);
-
-      // 3. The lockfile pins each released tarball by the integrity of the released file, and there is one SDK.
-      const lockfile = join(dir, manager === 'pnpm' ? 'pnpm-lock.yaml' : 'package-lock.json');
-      const lock = readFileSync(lockfile, 'utf8');
-      for (const [name, file] of Object.entries(files)) {
-        const expected = integrity(readFileSync(join(packages, file)));
-        const pinned =
+        const install = async (frozen) =>
           manager === 'pnpm'
-            ? [...lock.matchAll(/resolution: \{integrity: (sha512-[^,]+), tarball: ([^}]+)\}/g)]
-                .filter((m) => m[2].trim() === spec[name])
-                .map((m) => m[1])
-            : [JSON.parse(lock).packages[`node_modules/${name}`]].filter((entry) => entry?.resolved === spec[name]).map((entry) => entry.integrity);
-        check(
-          pinned.length === 1 && pinned[0] === expected,
-          `the lockfile pins ${name} to ${spec[name].replace(releaseUrl, '<release>/')} at ${expected.slice(0, 20)}…`,
-        );
-      }
-      if (manager === 'pnpm') {
-        const copies = readdirSync(join(dir, 'node_modules', '.pnpm')).filter((entry) => entry.startsWith('@logbird+sdk@'));
-        check(copies.length === 1, `one @logbird/sdk in the store (${copies.join(', ')})`);
-      } else {
-        const copies = Object.keys(JSON.parse(lock).packages).filter((key) => key.endsWith('node_modules/@logbird/sdk'));
-        check(copies.length === 1, `one @logbird/sdk in package-lock.json (${copies.join(', ')})`);
-      }
-      const resolvedFrom = (start) => {
-        for (let at = realpathSync(start); ; at = dirname(at)) {
-          const candidate = join(at, 'node_modules', '@logbird', 'sdk');
-          if (existsSync(join(candidate, 'package.json'))) return realpathSync(candidate);
-          if (dirname(at) === at) throw new Error(`no @logbird/sdk resolvable from ${start}`);
+            ? // In CI pnpm defaults to --frozen-lockfile, so the first install says it may write the lockfile.
+              await run('pnpm', ['install', frozen ? '--frozen-lockfile' : '--no-frozen-lockfile', '--store-dir', freshCache()], dir)
+            : await run('npm', [frozen ? 'ci' : 'install', '--no-audit', '--no-fund', '--cache', freshCache()], dir);
+        // pnpm 12 blocks a sub-dependency resolved from a URL (blockExoticSubdeps, on by default), which is what the
+        // override makes of @logbird/hono's @logbird/sdk. The docs say so and send pnpm users to the downloaded tarballs,
+        // which pnpm trusts; this proves the refusal is that rule and not something else.
+        if (shapeName === 'hono' && manager === 'pnpm' && source === 'url' && Number(managerVersion.split('.')[0]) >= 12) {
+          const refused = await attempt('pnpm', ['install', '--no-frozen-lockfile', '--store-dir', freshCache()], dir);
+          check(
+            refused.status !== 0 && /blockExoticSubdeps/.test(refused.output),
+            `pnpm ${managerVersion} refuses Release URLs (blockExoticSubdeps)`,
+          );
+          passed.push(`${label}: pnpm ${managerVersion} refuses it (blockExoticSubdeps), as documented`);
+          continue;
         }
-      };
-      check(
-        resolvedFrom(join(dir, 'node_modules', '@logbird', 'hono')) === realpathSync(join(dir, 'node_modules', '@logbird', 'sdk')),
-        '@logbird/hono resolves the same @logbird/sdk as the application',
-      );
+        if (shapeName === 'sdk') {
+          // The SDK README's command: `pnpm add ./vendor/logbird/<tarball>` (or the URL); npm: `npm install …`.
+          const target = source === 'file' ? `./vendor/logbird/${files['@logbird/sdk']}` : spec['@logbird/sdk'];
+          if (manager === 'pnpm') await run('pnpm', ['add', target, '--store-dir', freshCache()], dir);
+          else await run('npm', ['install', target, '--no-audit', '--no-fund', '--cache', freshCache()], dir);
+          const written = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).dependencies['@logbird/sdk'];
+          check(written === spec['@logbird/sdk'], `the install wrote "@logbird/sdk": "${written.replace(releaseUrl, '<release>/')}" to package.json`);
+        } else {
+          await install(false);
+        }
 
-      // 4. A clean, frozen reinstall from the lockfile.
-      const before = requests;
-      rmSync(join(dir, 'node_modules'), { recursive: true, force: true });
-      await install(true);
-      if (source === 'url') check(requests - before === RELEASED.length, 'the frozen install fetched both tarballs from the Release URL again');
-      check(readFileSync(lockfile, 'utf8') === lock, 'the frozen install left the lockfile unchanged');
+        // 3. The lockfile pins each released tarball by the integrity of the released file, one SDK, pinned registry.
+        const lockfile = join(dir, manager === 'pnpm' ? 'pnpm-lock.yaml' : 'package-lock.json');
+        const lock = readFileSync(lockfile, 'utf8');
+        for (const [name, file] of Object.entries(files)) {
+          const expected = integrity(readFileSync(join(packages, file)));
+          const pinned =
+            manager === 'pnpm'
+              ? [...lock.matchAll(/resolution: \{integrity: (sha512-[^,]+), tarball: ([^}]+)\}/g)]
+                  .filter((m) => m[2].trim() === spec[name])
+                  .map((m) => m[1])
+              : [JSON.parse(lock).packages[`node_modules/${name}`]].filter((entry) => entry?.resolved === spec[name]).map((entry) => entry.integrity);
+          check(
+            pinned.length === 1 && pinned[0] === expected,
+            `the lockfile pins ${name} to ${spec[name].replace(releaseUrl, '<release>/')} at ${expected.slice(0, 20)}…`,
+          );
+        }
+        if (manager === 'pnpm') {
+          const copies = readdirSync(join(dir, 'node_modules', '.pnpm')).filter((entry) => entry.startsWith('@logbird+sdk@'));
+          check(copies.length === 1, `one @logbird/sdk in the store (${copies.join(', ')})`);
+        } else {
+          const copies = Object.keys(JSON.parse(lock).packages).filter((key) => key.endsWith('node_modules/@logbird/sdk'));
+          check(copies.length === 1, `one @logbird/sdk in package-lock.json (${copies.join(', ')})`);
+        }
+        const expectedRegistry = { ...shape.registry, ...DEV, ...PINNED_OVERRIDES };
+        const resolved = registryPackages(manager, lock);
+        const sorted = (map) => JSON.stringify(Object.fromEntries(Object.entries(map).sort(([a], [b]) => a.localeCompare(b))));
+        check(sorted(resolved) === sorted(expectedRegistry), `the registry packages are exactly the pinned ones: ${sorted(resolved)}`);
+        if (shapeName === 'hono') {
+          const resolvedFrom = (start) => {
+            for (let at = realpathSync(start); ; at = dirname(at)) {
+              const candidate = join(at, 'node_modules', '@logbird', 'sdk');
+              if (existsSync(join(candidate, 'package.json'))) return realpathSync(candidate);
+              if (dirname(at) === at) throw new Error(`no @logbird/sdk resolvable from ${start}`);
+            }
+          };
+          check(
+            resolvedFrom(join(dir, 'node_modules', '@logbird', 'hono')) === realpathSync(join(dir, 'node_modules', '@logbird', 'sdk')),
+            '@logbird/hono resolves the same @logbird/sdk as the application',
+          );
+        }
 
-      // 5. TypeScript 6: type-check, compile and run.
-      const tsc = join(dir, 'node_modules', 'typescript', 'bin', 'tsc');
-      const tscVersion = (await run(process.execPath, [tsc, '--version'], dir, { capture: true })).trim();
-      check(/^Version 6\./.test(tscVersion), `TypeScript 6 compiles the consumer (${tscVersion})`);
-      await run(process.execPath, [tsc, '-p', 'tsconfig.json'], dir);
-      const output = await run(process.execPath, [join(dir, 'out', 'main.js')], dir, { capture: true });
-      check(/npm consumer: all \d+ checks passed/.test(output), 'the compiled consumer ran and passed its checks');
+        // 4. A clean, frozen reinstall from the lockfile.
+        const before = requests;
+        rmSync(join(dir, 'node_modules'), { recursive: true, force: true });
+        await install(true);
+        if (source === 'url')
+          check(requests - before === shape.released.length, 'the frozen install fetched the tarballs from the Release URL again');
+        check(readFileSync(lockfile, 'utf8') === lock, 'the frozen install left the lockfile unchanged');
 
-      // 6. Other bytes in place of the released SDK: a valid tarball of the same package with one more (empty) tar block,
-      // recompressed. A frozen install with an empty cache must refuse it on integrity alone.
-      const sdkName = files['@logbird/sdk'];
-      const altered = gzipSync(Buffer.concat([gunzipSync(readFileSync(join(packages, sdkName))), Buffer.alloc(512)]));
-      if (source === 'file') writeFileSync(join(dir, 'vendor', 'logbird', sdkName), altered);
-      else served.set(sdkName, altered);
-      rmSync(join(dir, 'node_modules'), { recursive: true, force: true });
-      const tampered =
-        manager === 'pnpm'
-          ? await attempt('pnpm', ['install', '--frozen-lockfile', '--fetch-retries=0', '--store-dir', freshCache()], dir)
-          : await attempt('npm', ['ci', '--no-audit', '--no-fund', '--fetch-retries=0', '--cache', freshCache()], dir);
-      served.set(sdkName, readFileSync(join(packages, sdkName)));
-      check(
-        tampered.status !== 0 && /integrity|EINTEGRITY|checksum/i.test(tampered.output),
-        'a frozen install refuses an altered SDK tarball (integrity mismatch)',
-      );
+        // 5. TypeScript 6: type-check, compile and run.
+        const tsc = join(dir, 'node_modules', 'typescript', 'bin', 'tsc');
+        const tscVersion = (await run(process.execPath, [tsc, '--version'], dir, { capture: true })).trim();
+        check(/^Version 6\./.test(tscVersion), `TypeScript 6 compiles the consumer (${tscVersion})`);
+        await run(process.execPath, [tsc, '-p', 'tsconfig.json'], dir);
+        const output = await run(process.execPath, [join(dir, 'out', 'main.js')], dir, { capture: true });
+        check(shape.passed.test(output), 'the compiled consumer ran and passed its checks');
 
-      passed.push(`${label}: ${manager} ${managerVersion}`);
+        // 6. Other bytes in place of the released SDK: a valid tarball of the same package with one more (empty) tar
+        // block, recompressed. A frozen install with an empty cache must refuse it on integrity alone.
+        const sdkName = files['@logbird/sdk'];
+        const altered = gzipSync(Buffer.concat([gunzipSync(readFileSync(join(packages, sdkName))), Buffer.alloc(512)]));
+        if (source === 'file') writeFileSync(join(dir, 'vendor', 'logbird', sdkName), altered);
+        else served.set(sdkName, altered);
+        rmSync(join(dir, 'node_modules'), { recursive: true, force: true });
+        const tampered =
+          manager === 'pnpm'
+            ? // pnpm 12 has no --fetch-retries flag; earlier versions would otherwise retry for over a minute.
+              await attempt(
+                'pnpm',
+                [
+                  'install',
+                  '--frozen-lockfile',
+                  ...(Number(managerVersion.split('.')[0]) >= 12 ? [] : ['--fetch-retries=0']),
+                  '--store-dir',
+                  freshCache(),
+                ],
+                dir,
+              )
+            : await attempt('npm', ['ci', '--no-audit', '--no-fund', '--fetch-retries=0', '--cache', freshCache()], dir);
+        served.set(sdkName, readFileSync(join(packages, sdkName)));
+        check(
+          tampered.status !== 0 && /integrity|EINTEGRITY|checksum/i.test(tampered.output),
+          'a frozen install refuses an altered SDK tarball (integrity mismatch)',
+        );
+
+        passed.push(`${label}: ${manager} ${managerVersion}`);
+      }
     }
   }
 } finally {

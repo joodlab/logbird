@@ -23,7 +23,10 @@ mkdir -p vendor/logbird && cd vendor/logbird &&
 ```
 
 Commit `vendor/logbird/` and the lockfile; the lockfile pins the tarball's SHA-512 integrity.
-Installing an integration (`@logbird/hono`, `@logbird/vue`, `@logbird/nuxt`,
+You can also depend on the Release URL directly:
+`pnpm add https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`,
+or the same with `npm install` (npm 12 first needs `allow-remote=root` in the project's
+`.npmrc`). Installing an integration (`@logbird/hono`, `@logbird/vue`, `@logbird/nuxt`,
 `@logbird/tanstack-start`) as well needs an override so it uses the same SDK tarball: see
 [Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
 for the full recipe for pnpm and npm.

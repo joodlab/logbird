@@ -107,10 +107,13 @@ To upgrade, download and verify the new version, change the version in the file 
 Pointing the dependencies and overrides straight at the Release URLs
 (`https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`)
 also works with pnpm 10 and with npm, where npm 12 needs `allow-remote=root` in the
-project's `.npmrc` (it refuses URL dependencies by default). pnpm 12 refuses it
-(`ERR_PNPM_EXOTIC_SUBDEP`: a sub-dependency resolved from a URL), and turning its
-`blockExoticSubdeps` protection off is not worth it. The downloaded files work with every
-one of them.
+project's `.npmrc` (it refuses URL dependencies by default). With an integration, pnpm 12
+refuses it (`ERR_PNPM_EXOTIC_SUBDEP`: the override makes the integration's SDK a
+sub-dependency resolved from a URL), and turning its `blockExoticSubdeps` protection off is
+not worth it. For `@logbird/sdk` alone (a direct dependency, no override) pnpm 12 accepts
+the URL: `pnpm add <URL>`, or `npm install <URL>` with `allow-remote=root`. The lockfile
+then pins the tarball's integrity just the same. The downloaded files work with every one
+of them and keep builds independent of GitHub being reachable.
 
 A source checkout of this repository is for contributing to Logbird
 ([CONTRIBUTING.md](../CONTRIBUTING.md)), not for installing it in an application.

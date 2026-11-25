@@ -54,8 +54,9 @@ jobs:
           retention-days: 7
 
   # The npm tarballs this release attaches: packed, checked and installed by the same reusable workflow that pull requests
-  # run (npm-tarballs.yml), at the release version. Image tags and the GitHub Release wait for it, so a failed check
-  # publishes nothing.
+  # run (npm-tarballs.yml), at the release version, with only the checks whose inputs the repository pins (release: true
+  # leaves out the "hono latest" cells). Image tags and the GitHub Release wait for it, so a failed check publishes
+  # nothing; re-run it.
   npm:
     name: npm tarballs
     needs: preflight
@@ -64,6 +65,7 @@ jobs:
     uses: ./.github/workflows/npm-tarballs.yml
     with:
       version: ${{ needs.preflight.outputs.version }}
+      release: true
 
   build:
     name: Build ${{ matrix.role }} (${{ matrix.arch }})
@@ -248,7 +250,7 @@ jobs:
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '22.18.0'
       - uses: actions/download-artifact@v8
         with:
           name: release-notes

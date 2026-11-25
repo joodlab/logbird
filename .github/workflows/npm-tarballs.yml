@@ -4,6 +4,11 @@ name: npm tarballs
 # npm-packages.yml; a release tag calls it from release.yml, which then attaches exactly the artifact this workflow
 # uploaded (`npm-packages`) to the GitHub Release. So a release can only attach tarballs that passed every job below.
 # Nothing is published to npm here.
+#
+# With `release: true` (the tag path) every check runs on inputs the repository pins: exact Node versions, the pnpm in
+# package.json's packageManager, npm 12.1.0, the lockfiles, the hono floor (from @logbird/hono's peer range) and the
+# hono that tests/npm-consumer/package-lock.json locks. The "hono latest" cells resolve the newest hono 4.x from the
+# registry; they run on pull requests and master pushes only, where a failure is a signal, not a blocked release.
 on:
   workflow_call:
     inputs:
@@ -12,6 +17,11 @@ on:
         type: string
         required: false
         default: ''
+      release:
+        description: The tag path. Runs only checks whose inputs are pinned by the repository (no "latest" lookups).
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -49,7 +59,8 @@ jobs:
           retention-days: 7
 
   # @logbird/sdk and @logbird/hono: type-checked under TypeScript 6 and 7, run, and the API reports compared, on both
-  # Node lines engines.node admits and both ends of the hono peer range.
+  # Node lines engines.node admits, at the floor of the hono peer range and the locked hono; on pull requests and master
+  # pushes also at the newest hono 4.x.
   consumer:
     name: npm consumer (Node ${{ matrix.node }}, hono ${{ matrix.hono }})
     needs: pack
@@ -60,8 +71,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['20', '22']
-        hono: [floor, latest]
+        node: ['20.20.2', '22.23.5']
+        hono: ${{ fromJSON(inputs.release && '["floor","locked"]' || '["floor","locked","latest"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -74,7 +85,9 @@ jobs:
           name: npm-packages
           path: tests/npm-consumer/.packages
       - name: Check capture, client redaction, read and public API from tarballs
-        run: node tests/npm-consumer/run.mjs --skip-pack --hono=${{ matrix.hono }}
+        env:
+          HONO: ${{ matrix.hono }}
+        run: node tests/npm-consumer/run.mjs --skip-pack --hono="$HONO"
 
   # @logbird/vue, @logbird/nuxt and @logbird/tanstack-start: type-checked and their API reports compared, at the
   # framework versions tested today.
@@ -99,7 +112,8 @@ jobs:
       - run: node tests/npm-consumer/run.mjs --project=adapters --skip-pack
 
   # The install recipe the docs give for a release (tests/npm-release-install/README.md), from a stand-in for the
-  # Release download URL: pnpm 10 and npm 10 (Node 22's own), and npm 12, which refuses URL dependencies by default.
+  # Release download URL, for @logbird/sdk alone and with @logbird/hono: pnpm 10 and npm 10 (Node 22's own), and npm 12,
+  # which refuses URL dependencies by default. Every version here is pinned.
   release-install:
     name: Release install recipe (${{ matrix.label }})
     needs: pack
@@ -116,7 +130,7 @@ jobs:
             managers: 'pnpm npm'
             npm: ''
           - label: npm 12
-            node: '24'
+            node: '24.22.3'
             managers: npm
             npm: '12.1.0'
     steps:

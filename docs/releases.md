@@ -233,11 +233,13 @@ packages, and the release's `npm` job calls it with the release version. It:
    `scripts/check-npm-packages.mjs` at the expected version, writes `SHA256SUMS` and
    uploads the folder as the `npm-packages` artifact;
 2. installs those tarballs into outside applications: `tests/npm-consumer` (TypeScript 6
-   and 7, run, API reports; Node 20 and 22; the floor and the latest hono),
+   and 7, run, API reports; Node 20 and 22; hono at the floor of its peer range, at the
+   version its lockfile pins and, on pull requests only, the latest 4.x),
    `tests/npm-consumer-adapters`, and `tests/npm-release-install`, which follows the
-   documented install recipe from a local stand-in for the Release URL under pnpm 10,
-   npm 10 and npm 12, reinstalls with a frozen lockfile, type-checks and runs under
-   TypeScript 6, and requires an altered tarball to be refused;
+   documented install recipes (`@logbird/sdk` alone, and with `@logbird/hono`) from a
+   local stand-in for the Release URL under pnpm 10, npm 10 and npm 12, reinstalls with a
+   frozen lockfile, type-checks and runs under TypeScript 6, and requires an altered
+   tarball to be refused;
 3. verifies the artifact holds exactly the release's asset set with
    `scripts/npm-release-assets.mjs verify` and shows the `gh release create` command
    the release would run (the "Release assets (dry run)" job; its summary lists each
@@ -245,9 +247,24 @@ packages, and the release's `npm` job calls it with the release version. It:
 
 The release job downloads that same artifact, runs the same verification and
 `sha256sum --check`, and passes the files to `gh release create` with `images.txt`.
-If any npm check fails, the image publish jobs and the release job do not run: nothing
-is tagged or attached and the run fails. A pull request's run of the npm workflow shows
-the asset set a release of that commit would attach.
+A tag publishes the images, the tarballs and the GitHub Release together or not at all.
+A pull request's run of the npm workflow shows the asset set a release of that commit
+would attach.
+
+**What gates a release.** On a tag, the npm workflow runs with `release: true`, and only
+checks whose inputs the repository pins can fail it: exact Node versions (20.20.2,
+22.18.0, 22.23.5, 24.22.3), the pnpm version in the root `package.json`, npm 12.1.0, the
+workspace and consumer lockfiles, the hono floor read from `@logbird/hono`'s peer range,
+the hono `tests/npm-consumer/package-lock.json` locks, and the exact registry packages of
+the release install check. The **"hono latest" consumer cells run on pull requests and
+master pushes only**: they resolve the newest hono 4.x, so a failure there is a signal
+to raise the floor or fix a regression, not a blocked release.
+
+**If the release's npm job fails**, nothing was published: no image tag moved and no
+GitHub Release exists (the platform images pushed by digest are untagged). Read the
+failing check. A registry or network error is fixed by "Re-run failed jobs" (the image
+builds need the registry too). A real failure needs a fix on master and a new version;
+never move the tag.
 
 With assets, `gh release create` creates a draft, uploads every file and publishes the
 release only when all uploads succeed. If an upload fails, it deletes that draft itself;

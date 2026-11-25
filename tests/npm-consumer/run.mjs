@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The npm consumer check (README.md). From the repository root:
-//   node tests/npm-consumer/run.mjs [--project=phase1|adapters] [--skip-pack] [--hono=<version or range>] [--update-api]
+//   node tests/npm-consumer/run.mjs [--project=phase1|adapters] [--skip-pack] [--hono=floor|locked|latest|<version>] [--update-api]
 // --skip-pack uses the tarballs already in the project's .packages folder (CI downloads them there).
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -95,6 +95,13 @@ run('npm', ['ci', '--no-audit', '--no-fund']);
 const files = project.install.map(({ name }) => `./${relative(here, tarball(name)).replaceAll('\\', '/')}`);
 // --hono=floor and --hono=latest test both ends of the peer range @logbird/hono declares, read from its tarball.
 let hono = option('hono');
+// --hono=locked: the hono this project's committed package-lock.json pins, asked for explicitly so the check below
+// proves it is what ran. It needs no registry lookup, so the release workflow can use it.
+if (hono === 'locked') {
+  hono = JSON.parse(readFileSync(join(here, 'package-lock.json'), 'utf8')).packages['node_modules/hono']?.version;
+  if (!hono) throw new Error(`${project.dir}/package-lock.json pins no hono`);
+  console.log(`hono from package-lock.json: testing ${hono}`);
+}
 if (hono === 'floor' || hono === 'latest') {
   const range = JSON.parse(packedFile(tarball(HONO.name), 'package/package.json')).peerDependencies.hono;
   const floor = /^\^(\d+\.\d+\.\d+)$/.exec(range)?.[1];
