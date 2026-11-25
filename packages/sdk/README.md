@@ -74,6 +74,17 @@ stay below 5 MB and 1000 rows, with a 256 KiB per-event limit. Each request has
 up to 30 seconds and each batch send has up to five minutes. On Node, batching
 and background request and backoff timers are unreferenced. An explicit flush
 or shutdown keeps the active delivery timers referenced while it waits.
+
+Ingest and read requests use manual redirect handling. Configure the endpoint
+as the serving origin. A redirect produces a status-only error. Ingest
+acknowledgements are limited to 4 MiB and read pages to 64 MiB. The SDK cancels
+unused or oversized bodies. An unreadable or oversized acknowledgement leaves
+the covered events eligible for retry. Reads validate the returned event shape
+and have a 30-second deadline. Before each dispatch, a fetch transport with
+four pending cancellations or abandoned reads refuses the new read until cleanup
+completes. Callers control read concurrency. Simultaneous aborts of reads already
+dispatched can put more than four operations into cleanup.
+
 Do not ship private ingest keys in a public browser bundle.
 
 `endpoint` is the public origin that serves the console, the same value as the server's `APP_URL`.
@@ -209,6 +220,32 @@ stamping. Redaction runs next, followed by the 256 KiB check on the resulting JS
 Returning null/undefined records a `filtered` drop. A throwing hook records a
 `before_send_failed` drop and reports through `onError`.
 
+Before copying input or invoking `beforeSend`, the SDK checks a 1 MiB lower
+bound of its JSON size and a depth of 1,000 levels within metadata and each
+change value. The lower bound counts one
+byte per UTF-16 code unit of keys and values, plus JSON framing and literals.
+The guard is an approximation. A few hundred bytes of SDK-added framing can
+affect results near the limit, and TypeScript and .NET also estimate numeric
+values differently.
+An event outside those limits is reported as `input_too_large` or
+`input_too_deep`, even if redaction would have reduced the output. Supply
+ordinary JSON data and convert accessor-backed values to plain data at capture.
+The final 256 KiB cap measures the actual serialized UTF-8 bytes. A redaction
+result that exceeds this output limit is reported as `too_large`.
+
+`onWarning` receives a `party_id_normalization` code and the field name when
+party identifiers or target types may be indexed differently because of
+whitespace, length or lone surrogates, or when there are more than 64 targets.
+The SDK sends the values as supplied. The server decides whether to accept
+the event.
+
+`LogbirdError` supports a stable `code` and safe numeric `status` and `count`
+fields when applicable. Use these fields for operational logs. The SDK reports
+approved rejection codes through `onDrop` and leaves its event snapshot
+available for recovery. A read cancelled before dispatch rejects with the
+caller's abort reason. Cancellation after dispatch uses a standard `AbortError`
+with a fixed message.
+
 ## Redaction
 
 Every event passes through client redaction, including events from framework
@@ -250,8 +287,7 @@ Use `\.`, `\*` or `\\` in a path to match a literal dot, star or backslash.
 Double the backslashes in a JavaScript string, as in `'metadata.guest\\.email'` for
 the key `guest.email`. Paths match existing JSON locations. They support
 one-segment wildcards only and do not match value contents or select changes
-by field name. Invalid paths throw during setup and name the option and
-zero-based entry index.
+by field name. Invalid paths throw during setup with code `redaction_options_invalid`.
 
 The SDK preserves top-level `id` and `action` and the party identifiers listed in
 `IDENTIFIER_FIELDS`. It reports rules that directly match identifiers once via
@@ -432,7 +468,7 @@ ids across separate `track()` calls, resend identical content, including `occurr
 and `executor.attempt`; a new call otherwise gets a fresh timestamp. A different
 event with the same id is rejected with `duplicate_id_conflict: ...`; the original
 is kept. Send a correction with a new id and `context.parentEventId` pointing to it.
-The SDK calls `onDrop` for that event and `onError` with the reason.
+The SDK calls `onDrop` with the approved rejection code and gives `onError` a count.
 
 `503 ingest_pending` and `503 ingest_unavailable` mean retry unsettled events,
 honoring `Retry-After`. Healthy siblings commit before a pending response and remain

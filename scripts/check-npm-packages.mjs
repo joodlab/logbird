@@ -402,10 +402,15 @@ function main(folder, expected) {
     collect(manifest.exports);
     if (targets.length === 0) fail('no exports');
     for (const target of targets) if (!files.has(target.replace(/^\.\//, ''))) fail(`exports names ${target}, which the tarball does not carry`);
-    for (const entrypoint of known.typedEntrypoints ?? []) {
-      const entry = manifest.exports?.[entrypoint];
-      if (typeof entry?.types !== 'string' || typeof entry.import !== 'string')
-        fail(`exports.${entrypoint} needs types and import targets for packed consumers`);
+    if (known.typedEntrypoints) {
+      for (const entrypoint of known.typedEntrypoints) {
+        const entry = manifest.exports?.[entrypoint];
+        if (typeof entry?.types !== 'string' || typeof entry.import !== 'string')
+          fail(`exports.${entrypoint} needs types and import targets for packed consumers`);
+      }
+      for (const entrypoint of Object.keys(manifest.exports ?? {})) {
+        if (!known.typedEntrypoints.includes(entrypoint)) fail(`unexpected public entrypoint ${entrypoint}`);
+      }
     }
 
     // What npm installs for a consumer: exactly the allowed dependencies and peers, no optional or bundled ones, and
