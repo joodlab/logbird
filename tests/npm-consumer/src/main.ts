@@ -70,7 +70,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   }
   if (request.method === 'GET' && url.pathname === '/v1/events') {
     searches.push(url);
-    const range = { from: url.searchParams.get('from') ?? '2026-01-01T00:00:00.000Z', to: url.searchParams.get('to') ?? '2026-01-02T00:00:00.000Z' };
+    const range = { from: url.searchParams.get('from') ?? '2026-01-01T00:00:00.000Z', to: url.searchParams.get('to') ?? '2027-01-01T00:00:00.000Z' };
     response.end(JSON.stringify({ data: [STORED], nextCursor: null, total: 1, range, tookMs: 1 }));
     return;
   }
@@ -99,6 +99,7 @@ function pass(what: string): void {
 function expect(condition: boolean, what: string): void {
   if (!condition) throw new Error(`expected ${what}`);
 }
+const stored0 = (page: { data: { timestamp: string }[] }) => page.data[0]?.timestamp ?? '';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 try {
@@ -224,7 +225,9 @@ try {
     { endpoint, readKey: 'lb_read_fictional' },
     trailQuery({ target: { type: 'invoice', id: 'inv_1' }, range, order: 'asc' }),
   );
-  expect(page.range?.from === '2026-01-01T00:00:00.000Z', 'the applied window to be read back');
+  const applied = page.range;
+  expect(applied?.from === '2026-01-01T00:00:00.000Z' && applied.to === '2027-01-01T00:00:00.000Z', 'the applied window to be read back');
+  expect(Boolean(stored0(page) && applied && applied.from <= stored0(page) && stored0(page) < applied.to), 'the event to lie in the applied window');
   expect(searches.at(-1)?.searchParams.get('order') === 'asc', 'the trail to read oldest first');
   const stored = page.data[0];
   expect(page.total === 1 && stored?.actor?.id === 'u1' && stored.changes[0]?.after === 'sent', 'the stored event read back');

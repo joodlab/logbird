@@ -21,13 +21,16 @@ export default {
 export default defineEventHandler(event => { event.context.audit('record.updated'); return { ok: true }; });
 ```
 
-Auto-imported `useAuditTrail({ target: { id: '123' } })` uses the server route
+Auto-imported `useAuditTrail({ target: { id: '123' }, range: { from: '2026-01-01T00:00:00Z' } })` uses the server route
 `/api/_logbird/events`; SSR forwards the application's request cookies. The route denies by default,
 sets private/no-store caching, and only forwards the query returned by authorize. Hooks run on the
 server, not serialized runtime config. Authorize every page/cursor; tenant selectors are not a policy.
 If authorize throws a `TrailQueryError` (a `TypeError`, from `trailQuery`) or returns a query with no `q`, the route answers 400 and reads
 nothing. Because authorize decides the scope on the server, `useAuditTrail({})` may send an empty trail to this route;
-a selector passed without a value (`tenant: undefined`) still throws on the client. Only a `TrailQueryError` from the
+a selector passed without a value (`tenant: undefined`) still throws on the client, and so does a trail with a
+selector but no `range.from`. The window of an empty trail is the hook's to choose: build its query with
+`trailQuery({ …, range: { from } })`, which refuses a trail without a window (a hand-built `{ q }` without `from` reads
+only the server's last 24 hours). Bounds the component passes (`range`) arrive in the hook's `query`. Only a `TrailQueryError` from the
 SDK becomes a 400; any other error in `authorize` stays a server error.
 Pass `session` in the options: a string that changes whenever `authorize` would return a different scope, so the user
 **and** the active tenant or workspace, for example

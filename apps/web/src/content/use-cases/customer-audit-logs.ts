@@ -41,8 +41,8 @@ export default {
     // trailQuery quotes the id for the query language.
     return trailQuery({
       tenant: tenantId,
-      // A trail names its window: here the last year of history.
-      range: { from: new Date(Date.now() - 365 * 86_400_000) },
+      // A trail names its window, fixed: a start recomputed per request would move between pages.
+      range: { from: '2026-01-01T00:00:00Z' },
       cursor: typeof query.cursor === 'string' ? query.cursor : undefined,
     });
   },

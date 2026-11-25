@@ -1,3 +1,4 @@
+import { mayHoldInexactNumbers, parseJsonExact, supportsExactJson } from '@logbird/contracts/json';
 import { parseQueryExpression } from '@logbird/contracts/query-syntax';
 import { formatRecordTerm, quoteQueryValue } from '@logbird/contracts/record-selector';
 
@@ -366,8 +367,13 @@ export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
     tenant === undefined ? '' : `tenant:${quoteQueryValue(tenant)}`,
   ].filter(Boolean);
   const window = trailWindow(trail);
-  return { ...window, q: terms.join(' AND '), order: trail.order, limit: trail.limit, cursor: trail.cursor };
+  // `order` only when the trail gives one, so a caller's own order around the result is not overwritten.
+  const order = own(trail, 'order');
+  return { ...window, q: terms.join(' AND '), ...(order ? { order } : {}), limit: trail.limit, cursor: trail.cursor };
 }
+/** A snapshot field the snapshot itself holds: never one inherited through Object.prototype. */
+const own = <K extends keyof TrailSnapshot>(trail: TrailSnapshot, key: K): TrailSnapshot[K] | undefined =>
+  Object.hasOwn(trail, key) ? trail[key] : undefined;
 const NO_WINDOW =
   "without `from` the server reads only the 24 hours before `to`, so the trail would look complete when it is not. Pass `range: { from }` (`to` defaults to now), or `range: SERVER_DEFAULT_RANGE` to read the server's default window on purpose.";
 /**
@@ -375,12 +381,15 @@ const NO_WINDOW =
  * hours before `to`, and a short history would look complete. `SERVER_DEFAULT_RANGE` asks for that default on purpose
  * (no bounds are sent). Throws a TrailQueryError otherwise.
  */
-export function trailWindow(trail: Pick<TrailSnapshot, 'range'>, where = 'trailQuery'): { from?: string; to?: string } {
-  const range = trail.range;
+function trailWindow(trail: TrailSnapshot, where = 'trailQuery'): { from?: string; to?: string } {
+  const range = own(trail, 'range');
   if (range === SERVER_DEFAULT_RANGE) return {};
   if (range === undefined) return fail(where, `a trail needs a \`range\`: ${NO_WINDOW}`);
-  if (range.from === undefined) return fail(where, `\`range\` has no \`from\`: ${NO_WINDOW}`);
-  return range;
+  // The snapshot's range is itself a frozen snapshot of strings: copy its own bounds, nothing else.
+  const from = Object.hasOwn(range, 'from') ? range.from : undefined;
+  const to = Object.hasOwn(range, 'to') ? range.to : undefined;
+  if (from === undefined) return fail(where, `\`range\` has no \`from\`: ${NO_WINDOW}`);
+  return to === undefined ? { from } : { from, to };
 }
 
 export interface ReadOptions {
@@ -417,14 +426,22 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
 }
 
 /**
- * One event by id, with its causation context: the nearest ancestors (`parents`, furthest first), how many events name
- * it as their parent (`childCount`; list them with `parent:` in a trail's `q`), how many share its operation, and the
- * original document (`payload`, null under a field mask). No time window applies. Resolves to null when the id is
- * unknown or outside the key's scope (404).
+ * One event by id, with its causation context: its nearest ancestors (`parents`, furthest first), how many events name
+ * it as their parent (`childCount`; list them with `parent:` and the quoted id in a trail's `q`, over a window that
+ * covers them), how many share its operation (`operationSize`, 0 without an operation id), and the original document
+ * (`payload`, null under a field mask). No time window applies. Resolves to null when the id is unknown or outside the
+ * key's scope (404).
+ *
+ * The payload keeps the exact digits of every number it holds (64-bit ids, long decimals) on runtimes with
+ * `JSON.rawJSON` (Node 21 or later). Where a runtime cannot keep them, a payload that may hold such a number is
+ * refused with an error rather than returned rounded.
  */
 export async function readAuditEvent(options: ReadOptions, id: string, signal?: AbortSignal): Promise<EventDetail | null> {
   if (typeof window !== 'undefined') throw new Error('Logbird read keys are server-only');
   const eventId = selector('readAuditEvent', 'id', id);
+  // A URL path has no spelling for these two ids (`%2E` is a dot segment too): they would address another route.
+  if (eventId === '.' || eventId === '..')
+    fail('readAuditEvent', `the id "${eventId}" cannot be addressed in a URL path; search with \`id:\` instead.`);
   const url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events/${encodeURIComponent(eventId)}`);
   const response = await (options.fetch ?? fetch)(url, {
     headers: { Authorization: `Bearer ${options.readKey}` },
@@ -432,33 +449,92 @@ export async function readAuditEvent(options: ReadOptions, id: string, signal?: 
   });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Logbird read HTTP ${response.status}`);
-  return response.json() as Promise<EventDetail>;
+  const text = await response.text();
+  if (!supportsExactJson && mayHoldInexactNumbers(text))
+    throw new Error(
+      'Logbird read: this event may hold numbers this runtime cannot keep exactly (it has no JSON.rawJSON); read it on Node 21 or later.',
+    );
+  return parseJsonExact(text) as EventDetail;
+}
+
+/** Bounds the server may move a requested bound onto: what its store holds (1900-01-01 to 2299-12-31, UTC). */
+const STORE_MIN = Date.UTC(1900, 0, 1);
+const STORE_MAX = Date.UTC(2299, 11, 31, 23, 59, 59, 999);
+/** Whether `applied` is the bound the caller asked for, allowing only the server's documented move onto its limits. */
+function sameBound(requested: string, applied: string) {
+  const asked = Date.parse(requested);
+  const got = Date.parse(applied);
+  if (!Number.isFinite(asked) || !Number.isFinite(got)) return false;
+  return got === Math.min(STORE_MAX, Math.max(STORE_MIN, asked));
 }
 
 /**
  * Every event of a trail, page after page, as one async iterator: `for await (const event of iterateAuditTrail(…))`.
  * The trail needs an explicit `range` with `from` (`SERVER_DEFAULT_RANGE` is refused here: a whole trail has to say
- * where it starts). Pages follow `nextCursor` within the window the first page applied (its `range`), so later pages
- * never drift with the clock, and the iterator ends after the last page. Breaking out of the loop stops it before the
- * next request; `signal` aborts a request in flight.
+ * where it starts). The trail and the reader options are read once, when you call it; nothing is sent until the first
+ * `next()`. Every page is checked before any of its events is yielded:
  *
- * A pass is not a snapshot: an event stored while you iterate, with a timestamp behind your position, is not
- * returned, and nor is one older than `from`. To pick up late arrivals, read again later with `receivedAt:>=` a time
- * well before the last `receivedAt` you saw (receipt times are not a strict sequence) and skip ids you already have.
+ * - The first page must apply the window you asked for (the server only moves a bound onto its store limits, 1900 to
+ *   2299). Later pages are sent with that same window, so `to` never moves with the clock, and must report it too.
+ *   Against a server that does not report its window (older than that field), a trail without `to` is refused before
+ *   the second page: pass `range.to`.
+ * - A cursor the pass has already used ends it with an error instead of a loop.
+ * - An event id the pass has already yielded is skipped (an id can sit at two positions in older stored data).
+ *
+ * It ends after the last page. Breaking out of the loop stops it before the next request, and `signal` stops both a
+ * request in flight and the events of a page not yet yielded.
+ *
+ * A pass is not a snapshot: an event stored while you iterate, with a timestamp behind your position (or before
+ * `from`), is not returned, and a relative time in `q` (`receivedAt:>now-1h`) is read again on every page. To pick up
+ * late arrivals, read again later with a window that covers when they can have occurred and `receivedAt:>=` in `q`,
+ * starting well before the last `receivedAt` you saw (receipt times are not a strict sequence), and skip ids you
+ * already have. A `cursor` in the trail starts the pass partway through its window.
  */
-export async function* iterateAuditTrail(options: ReadOptions, trail: TrailQuery, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined> {
+export function iterateAuditTrail(options: ReadOptions, trail: TrailQuery, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined> {
   const snapshot = snapshotTrail(trail, 'iterateAuditTrail');
-  if (snapshot.range === SERVER_DEFAULT_RANGE)
+  if (own(snapshot, 'range') === SERVER_DEFAULT_RANGE)
     fail('iterateAuditTrail', 'a whole trail needs `range: { from }`; `SERVER_DEFAULT_RANGE` reads only the last 24 hours.');
-  let query: Partial<SearchQuery> = trailQuery({ ...snapshot, limit: snapshot.limit ?? 200 });
+  const first: Partial<SearchQuery> = trailQuery({ ...snapshot, limit: snapshot.limit ?? 200 });
+  if (!isRecord(options)) fail('iterateAuditTrail', 'expects an options object.');
+  const reader: ReadOptions = Object.freeze({
+    endpoint: text('iterateAuditTrail', 'endpoint', options.endpoint),
+    readKey: text('iterateAuditTrail', 'readKey', options.readKey),
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+  });
+  return pages(reader, first, signal);
+}
+async function* pages(reader: ReadOptions, first: Partial<SearchQuery>, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined> {
+  const asked = { from: first.from as string, to: first.to };
+  const usedCursors = new Set<string>(first.cursor ? [first.cursor] : []);
+  const yielded = new Set<string>();
+  let query = first;
+  let pinned: { from: string; to: string } | undefined;
   for (;;) {
-    const page = await readAuditTrail(options, query, signal);
-    for (const event of page.data) yield event;
+    const page = await readAuditTrail(reader, query, signal);
+    // Check the whole page before yielding any of it.
+    if (page.range) {
+      if (!pinned) {
+        if (!sameBound(asked.from, page.range.from) || (asked.to !== undefined && !sameBound(asked.to, page.range.to)))
+          throw new Error(`Logbird read: the server applied ${page.range.from} to ${page.range.to}, not the window asked for.`);
+        pinned = { from: page.range.from, to: page.range.to };
+      } else if (page.range.from !== pinned.from || page.range.to !== pinned.to)
+        throw new Error('Logbird read: the server changed the window between pages.');
+    }
     const next = page.nextCursor;
+    if (next) {
+      if (usedCursors.has(next)) throw new Error('Logbird read: the server repeated a page cursor.');
+      if (!pinned && asked.to === undefined)
+        throw new Error('Logbird read: this server does not report the window it applied, so the pass cannot keep a fixed end; pass `range.to`.');
+    }
+    for (const event of page.data) {
+      signal?.throwIfAborted();
+      if (yielded.has(event.id)) continue;
+      yielded.add(event.id);
+      yield event;
+    }
     if (!next) return;
-    // A server that hands back the cursor it was given would loop forever.
-    if (next === query.cursor) throw new Error('Logbird read: the server repeated a page cursor.');
+    usedCursors.add(next);
     // Keep the window the first page applied: a cursor carries none, and an open `to` would move with the clock.
-    query = { ...query, ...(page.range ? { from: page.range.from, to: page.range.to } : {}), cursor: next };
+    query = { ...query, ...(pinned ?? {}), cursor: next };
   }
 }

@@ -129,7 +129,8 @@ const options = { endpoint, readKey };
 const trail = { target: { type: 'booking', id: 'bk_1042' }, tenant: 'biz_7', range: { from: '2026-01-01T00:00:00Z' } };
 const page = await readAuditTrail(options, trailQuery({ ...trail, order: 'asc' })); // one page; page.range is the window
 for await (const event of iterateAuditTrail(options, { ...trail, order: 'asc' })) render(event); // every page
-const detail = await readAuditEvent(options, page.data[0].id); // parents, childCount, payload; null when unknown
+const first = page.data[0];
+const detail = first ? await readAuditEvent(options, first.id) : null; // parents, childCount, payload; null when unknown
 ```
 
 `iterateAuditTrail` needs a `range` with `from`, follows `nextCursor` within the window the first page applied, and
@@ -146,7 +147,7 @@ parse as one complete Logbird query on its own; it is ANDed with the selectors.
 `trailQuery` and `readAuditTrail` first copy their input into a frozen snapshot of strings and numbers, reading each
 property once (getters, inherited and non-enumerable properties included), and throw a `TrailQueryError` (a `TypeError`;
 test with `isTrailQueryError`) for a value of the wrong type. Selectors, `q` and `cursor` are strings; a range bound is
-a `Date`, whole epoch milliseconds or an ISO 8601 string (checked by the server); a `range` needs at least one bound;
+a `Date`, whole epoch milliseconds or an ISO 8601 string (checked by the server); a trail's `range` needs `from`;
 `limit` is an integer or its decimal digits; the options, `target`, `range` and query are plain objects or class
 instances whose fields are named properties. Containers that keep entries elsewhere are refused: anything with an
 iterator, or with a method named `get`, `getTime`, `getReader` or `then` (arrays, `Map`s, `URLSearchParams`, `Headers`,

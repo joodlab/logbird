@@ -4,7 +4,7 @@
  *   pnpm exec tsx sdks/dotnet/tests/cross-sdk/trail-query.ts [--check]
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { type TrailQuery, trailQuery } from '../../../../packages/sdk/src/read';
+import { SERVER_DEFAULT_RANGE, type TrailQuery, trailQuery } from '../../../../packages/sdk/src/read';
 
 const output = 'sdks/dotnet/tests/Logbird.Tests/Fixtures/trail-query.golden.txt';
 
@@ -32,7 +32,9 @@ const cases: TrailQuery[] = [
   { q: 'outcome:failure', target: { type: 'invoice', id: 'inv_1' }, actor: 'u', tenant: 't' },
 ];
 
-const lines = cases.map((input) => JSON.stringify({ input, q: trailQuery(input).q }));
+// The window is not part of the selector parity: each case opts into the default window at the call, so the golden
+// inputs (and the .NET side) stay as they were.
+const lines = cases.map((input) => JSON.stringify({ input, q: trailQuery({ ...input, range: SERVER_DEFAULT_RANGE }).q }));
 const golden = `${lines.join('\n')}\n`;
 if (process.argv.includes('--check')) {
   if (readFileSync(output, 'utf8') !== golden) throw new Error(`${output} is stale: run this script without --check`);

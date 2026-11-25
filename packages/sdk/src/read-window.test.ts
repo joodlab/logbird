@@ -150,3 +150,139 @@ describe('iterateAuditTrail', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('iterateAuditTrail checks every page before it yields', () => {
+  const reply = (pages: Record<string, unknown>[]) => {
+    let i = 0;
+    const fetch = vi.fn(async () => json(pages[Math.min(i++, pages.length - 1)]));
+    return { fetch, options: { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch } };
+  };
+  const collect = async (options: Parameters<typeof iterateAuditTrail>[0], trail: Parameters<typeof iterateAuditTrail>[1]) => {
+    const seen: string[] = [];
+    let error: unknown;
+    try {
+      for await (const e of iterateAuditTrail(options, trail)) seen.push(e.id);
+    } catch (cause) {
+      error = cause;
+    }
+    return { seen, error: error instanceof Error ? error.message : undefined };
+  };
+
+  it('refuses a first page whose window is not the one asked for, before yielding it', async () => {
+    const { options } = reply([{ data: [event('a')], nextCursor: null, total: 1, range: { from: '2026-02-01T00:00:00.000Z', to: TO }, tookMs: 1 }]);
+    expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+      seen: [],
+      error: expect.stringMatching(/not the window asked for/),
+    });
+    // A bound the server moved onto its store limit is the same window.
+    const clamped = reply([{ data: [event('a')], nextCursor: null, total: 1, range: { from: '1900-01-01T00:00:00.000Z', to: TO }, tookMs: 1 }]);
+    expect(await collect(clamped.options, { tenant: 'acme', range: { from: '0001-01-01T00:00:00.000Z', to: TO } })).toEqual({
+      seen: ['a'],
+      error: undefined,
+    });
+  });
+
+  it('refuses a window that changes between pages, before yielding the changed page', async () => {
+    const { options } = reply([
+      { data: [event('a')], nextCursor: 'c1', total: 2, range: { from: FROM, to: TO }, tookMs: 1 },
+      { data: [event('b')], nextCursor: null, total: 2, range: { from: FROM, to: '2026-11-03T00:00:00.000Z' }, tookMs: 1 },
+    ]);
+    expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+      seen: ['a'],
+      error: expect.stringMatching(/changed the window/),
+    });
+  });
+
+  it('cannot keep a fixed end on a server that reports no window: needs `to` before a second page', async () => {
+    const pages = [
+      { data: [event('a')], nextCursor: 'c1', total: 2, tookMs: 1 },
+      { data: [event('b')], nextCursor: null, total: 2, tookMs: 1 },
+    ];
+    expect(await collect(reply(pages).options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+      seen: [],
+      error: expect.stringMatching(/pass `range.to`/),
+    });
+    const fixed = reply(pages);
+    expect(await collect(fixed.options, { tenant: 'acme', range: { from: FROM, to: TO } })).toEqual({ seen: ['a', 'b'], error: undefined });
+    const second = fixed.fetch.mock.calls[1] as unknown as [URL];
+    expect(new URL(String(second[0])).searchParams.get('to')).toBe(TO);
+  });
+
+  it('ends on any cursor it has used, and skips an id it has already yielded', async () => {
+    const cycle = reply([
+      { data: [event('a')], nextCursor: 'A', total: 9, range: { from: FROM, to: TO }, tookMs: 1 },
+      { data: [event('b')], nextCursor: 'B', total: 9, range: { from: FROM, to: TO }, tookMs: 1 },
+      { data: [event('c')], nextCursor: 'A', total: 9, range: { from: FROM, to: TO }, tookMs: 1 },
+    ]);
+    expect(await collect(cycle.options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+      seen: ['a', 'b'],
+      error: expect.stringMatching(/repeated a page cursor/),
+    });
+    const repeats = reply([
+      { data: [event('a'), event('b')], nextCursor: 'c1', total: 3, range: { from: FROM, to: TO }, tookMs: 1 },
+      { data: [event('b'), event('c')], nextCursor: null, total: 3, range: { from: FROM, to: TO }, tookMs: 1 },
+    ]);
+    expect(await collect(repeats.options, { tenant: 'acme', range: { from: FROM } })).toEqual({ seen: ['a', 'b', 'c'], error: undefined });
+  });
+
+  it('reads the trail and the reader once, when called: later changes to those objects do not reach the pass', async () => {
+    const first = reply([{ data: [event('a')], nextCursor: null, total: 1, range: { from: FROM, to: TO }, tookMs: 1 }]);
+    const other = reply([{ data: [event('x')], nextCursor: null, total: 1, range: { from: FROM, to: TO }, tookMs: 1 }]);
+    const trail = { tenant: 'acme', range: { from: FROM } };
+    const options = { ...first.options };
+    const pass = iterateAuditTrail(options, trail);
+    trail.tenant = 'globex';
+    options.fetch = other.options.fetch;
+    const seen: string[] = [];
+    for await (const e of pass) seen.push(e.id);
+    expect(seen).toEqual(['a']);
+    expect(new URL(String((first.fetch.mock.calls[0] as unknown as [URL])[0])).searchParams.get('q')).toBe('tenant:"acme"');
+    expect(other.fetch).not.toHaveBeenCalled();
+  });
+
+  it('stops yielding a page once its signal aborts', async () => {
+    const { options } = reply([{ data: [event('a'), event('b'), event('c')], nextCursor: null, total: 3, range: { from: FROM, to: TO }, tookMs: 1 }]);
+    const controller = new AbortController();
+    const seen: string[] = [];
+    await expect(
+      (async () => {
+        for await (const e of iterateAuditTrail(options, { tenant: 'acme', range: { from: FROM } }, controller.signal)) {
+          seen.push(e.id);
+          controller.abort();
+        }
+      })(),
+    ).rejects.toThrow();
+    expect(seen).toEqual(['a']);
+  });
+});
+
+describe('the helpers keep what the caller and the server gave', () => {
+  it('leaves a caller order in place when the trail gives none', () => {
+    expect({ order: 'asc', ...trailQuery({ tenant: 'acme', range: { from: FROM } }) }.order).toBe('asc');
+  });
+
+  it('never takes a range or order from Object.prototype', () => {
+    const proto = Object.prototype as Record<string, unknown>;
+    proto.range = SERVER_DEFAULT_RANGE;
+    proto.order = 'asc';
+    try {
+      expect(() => trailQuery(Object.assign(Object.create(null), { tenant: 'acme' }))).toThrow(/needs a `range`/);
+      // A null-prototype input has no order: the snapshot built from it must not pick one up from Object.prototype.
+      const bare = Object.assign(Object.create(null), { tenant: 'acme', range: Object.assign(Object.create(null), { from: FROM }) });
+      expect(Object.hasOwn(trailQuery(bare), 'order')).toBe(false);
+    } finally {
+      delete proto.range;
+      delete proto.order;
+    }
+  });
+
+  it('keeps the exact digits of numbers in the original payload, and refuses an id no URL path can hold', async () => {
+    const body = `{"event":${JSON.stringify(event('e1'))},"payload":{"accountId":9007199254740993,"ratio":0.1000000000000000055511151231257827},"parents":[],"childCount":0,"operationSize":1}`;
+    const fetch = vi.fn(async () => new Response(body, { status: 200 }));
+    const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+    const detail = await readAuditEvent(options, 'e1');
+    expect(JSON.stringify(detail?.payload)).toBe('{"accountId":9007199254740993,"ratio":0.1000000000000000055511151231257827}');
+    for (const id of ['.', '..']) await expect(readAuditEvent(options, id)).rejects.toThrow(/cannot be addressed in a URL path/);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});

@@ -1,20 +1,19 @@
 import { serve } from '@hono/node-server';
 import { type AuditVariables, logbird } from '@logbird/hono';
-import { readAuditTrail, trailQuery } from '@logbird/sdk/read';
-import { useAuditTrail } from '@logbird/vue';
+import { readAuditTrail } from '@logbird/sdk/read';
+import { type AuditFetcher, useAuditTrail } from '@logbird/vue';
 import { renderToString } from '@vue/server-renderer';
 import { Hono } from 'hono';
 import { createSSRApp, h, onServerPrefetch } from 'vue';
 import { endpoint, options } from './audit.server';
 
 const app = new Hono<{ Variables: AuditVariables }>();
+/** The demo shows the last 30 days, fixed when the server starts. */
+const historyFrom = new Date(Date.now() - 30 * 86_400_000);
 const capture = logbird(options);
 app.use(capture);
-const read = () =>
-  readAuditTrail(
-    { endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' },
-    trailQuery({ target: { id: 'demo-record' }, range: { from: new Date(Date.now() - 30 * 86_400_000) } }),
-  );
+// The fetcher sends the query the composable built (selectors, window, cursor), so every page reads the same trail.
+const read: AuditFetcher = (query, signal) => readAuditTrail({ endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' }, query, signal);
 app.post('/demo', (c) => {
   c.var.audit('vue.record.updated', { targets: [{ type: 'record', id: 'demo-record' }] });
   return c.json({ ok: true });
@@ -24,7 +23,8 @@ app.get('/history', async (c) => {
   const view = createSSRApp({
     setup() {
       // The fetcher is server-owned; keys are never serialized to component props.
-      const trail = useAuditTrail({ fetcher: read, target: { id: 'demo-record' }, range: { from: new Date(Date.now() - 30 * 86_400_000) } });
+      // One fixed window for the whole history (a `from` computed per request would move between pages).
+      const trail = useAuditTrail({ fetcher: read, target: { id: 'demo-record' }, range: { from: historyFrom } });
       onServerPrefetch(async () => {
         await trail.refresh();
         failed = Boolean(trail.error.value);

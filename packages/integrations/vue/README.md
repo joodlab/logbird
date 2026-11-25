@@ -4,6 +4,9 @@
 import { useAuditTrail } from '@logbird/vue';
 const trail = useAuditTrail({
   target: { type: 'record', id: '123' },
+  // Required: the window (`to` defaults to now), or SERVER_DEFAULT_RANGE for the server's last 24 hours.
+  range: { from: '2026-01-01T00:00:00Z' },
+  order: 'asc',
   fetcher: async (query, signal) => {
     const response = await fetch(`/api/history?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined).map(([k,v]) => [k, String(v)]))}`, { signal });
     if (!response.ok) throw new Error(`History HTTP ${response.status}`);
