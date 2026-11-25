@@ -26,7 +26,7 @@ function bytes(label: string) {
 }
 const defaultOf = (label: string) => Number(value(label).match(/\(default (\d+)\)/)?.[1]);
 
-it('documents every per-event limit with the number the normalizer uses', () => {
+it('documents the checked per-event limits with the number the normalizer uses', () => {
   expect(bytes('Event size')).toBe(EVENT_LIMITS.payloadBytes);
   expect(first('Number depth')).toBe(EXACT_NUMBER_MAX_DEPTH);
   expect(first('Targets indexed')).toBe(EVENT_LIMITS.targets);
@@ -39,7 +39,7 @@ it('documents every per-event limit with the number the normalizer uses', () => 
   expect(numbers('occurredAt')).toEqual([OCCURRED_AT_PAST_DAYS, OCCURRED_AT_FUTURE_DAYS]);
 });
 
-it('documents every per-request limit, its default and its unit, with what the server enforces', () => {
+it('documents the checked per-request limits, their defaults and units, with what the server enforces', () => {
   expect(first('Ingest batch')).toBe(REQUEST_LIMITS.ingestEvents);
   expect(bytes('Ingest body')).toBe(REQUEST_LIMITS.ingestBodyBytes);
   expect(bytes('Viewer-token request body')).toBe(REQUEST_LIMITS.viewerTokenBodyBytes);

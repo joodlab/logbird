@@ -119,3 +119,22 @@ describe('the reserved prefix and the attribute budget', () => {
     expect(result.row.attributes[TRUNCATED_ATTRIBUTES.targets]).toBe('65');
   });
 });
+
+describe('the sent counts come from the stored payload', () => {
+  it('flags a cut even when an in-process hook shrinks the input after the payload was serialized', () => {
+    const list = changes(257);
+    // A toJSON hook on the first change's value: harmless while the payload is serialized (key "before"), it pops
+    // the last change when that value is serialized on its own for the indexed column (key "").
+    const first = list[0] as Record<string, unknown>;
+    first.before = {
+      toJSON(key: string) {
+        if (key === '') list.pop();
+        return 'v';
+      },
+    };
+    const result = normalized({ changes: list });
+    expect(JSON.parse(result.row.payload).changes).toHaveLength(257);
+    expect(result.row.attributes[TRUNCATED_ATTRIBUTES.changes]).toBe('257');
+    expect(result.cuts).toEqual([expect.objectContaining({ code: 'changes_truncated', sent: 257, indexed: 256 })]);
+  });
+});

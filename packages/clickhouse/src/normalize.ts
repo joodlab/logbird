@@ -137,9 +137,9 @@ export type IngestCut =
   | { code: 'targets_truncated' | 'changes_truncated'; reason: string; sent: number; indexed: number; limit: number }
   | { code: 'change_fields_truncated'; reason: string; cut: number; limit: number };
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-function truncations(e: Record<string, unknown>, indexedTargets: number, indexedChanges: number, fields: unknown[]) {
+function truncations(wire: Record<string, unknown>, indexedTargets: number, indexedChanges: number, fields: unknown[]) {
   const cuts: (IngestCut & { attribute: string })[] = [];
-  const sentTargets = Array.isArray(e.targets) ? e.targets.length : 0;
+  const sentTargets = Array.isArray(wire.targets) ? wire.targets.length : 0;
   if (indexedTargets < sentTargets)
     cuts.push({
       code: 'targets_truncated',
@@ -149,7 +149,7 @@ function truncations(e: Record<string, unknown>, indexedTargets: number, indexed
       limit: EVENT_LIMITS.targets,
       reason: `${plural(sentTargets, 'target', 'targets')} sent, ${indexedTargets} indexed (at most ${EVENT_LIMITS.targets} per event, in the order sent; a numeric id too long to index is left out). Only the first ${EVENT_LIMITS.targets} entries feed the target index; later entries add nothing to it. The stored payload keeps them all.`,
     });
-  const sentChanges = Array.isArray(e.changes) ? e.changes.length : 0;
+  const sentChanges = Array.isArray(wire.changes) ? wire.changes.length : 0;
   if (indexedChanges < sentChanges)
     cuts.push({
       code: 'changes_truncated',
@@ -382,7 +382,12 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     sdk: text(ctx.sdk, 128),
   };
   // Computed after the row, from the field names it read: each change's field is read once, in the old order.
-  const cuts = ctx.legacyColumns ? [] : truncations(e, recordTargets.length, changes.length, indexedFields);
+  // How many were sent is read from the stored payload (the document kept), never from the live input again: an
+  // in-process hook (toJSON, a getter) could change the input after the payload was serialized.
+  const wire = ctx.legacyColumns
+    ? {}
+    : object(payloadInput ?? (payload.includes('"targets"') || payload.includes('"changes"') ? parseJsonExact(payload) : undefined));
+  const cuts = ctx.legacyColumns ? [] : truncations(wire, recordTargets.length, changes.length, indexedFields);
   if (!ctx.legacyColumns) {
     // Reserved: only Logbird writes under logbird.truncated, so a producer can neither forge a cut nor hide one.
     for (const key of Object.keys(attributes))
