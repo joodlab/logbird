@@ -23,7 +23,7 @@ export function logbird(options: LogbirdOptions): MiddlewareHandler<{ Variables:
             metadata: { path: c.req.path, status: c.res.status },
           });
       } catch (error) {
-        report(options.onError, error);
+        report(options.onError, error, options.client);
       }
       // Hono throws when no execution context exists on Node.
       let execution: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
@@ -37,7 +37,7 @@ export function logbird(options: LogbirdOptions): MiddlewareHandler<{ Variables:
           audit
             .pending()
             .then(() => options.client.flush())
-            .catch((error) => report(options.onError, error)),
+            .catch((error) => report(options.onError, error, options.client)),
         );
     }
   };

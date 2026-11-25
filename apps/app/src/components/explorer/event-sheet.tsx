@@ -1,4 +1,4 @@
-import { type AuditEvent, type EventDetail, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
+import { type AuditEvent, type ChangeValueKind, type EventDetail, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
 import { OutcomeBadge, OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badges';
 import { CopyButton, CopyValue } from '@logbird/ui/components/copy-button';
 import { EntityAvatar, EntityChip } from '@logbird/ui/components/entity-chip';
@@ -574,6 +574,25 @@ function PartyCard({
   );
 }
 
+function ChangeValue({ text, kind, before, redacted }: { text: string; kind: ChangeValueKind | undefined; before?: boolean; redacted: boolean }) {
+  const value = kind === 'string' && text !== '[redacted]' ? JSON.stringify(text) : text;
+  return (
+    <span
+      className={cn(
+        'font-mono text-[12px] [overflow-wrap:anywhere]',
+        kind === 'absent' || redacted
+          ? 'text-muted-foreground italic'
+          : before
+            ? 'text-diff-remove line-through decoration-diff-remove/40'
+            : 'text-diff-add',
+      )}
+      dir="auto"
+    >
+      {kind === 'absent' ? 'not set' : value || <span className={cn('text-muted-foreground', before && 'no-underline')}>∅</span>}
+    </span>
+  );
+}
+
 function EventDetailBody({
   event: e,
   detail,
@@ -803,26 +822,10 @@ function EventDetailBody({
                       <tr key={c.field}>
                         <td className="px-3 py-2 align-top font-mono text-[12px] [overflow-wrap:anywhere]">{c.field}</td>
                         <td className="px-3 py-2 align-top">
-                          <span
-                            className={cn(
-                              'font-mono text-[12px] [overflow-wrap:anywhere]',
-                              redacted ? 'text-muted-foreground italic' : 'text-diff-remove line-through decoration-diff-remove/40',
-                            )}
-                            dir="auto"
-                          >
-                            {c.before || <span className="text-muted-foreground no-underline">∅</span>}
-                          </span>
+                          <ChangeValue before kind={c.beforeKind} redacted={redacted} text={c.before} />
                         </td>
                         <td className="px-3 py-2 align-top">
-                          <span
-                            className={cn(
-                              'font-mono text-[12px] [overflow-wrap:anywhere]',
-                              redacted ? 'text-muted-foreground italic' : 'text-diff-add',
-                            )}
-                            dir="auto"
-                          >
-                            {c.after || <span className="text-muted-foreground">∅</span>}
-                          </span>
+                          <ChangeValue kind={c.afterKind} redacted={redacted} text={c.after} />
                         </td>
                       </tr>
                     );

@@ -89,13 +89,15 @@ describe('the first-event snippets, executed', () => {
       await new AsyncFunction('Logbird', 'console', body)(Logbird, { error, log: vi.fn() });
       return error;
     };
-    const ok = standIn(stored);
+    const ok = vi.fn(async (_url: string, init: RequestInit) =>
+      Response.json({ ...stored, ids: [JSON.parse(String(init.body)).events[0].id] }, { status: 202 }),
+    );
     expect(await run(ok)).not.toHaveBeenCalled();
     const sent = JSON.parse(String((ok.mock.calls[0] as [string, RequestInit])[1].body));
     expect(sent.events[0]).toMatchObject({ action: 'hotel.policy.updated', changes: [{ field: 'cancellationHours', before: 24, after: 48 }] });
     expect(typeof sent.events[0].id).toBe('string');
     const errors = await run(standIn(refused));
-    expect(errors.mock.calls.map((c) => c.join(' ')).join('\n')).toMatch(/invalid_event: action must be a string/);
+    expect(errors).toHaveBeenCalledWith('[logbird]', '1 events rejected by Logbird');
   });
 
   it('shows the install that works today, and says the key belongs in the environment', () => {

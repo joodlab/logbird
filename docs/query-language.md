@@ -105,6 +105,9 @@ resolved dates are parameters. `NOT _exists_:field` means missing.
 | receivedAt |  | date | received_at | none |
 | description |  | text | description | none |
 
+The `beforeKind` and `afterKind` values on returned changes are read metadata. They have no query
+language fields or SQL-mode identifiers.
+
 ## SQL mode (lang=sql)
 
 Examples:

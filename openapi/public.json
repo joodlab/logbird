@@ -153,9 +153,35 @@
                             "items": {
                               "properties": {
                                 "after": {
+                                  "description": "Existing indexed text. Absent: empty string. Null: \"null\". String: its contents, without JSON quotes. Number: JSON number text that preserves numeric precision. Equivalent spellings may normalize (for example, 19.90 to 19.9 or 1e3 to 1000). Boolean: \"true\" or \"false\". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.",
+                                  "type": "string"
+                                },
+                                "afterKind": {
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "enum": [
+                                    "absent",
+                                    "null",
+                                    "string",
+                                    "number",
+                                    "boolean",
+                                    "json"
+                                  ],
                                   "type": "string"
                                 },
                                 "before": {
+                                  "description": "Existing indexed text. Absent: empty string. Null: \"null\". String: its contents, without JSON quotes. Number: JSON number text that preserves numeric precision. Equivalent spellings may normalize (for example, 19.90 to 19.9 or 1e3 to 1000). Boolean: \"true\" or \"false\". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.",
+                                  "type": "string"
+                                },
+                                "beforeKind": {
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "enum": [
+                                    "absent",
+                                    "null",
+                                    "string",
+                                    "number",
+                                    "boolean",
+                                    "json"
+                                  ],
                                   "type": "string"
                                 },
                                 "field": {
@@ -856,9 +882,35 @@
                           "items": {
                             "properties": {
                               "after": {
+                                "description": "Existing indexed text. Absent: empty string. Null: \"null\". String: its contents, without JSON quotes. Number: JSON number text that preserves numeric precision. Equivalent spellings may normalize (for example, 19.90 to 19.9 or 1e3 to 1000). Boolean: \"true\" or \"false\". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.",
+                                "type": "string"
+                              },
+                              "afterKind": {
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                "enum": [
+                                  "absent",
+                                  "null",
+                                  "string",
+                                  "number",
+                                  "boolean",
+                                  "json"
+                                ],
                                 "type": "string"
                               },
                               "before": {
+                                "description": "Existing indexed text. Absent: empty string. Null: \"null\". String: its contents, without JSON quotes. Number: JSON number text that preserves numeric precision. Equivalent spellings may normalize (for example, 19.90 to 19.9 or 1e3 to 1000). Boolean: \"true\" or \"false\". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.",
+                                "type": "string"
+                              },
+                              "beforeKind": {
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                "enum": [
+                                  "absent",
+                                  "null",
+                                  "string",
+                                  "number",
+                                  "boolean",
+                                  "json"
+                                ],
                                 "type": "string"
                               },
                               "field": {
@@ -1128,9 +1180,35 @@
                             "items": {
                               "properties": {
                                 "after": {
+                                  "description": "Existing indexed text. Absent: empty string. Null: \"null\". String: its contents, without JSON quotes. Number: JSON number text that preserves numeric precision. Equivalent spellings may normalize (for example, 19.90 to 19.9 or 1e3 to 1000). Boolean: \"true\" or \"false\". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.",
+                                  "type": "string"
+                                },
+                                "afterKind": {
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "enum": [
+                                    "absent",
+                                    "null",
+                                    "string",
+                                    "number",
+                                    "boolean",
+                                    "json"
+                                  ],
                                   "type": "string"
                                 },
                                 "before": {
+                                  "description": "Existing indexed text. Absent: empty string. Null: \"null\". String: its contents, without JSON quotes. Number: JSON number text that preserves numeric precision. Equivalent spellings may normalize (for example, 19.90 to 19.9 or 1e3 to 1000). Boolean: \"true\" or \"false\". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.",
+                                  "type": "string"
+                                },
+                                "beforeKind": {
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "enum": [
+                                    "absent",
+                                    "null",
+                                    "string",
+                                    "number",
+                                    "boolean",
+                                    "json"
+                                  ],
                                   "type": "string"
                                 },
                                 "field": {
@@ -1546,7 +1624,7 @@
                 }
               }
             },
-            "description": "Versioned CSV/JSONL or complete original-payload JSONL (jsonl-evidence; 422 masked_export for masked scopes), limited to the caller scope. CSV columns: id, timestamp, action, outcome, description, project_id, received_at, environment, category, severity, actor_type, actor_id, actor_name, actor_email, impersonator_id, impersonator_name, executor_type, executor_id, executor_name, job_id, job_attempt, tenant_id, tenant_name, source, targets, changes, context, attributes, conformance, schema_version, sdk, schemaVersion. There is no trailer: a complete download is one that ends normally (a non-empty file ends with a newline; an export with no matching events is an empty JSONL body or a CSV header only); a failure after the headers aborts the connection, so treat any transport error as an incomplete file and discard it. Audited in workspace activity as export.requested, then export.completed or export.failed (actor = the API key; metadata.access names the key, tenant and viewer token). See docs/exports.md.",
+            "description": "Versioned CSV/JSONL or complete original-payload JSONL (jsonl-evidence; 422 masked_export for masked scopes), limited to the caller scope. Normalized changes include beforeKind and afterKind when known, including in the JSON-encoded CSV changes cell. CSV columns: id, timestamp, action, outcome, description, project_id, received_at, environment, category, severity, actor_type, actor_id, actor_name, actor_email, impersonator_id, impersonator_name, executor_type, executor_id, executor_name, job_id, job_attempt, tenant_id, tenant_name, source, targets, changes, context, attributes, conformance, schema_version, sdk, schemaVersion. There is no trailer: a complete download is one that ends normally (a non-empty file ends with a newline; an export with no matching events is an empty JSONL body or a CSV header only); a failure after the headers aborts the connection, so treat any transport error as an incomplete file and discard it. Audited in workspace activity as export.requested, then export.completed or export.failed (actor = the API key; metadata.access names the key, tenant and viewer token). See docs/exports.md.",
             "headers": {
               "RateLimit-Limit": {
                 "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",

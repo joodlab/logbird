@@ -1,3 +1,6 @@
+import { acknowledge } from './acknowledgement';
+import { attachCaptureQueue } from './capture-queue';
+
 import { createRedactor, type RedactionOptions } from './redaction';
 
 export { DEFAULT_SECRET_KEYS, IDENTIFIER_FIELDS, type RedactionOptions, redact } from './redaction';
@@ -16,6 +19,8 @@ export {
 // Keep in sync with packages/sdk/package.json (verified by index.test.ts).
 const SDK_VERSION = '0.3.0';
 const MAX_SEND_MS = 5 * 60_000;
+const MAX_PENDING_NOTIFICATIONS = 1024;
+const MAX_OUTSTANDING_REQUESTS = 4;
 
 /**
  * A string id, or a JavaScript number from an integer key. A JS number cannot hold integers above 2^53 − 1: send
@@ -64,6 +69,38 @@ export function uuidv7(): string {
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+export type IngestRejectionCode =
+  | 'invalid_event'
+  | 'invalid_event_id'
+  | 'duplicate_id_conflict'
+  | 'stored_event_unreadable'
+  | 'unverified_after_parse_failure';
+
+export type DropReason =
+  | 'queue_full'
+  | 'rejected'
+  | 'http_error'
+  | 'too_large'
+  | 'invalid'
+  | 'before_send_failed'
+  | 'redaction_failed'
+  | 'filtered'
+  | 'diagnostic_reentry'
+  | 'shutdown';
+
+export interface DropDetails {
+  reason: DropReason;
+  /** A dispatch may have stored this event. Replay with the original id and content. */
+  mayBeStored: boolean;
+  code?: IngestRejectionCode;
+  status?: number;
+}
+
+export interface TrackOptions {
+  /** Preserve a nonblank event id already returned to the caller, even if beforeSend changes it. */
+  preserveId?: boolean;
+}
+
 export interface LogbirdOptions {
   apiKey?: string;
   endpoint?: string;
@@ -74,160 +111,379 @@ export interface LogbirdOptions {
   redaction?: false | RedactionOptions;
   batchSize?: number;
   flushIntervalMs?: number;
+  /** Total delivery time allowed at shutdown, including any request already in progress. Defaults to 10 seconds. */
+  shutdownTimeoutMs?: number;
   maxRetries?: number;
   onError?: (error: Error) => void;
   maxQueueSize?: number;
   dropPolicy?: 'oldest' | 'newest';
-  onDrop?: (event: EventInput) => void;
+  onDrop?: (event: EventInput, details: Readonly<DropDetails>) => void;
 }
+
+interface QueuedEvent {
+  event: EventInput;
+  sequence: number;
+  wireId: string;
+  serialized: string;
+  bytes: number;
+  uncertain: boolean;
+  sending: boolean;
+}
+
+interface FlushWaiter {
+  promise: Promise<void>;
+  resolve: (result?: void | Promise<void>) => void;
+  reject: (error: unknown) => void;
+}
+
+interface PreparingEvent {
+  identity: EventInput;
+  done: Promise<void>;
+  finish: () => void;
+}
+
+function boundedIdentityText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return;
+  if (value.length <= 256) return value;
+  // Copy the prefix because a substring can keep the entire original string alive.
+  return String.fromCharCode(...Array.from({ length: 256 }, (_, index) => value.charCodeAt(index)));
+}
+
+function dropIdentity(event: EventInput): EventInput {
+  // Local refusals may not have a usable snapshot. Do not copy invalid or oversized inputs into the notification backlog.
+  try {
+    const action: unknown = Object.getOwnPropertyDescriptor(event, 'action')?.value;
+    const id: unknown = Object.getOwnPropertyDescriptor(event, 'id')?.value;
+    return { action: boundedIdentityText(action) ?? '', id: boundedIdentityText(id) };
+  } catch {
+    return { action: '' };
+  }
+}
+
 export class Logbird {
-  private readonly queue: EventInput[] = [];
+  private readonly queue: QueuedEvent[] = [];
+  private inFlight: QueuedEvent[] = [];
+  private lastSequence = 0;
+  private flushWaiters = new Map<number, FlushWaiter>();
+  private readonly preparing = new Set<PreparingEvent>();
+  private readonly options: LogbirdOptions;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private operationTimer: ReturnType<typeof setTimeout> | undefined;
   private pending: Promise<void> | undefined;
+  private stopping: Promise<void> | undefined;
+  private shutdownDeadline: number | undefined;
+  private explicit = false;
+  private readonly stop = new AbortController();
   private closed = false;
   private readonly batchSize: number;
   private readonly interval: number;
+  private readonly shutdownTimeout: number;
+  private readonly endpoint: string;
   private readonly retries: number;
   private readonly capacity: number;
   private readonly serializeRedacted: ReturnType<typeof createRedactor> | undefined;
   private droppedCount = 0;
+  private readonly dropCounts: Partial<Record<DropReason, number>> = {};
+  private readonly uncertainDropCounts: Partial<Record<DropReason, number>> = {};
+  private notifications = 0;
+  private notificationBurst = 0;
+  private notifying = false;
+  private outstandingRequests = 0;
+  private skipped = 0;
+  private failed = 0;
   get dropped(): number {
     return this.droppedCount;
+  }
+  get droppedByReason(): Readonly<Partial<Record<DropReason, number>>> {
+    return { ...this.dropCounts };
+  }
+  get possiblyStoredDropsByReason(): Readonly<Partial<Record<DropReason, number>>> {
+    return { ...this.uncertainDropCounts };
+  }
+  get skippedNotifications(): number {
+    return this.skipped;
+  }
+  get failedNotifications(): number {
+    return this.failed;
   }
   get queueSize(): number {
     return this.queue.length;
   }
-  private drop(event: EventInput) {
-    this.droppedCount++;
-    try {
-      this.options.onDrop?.(event);
-    } catch {
-      /* Diagnostics cannot break capture. */
+  private notify<T extends unknown[]>(callback: ((...args: T) => void) | undefined, ...args: T) {
+    if (!callback) return;
+    if (this.notifying || this.notifications >= MAX_PENDING_NOTIFICATIONS || this.notificationBurst >= MAX_PENDING_NOTIFICATIONS) {
+      this.skipped++;
+      return;
     }
+    if (this.notificationBurst === 0) {
+      // A callback that captures again after an await must still yield the event loop to the shutdown timer.
+      setTimeout(() => {
+        this.notificationBurst = 0;
+      }, 0).unref?.();
+    }
+    this.notificationBurst++;
+    this.notifications++;
+    void Promise.resolve()
+      .then(() => {
+        this.notifying = true;
+        try {
+          return callback(...args);
+        } finally {
+          this.notifying = false;
+        }
+      })
+      .then(
+        () => {
+          this.notifications--;
+        },
+        () => {
+          this.notifications--;
+          this.failed++;
+        },
+      );
   }
-  constructor(private readonly options: LogbirdOptions) {
-    if (options.enabled !== false && (!options.apiKey || !options.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
-    this.capacity = options.maxQueueSize ?? 10_000;
-    this.batchSize = options.batchSize ?? 100;
-    this.interval = options.flushIntervalMs ?? 1000;
-    this.retries = options.maxRetries ?? 5;
+  private drop(event: EventInput, details: DropDetails) {
+    this.droppedCount++;
+    this.dropCounts[details.reason] = (this.dropCounts[details.reason] ?? 0) + 1;
+    if (details.mayBeStored) this.uncertainDropCounts[details.reason] = (this.uncertainDropCounts[details.reason] ?? 0) + 1;
+    this.notify(this.options.onDrop, event, details);
+  }
+  private dropQueued(entry: QueuedEvent, reason: DropReason, extra?: Pick<DropDetails, 'code' | 'status'>) {
+    this.drop(entry.event, { reason, mayBeStored: entry.sending || entry.uncertain, ...extra });
+  }
+  constructor(options: LogbirdOptions) {
+    const snapshot: LogbirdOptions = {
+      apiKey: options.apiKey,
+      endpoint: options.endpoint,
+      enabled: options.enabled,
+      defaults: options.defaults,
+      beforeSend: options.beforeSend,
+      redaction: options.redaction,
+      batchSize: options.batchSize,
+      flushIntervalMs: options.flushIntervalMs,
+      shutdownTimeoutMs: options.shutdownTimeoutMs,
+      maxRetries: options.maxRetries,
+      onError: options.onError,
+      maxQueueSize: options.maxQueueSize,
+      dropPolicy: options.dropPolicy,
+      onDrop: options.onDrop,
+    };
+    if (snapshot.enabled !== false && (!snapshot.apiKey || !snapshot.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
+    this.endpoint = (snapshot.endpoint ?? '').replace(/\/$/, '');
+    this.capacity = snapshot.maxQueueSize ?? 10_000;
+    this.batchSize = snapshot.batchSize ?? 100;
+    this.interval = snapshot.flushIntervalMs ?? 1000;
+    this.shutdownTimeout = snapshot.shutdownTimeoutMs ?? 10_000;
+    this.retries = snapshot.maxRetries ?? 5;
     if (
       !Number.isInteger(this.capacity) ||
       this.capacity < 1 ||
-      (options.dropPolicy !== undefined && !['oldest', 'newest'].includes(options.dropPolicy)) ||
+      (snapshot.dropPolicy !== undefined && !['oldest', 'newest'].includes(snapshot.dropPolicy)) ||
       !Number.isInteger(this.batchSize) ||
       this.batchSize < 1 ||
       this.batchSize > 1000 ||
       !Number.isFinite(this.interval) ||
       this.interval < 1 ||
+      !Number.isInteger(this.shutdownTimeout) ||
+      this.shutdownTimeout < 0 ||
+      this.shutdownTimeout > 3_600_000 ||
       !Number.isInteger(this.retries) ||
       this.retries < 0
     )
       throw new Error('Invalid batching options');
-    if (options.redaction !== false) {
-      this.serializeRedacted = createRedactor(options.redaction, (error) => this.report(error));
+    this.options = snapshot;
+    attachCaptureQueue(this, {
+      defer: (identity, prepare, onFailure) => this.deferCapture(identity, prepare, onFailure),
+      notify: (callback, error) => this.notify(callback, error instanceof Error ? error : new Error('Logbird capture failed')),
+    });
+    if (snapshot.redaction !== false) {
+      this.serializeRedacted = createRedactor(snapshot.redaction, (error) => this.report(error));
     }
   }
   private report(error: unknown) {
-    try {
-      this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
-    } catch {
-      /* A diagnostic hook must never break capture. */
-    }
+    this.notify(this.options.onError, error instanceof Error ? error : new Error('Logbird delivery failed'));
   }
-  track(event: EventInput): void {
+  private refuse(event: EventInput, reason: DropReason, message?: string) {
+    this.drop(dropIdentity(event), { reason, mayBeStored: false });
+    if (message) this.report(new Error(message));
+  }
+  track(event: EventInput, options?: TrackOptions): void {
+    this.trackPrepared(event, options, false);
+  }
+  private trackPrepared(event: EventInput, options: TrackOptions | undefined, duringShutdown: boolean): void {
     if (this.options.enabled === false) return;
-    let action = '';
-    let id: string | undefined;
-    let refusal: string | undefined;
+    if (this.notifying) {
+      this.refuse(event, 'diagnostic_reentry');
+      return;
+    }
+    if (this.closed && !duringShutdown) {
+      this.refuse(event, 'shutdown', 'Logbird is shut down');
+      return;
+    }
+    let entry: Omit<QueuedEvent, 'sequence'>;
+    let failure: DropReason = 'invalid';
+    let identity = dropIdentity(event);
     try {
-      if (this.closed) throw new Error('Logbird is shut down');
-      refusal = 'An audit event could not be prepared and was dropped';
       const defaults = this.options.defaults;
       let prepared: EventInput = { ...defaults, ...event };
-      if (typeof prepared.action === 'string') action = prepared.action;
-      if (typeof prepared.id === 'string' && prepared.id.trim()) id = prepared.id;
+      const id = typeof prepared.id === 'string' && prepared.id.trim() ? prepared.id : uuidv7();
+      prepared.id = id;
+      identity = dropIdentity(prepared);
       prepared.context = { ...defaults?.context, ...event.context };
       prepared.metadata = { ...defaults?.metadata, ...event.metadata };
-      prepared.id ??= uuidv7();
       prepared.occurredAt ??= new Date().toISOString();
       if (this.options.beforeSend) {
+        failure = 'before_send_failed';
         const result = this.options.beforeSend(prepared);
-        if (result == null) return;
-        prepared = result;
-      }
-      // The server mints a fresh id for a missing, blank or non-string id (numbers included), which a retry could
-      // never match. Mint it here instead, on a copy, so a frozen or caller-owned beforeSend result is never mutated.
-      const preparedId = prepared.id;
-      if (typeof preparedId === 'string' && preparedId.trim()) id = preparedId;
-      else {
-        id = uuidv7();
-        prepared = { ...prepared, id };
-      }
-      if (this.serializeRedacted) refusal = 'An audit event could not be redacted and was dropped';
-      const serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : JSON.stringify(prepared);
-      if (new TextEncoder().encode(serialized).length > 256 * 1024) {
-        refusal = 'Event exceeds 256 KB and was dropped';
-        throw new Error(refusal);
-      }
-      const copy = JSON.parse(serialized) as EventInput;
-      refusal = undefined;
-      if (this.queue.length >= this.capacity) {
-        if (this.options.dropPolicy === 'newest') {
-          this.drop(copy);
+        if (result == null) {
+          this.refuse(identity, 'filtered');
           return;
         }
-        this.drop(this.queue.shift()!);
+        if (typeof result.then === 'function') {
+          // beforeSend prepares the event synchronously. Observe an accidental async return without queuing it.
+          void Promise.resolve(result).catch(() => undefined);
+          this.refuse(identity, 'before_send_failed', 'Logbird beforeSend must be synchronous');
+          return;
+        }
+        prepared = result;
+        failure = 'invalid';
       }
-      this.queue.push(copy);
-      if (this.queue.length >= this.batchSize) void this.flush().catch((e) => this.report(e));
-      else this.schedule();
-    } catch (e) {
-      if (refusal) {
-        // Preparation failed before a safe payload was available. Report scalar identity and fixed diagnostics.
-        this.drop(id === undefined ? { action } : { action, id });
-        this.report(new Error(refusal));
-      } else this.report(e);
+      const supplied: unknown = prepared.id;
+      const hookId = typeof supplied === 'string' && supplied.trim() ? supplied : undefined;
+      const outgoingId = options?.preserveId ? id : (hookId ?? uuidv7());
+      if (supplied !== outgoingId) prepared = { ...prepared, id: outgoingId };
+      // The serialized snapshot also enforces the id for events with a top-level toJSON.
+      if (this.serializeRedacted) failure = 'redaction_failed';
+      let serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : JSON.stringify(prepared);
+      failure = 'invalid';
+      let bytes = new TextEncoder().encode(serialized).length;
+      if (bytes > 256 * 1024) {
+        this.refuse(identity, 'too_large', 'Event exceeds 256 KB');
+        return;
+      }
+      const copy = JSON.parse(serialized) as EventInput;
+      if (!copy || typeof copy !== 'object' || Array.isArray(copy)) {
+        this.refuse(identity, 'invalid', 'An audit event could not be prepared and was dropped');
+        return;
+      }
+      if (typeof copy.id !== 'string' || !copy.id.trim() || (options?.preserveId && copy.id !== outgoingId)) {
+        copy.id = outgoingId;
+        serialized = JSON.stringify(copy);
+        bytes = new TextEncoder().encode(serialized).length;
+        if (bytes > 256 * 1024) {
+          this.refuse(identity, 'too_large', 'Event exceeds 256 KB');
+          return;
+        }
+      }
+      entry = { event: copy, wireId: copy.id.trim(), serialized, bytes, uncertain: false, sending: false };
+    } catch {
+      this.refuse(
+        identity,
+        failure,
+        failure === 'redaction_failed'
+          ? 'An audit event could not be redacted and was dropped'
+          : 'An audit event could not be prepared and was dropped',
+      );
+      return;
     }
+    // beforeSend is host code and can shut down the client before preparation returns.
+    if (this.closed && (!duringShutdown || this.stop.signal.aborted)) {
+      this.drop(entry.event, { reason: 'shutdown', mayBeStored: false });
+      return;
+    }
+    if (!this.makeRoom()) {
+      this.drop(entry.event, { reason: 'queue_full', mayBeStored: false });
+      return;
+    }
+    this.queue.push({ ...entry, sequence: ++this.lastSequence });
+    if (this.queue.length >= this.batchSize) this.backgroundFlush();
+    else this.schedule();
+  }
+  private makeRoom(): boolean {
+    if (this.queue.length + this.preparing.size < this.capacity) return true;
+    const evicted = this.options.dropPolicy === 'newest' ? undefined : this.queue.shift();
+    if (!evicted) return false;
+    this.dropQueued(evicted, 'queue_full');
+    this.completeFlushes();
+    return true;
+  }
+  private deferCapture(identity: EventInput, prepare: () => Promise<EventInput>, onFailure: () => void): Promise<void> | undefined {
+    if (this.notifying || this.closed || !this.makeRoom()) {
+      if (this.options.enabled !== false) this.refuse(identity, this.notifying ? 'diagnostic_reentry' : this.closed ? 'shutdown' : 'queue_full');
+      return;
+    }
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const capture = { identity: dropIdentity(identity), done, finish };
+    this.preparing.add(capture);
+    const fail = () => {
+      if (this.options.enabled !== false) this.refuse(capture.identity, 'invalid');
+      onFailure();
+    };
+    const settle = (event?: EventInput) => {
+      if (!this.preparing.delete(capture)) return;
+      try {
+        if (!event) fail();
+        else if (this.closed && this.options.enabled !== false) this.trackPrepared(event, { preserveId: true }, true);
+        else this.track(event, { preserveId: true });
+      } finally {
+        finish();
+      }
+    };
+    void prepare()
+      .then(settle, () => settle())
+      .catch(fail);
+    return done;
+  }
+  private backgroundFlush() {
+    if (this.pending) return;
+    void this.drain(false).catch((error) => this.report(error));
   }
   private schedule() {
     if (this.timer || this.closed) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void this.flush().catch((e) => this.report(e));
+      this.backgroundFlush();
     }, this.interval);
-    (this.timer as unknown as { unref?: () => void }).unref?.();
+    this.timer.unref?.();
   }
-  private async send(batch: EventInput[]) {
-    // Monotonic: a wall-clock step (NTP, suspend, a test clock) must not shorten or extend the send cap.
-    const deadline = monotonicNow() + MAX_SEND_MS;
-    const serialized = batch.map((event) => JSON.stringify(event));
-    let attemptIndices = batch.map((_, index) => index);
-    const serializeBody = () => `{"events":[${attemptIndices.map((index) => serialized[index]).join(',')}]}`;
-    let body = serializeBody();
-    const settledIndices = new Set<number>();
-    const reject = (rejections: unknown) => {
-      if (!Array.isArray(rejections)) return;
-      const fresh: { index: number; reason: string }[] = [];
-      for (const rejection of rejections) {
-        if (!rejection || typeof rejection !== 'object' || !Number.isInteger(rejection.index) || typeof rejection.reason !== 'string') continue;
-        const index = attemptIndices[rejection.index];
-        if (index === undefined || settledIndices.has(index)) continue;
-        settledIndices.add(index);
-        fresh.push(rejection);
-        this.drop(batch[index]!);
-      }
-      if (fresh.length) this.report(new Error(`${fresh.length} events rejected by Logbird: ${fresh.map((r) => r.reason).join('; ')}`));
-    };
-    let retries = 0;
+  private async timed<T>(milliseconds: number, timeout: () => T, operation?: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    this.stop.signal.throwIfAborted();
+    const controller = new AbortController();
+    const stop = () => controller.abort(this.stop.signal.reason);
+    this.stop.signal.addEventListener('abort', stop, { once: true });
     try {
-      for (let attempt = 0; ; attempt++) {
-        const remainingMs = deadline - monotonicNow();
-        if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
-        let progressed = false;
-        let response: Response | undefined, error: unknown;
+      return await new Promise<T>((resolve, reject) => {
+        controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+        this.operationTimer = setTimeout(() => {
+          resolve(timeout());
+          controller.abort();
+        }, milliseconds);
+        if (!this.explicit) this.operationTimer.unref?.();
+        if (operation) void operation(controller.signal).then(resolve, reject);
+      });
+    } finally {
+      clearTimeout(this.operationTimer);
+      this.operationTimer = undefined;
+      this.stop.signal.removeEventListener('abort', stop);
+    }
+  }
+  private async request(batch: QueuedEvent[], remainingMs: number) {
+    if (this.outstandingRequests >= MAX_OUTSTANDING_REQUESTS) throw new Error('Logbird transport has too many outstanding requests');
+    const body = `{"events":[${batch.map((entry) => entry.serialized).join(',')}]}`;
+    let status = 0;
+    let retryAfter: string | null = null;
+    const answer = () => ({ status, retryAfter, result: undefined as unknown });
+    try {
+      return await this.timed(Math.max(1, Math.floor(Math.min(30_000, remainingMs))), answer, async (signal) => {
+        let cancellation: Promise<void> | undefined;
+        this.outstandingRequests++;
         try {
-          response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
+          this.checkShutdownDeadline();
+          for (const entry of batch) entry.sending = true;
+          const response = await fetch(`${this.endpoint}/v1/events`, {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${this.options.apiKey}`,
@@ -237,138 +493,263 @@ export class Logbird {
               'Logbird-Retry': 'subset',
             },
             body,
-            // AbortSignal.timeout() accepts integers only; the monotonic clock is fractional.
-            signal: AbortSignal.timeout(Math.max(1, Math.floor(Math.min(30_000, remainingMs)))),
+            signal,
           });
-        } catch (e) {
-          error = e;
-        }
-        if (response?.ok) {
-          const result = (await response.json()) as { rejected?: { index: number; reason: string }[] };
-          reject(result.rejected);
-          return;
-        }
-        if (response?.status === 503) {
-          // Retry the identical body unless the server settled rows; then resend only unsettled rows.
-          const result = (await response.json().catch(() => null)) as {
-            error?: {
-              code?: string;
-              details?: {
-                accepted?: number;
-                ids?: string[];
-                rejected?: { index: number; reason: string }[];
-                indices?: number[];
-                eventIds?: string[];
-                warnings?: unknown[];
-              };
-            };
-          } | null;
-          if (result?.error?.code === 'ingest_pending' || result?.error?.code === 'ingest_unavailable') {
-            const details = result.error.details;
-            reject(details?.rejected);
-            if (
-              details &&
-              Array.isArray(details.ids) &&
-              details.ids.every((id) => typeof id === 'string') &&
-              details.accepted === details.ids.length &&
-              Array.isArray(details.rejected) &&
-              details.rejected.every(
-                (r) =>
-                  r && typeof r === 'object' && Number.isInteger(r.index) && attemptIndices[r.index] !== undefined && typeof r.reason === 'string',
-              ) &&
-              Array.isArray(details.indices) &&
-              details.indices.every((index) => Number.isInteger(index) && attemptIndices[index] !== undefined) &&
-              Array.isArray(details.eventIds) &&
-              details.eventIds.every((id) => typeof id === 'string') &&
-              details.indices.length === details.eventIds.length &&
-              new Set(details.indices).size === details.indices.length &&
-              new Set(details.rejected.map((r) => r.index)).size === details.rejected.length &&
-              details.indices.every((index, position) => {
-                const id = batch[attemptIndices[index]!]!.id;
-                return typeof id === 'string' && details.eventIds?.[position] === id.trim() && !details.rejected?.some((r) => r.index === index);
-              }) &&
-              Array.isArray(details.warnings)
-            ) {
-              const accepted = new Set(details.ids);
-              const unresolved = new Set(details.indices);
-              attemptIndices.forEach((index, wireIndex) => {
-                const event = batch[index]!;
-                if (!unresolved.has(wireIndex) && typeof event.id === 'string' && accepted.has(event.id.trim())) settledIndices.add(index);
-              });
-              // Require every omitted position to be settled; malformed details must keep the previous body.
-              if (attemptIndices.every((index, wireIndex) => unresolved.has(wireIndex) || settledIndices.has(index))) {
-                const remaining = attemptIndices.filter((index) => !settledIndices.has(index));
-                if (!remaining.length) return;
-                if (remaining.length < attemptIndices.length) {
-                  attemptIndices = remaining;
-                  body = serializeBody();
-                  progressed = true;
-                }
-              }
-            }
+          if (signal.aborted) {
+            cancellation = response.body?.cancel().catch(() => undefined);
+            return answer();
           }
+          status = response.status;
+          retryAfter = response.headers.get('Retry-After');
+          if (!response.ok && status !== 503) {
+            cancellation = response.body?.cancel().catch(() => undefined);
+            return answer();
+          }
+          const result: unknown = await response.json().catch(() => undefined);
+          return { status, retryAfter, result };
+        } finally {
+          if (cancellation) {
+            // Return the classification immediately but keep owning transport cleanup until it finishes.
+            void cancellation.then(() => {
+              this.outstandingRequests--;
+            });
+          } else this.outstandingRequests--;
         }
-        const retry = !response || response.status === 429 || response.status >= 500;
-        if (!retry) {
-          batch.forEach((event, index) => {
-            if (!settledIndices.has(index)) this.drop(event);
-          });
-          this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
-          return;
-        }
-        // Progress attempts strictly shrink the body, so there can be at most batch.length of them.
-        // Only non-progress failures consume maxRetries; retain a hard total-attempt bound as well.
-        if ((!progressed && retries >= this.retries) || attempt >= batch.length + this.retries - 1)
-          throw error ?? new Error(`Logbird HTTP ${response?.status}`);
-        const retryAfter = response?.headers.get('Retry-After');
-        const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
-        const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
-        if (!progressed) retries++;
-        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay, deadline - monotonicNow()))));
-      }
+      });
+    } catch {
+      this.stop.signal.throwIfAborted();
+      return answer();
     } finally {
-      // On every exceptional exit, flush can requeue only events not already accepted or rejected.
-      const remaining = batch.filter((_, index) => !settledIndices.has(index));
-      batch.splice(0, batch.length, ...remaining);
+      for (const entry of batch) {
+        if (this.stop.signal.aborted && entry.sending && (status < 400 || status >= 500)) entry.uncertain = true;
+        entry.sending = false;
+      }
     }
   }
-  flush(): Promise<void> {
-    if (this.options.enabled === false) return Promise.resolve();
-    if (this.pending) return this.pending;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = undefined;
-    this.pending = (async () => {
-      while (this.queue.length) {
-        const batch: EventInput[] = [];
-        let bytes = 32;
-        while (this.queue.length && batch.length < this.batchSize) {
-          const next = this.queue[0];
-          if (!next) break;
-          const size = new TextEncoder().encode(JSON.stringify(next)).length + 1;
-          if (batch.length && bytes + size > 5 * 1024 * 1024) break;
-          this.queue.shift();
-          batch.push(next);
-          bytes += size;
-        }
-        try {
-          await this.send(batch);
-        } catch (e) {
-          this.queue.unshift(...batch);
-          while (this.queue.length > this.capacity) {
-            this.drop(this.options.dropPolicy === 'newest' ? this.queue.pop()! : this.queue.shift()!);
+  private async send(batch: QueuedEvent[]) {
+    const deadline = monotonicNow() + MAX_SEND_MS;
+    const maxAttempts = batch.length + this.retries;
+    let wire = batch.slice();
+    const unsettled = new Set(batch);
+    let retries = 0;
+    for (let attempt = 1; ; attempt++) {
+      this.checkShutdownDeadline();
+      const remainingMs = deadline - monotonicNow();
+      if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
+      const { status, retryAfter, result } = await this.request(wire, remainingMs);
+      const success = status >= 200 && status < 300;
+      let progressed = false;
+      if (!this.stop.signal.aborted && (success || status === 503)) {
+        const ack = acknowledge(
+          result,
+          wire.map((entry) => entry.wireId),
+          status === 503,
+        );
+        if (ack) {
+          let rejectedCount = 0;
+          for (const [index, code] of ack.rejected) {
+            const entry = wire[index];
+            if (!entry || !unsettled.delete(entry)) continue;
+            const definitive = code === 'invalid_event' || code === 'invalid_event_id' || code === 'duplicate_id_conflict';
+            this.drop(entry.event, { reason: 'rejected', code, mayBeStored: entry.uncertain && !definitive });
+            rejectedCount++;
           }
-          throw e;
+          if (rejectedCount) this.report(new Error(`${rejectedCount} events rejected by Logbird`));
+          if (ack.delivered)
+            for (const index of ack.delivered) {
+              const entry = wire[index];
+              if (entry) unsettled.delete(entry);
+            }
+          const remaining = batch.filter((entry) => unsettled.has(entry));
+          batch.splice(0, batch.length, ...remaining);
+          this.completeFlushes();
+          if (!batch.length) return;
+          if (ack.delivered && batch.length < wire.length) {
+            wire = batch.slice();
+            progressed = true;
+          }
         }
       }
-    })().finally(() => {
-      this.pending = undefined;
-    });
-    return this.pending;
+      if (status < 400 || status >= 500) for (const entry of batch) entry.uncertain = true;
+      this.stop.signal.throwIfAborted();
+      const retry = success || status === 0 || status === 429 || status >= 500;
+      if (!retry) {
+        for (const entry of batch.splice(0)) this.dropQueued(entry, 'http_error', { status });
+        this.report(new Error(`Logbird HTTP ${status}; batch dropped`));
+        this.completeFlushes();
+        return;
+      }
+      if ((!progressed && retries >= this.retries) || attempt >= maxAttempts) {
+        if (success) throw new Error('Logbird response did not acknowledge all events');
+        throw new Error(status ? `Logbird HTTP ${status}` : 'Logbird request failed');
+      }
+      const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
+      const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
+      if (!progressed) retries++;
+      await this.timed(Math.max(0, Math.min(60_000, delay, deadline - monotonicNow())), () => undefined);
+    }
   }
-  async shutdown(): Promise<void> {
-    this.closed = true;
-    if (this.timer) clearTimeout(this.timer);
+  private drain(explicit: boolean): Promise<void> {
+    if (this.options.enabled === false) return Promise.resolve();
+    if (explicit) {
+      this.explicit = true;
+      this.operationTimer?.ref?.();
+    }
+    if (this.pending) return this.pending;
+    clearTimeout(this.timer);
     this.timer = undefined;
-    await this.flush();
+    let start!: () => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      start = () => void this.drainQueue().then(resolve, reject);
+    });
+    this.pending = promise;
+    start();
+    return promise;
+  }
+  private async drainQueue() {
+    try {
+      while (this.queue.length) {
+        this.stop.signal.throwIfAborted();
+        this.completeFlushes();
+        const boundary = this.flushWaiters.keys().next().value ?? Number.POSITIVE_INFINITY;
+        const batch: QueuedEvent[] = [];
+        let bytes = 32;
+        while (batch.length < this.batchSize) {
+          const next = this.queue[0];
+          if (!next || next.sequence > boundary) break;
+          if (batch.length && bytes + next.bytes + 1 > 5 * 1024 * 1024) break;
+          this.queue.shift();
+          batch.push(next);
+          bytes += next.bytes + 1;
+        }
+        this.inFlight = batch;
+        try {
+          await this.send(batch);
+        } catch (error) {
+          this.inFlight = [];
+          this.queue.unshift(...batch);
+          while (this.queue.length + this.preparing.size > this.capacity && !this.closed) {
+            const evicted = this.options.dropPolicy === 'newest' ? this.queue.pop() : this.queue.shift();
+            if (evicted) this.dropQueued(evicted, 'queue_full');
+          }
+          throw error;
+        }
+        this.inFlight = [];
+      }
+      this.completeFlushes();
+    } catch (error) {
+      this.completeFlushes({ error });
+      throw error;
+    } finally {
+      this.pending = undefined;
+      this.explicit = false;
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+  }
+  private completeFlushes(failure?: { error: unknown }) {
+    const oldest = this.inFlight[0]?.sequence ?? this.queue[0]?.sequence ?? Number.POSITIVE_INFINITY;
+    for (const [target, waiter] of this.flushWaiters) {
+      if (target < oldest) waiter.resolve();
+      else if (failure) waiter.reject(failure.error);
+      else break;
+      this.flushWaiters.delete(target);
+    }
+    if (!this.closed && !this.flushWaiters.size) {
+      this.explicit = false;
+      this.operationTimer?.unref?.();
+    }
+  }
+  private coalesceFlushTargets() {
+    // Dropped or acknowledged targets can become equivalent while an older event is still pending.
+    // Share those settlements without extending any caller's coverage to a newer event.
+    const outstanding = [...this.inFlight, ...this.queue];
+    const merged = new Map<number, FlushWaiter>();
+    let index = 0;
+    for (const [target, waiter] of this.flushWaiters) {
+      for (let entry = outstanding[index]; entry && entry.sequence <= target; entry = outstanding[++index]) {
+        // Advance to the last outstanding event covered by this target.
+      }
+      const covered = outstanding[index - 1]?.sequence;
+      if (covered === undefined) waiter.resolve();
+      else {
+        const shared = merged.get(covered);
+        if (shared) waiter.resolve(shared.promise);
+        else merged.set(covered, waiter);
+      }
+    }
+    this.flushWaiters = merged;
+  }
+  flush(): Promise<void> {
+    if (this.options.enabled === false || (!this.inFlight.length && !this.queue.length)) return Promise.resolve();
+    if (this.flushWaiters.size >= 2 * (this.capacity + this.batchSize)) this.coalesceFlushTargets();
+    const target = this.queue.at(-1)?.sequence ?? this.inFlight.at(-1)?.sequence ?? this.lastSequence;
+    const existing = this.flushWaiters.get(target);
+    if (existing) return existing.promise;
+    let resolve!: FlushWaiter['resolve'];
+    let reject!: FlushWaiter['reject'];
+    const promise = new Promise<void>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    this.flushWaiters.set(target, { promise, resolve, reject });
+    if (this.pending) {
+      this.explicit = true;
+      this.operationTimer?.ref?.();
+    } else void this.drain(true).catch(() => undefined);
+    return promise;
+  }
+  shutdown(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    this.closed = true;
+    this.stopping = this.finishShutdown();
+    return this.stopping;
+  }
+  private async finishShutdown() {
+    this.shutdownDeadline = monotonicNow() + this.shutdownTimeout;
+    const abort = () => this.abortShutdown();
+    if (this.shutdownTimeout === 0) abort();
+    const timer = this.shutdownTimeout > 0 ? setTimeout(abort, this.shutdownTimeout) : undefined;
+    try {
+      if (this.preparing.size) {
+        await Promise.all([this.waitForCaptures(), this.drain(true)]);
+      }
+      await this.drain(true);
+    } catch (error) {
+      this.stop.abort(error);
+      for (const capture of this.preparing) {
+        if (this.options.enabled !== false) this.refuse(capture.identity, 'shutdown');
+        capture.finish();
+      }
+      this.preparing.clear();
+      await this.pending?.catch(() => undefined);
+      this.completeFlushes({ error });
+      for (const entry of this.queue.splice(0)) this.dropQueued(entry, 'shutdown');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  private abortShutdown() {
+    this.stop.abort(new Error('Logbird shutdown time limit exceeded'));
+  }
+  private checkShutdownDeadline() {
+    if (this.shutdownDeadline !== undefined && monotonicNow() >= this.shutdownDeadline) this.abortShutdown();
+    this.stop.signal.throwIfAborted();
+  }
+  private async waitForCaptures() {
+    const signal = this.stop.signal;
+    signal.throwIfAborted();
+    let interrupt!: () => void;
+    const interrupted = new Promise<never>((_, reject) => {
+      interrupt = () => reject(signal.reason);
+    });
+    signal.addEventListener('abort', interrupt, { once: true });
+    try {
+      const prepared = Promise.all(Array.from(this.preparing, (entry) => entry.done));
+      await Promise.race([prepared, interrupted]);
+    } finally {
+      signal.removeEventListener('abort', interrupt);
+    }
   }
 }

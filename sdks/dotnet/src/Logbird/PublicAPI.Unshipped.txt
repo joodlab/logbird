@@ -361,8 +361,12 @@ Logbird.StoredChange
 Logbird.StoredChange.<Clone>$() -> Logbird.StoredChange!
 Logbird.StoredChange.After.get -> string!
 Logbird.StoredChange.After.init -> void
+Logbird.StoredChange.AfterKind.get -> string?
+Logbird.StoredChange.AfterKind.init -> void
 Logbird.StoredChange.Before.get -> string!
 Logbird.StoredChange.Before.init -> void
+Logbird.StoredChange.BeforeKind.get -> string?
+Logbird.StoredChange.BeforeKind.init -> void
 Logbird.StoredChange.Deconstruct(out string! Field, out string! Before, out string! After) -> void
 Logbird.StoredChange.Equals(Logbird.StoredChange? other) -> bool
 Logbird.StoredChange.Field.get -> string!
