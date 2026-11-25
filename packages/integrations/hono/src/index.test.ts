@@ -86,24 +86,24 @@ it('sends the id returned by audit for a blank input even if beforeSend changes 
 });
 
 it('isolates concurrent requests, merges causation and auto-tracks mutations', async () => {
-  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
+  const client = new Logbird({ enabled: false });
   const track = vi.spyOn(client, 'track').mockImplementation(() => undefined);
   const app = new Hono<{ Variables: AuditVariables }>();
-  app.use(
-    logbird({
-      client,
-      actor: (c) => ({ id: c.req.header('user') }),
-      tenant: () => ({ id: 'tenant' }),
-      useOperationHeader: true,
-      autoTrack: {},
-    }),
-  );
+  const capture = logbird({
+    client,
+    actor: (c) => ({ id: c.req.header('user') }),
+    tenant: () => ({ id: 'tenant' }),
+    useOperationHeader: true,
+    autoTrack: {},
+  });
+  app.use(capture);
   app.post('/', async (c) => {
     await Promise.resolve();
     c.var.audit('record.updated', { context: { parentEventId: 'parent' } });
     return c.text('ok');
   });
   await Promise.all(['alice', 'bob'].map((user) => app.request('/', { method: 'POST', headers: { user, 'x-logbird-operation': user } })));
+  await capture.shutdown();
   expect(track).toHaveBeenCalledTimes(4);
   for (const [event] of track.mock.calls) expect(event.context?.operationId).toBe(event.actor?.id);
   expect(track.mock.calls[0]?.[0].context?.parentEventId).toBe('parent');

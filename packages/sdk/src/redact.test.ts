@@ -410,6 +410,7 @@ it('reports identifier matches once at startup, then ignores them', async () => 
       paths: ['id', 'action', '*.id', 'targets.0.type', 'targets.*.id'],
     },
   });
+  await Promise.resolve();
   expect(onError).toHaveBeenCalledOnce();
   expect(onError.mock.calls[0]).toEqual([expect.objectContaining({ message: expect.stringMatching(/actor\.id.*targets\[\]\.type.*jobId/) })]);
   const event = {

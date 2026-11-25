@@ -160,9 +160,7 @@ export interface LogbirdOptions {
     onDrop?: (event: EventInput, details: Readonly<DropDetails>) => void;
     // (undocumented)
     onError?: (error: Error) => void;
-    // (undocumented)
     redaction?: false | RedactionOptions;
-    // (undocumented)
     shutdownTimeoutMs?: number;
 }
 
