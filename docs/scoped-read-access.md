@@ -103,7 +103,9 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
     pseudonym of an address (for example by causing an actor event with it) can still recognise it in actor results.
   - Paths below it are removed from the event: their keys are producer text and can be an address themselves.
   - Literal dotted copies of the names (a top-level `"impersonator.name"` or `"actor.name"` key, which ingest keeps
-    as an attribute) are removed too, and filters and facets on them are refused: the name rule can't judge them.
+    as an attribute, and flattens into child attributes when its value is an object) are removed too, with every
+    path below them, and filters and facets on them are refused: the name rule can't judge them. The same holds for
+    paths below every other masked attribute path (`actor.email.work`, `context.ip.v4`).
   - The impersonator's name follows the actor name rule above, judged against `impersonator.email`: a name that
     carries an address shows as a pseudonym, in events and in facet labels (`impersonator`, at both levels).
   - Filters on `impersonator.email` or a path below it, and facets on them (`field=attr.impersonator.email`; a facet

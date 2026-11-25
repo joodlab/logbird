@@ -32,6 +32,7 @@ import {
 import type { z } from 'zod';
 import {
   ACTOR_NAME_MASK_PARAMS,
+  facetFlag,
   facetOrderParams,
   facetOrderSql,
   MASKED_NAME_COLUMNS,
@@ -615,7 +616,8 @@ async function maskedFacets(
     `SELECT ${one.expr} value,${one.flag} masked,tupleElement(argMaxIf(tuple(${one.labelFlag},${one.label}),received_at,${one.label}!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value,masked ORDER BY count DESC,${facetOrderSql('masked', 'value')} LIMIT {facetLimit:UInt32}`,
     { ...w.params, ...one.params, ...params, facetLimit: q.limit },
   );
-  const keyOf = (flag: number | string, text: string) => `${Number(flag)}|${text}`;
+  // Group keys use the strictly checked flag, at both levels: a malformed flag throws instead of joining bucket 0.
+  const keyOf = (flag: number | string, text: string) => `${facetFlag(flag)}|${text}`;
   const values = rows.map((r) => {
     const value = show(r.masked, r.value);
     return {
