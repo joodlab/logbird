@@ -137,9 +137,7 @@ try {
   const app = new Hono<{ Variables: AuditVariables }>();
   const capture = logbird({ client, actor: () => ({ type: 'user', id: 'u2' }), tenant: () => ({ id: 't2' }) });
   app.use(capture);
-  app.post('/invoices/:id', (c) =>
-    c.text(c.get('audit')('invoice.sent', { id: '   ', targets: [{ type: 'invoice', id: c.req.param('id') }] })),
-  );
+  app.post('/invoices/:id', (c) => c.text(c.get('audit')('invoice.sent', { id: '   ', targets: [{ type: 'invoice', id: c.req.param('id') }] })));
   const response = await app.request('/invoices/inv_9', { method: 'POST', headers: { 'x-request-id': 'req_from_client' } });
   expect(response.status === 200, `the route to answer 200, not ${response.status}`);
   const auditId = await response.text();
