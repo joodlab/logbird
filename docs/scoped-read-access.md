@@ -107,7 +107,7 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
     path below them, and filters and facets on them are refused: the name rule can't judge them. The same holds for
     paths below every other masked attribute path (`actor.email.work`, `context.ip.v4`).
   - The impersonator's name follows the actor name rule above, judged against `impersonator.email`: a name that
-    carries an address shows as a pseudonym, in events and in facet labels (`impersonator`, at both levels).
+    carries an address shows as a pseudonym in events and facets (`impersonator` labels and `impersonator.name` values, at both levels), and an `impersonator.name` filter reads it as an empty name.
   - Filters on `impersonator.email` or a path below it, and facets on them (`field=attr.impersonator.email`; a facet
     field without the `attr.` or `attributes.` prefix is not an attribute facet and answers 422 `validation_error`),
     are refused like `actor.email` (see the last item).
