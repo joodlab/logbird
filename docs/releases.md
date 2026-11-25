@@ -211,14 +211,21 @@ use "Re-run failed jobs" within that time):
   the release job follows.
 - **During release creation**: `gh` uploads to a draft and publishes it only when every
   upload succeeds, deleting the draft itself if an upload fails. A runner lost mid-upload
-  can leave a draft behind, and the release job refuses to continue while the tag has any
-  release or draft. After any failed or interrupted release job, open the repository's
-  Releases page: if a draft for this tag exists, delete it, then re-run; if a published
-  release exists, the release step is done and only later jobs need a re-run.
+  can leave a draft behind, and the release job refuses to continue while the tag has a
+  draft. After any failed or interrupted release job, open the repository's Releases page:
+  if a draft for this tag exists, delete it, then re-run the failed jobs. If the release was
+  published before the runner was lost, re-run the failed jobs too: the release job accepts
+  a published release only when it holds exactly this run's `images.txt` and npm files,
+  byte for byte, and then lets the alias jobs run. Any other published release for the tag
+  stops it; investigate rather than delete a published release. Once a version is released,
+  a re-run never rewrites its exact image tags: the image jobs reuse the indexes its
+  `images.txt` records, and fail if a tag no longer matches.
 - **After the release, while moving aliases**: the release is live and some aliases may
   still point at the previous version (the registry takes one tag at a time). Re-run the
-  failed alias jobs, then confirm that X.Y.Z, X.Y and latest resolve to the same digest
-  with `docker buildx imagetools inspect`.
+  failed alias jobs, then check each alias with `docker buildx imagetools inspect`: an
+  alias the job moved (its log names them) resolves to the X.Y.Z digest in `images.txt`;
+  an alias it left alone because a newer release is published (`latest` for a patch on an
+  older line, or both for a superseded re-run) still resolves to that newer release.
 - **More than seven days later**, the digest, receipt and npm artifacts are gone and a
   re-run cannot finish. Do not rebuild under the same version: release the next patch
   version. Any X.Y.Z image tags the stopped run published stay unannounced.
@@ -281,7 +288,10 @@ packages, and the release's `npm` job calls it with the release version. It:
 
 The release job downloads that same artifact, runs the same verification and
 `sha256sum --check`, and passes the files to `gh release create` with `images.txt`.
-A tag publishes the images, the tarballs and the GitHub Release together or not at all.
+A tag either completes all three steps above (exact images, the GitHub Release with the
+tarballs, then the aliases) or stops in one of the documented intermediate states, none of
+which moves an alias before the release exists or publishes a release without its exact
+image indexes and tarballs.
 A pull request's run of the npm workflow shows the asset set a release of that commit
 would attach.
 
@@ -304,7 +314,7 @@ never move the tag. For a failure after the npm job, see the recovery list under
 
 ## NuGet packages (.NET SDK)
 
-After the GitHub Release exists, the `nuget` job can publish `Logbird` and
+After the GitHub Release exists and the image aliases have moved, the `nuget` job can publish `Logbird` and
 `Logbird.AspNetCore` to nuget.org at the release version. It is off until the
 maintainers turn it on after the pre-publication gate; a release tag alone never
 publishes a package:

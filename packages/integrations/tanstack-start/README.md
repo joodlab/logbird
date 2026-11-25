@@ -2,14 +2,14 @@
 
 ## Install
 
-Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches
-`logbird-tanstack-start-X.Y.Z.tgz` and `logbird-sdk-X.Y.Z.tgz` with a
-`SHA256SUMS` file. Download them, verify them, depend on the files and override
-`@logbird/sdk` to the same tarball, as
-[Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
-shows. Requirements: Node 22.12 or later, `@tanstack/react-start` 1.168.49 or later in 1.x (peer `^1.168.49`); ES modules only; the declarations are type-checked with
-TypeScript 6 and 7 under `bundler` resolution. No check installs this package with that recipe
-yet; the SDK and Hono recipes are the tested ones.
+Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches this package as
+`logbird-tanstack-start-X.Y.Z.tgz`, listed in its `SHA256SUMS`. It depends on `@logbird/sdk` (`logbird-sdk-X.Y.Z.tgz`) at exactly the same
+version, attached to the same release. No check installs this package on its own yet (it is type-checked from the
+release tarballs, installed side by side with the SDK), so there is no tested install recipe for it; the tested
+recipes are for `@logbird/sdk` alone and with `@logbird/hono` ([Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)).
+
+Requirements: Node 22.12 or later, `@tanstack/react-start` 1.168.49 or later in 1.x (peer `^1.168.49`); ES modules only; the declarations are type-checked with TypeScript 6 and 7 under `bundler`
+resolution.
 
 ## Usage
 

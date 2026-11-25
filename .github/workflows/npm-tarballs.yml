@@ -210,6 +210,8 @@ jobs:
             echo "The release for v$version runs, from this job's working directory, after its images publish:"
             echo
             echo '```sh'
-            echo "gh release create v$version images.txt ${names[*]} --repo $GITHUB_REPOSITORY --verify-tag --latest=<true unless a newer release is published> --title \"Logbird v$version\" --notes-file release-notes.md"
+            echo "gh release create v$version images.txt ${names[*]} --repo $GITHUB_REPOSITORY --verify-tag --latest=\"\$latest\" --title \"Logbird v$version\" --notes-file release-notes.md"
             echo '```'
+            echo
+            echo '`$latest` is `true` unless a newer stable release is published (`scripts/release-aliases.mjs`). If the tag already has a published release holding exactly these files, the release job creates nothing and the aliases follow.'
           } | tee -a "$GITHUB_STEP_SUMMARY"

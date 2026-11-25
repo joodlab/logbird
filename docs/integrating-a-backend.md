@@ -55,8 +55,8 @@ mkdir -p vendor/logbird && cd vendor/logbird &&
   cd ../..
 ```
 
-Download only the integrations you use, with one `curl` and one `grep … | sha256sum --check`
-line per tarball. On macOS, use `shasum -a 256 --check` for `sha256sum --check`. Each
+Without the Hono integration, leave out its two lines: one `curl` and one
+`grep … | sha256sum --check` line per tarball. On macOS, use `shasum -a 256 --check` for `sha256sum --check`. Each
 tarball must print `OK`. The chain stops at a failed download, a mismatch, or a tarball
 that `SHA256SUMS` does not list (`sha256sum` refuses an empty check), and you must not
 install from that folder until it passes. Commit `vendor/logbird/` with your project: the
@@ -100,11 +100,10 @@ With **npm**, add it to `package.json`:
 With the SDK alone you need no override: `pnpm add ./vendor/logbird/logbird-sdk-X.Y.Z.tgz`
 (or `npm install …`) writes the `file:` dependency for you.
 
-The same mechanism applies to the other integrations, but no check installs them this way
-yet (they are type-checked from the same tarballs, installed side by side): depend on each
-Logbird tarball you use and override every `@logbird/*` package it depends on, which is
-`@logbird/sdk` for `@logbird/vue` and `@logbird/tanstack-start`, and `@logbird/sdk` and
-`@logbird/vue` for `@logbird/nuxt`.
+`@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` are attached to the same release (each
+depends on `@logbird/sdk` at exactly its version, and `@logbird/nuxt` on `@logbird/vue` too). No check installs
+them on their own yet (they are type-checked from the release tarballs, installed side by side), so this guide gives
+no install recipe for them.
 
 **3. Install and commit the lockfile.** Run `pnpm install` or `npm install`. The lockfile
 records each tarball with its SHA-512 integrity (`integrity: sha512-…`), and later installs
@@ -200,8 +199,8 @@ as two):
   attributes from your fields, taken in this order: your top-level fields in the order they
   appear, then the extra party and context keys, then the extra target keys (Logbird may add
   its own `logbird.occurredAt.rejected` beyond them). A text value keeps its first 2 KB
-  (2,048 bytes); a number is indexed whole or, if its exact spelling is longer than that,
-  not at all (see [numbers and ids](#numbers-and-ids)).
+  (2,048 bytes); a number is indexed whole or, if its exact spelling is longer than 2,044
+  characters, not at all (see [numbers and ids](#numbers-and-ids)).
 
 Anything past a cap is not searchable, but it is not lost: the stored payload keeps the
 whole event (up to the 256 KB event limit; a larger event is rejected and the SDK reports

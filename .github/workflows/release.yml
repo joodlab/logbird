@@ -166,9 +166,28 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish multi-platform image and record index digest
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.preflight.outputs.version }}
         shell: bash
         run: |
+          # Once this version's GitHub Release is published, its exact tag is never written again: a re-run (even one that
+          # rebuilt a platform image with another digest) reuses the index the release's images.txt records, after
+          # checking the tag still points at it.
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
+          if jq -e --arg tag "v$VERSION" '[.[][] | select(.tag_name == $tag and (.draft | not))] | length > 0' releases.json > /dev/null; then
+            gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern images.txt --dir released
+            line="$(grep -E "^${IMAGE//./\\.}:${VERSION//./\\.}@sha256:[0-9a-f]{64}$" released/images.txt || true)"
+            digest="${line##*@}"
+            current="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -er '.digest')"
+            if [[ -z "$line" || "$current" != "$digest" ]]; then
+              echo "v$VERSION is released, and $IMAGE:$VERSION ($current) does not match its images.txt ('$line'). Investigate; see docs/releases.md." >&2
+              exit 1
+            fi
+            echo "::notice::v$VERSION is already released; $IMAGE:$VERSION is left at $digest."
+            printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$digest" > "image-${{ matrix.role }}.txt"
+            exit 0
+          fi
+
           sources=()
           for arch in amd64 arm64; do
             digest=$(cat "digests/$arch.txt")
@@ -262,8 +281,11 @@ jobs:
           (( ${#assets[@]} == 6 )) || { echo "::error::expected 6 npm assets, got ${#assets[@]}"; exit 1; }
           (cd npm && sha256sum --check SHA256SUMS)
           printf '%s\n' "${assets[@]}" > npm-assets.txt
-      # A release (or a draft left by an interrupted run) for this tag stops the job: inspect it first (docs/releases.md).
-      # A version older than the newest published release is created without taking the "Latest release" mark.
+      # No release for this tag: create it. A published release holding exactly this run's assets, byte for byte, is this
+      # run's own release (a re-run after the runner was lost once it had published): accept it, so the aliases can follow.
+      # A draft (left by an interrupted run), several releases, or a release with other assets stop the job: inspect it
+      # first (docs/releases.md). A version older than the newest published release is created without taking the
+      # "Latest release" mark.
       - name: Check existing releases
         id: existing
         env:
@@ -273,13 +295,31 @@ jobs:
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
           existing="$(jq -r --arg tag "$GITHUB_REF_NAME" '[.[][] | select(.tag_name == $tag) | if .draft then "draft" else "published" end] | join(",")' releases.json)"
-          if [[ -n "$existing" ]]; then
+          if [[ -z "$existing" ]]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            node scripts/release-aliases.mjs "$VERSION" releases.json | grep '^latest=' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$existing" != published ]]; then
             echo "::error::$GITHUB_REF_NAME already has a release ($existing). Inspect it before re-running; see docs/releases.md."
             exit 1
           fi
-          node scripts/release-aliases.mjs "$VERSION" releases.json | grep '^latest=' >> "$GITHUB_OUTPUT"
+          mapfile -t assets < npm-assets.txt
+          expected=(images.txt)
+          for asset in "${assets[@]}"; do expected+=("$(basename "$asset")"); done
+          mkdir released
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir released
+          if [[ "$(ls released | sort)" != "$(printf '%s\n' "${expected[@]}" | sort)" ]]; then
+            echo "::error::The published $GITHUB_REF_NAME release holds other assets than this run: $(ls released | tr '\n' ' ')"
+            exit 1
+          fi
+          cmp released/images.txt images.txt
+          for asset in "${assets[@]}"; do cmp "released/$(basename "$asset")" "$asset"; done
+          echo "::notice::$GITHUB_REF_NAME is already published with exactly this run's assets; nothing to create."
+          echo "exists=true" >> "$GITHUB_OUTPUT"
       # With assets, gh creates a draft, uploads every file, and publishes the release only once all uploads succeed.
       - name: Create release after all images publish
+        if: steps.existing.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LATEST: ${{ steps.existing.outputs.latest }}
@@ -396,7 +436,7 @@ jobs:
 
   nuget:
     name: Publish NuGet packages
-    needs: [preflight, release]
+    needs: [preflight, release, aliases]
     # The first NuGet publication is the maintainers' decision after the pre-publication gate, not a side effect of a tag.
     # Publishing needs the Actions variable NUGET_PUBLISH_ENABLED (a repository variable, or an organization variable
     # shared with this repository when the repository defines none) set to exactly `true` (checked case-sensitively

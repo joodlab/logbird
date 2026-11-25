@@ -133,7 +133,7 @@ run('npm', ['install', '--no-save', '--no-audit', '--no-fund', ...files, ...(hon
   for (const [key, entry] of Object.entries(JSON.parse(readFileSync(hiddenPath, 'utf8')).packages)) {
     if (!key || /(^|\/)node_modules\/@logbird\/[^/]+$/.test(key) || (hono && key === 'node_modules/hono')) continue;
     const pinned = lockedTree[key];
-    if (!pinned || pinned.version !== entry.version || (pinned.integrity && entry.integrity && pinned.integrity !== entry.integrity)) {
+    if (!pinned || pinned.version !== entry.version || (pinned.integrity !== undefined && pinned.integrity !== entry.integrity)) {
       unlocked.push(`${key}@${entry.version}${pinned ? ` (locked: ${pinned.version})` : ' (not in the lock)'}`);
     }
   }

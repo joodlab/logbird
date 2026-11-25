@@ -146,8 +146,9 @@ function registryPackages(manager, lock) {
   };
   if (manager === 'npm') {
     for (const [key, entry] of Object.entries(JSON.parse(lock).packages)) {
-      if (!key || key.includes('@logbird/')) continue;
-      add(key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length), entry.version);
+      if (!key) continue;
+      const name = key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
+      if (!name.startsWith('@logbird/')) add(name, entry.version);
     }
     return found;
   }
@@ -217,11 +218,35 @@ try {
         const spec = {};
         if (source === 'file') {
           const vendor = join(dir, 'vendor', 'logbird');
-          mkdirSync(vendor, { recursive: true });
-          for (const file of [...Object.values(files), SUMS]) {
-            const response = await fetch(`${releaseUrl}${file}`);
-            check(response.ok, `downloaded ${file} from the Release URL (after its redirect)`);
-            writeFileSync(join(vendor, file), Buffer.from(await response.arrayBuffer()));
+          // The documented download and verification, run as written (docs/integrating-a-backend.md, the SDK README)
+          // wherever sh, curl and sha256sum exist: curl -fsSLO through the redirect, then one
+          // `grep " <file>$" SHA256SUMS | sha256sum --check` per tarball, all chained with &&. Elsewhere (Windows without
+          // those tools) Node downloads the files and the checks below verify them.
+          const tools = spawnSync('sh', ['-c', 'command -v curl && command -v sha256sum'], { stdio: 'ignore' }).status === 0;
+          const shell = (checker) => {
+            const lines = [`version=${version}`, `base="${releaseUrl.slice(0, -1)}"`, 'mkdir -p vendor/logbird && cd vendor/logbird &&'];
+            lines.push('  curl -fsSLO "$base/SHA256SUMS" &&');
+            for (const name of shape.released) lines.push(`  curl -fsSLO "$base/${tarballName(name, '$version')}" &&`);
+            for (const name of shape.released) lines.push(`  grep " ${tarballName(name, '$version')}\\$" SHA256SUMS | ${checker} &&`);
+            lines.push('  cd ../..');
+            return `${lines.join('\n')}\n`;
+          };
+          // Only the grep | check lines, against a given sums file, run inside vendor/logbird.
+          const verifyOnly = (checker, sums) =>
+            `version=${version}\n${shape.released.map((name) => `grep " ${tarballName(name, '$version')}\\$" ${sums} | ${checker}`).join(' &&\n')}\n`;
+          const shasum = tools && spawnSync('sh', ['-c', 'command -v shasum'], { stdio: 'ignore' }).status === 0;
+          if (tools) {
+            writeFileSync(join(dir, 'download.sh'), shell('sha256sum --check'));
+            await run('sh', ['download.sh'], dir);
+            rmSync(join(dir, 'download.sh'));
+            check(true, 'the documented curl and sha256sum chain downloaded and verified every tarball');
+          } else {
+            mkdirSync(vendor, { recursive: true });
+            for (const file of [...Object.values(files), SUMS]) {
+              const response = await fetch(`${releaseUrl}${file}`);
+              check(response.ok, `downloaded ${file} from the Release URL (after its redirect)`);
+              writeFileSync(join(vendor, file), Buffer.from(await response.arrayBuffer()));
+            }
           }
           const sums = parseSums(readFileSync(join(vendor, SUMS), 'utf8'));
           for (const file of Object.values(files)) {
@@ -230,15 +255,10 @@ try {
               .digest('hex');
             check(sums.get(file) === digest, `${file} matches ${SUMS}`);
           }
-          // The documented commands where sha256sum exists: one `grep " <file>$" SHA256SUMS | sha256sum --check` per
-          // selected tarball, chained with &&. Each must pass here, and the chain must fail when SHA256SUMS lacks the
-          // line of one of them (sha256sum refuses empty input), so no tarball is ever left unchecked.
-          if (!isWindows && spawnSync('sha256sum', ['--version']).status === 0) {
-            const chain = (sums) =>
-              Object.values(files)
-                .map((file) => `grep " ${file}\\$" ${sums} | sha256sum --check`)
-                .join(' && ');
-            await run('sh', ['-c', chain(SUMS)], vendor);
+          // Each documented checker (sha256sum, and the macOS alternative `shasum -a 256` where it exists) passes, and
+          // fails when SHA256SUMS lacks the line of one selected tarball (both refuse empty input), so no tarball is
+          // ever left unchecked.
+          if (tools) {
             const last = Object.values(files).at(-1);
             writeFileSync(
               join(vendor, 'SHA256SUMS.partial'),
@@ -247,9 +267,15 @@ try {
                 .filter((line) => !line.endsWith(` ${last}`))
                 .join('\n'),
             );
-            const partial = await attempt('sh', ['-c', chain('SHA256SUMS.partial')], vendor);
-            check(partial.status !== 0, `the documented check fails when ${SUMS} has no line for ${last}`);
+            for (const checker of ['sha256sum --check', ...(shasum ? ['shasum -a 256 --check'] : [])]) {
+              writeFileSync(join(vendor, 'verify.sh'), verifyOnly(checker, SUMS));
+              await run('sh', ['verify.sh'], vendor);
+              writeFileSync(join(vendor, 'verify.sh'), verifyOnly(checker, 'SHA256SUMS.partial'));
+              const partial = await attempt('sh', ['verify.sh'], vendor);
+              check(partial.status !== 0, `\`${checker}\` passes, and fails when ${SUMS} has no line for ${last}`);
+            }
             rmSync(join(vendor, 'SHA256SUMS.partial'));
+            rmSync(join(vendor, 'verify.sh'));
           }
           for (const [name, file] of Object.entries(files)) spec[name] = `file:vendor/logbird/${file}`;
         } else {
