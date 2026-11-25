@@ -338,12 +338,16 @@ Logbird.QueueFullBehavior.DropOldest = 0 -> Logbird.QueueFullBehavior
 Logbird.RedactionOptions
 Logbird.RedactionOptions.AddedKeys.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Logbird.RedactionOptions.AddKeys(params string![]! names) -> Logbird.RedactionOptions!
+Logbird.RedactionOptions.AddPaths(params string![]! paths) -> Logbird.RedactionOptions!
 Logbird.RedactionOptions.ChangeFields.get -> System.Text.RegularExpressions.Regex?
 Logbird.RedactionOptions.ChangeFields.set -> void
 Logbird.RedactionOptions.Enabled.get -> bool
 Logbird.RedactionOptions.Enabled.set -> void
+Logbird.RedactionOptions.KeepPaths(params string![]! paths) -> Logbird.RedactionOptions!
+Logbird.RedactionOptions.KeptPaths.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Logbird.RedactionOptions.Keys.get -> System.Text.RegularExpressions.Regex!
 Logbird.RedactionOptions.Keys.set -> void
+Logbird.RedactionOptions.Paths.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Logbird.RedactionOptions.RedactionOptions() -> void
 Logbird.RedactionOptions.Replacement.get -> string!
 Logbird.RedactionOptions.Replacement.set -> void

@@ -278,7 +278,13 @@ type ParityCase = {
 // The same cases run in the .NET SDK (RedactionParityTests): both must produce exactly the expected event.
 const fixture = JSON.parse(
   readFileSync(new URL('../../../sdks/dotnet/tests/Logbird.Tests/Fixtures/redaction-parity.json', import.meta.url), 'utf8'),
-) as { cases: ParityCase[] };
+) as { cases: ParityCase[]; invalidIdentifiers: { name: string; path: string; input: EventInput }[] };
+
+it.each(fixture.invalidIdentifiers)('shared invalid identifier: $name', ({ path, input }) => {
+  const original = structuredClone(input);
+  expect(() => redact({ paths: [path] })(input)).toThrow('An identifier must serialize to a scalar');
+  expect(input).toStrictEqual(original);
+});
 
 const connection = { endpoint: 'https://capture.example.invalid', apiKey: 'fictional' };
 
