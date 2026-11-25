@@ -332,11 +332,24 @@ at any depth (actor, targets, context, metadata) and to the before and after val
   with a look-alike character (U+212A KELVIN SIGN for `k`, U+017F LONG S for `s`) does not, exactly as JavaScript's
   `/i` behaves. A pattern you supply is matched with the options you give it.
 
-The default does not cover personal data, so add your own keys:
+To mask guest personal data and keep staff attribution, add the names
+to your policy and exempt the staff fields.
 
 ```csharp
-options.Redaction.AddKeys("email", "phone", "iban");
+options.Redaction
+    .AddKeys("email", "phone", "notes", "name")
+    .AddPaths("metadata.guest.contact")
+    .KeepPaths("actor.name", "actor.email", "impersonator.name");
 ```
+
+`AddPaths` always masks the selected location, and `KeepPaths` exempts that
+node from its key match while leaving descendant checks active. Use
+case-sensitive dot-separated segments from the event root. A whole `*`
+segment matches one object key or array index, as in `targets.*.name`.
+Escape a literal dot, star, or backslash with a backslash. Use a C# verbatim
+string such as `@"metadata.guest\.email"` to select the literal key
+`guest.email`. Invalid syntax throws at client construction and identifies
+the option and the zero-based entry index.
 
 **Identifier fields are never redacted** (`Redactor.IdentifierFields`): the actor's type and id, the impersonator's
 and tenant's id, the executor's type, id, job id and attempt, and each target's type and id, as well as the event's own
@@ -350,8 +363,11 @@ pseudonymise an id, transform it before recording, for example with a keyed hash
 fields; so does a pattern matching a target's index (`^0$`). A party object is never replaced as a whole (a party
 that is not an object, such as a string `actor`, is replaced like any other value). A change's before and
 after values are replaced when its `field` is a string that `ChangeFields` matches.
+After protecting identifiers, the precedence is `AddPaths`, change field
+matches, whole-party matches, `KeepPaths`, then key patterns. A path exemption
+for `actor.email` leaves a whole-party match on `actor` in force.
 
-Redaction follows the same rules as the TypeScript SDK's `redact()`: both run one shared fixture of cases
+Redaction follows the same rules as the TypeScript SDK's client redaction: both run one shared fixture of cases
 (`tests/Logbird.Tests/Fixtures/redaction-parity.json`). With the default pattern and names added with `AddKeys` (matched
 apart from `Redaction.Keys`, so that pattern's options and syntax never change them), both redact exactly the same keys. A `Regex` of your own
 runs on .NET's engine and a TypeScript one on JavaScript's, which differ at the edges: in .NET, `$` also matches before a
@@ -359,6 +375,11 @@ final line feed (use `\z` for the end of a key), and case-insensitive options fo
 share between the SDKs to plain alternatives and `^` anchors. Set `Redaction.Enabled = false` to turn it off, or replace
 `Redaction.Keys` with your own pattern. `BeforeSend` runs before redaction on a copy of each event; return `null`
 to skip an event.
+
+The public `Redactor.Redact(JsonObject)` helper uses the input object's lookup
+rules to find changes. A case-insensitive object can expose `Changes` as
+`changes`. The typed client emits lowercase `changes`, and exact path
+segments use case-sensitive matching.
 
 ## Read the audit trail
 
