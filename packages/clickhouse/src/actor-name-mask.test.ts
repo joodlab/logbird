@@ -156,6 +156,11 @@ describe('the filter rewrite', () => {
     const rest = sql.replace(IMP, 'S').replace(DEFINED, 'A');
     expect(rest.match(/\bimpersonator_name\b/g)?.length).toBe(rest.match(/,'',impersonator_name\)/g)?.length);
     expect(IMPERSONATOR_NAME_IS_SENSITIVE_SQL).toContain("attributes['impersonator.email']");
+    // The impersonator.name query field compiles to that column, so a masked filter on it gets the rewrite.
+    const masked = compileMaskedQuery('impersonator.name:"rita@example.invalid"', ['actor_email']);
+    expect(masked.sql).toContain(IMP);
+    expect(masked.sql.replace(IMP, 'S')).toMatch(/if\(S,'',impersonator_name\) = \{q0:String\}/);
+    expect(compileMaskedQuery('impersonator.name:x', ['ip']).sql).not.toContain('impersonator_name_carries');
     // A filter that never reads the impersonator's name gets no impersonator test.
     expect(maskActorNameInFilter(compileQuery('actor.name:x').sql)).not.toContain('impersonator');
   });

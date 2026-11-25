@@ -1,6 +1,8 @@
 import {
+  CHANGES_FIELD_HINT,
   decodeRecordPair,
   failQuery as fail,
+  isUnknownChangesKey,
   type ParsedQueryToken,
   parseQueryExpression,
   QUERY_FIELDS,
@@ -145,6 +147,8 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[], options: C
   }
   function fieldValue(atom: Extract<QueryAtom, { kind: 'field' }>): string {
     const { field, value } = atom;
+    // `changes` is never flattened into attributes: an unknown changes.* key would silently match nothing.
+    if (isUnknownChangesKey(field)) fail('unknown_field', atom.start, atom.end, `Unknown field ${field}. ${CHANGES_FIELD_HINT}`);
     switch (value.kind) {
       case 'value':
         return predicate(field, value.token);

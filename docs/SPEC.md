@@ -688,7 +688,7 @@ a AND b,  NOT a                   explicit AND / NOT keywords (upper-case), same
 ```
 Attribute values are strings; with comparisons/ranges they are read as numbers
 (`toFloat64OrNull(attributes[k])`), or as dates when the bound is a date. Rows whose value does not convert never
-match. Array fields (`target`, `target.type`, `target.name`, `changes.field`) match when any element matches.
+match. Array fields (`target`, `target.type`, `target.name`, `changes.field`, `changes.before`, `changes.after`) match when any element matches; any other `changes.*` key is refused (422 `invalid_query`, `unknown_field`).
 `record:<type>:<id>` checks a single target for both fields, splitting the value on its first unescaped colon. See [record selector escaping](query-language.md#query-language-langquery-default).
 
 Errors: HTTP 422 `invalid_query`, `details` = `QueryErrorDetails` (`lang`, `reason`, `start`/`end` UTF-16 offsets,

@@ -16,12 +16,15 @@ env
 actor.id
 actor.name
 actor.email
+impersonator.name
 tenant.name
 executor.name
 job
 attempt
 target.name
 changes.field
+changes.before
+changes.after
 operation
 parent
 request

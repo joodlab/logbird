@@ -506,7 +506,7 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     join = `ARRAY JOIN arrayZip(target_ids,target_names) AS facet_target${n}`;
     expr = `facet_target${n}.1`;
     label = `facet_target${n}.2`;
-  } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
+  } else if (['target_types', 'target_names', 'changes_fields', 'changes_before', 'changes_after'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
   } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) {
