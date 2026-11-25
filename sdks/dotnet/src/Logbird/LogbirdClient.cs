@@ -162,7 +162,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         {
             // Reported once, at startup: identifier fields are structural and are never redacted.
             Report(new LogbirdDeliveryException(
-                $"The redaction pattern matches identifier field(s) {string.Join(", ", identifierFields)}. Identifier fields are never redacted; "
+                $"The redaction rules match identifier field(s) {string.Join(", ", identifierFields)}. Identifier fields are never redacted; "
                 + "to pseudonymise an id, transform it before recording."));
         }
 

@@ -10,6 +10,7 @@ import {
   generateWebhookSecret,
   IDENTIFIER_FIELDS,
   Logbird,
+  type RedactionOptions,
   redact,
   signWebhook,
   verifyWebhook,
@@ -89,32 +90,40 @@ function expect(condition: boolean, what: string): void {
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 try {
-  // 1. The client queues, redacts through beforeSend, sends one batch and reads the acknowledgement.
+  // 1. The client queues, redacts through its configured policy, sends one batch and reads the acknowledgement.
   const drops: EventInput[] = [];
   const errors: Error[] = [];
+  const redaction: RedactionOptions = {
+    addKeys: ['email', 'phone'],
+    paths: ['metadata.customerNotes'],
+    keepPaths: ['actor.email'],
+    replacement: 'hidden',
+  };
   const client = new Logbird({
     endpoint,
     apiKey: 'lb_ingest_fictional',
     flushIntervalMs: 60_000,
-    beforeSend: redact(),
+    redaction,
     onDrop: (event) => drops.push(event),
     onError: (error) => errors.push(error),
   });
   client.track({
     action: 'invoice.updated',
-    actor: { type: 'user', id: 'u1', name: 'Fictional User' },
+    actor: { type: 'user', id: 'u1', name: 'Fictional User', email: 'staff@example.invalid' },
     tenant: { id: 't1' },
     targets: [{ type: 'invoice', id: 'inv_1' }],
-    changes: [{ field: 'status', before: 'draft', after: 'sent' }],
-    metadata: { plan: 'pro', token: 'fictional-secret' },
+    changes: [{ field: 'guest.phone', after: '555-0100' }],
+    metadata: { plan: 'pro', token: 'fictional-secret', workEmail: 'guest@example.invalid', customerNotes: 'fictional notes' },
   });
   await client.flush();
-  const sent = received.at(-1) as { action: string; actor: { id: string }; metadata: Record<string, unknown> } | undefined;
+  const sent = received.at(-1) as EventInput | undefined;
   expect(received.length === 1 && sent?.action === 'invoice.updated', 'one event sent');
-  expect(sent?.actor.id === 'u1', 'the actor id to be sent');
-  expect(sent?.metadata.plan === 'pro' && sent?.metadata.token === '[redacted]', 'metadata.token redacted, plan kept');
+  expect(sent?.actor?.id === 'u1' && sent.actor.email === 'staff@example.invalid', 'staff identity kept');
+  expect(sent?.metadata?.plan === 'pro' && sent.metadata.token === 'hidden', 'default secret redacted, plan kept');
+  expect(sent?.metadata?.workEmail === 'hidden' && sent.metadata.customerNotes === 'hidden', 'added key and explicit path redacted');
+  expect(sent?.changes?.[0]?.field === 'guest.phone' && sent.changes[0].after === 'hidden', 'change value redacted, field kept');
   expect(drops.length === 0 && errors.length === 0, `no drop and no error (drops ${drops.length}, errors ${errors.length})`);
-  pass('Logbird track and flush: serialized, redacted by beforeSend, acknowledged');
+  pass('Logbird track and flush: client policy applied, acknowledged');
 
   // 1b. The acknowledgement is read: in one batch, the event ingest refuses is dropped and reported, the other kept.
   client.track({ action: 'stand-in.reject', actor: { type: 'user', id: 'u1' } });
@@ -131,7 +140,7 @@ try {
   const app = new Hono<{ Variables: AuditVariables }>();
   app.use(logbird({ client, actor: () => ({ type: 'user', id: 'u2' }), tenant: () => ({ id: 't2' }) }));
   app.post('/invoices/:id', (c) => {
-    c.get('audit')('invoice.sent', { targets: [{ type: 'invoice', id: c.req.param('id') }] });
+    c.get('audit')('invoice.sent', { targets: [{ type: 'invoice', id: c.req.param('id') }], metadata: { customerNotes: 'fictional notes' } });
     return c.text('ok');
   });
   const response = await app.request('/invoices/inv_9', { method: 'POST', headers: { 'x-request-id': 'req_from_client' } });
@@ -143,11 +152,13 @@ try {
         actor: { id: string };
         tenant: { id: string };
         targets: { id: string }[];
+        metadata: { customerNotes: string };
         context: { requestId: string; operationId: string };
       }
     | undefined;
   expect(viaHono?.action === 'invoice.sent' && viaHono.targets[0]?.id === 'inv_9', 'the route event with its target');
   expect(viaHono?.actor.id === 'u2' && viaHono.tenant.id === 't2', 'the resolved actor and tenant');
+  expect(viaHono?.metadata.customerNotes === 'hidden', 'the Hono event obeys the configured path');
   expect(
     uuid.test(viaHono?.context.requestId ?? '') && uuid.test(viaHono?.context.operationId ?? ''),
     'generated request and operation ids, not the inbound header',
