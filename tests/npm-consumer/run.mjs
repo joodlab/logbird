@@ -121,6 +121,29 @@ if (hono === 'floor' || hono === 'latest') {
   console.log(`hono peer range ${range}: testing ${hono}`);
 }
 run('npm', ['install', '--no-save', '--no-audit', '--no-fund', ...files, ...(hono ? [`hono@${hono}`] : [])]);
+// Overlaying the tarballs must not resolve anything outside the committed lock: every installed package other than the
+// Logbird tarballs (and the exact hono asked for) must be the locked one, at the locked version and integrity. Otherwise a
+// dependency of a packed package (say an exact version the lock lacks) would be fetched from the registry at whatever
+// its ranges resolve to that day, and the same commit could pass today and fail tomorrow.
+{
+  const lockedTree = JSON.parse(readFileSync(join(here, 'package-lock.json'), 'utf8')).packages;
+  const hiddenPath = join(here, 'node_modules', '.package-lock.json');
+  if (!existsSync(hiddenPath)) throw new Error('npm wrote no node_modules/.package-lock.json; cannot compare the installed tree');
+  const unlocked = [];
+  for (const [key, entry] of Object.entries(JSON.parse(readFileSync(hiddenPath, 'utf8')).packages)) {
+    if (!key || /(^|\/)node_modules\/@logbird\/[^/]+$/.test(key) || (hono && key === 'node_modules/hono')) continue;
+    const pinned = lockedTree[key];
+    if (!pinned || pinned.version !== entry.version || (pinned.integrity && entry.integrity && pinned.integrity !== entry.integrity)) {
+      unlocked.push(`${key}@${entry.version}${pinned ? ` (locked: ${pinned.version})` : ' (not in the lock)'}`);
+    }
+  }
+  if (unlocked.length) {
+    throw new Error(
+      `installing the tarballs resolved packages outside ${project.dir}/package-lock.json: ${unlocked.join(', ')}. Add the packed packages' exact dependencies to the project and regenerate its lock.`,
+    );
+  }
+  console.log(`every installed package outside @logbird/* is the one ${project.dir}/package-lock.json locks`);
+}
 const installed = (name) => JSON.parse(readFileSync(join(here, 'node_modules', ...name.split('/'), 'package.json'), 'utf8')).version;
 // npm keeps the locked hono when the requested one conflicts with the peer range: never test a version other than
 // the one asked for.

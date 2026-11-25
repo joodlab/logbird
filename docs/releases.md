@@ -101,18 +101,33 @@ at the release version (see [npm tarballs](#npm-tarballs-on-the-github-release))
 The image publish jobs wait for it as well as for the builds, so a failed npm check
 publishes no image tag and no release.
 
+A release publishes in three steps, and the GitHub Release is the point where a version
+becomes current:
+
+1. **Exact image indexes.** After the builds pass, a job per role reads the two digest
+   artifacts and uses `docker buildx imagetools create` to publish the X.Y.Z image index,
+   inspects it and fails unless it holds both linux/amd64 and linux/arm64. No moving alias
+   changes here.
+2. **The GitHub Release.** Once all four indexes publish, the release job requires one
+   well-formed receipt per role (a missing role fails instead of shrinking `images.txt`),
+   verifies the npm tarballs again, refuses to continue if the tag already has a release
+   or a draft, and creates the release with `images.txt`, the five npm tarballs and their
+   `SHA256SUMS`. It takes the "Latest release" mark only when no newer stable release is
+   published.
+3. **Moving aliases.** Only after the release exists does a job per role move `X.Y` and
+   `latest` to the verified X.Y.Z index, after checking that X.Y.Z still points at it.
+   `scripts/release-aliases.mjs` reads the published releases first: `latest` moves only
+   when no newer stable release exists, and `X.Y` only when no newer X.Y.N does, so a late
+   or re-run older release never moves an alias backwards.
+
 Each platform build pushes by digest with OCI source/version/revision/MIT license
-labels, an SBOM and maximum-mode BuildKit provenance. After the builds pass, a job
-per role reads the two digest artifacts and uses `docker buildx imagetools create`
-to publish the X.Y.Z image index, inspects the published index and fails unless it holds both linux/amd64 and linux/arm64, and only then moves the X.Y and latest tags to that verified digest. X.Y and latest are moving
-aliases; pin exact versions or digests for controlled upgrades. Only publish
-releases in increasing version order, since older tags would move these aliases
-backwards. Never rebuild a completed published release under the same version.
+labels, an SBOM and maximum-mode BuildKit provenance. X.Y and latest are moving
+aliases; pin exact versions or digests for controlled upgrades. Publish releases in
+increasing version order. Never rebuild a completed published release under the same
+version.
 
 Preflight also rejects a tag that already has a GitHub Release, preserving a
-completed publication on full-workflow retries. Only after all four indexes publish
-does the workflow create the GitHub Release and attach `images.txt` with all four
-index digests, the five npm tarballs and their `SHA256SUMS`. Notes contain the reviewed
+completed publication on full-workflow retries. Notes contain the reviewed
 Highlights, conventional-type groups in a collapsible changelog with PR/commit
 links, and a thank-you section. Human authors and co-authors are deduplicated by
 GitHub handle across email aliases; people absent before the baseline are marked
@@ -183,18 +198,36 @@ responses or an excluded identity reaching rendering abort notes generation befo
 any notes are emitted. Invalid Highlights or failed preflight likewise prevent
 image publishing and release creation. Fix the cause and rerun; do not bypass it.
 
-Release concurrency serializes publications. If an index publication fails, other
-roles may receive their version tags before the GitHub Release is available.
-Inspect the run and digests, fix the cause, and rerun against the same accepted
-source before announcing availability. The publish job is safe to re-run with
-"Re-run failed jobs": it rebuilds the X.Y.Z index from the same platform digests,
-verifies it, and then moves the aliases. The registry accepts one tag at a time, so
-a job that fails partway can leave `X.Y` on the new release while `latest` is still
-on the previous one. Re-run the failed job to finish, then confirm that X.Y.Z, X.Y
-and latest resolve to the same digest with `docker buildx imagetools inspect`. An existing GitHub Release blocks a full
-rerun in preflight; retrying only release
-creation fails rather than replacing its reviewed notes. No Coolify deployment
-runs automatically.
+Release concurrency serializes publications. GHCR and GitHub Releases are separate
+services, so a release cannot be one atomic write; it can stop between its steps.
+What each stop leaves, and what to do (the run's artifacts are kept for **seven days**;
+use "Re-run failed jobs" within that time):
+
+- **Before any image index publishes** (preflight, a build, the npm job): nothing is
+  published. Re-run, or fix on master and release a new version.
+- **After some or all X.Y.Z indexes, before the GitHub Release**: those exact version
+  tags exist, but nothing announces them and no alias moved. Re-run the failed jobs: the
+  publish job rebuilds the X.Y.Z index from the same platform digests and verifies it, and
+  the release job follows.
+- **During release creation**: `gh` uploads to a draft and publishes it only when every
+  upload succeeds, deleting the draft itself if an upload fails. A runner lost mid-upload
+  can leave a draft behind, and the release job refuses to continue while the tag has any
+  release or draft. After any failed or interrupted release job, open the repository's
+  Releases page: if a draft for this tag exists, delete it, then re-run; if a published
+  release exists, the release step is done and only later jobs need a re-run.
+- **After the release, while moving aliases**: the release is live and some aliases may
+  still point at the previous version (the registry takes one tag at a time). Re-run the
+  failed alias jobs, then confirm that X.Y.Z, X.Y and latest resolve to the same digest
+  with `docker buildx imagetools inspect`.
+- **More than seven days later**, the digest, receipt and npm artifacts are gone and a
+  re-run cannot finish. Do not rebuild under the same version: release the next patch
+  version. Any X.Y.Z image tags the stopped run published stay unannounced.
+
+An existing GitHub Release blocks a full rerun in preflight; retrying only release
+creation fails rather than replacing its reviewed notes. A re-run of an older version
+after a newer one has shipped publishes its own exact tags and release and leaves both
+aliases and the "Latest release" mark where they are. No Coolify deployment runs
+automatically.
 
 `.github/workflows/docker.yml` separately builds all four targets on native amd64
 and arm64 runners on PRs changing Dockerfiles, Compose, Docker context exclusions
@@ -234,10 +267,11 @@ packages, and the release's `npm` job calls it with the release version. It:
    uploads the folder as the `npm-packages` artifact;
 2. installs those tarballs into outside applications: `tests/npm-consumer` (TypeScript 6
    and 7, run, API reports; Node 20 and 22; hono at the floor of its peer range, at the
-   version its lockfile pins and, on pull requests only, the latest 4.x),
-   `tests/npm-consumer-adapters`, and `tests/npm-release-install`, which follows the
+   version its lockfile pins and, on pull requests and master pushes only, the latest 4.x),
+   `tests/npm-consumer-adapters` (both fail if installing the tarballs resolves any package
+   outside their committed lockfile), and `tests/npm-release-install`, which follows the
    documented install recipes (`@logbird/sdk` alone, and with `@logbird/hono`) from a
-   local stand-in for the Release URL under pnpm 10, npm 10 and npm 12, reinstalls with a
+   local stand-in for the Release URL under pnpm 10 and 12 and npm 10 and 12, reinstalls with a
    frozen lockfile, type-checks and runs under TypeScript 6, and requires an altered
    tarball to be refused;
 3. verifies the artifact holds exactly the release's asset set with
@@ -253,7 +287,8 @@ would attach.
 
 **What gates a release.** On a tag, the npm workflow runs with `release: true`, and only
 checks whose inputs the repository pins can fail it: exact Node versions (20.20.2,
-22.18.0, 22.23.5, 24.22.3), the pnpm version in the root `package.json`, npm 12.1.0, the
+22.18.0, 22.23.5, 24.22.3), the pnpm version in the root `package.json`, pnpm 12.6.0
+(`tests/npm-release-install/pnpm12/package.json`), npm 12.1.0, the
 workspace and consumer lockfiles, the hono floor read from `@logbird/hono`'s peer range,
 the hono `tests/npm-consumer/package-lock.json` locks, and the exact registry packages of
 the release install check. The **"hono latest" consumer cells run on pull requests and
@@ -264,12 +299,8 @@ to raise the floor or fix a regression, not a blocked release.
 GitHub Release exists (the platform images pushed by digest are untagged). Read the
 failing check. A registry or network error is fixed by "Re-run failed jobs" (the image
 builds need the registry too). A real failure needs a fix on master and a new version;
-never move the tag.
-
-With assets, `gh release create` creates a draft, uploads every file and publishes the
-release only when all uploads succeed. If an upload fails, it deletes that draft itself;
-then use "Re-run failed jobs" (the artifacts are kept for seven days). Only if the job log
-shows that the cleanup failed too, delete the leftover draft release before re-running.
+never move the tag. For a failure after the npm job, see the recovery list under
+[What the tag workflow does](#what-the-tag-workflow-does).
 
 ## NuGet packages (.NET SDK)
 

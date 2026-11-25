@@ -91,7 +91,11 @@ const sources = pick('source', ['file', 'url']);
 const shapes = pick('shape', ['sdk', 'hono']);
 
 // Through cmd (pnpm and npm are .cmd shims on Windows), an argument with a space or metacharacter must be quoted.
-const quote = (arg) => (/[\s"&|<>^()]/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg);
+// A % is refused outright: cmd expands %VAR% even inside quotes, and no quoting prevents it.
+const quote = (arg) => {
+  if (arg.includes('%')) throw new Error(`cannot pass an argument containing % through cmd safely: ${arg}`);
+  return /[\s"&|<>^()]/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg;
+};
 // Asynchronous, so the stand-in server below (in this process) keeps answering while a package manager runs.
 function exec(command, commandArgs, cwd, capture) {
   const shell = isWindows && command !== process.execPath;
@@ -131,41 +135,56 @@ const check = (condition, message) => {
   console.log(`ok - ${message}`);
 };
 
-/** Every package a lockfile resolved from the registry, as name → version (the released tarballs are left out). */
+/**
+ * Every package a lockfile resolved from the registry, as name → the versions it holds, joined with "|" (so a second,
+ * nested copy at another version shows instead of hiding behind the first). The released tarballs are left out.
+ */
 function registryPackages(manager, lock) {
   const found = {};
+  const add = (name, version) => {
+    found[name] = [...new Set([...(found[name]?.split('|') ?? []), version])].sort().join('|');
+  };
   if (manager === 'npm') {
     for (const [key, entry] of Object.entries(JSON.parse(lock).packages)) {
       if (!key || key.includes('@logbird/')) continue;
-      found[key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length)] = entry.version;
+      add(key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length), entry.version);
     }
     return found;
   }
   const section = lock.split(/^packages:$/m)[1]?.split(/^\S/m)[0] ?? '';
   for (const match of section.matchAll(/^ {2}'?((?:@[^/'\s]+\/)?[^@'\s]+)@([^':\s]+)'?:\s*$/gm)) {
-    if (!match[1].startsWith('@logbird/')) found[match[1]] = match[2];
+    if (!match[1].startsWith('@logbird/')) add(match[1], match[2]);
   }
   return found;
 }
 
-// The stand-in for https://github.com/joodlab/logbird/releases/download/v<version>/<asset>: it answers with a redirect
-// to the file, as GitHub does, and can serve other bytes in place of an asset (step 6).
+// The stand-in for https://github.com/joodlab/logbird/releases/download/v<version>/<asset>: like GitHub, it answers with
+// a redirect to another origin (here a second loopback server, on another port) that serves the file. The asset server
+// can serve other bytes in place of an asset (step 6).
 const served = new Map(readdirSync(packages).map((file) => [file, readFileSync(join(packages, file))]));
 const downloadPath = `/joodlab/logbird/releases/download/v${version}/`;
 let requests = 0;
-const server = createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://stand-in');
-  if (url.pathname.startsWith(downloadPath) && served.has(url.pathname.slice(downloadPath.length))) {
-    response.statusCode = 302;
-    response.setHeader('location', `/release-assets/${url.pathname.slice(downloadPath.length)}`);
-    response.end();
-    return;
-  }
+const assets = createServer((request, response) => {
+  const url = new URL(request.url ?? '/', 'http://assets');
   const file = url.pathname.startsWith('/release-assets/') ? url.pathname.slice('/release-assets/'.length) : '';
   if (served.has(file)) {
     requests += 1;
     response.setHeader('content-type', 'application/octet-stream');
     response.end(served.get(file));
+    return;
+  }
+  response.statusCode = 404;
+  response.end();
+});
+assets.listen(0, '127.0.0.1');
+await once(assets, 'listening');
+const assetOrigin = `http://127.0.0.1:${assets.address().port}`;
+const server = createServer((request, response) => {
+  const url = new URL(request.url ?? '/', 'http://stand-in');
+  if (url.pathname.startsWith(downloadPath) && served.has(url.pathname.slice(downloadPath.length))) {
+    response.statusCode = 302;
+    response.setHeader('location', `${assetOrigin}/release-assets/${url.pathname.slice(downloadPath.length)}`);
+    response.end();
     return;
   }
   response.statusCode = 404;
@@ -211,11 +230,26 @@ try {
               .digest('hex');
             check(sums.get(file) === digest, `${file} matches ${SUMS}`);
           }
-          // The documented command where sha256sum exists: only the selected tarballs' lines, and none may be missing.
+          // The documented commands where sha256sum exists: one `grep " <file>$" SHA256SUMS | sha256sum --check` per
+          // selected tarball, chained with &&. Each must pass here, and the chain must fail when SHA256SUMS lacks the
+          // line of one of them (sha256sum refuses empty input), so no tarball is ever left unchecked.
           if (!isWindows && spawnSync('sha256sum', ['--version']).status === 0) {
-            const names = shapeName === 'sdk' ? 'sdk' : '(sdk|hono)';
-            const pattern = ` logbird-${names}-${version.replaceAll('.', '\\.')}\\.tgz$`;
-            await run('sh', ['-c', `grep -E '${pattern}' ${SUMS} | sha256sum --check`], vendor);
+            const chain = (sums) =>
+              Object.values(files)
+                .map((file) => `grep " ${file}\\$" ${sums} | sha256sum --check`)
+                .join(' && ');
+            await run('sh', ['-c', chain(SUMS)], vendor);
+            const last = Object.values(files).at(-1);
+            writeFileSync(
+              join(vendor, 'SHA256SUMS.partial'),
+              readFileSync(join(vendor, SUMS), 'utf8')
+                .split('\n')
+                .filter((line) => !line.endsWith(` ${last}`))
+                .join('\n'),
+            );
+            const partial = await attempt('sh', ['-c', chain('SHA256SUMS.partial')], vendor);
+            check(partial.status !== 0, `the documented check fails when ${SUMS} has no line for ${last}`);
+            rmSync(join(vendor, 'SHA256SUMS.partial'));
           }
           for (const [name, file] of Object.entries(files)) spec[name] = `file:vendor/logbird/${file}`;
         } else {
@@ -362,6 +396,7 @@ try {
   }
 } finally {
   server.close();
+  assets.close();
   rmSync(work, { recursive: true, force: true });
 }
 console.log(`\nrelease install check passed for ${version}:\n${passed.map((line) => `- ${line}`).join('\n')}`);

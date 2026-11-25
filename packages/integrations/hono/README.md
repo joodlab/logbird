@@ -23,7 +23,8 @@ depends on the SDK at exactly its own version, which no registry serves yet):
 // package.json
 "dependencies": {
   "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz",
-  "@logbird/hono": "file:vendor/logbird/logbird-hono-X.Y.Z.tgz"
+  "@logbird/hono": "file:vendor/logbird/logbird-hono-X.Y.Z.tgz",
+  "hono": "4.13.21" // your application's hono: 4.12.3 or later in 4.x
 }
 // npm: "overrides": { "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz" } in package.json
 // pnpm: overrides: { '@logbird/sdk': file:vendor/logbird/logbird-sdk-X.Y.Z.tgz } in pnpm-workspace.yaml

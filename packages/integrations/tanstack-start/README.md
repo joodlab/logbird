@@ -7,8 +7,9 @@ Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/release
 `SHA256SUMS` file. Download them, verify them, depend on the files and override
 `@logbird/sdk` to the same tarball, as
 [Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
-shows. Requirements: Node 22.12 or later, `@tanstack/react-start` 1.168.49 or later in 1.x (peer `^1.168.49`); ES modules only; the declarations are checked with
-TypeScript 6 and 7.
+shows. Requirements: Node 22.12 or later, `@tanstack/react-start` 1.168.49 or later in 1.x (peer `^1.168.49`); ES modules only; the declarations are type-checked with
+TypeScript 6 and 7 under `bundler` resolution. No check installs this package with that recipe
+yet; the SDK and Hono recipes are the tested ones.
 
 ## Usage
 

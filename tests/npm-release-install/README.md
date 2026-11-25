@@ -13,7 +13,8 @@ redirects, as GitHub does) and writes a fresh application outside this repositor
 For each shape, package manager and source:
 
 - **downloaded tarballs** (`file:`, the recommended recipe): downloads the tarballs and `SHA256SUMS` and verifies them
-  (with the documented `grep … SHA256SUMS | sha256sum --check` where `sha256sum` exists);
+  (with the documented `grep " <file>$" SHA256SUMS | sha256sum --check` per tarball where `sha256sum` exists, which
+  must also fail when `SHA256SUMS` lacks a tarball's line);
 - **Release URLs**: depends on the URLs directly (npm gets `allow-remote=root` in `.npmrc`, which npm 12 requires);
 
 then requires:
@@ -41,5 +42,6 @@ node tests/npm-release-install/run.mjs --packages=.tmp/npm --shape=sdk --manager
 ```
 
 It uses the network for the application's registry packages, never for the Logbird packages. CI
-(`.github/workflows/npm-tarballs.yml`) runs it with pnpm 10.30.3 and npm 10 on Node 22.18.0, and with npm 12.1.0 on
-Node 24.22.3, on pull requests and on release tags.
+(`.github/workflows/npm-tarballs.yml`) runs it with pnpm 10.30.3 and npm 10 on Node 22.18.0, with npm 12.1.0 on Node
+24.22.3, and with pnpm 12.6.0 on Node 24.22.3 (pinned by `pnpm12/package.json`), on pull requests, master pushes and
+release tags.

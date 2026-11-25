@@ -33,9 +33,12 @@ Requirements, as the packages' manifests state them:
 - Node 20 or later (`engines.node` is `>=20` for `@logbird/sdk`, `@logbird/hono` and
   `@logbird/vue`; `@logbird/nuxt` needs `^20.19.0 || >=22.12.0` and
   `@logbird/tanstack-start` `>=22.12.0`).
-- ES modules only: `import` the packages; there is no CommonJS build. TypeScript projects
-  need `moduleResolution` `nodenext`, `node16` or `bundler`. The declarations are checked with
-  TypeScript 6 and 7 under `strict` and `skipLibCheck: false`.
+- ES modules only: `import` the packages; there is no CommonJS build.
+- TypeScript: the declarations of `@logbird/sdk` and `@logbird/hono` are checked with
+  TypeScript 6 and 7 under `strict` and `skipLibCheck: false`, with `moduleResolution`
+  `nodenext` and `bundler`. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start`
+  are checked with TypeScript 6 and 7 under `bundler` resolution with `skipLibCheck: true`
+  (Nuxt projects resolve that way).
 - `@logbird/hono`: hono 4.12.3 or later in 4.x (its peer dependency).
 
 **1. Download and verify.** From your project root, with the version you want:
@@ -47,26 +50,30 @@ mkdir -p vendor/logbird && cd vendor/logbird &&
   curl -fsSLO "$base/SHA256SUMS" &&
   curl -fsSLO "$base/logbird-sdk-$version.tgz" &&
   curl -fsSLO "$base/logbird-hono-$version.tgz" &&
-  grep -E " logbird-(sdk|hono)-$version\.tgz\$" SHA256SUMS | sha256sum --check &&
+  grep " logbird-sdk-$version.tgz\$" SHA256SUMS | sha256sum --check &&
+  grep " logbird-hono-$version.tgz\$" SHA256SUMS | sha256sum --check &&
   cd ../..
 ```
 
-Download only the integrations you use, and name each one in the `grep` pattern. On
-macOS, use `shasum -a 256 --check` for `sha256sum --check`. Every tarball must print `OK`;
-the chain stops at a failed download or a mismatch, and you must not install from that
-folder until it passes. Commit `vendor/logbird/` with your project: the
+Download only the integrations you use, with one `curl` and one `grep … | sha256sum --check`
+line per tarball. On macOS, use `shasum -a 256 --check` for `sha256sum --check`. Each
+tarball must print `OK`. The chain stops at a failed download, a mismatch, or a tarball
+that `SHA256SUMS` does not list (`sha256sum` refuses an empty check), and you must not
+install from that folder until it passes. Commit `vendor/logbird/` with your project: the
 build then installs the same bytes every time and never depends on GitHub being reachable.
 
 **2. Depend on the files.** `@logbird/hono` (like every integration) depends on
 `@logbird/sdk` at exactly its own version, which no registry serves yet. An override
 points that dependency at the same tarball, so your code and the integration share one SDK.
-In `package.json`:
+In `package.json`, next to your application's own `hono` (4.12.3 or later in 4.x; the
+install check uses exactly this manifest with hono 4.13.21):
 
 ```json
 {
   "dependencies": {
     "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz",
-    "@logbird/hono": "file:vendor/logbird/logbird-hono-X.Y.Z.tgz"
+    "@logbird/hono": "file:vendor/logbird/logbird-hono-X.Y.Z.tgz",
+    "hono": "4.13.21"
   }
 }
 ```
@@ -90,9 +97,14 @@ With **npm**, add it to `package.json`:
 }
 ```
 
-`@logbird/vue` and `@logbird/tanstack-start` install the same way. `@logbird/nuxt` also
-depends on `@logbird/vue`: download both, and override `@logbird/sdk` and `@logbird/vue`.
-With the SDK alone you need no override.
+With the SDK alone you need no override: `pnpm add ./vendor/logbird/logbird-sdk-X.Y.Z.tgz`
+(or `npm install …`) writes the `file:` dependency for you.
+
+The same mechanism applies to the other integrations, but no check installs them this way
+yet (they are type-checked from the same tarballs, installed side by side): depend on each
+Logbird tarball you use and override every `@logbird/*` package it depends on, which is
+`@logbird/sdk` for `@logbird/vue` and `@logbird/tanstack-start`, and `@logbird/sdk` and
+`@logbird/vue` for `@logbird/nuxt`.
 
 **3. Install and commit the lockfile.** Run `pnpm install` or `npm install`. The lockfile
 records each tarball with its SHA-512 integrity (`integrity: sha512-…`), and later installs
@@ -167,23 +179,29 @@ See [SDK redaction options](../packages/sdk/README.md#redaction).
 
 ### What search can find
 
-Logbird keeps each event twice: the event exactly as sent (the stored payload, which
-event detail and exports return in full) and a search index built from it. Search,
-filters and facets read the index, which has caps:
+Logbird keeps each event twice: the event exactly as sent (the stored payload, which event
+detail returns unless a field mask hides it, and which the complete `jsonl-evidence` export
+carries; CSV and normalized JSONL exports carry the indexed fields) and a search index built
+from it. Search, filters and facets read the index, which has caps (lengths count UTF-16
+code units, so a character outside the Basic Multilingual Plane, such as most emoji, counts
+as two):
 
 - **Known fields** are indexed columns, each cut to a length: `action` 200 characters,
   `description` 4,096, `source` 128, `environment` 64, `outcome` and `severity` 32; the
   ids of the actor, impersonator, executor, tenant, targets and `context` 256; names and
   the actor's email 512; types 64; `context.ip` 64 and `context.userAgent` 1,024.
-- **Targets and changes:** the first 64 `targets` and the first 256 `changes`.
+- **Targets and changes:** the first 64 `targets` and the first 256 `changes` (a change's
+  `field`, `before` and `after`; other keys on a change entry are not indexed).
 - **Every other field is an attribute**, found by its dotted path (`metadata.plan:pro`):
   `metadata` and any other top-level field you add, extra keys on `actor`, `impersonator`,
   `executor`, `tenant` and `context` (`actor.department`), and extra keys on a target
   (`targets.0.status`). Objects are flattened up to six path segments; an array, or an
   object deeper than that, is indexed as its JSON text. An event indexes at most 256
-  attributes, taken in this order: your top-level fields in the order they appear, then the
-  extra party and context keys, then the extra target keys. Each value keeps its first
-  2 KB (2,048 bytes).
+  attributes from your fields, taken in this order: your top-level fields in the order they
+  appear, then the extra party and context keys, then the extra target keys (Logbird may add
+  its own `logbird.occurredAt.rejected` beyond them). A text value keeps its first 2 KB
+  (2,048 bytes); a number is indexed whole or, if its exact spelling is longer than that,
+  not at all (see [numbers and ids](#numbers-and-ids)).
 
 Anything past a cap is not searchable, but it is not lost: the stored payload keeps the
 whole event (up to the 256 KB event limit; a larger event is rejected and the SDK reports
@@ -202,7 +220,8 @@ audit.track({
 
 `metadata.importer:nightly-feed` finds the event, and so does `metadata.settings.locale:fr`
 when `locale` is among the first 255 settings keys. The last 45 keys are past the cap:
-searching for them finds nothing, while event detail and exports still show all 300. Put
+searching for them finds nothing, while event detail and the `jsonl-evidence` export still
+show all 300. Put
 what people will search for in short fields of their own, or record one event per record
 changed with the record as a target, rather than deep in a long object or list.
 

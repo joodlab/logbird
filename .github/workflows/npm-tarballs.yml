@@ -29,7 +29,7 @@ permissions:
 jobs:
   pack:
     name: Pack and check the npm tarballs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -64,7 +64,7 @@ jobs:
   consumer:
     name: npm consumer (Node ${{ matrix.node }}, hono ${{ matrix.hono }})
     needs: pack
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -94,7 +94,7 @@ jobs:
   adapters:
     name: npm consumer (Vue, Nuxt, TanStack Start types)
     needs: pack
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -112,12 +112,13 @@ jobs:
       - run: node tests/npm-consumer/run.mjs --project=adapters --skip-pack
 
   # The install recipe the docs give for a release (tests/npm-release-install/README.md), from a stand-in for the
-  # Release download URL, for @logbird/sdk alone and with @logbird/hono: pnpm 10 and npm 10 (Node 22's own), and npm 12,
-  # which refuses URL dependencies by default. Every version here is pinned.
+  # Release download URL, for @logbird/sdk alone and with @logbird/hono: pnpm 10 and npm 10 (Node 22's own), npm 12
+  # (which refuses URL dependencies by default) and pnpm 12 (which refuses a URL sub-dependency). Every version here is
+  # pinned: pnpm from a packageManager field (the root package.json, or tests/npm-release-install/pnpm12/package.json).
   release-install:
     name: Release install recipe (${{ matrix.label }})
     needs: pack
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -129,16 +130,25 @@ jobs:
             node: '22.18.0'
             managers: 'pnpm npm'
             npm: ''
+            pnpm_manifest: package.json
           - label: npm 12
             node: '24.22.3'
             managers: npm
             npm: '12.1.0'
+            pnpm_manifest: ''
+          - label: pnpm 12
+            node: '24.22.3'
+            managers: pnpm
+            npm: ''
+            pnpm_manifest: tests/npm-release-install/pnpm12/package.json
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         if: contains(matrix.managers, 'pnpm')
+        with:
+          package_json_file: ${{ matrix.pnpm_manifest }}
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
@@ -165,7 +175,7 @@ jobs:
   assets:
     name: Release assets (dry run)
     needs: [pack, consumer, adapters, release-install]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -195,11 +205,11 @@ jobs:
           (( ${#assets[@]} == 6 )) || { echo "::error::expected 6 npm assets, got ${#assets[@]}"; exit 1; }
           (cd npm && sha256sum --check SHA256SUMS)
           names=()
-          for asset in "${assets[@]}"; do names+=("$(basename "$asset")"); done
+          for asset in "${assets[@]}"; do names+=("npm/$(basename "$asset")"); done
           {
-            echo "The release for v$version runs, after its images publish:"
+            echo "The release for v$version runs, from this job's working directory, after its images publish:"
             echo
             echo '```sh'
-            echo "gh release create v$version images.txt ${names[*]} --verify-tag --title \"Logbird v$version\" --notes-file release-notes.md"
+            echo "gh release create v$version images.txt ${names[*]} --repo $GITHUB_REPOSITORY --verify-tag --latest=<true unless a newer release is published> --title \"Logbird v$version\" --notes-file release-notes.md"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"

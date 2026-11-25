@@ -137,6 +137,8 @@ jobs:
           overwrite: true
           retention-days: 7
 
+  # Publishes each role's exact X.Y.Z index only. The moving aliases (X.Y, latest) follow in the `aliases` job, after the
+  # GitHub Release exists, so the release is the point where a version becomes current.
   images:
     name: Publish ${{ matrix.role }}
     needs: [preflight, build, npm]
@@ -162,18 +164,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Image tags
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
       - name: Publish multi-platform image and record index digest
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
           VERSION: ${{ needs.preflight.outputs.version }}
         shell: bash
         run: |
@@ -187,8 +179,8 @@ jobs:
             sources+=("$IMAGE@$digest")
           done
 
-          # Publish the exact version first. The moving aliases (X.Y, latest) only follow once the
-          # published index is verified, so a wrong index never reaches users who pull an alias.
+          # Publish the exact version. The moving aliases (X.Y, latest) only follow once the published index is
+          # verified and the GitHub Release exists, so a wrong index never reaches users who pull an alias.
           docker buildx imagetools create --tag "$IMAGE:$VERSION" "${sources[@]}"
 
           docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' > index.json
@@ -201,30 +193,6 @@ jobs:
           if [[ "$platforms" != "amd64,arm64" ]]; then
             echo "Expected linux/amd64 and linux/arm64 in $IMAGE:$VERSION, found: $platforms" >&2
             exit 1
-          fi
-
-          # The tag list can name an alias twice (the semver rule and the explicit latest rule both
-          # produce "latest"), so each alias is passed once.
-          alias_args=()
-          declare -A seen=()
-          version_tagged=false
-          while IFS= read -r tag; do
-            if [[ -z "$tag" || -n "${seen[$tag]:-}" ]]; then
-              continue
-            fi
-            seen[$tag]=1
-            if [[ "$tag" == "$IMAGE:$VERSION" ]]; then
-              version_tagged=true
-            else
-              alias_args+=(--tag "$tag")
-            fi
-          done <<< "$TAGS"
-          if [[ "$version_tagged" != true ]]; then
-            echo "The tag list does not contain $IMAGE:$VERSION" >&2
-            exit 1
-          fi
-          if (( ${#alias_args[@]} > 0 )); then
-            docker buildx imagetools create "${alias_args[@]}" "$IMAGE@$digest"
           fi
           printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$digest" > "image-${{ matrix.role }}.txt"
       - uses: actions/upload-artifact@v7
@@ -242,11 +210,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Only the asset check runs from the repository here, and it uses Node built-ins only (nothing is installed).
+      # Only the asset and alias checks run from the repository here; they use Node built-ins only (nothing is installed).
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          sparse-checkout: scripts/npm-release-assets.mjs
+          sparse-checkout: |
+            scripts/npm-release-assets.mjs
+            scripts/release-aliases.mjs
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v7
         with:
@@ -261,9 +231,24 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           pattern: image-*
+          path: receipts
           merge-multiple: true
+      # One well-formed receipt per role, in a fixed order: a missing role fails instead of shrinking images.txt.
       - name: Assemble image receipt
-        run: cat image-*.txt > images.txt
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          : > images.txt
+          for role in server worker app migrate; do
+            line="$(cat "receipts/image-$role.txt" 2>/dev/null || true)"
+            if [[ ! "$line" =~ ^ghcr\.io/joodlab/logbird-$role:${VERSION//./\\.}@sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::No valid image receipt for $role at $VERSION: '$line'"
+              exit 1
+            fi
+            printf '%s\n' "$line" >> images.txt
+          done
+          cat images.txt
       # The npm job's artifact, checked again right before attaching: exactly one tarball per package at the release
       # version, and SHA256SUMS matching them. The npm workflow's "Release assets (dry run)" job runs the same check on
       # pull requests.
@@ -277,16 +262,137 @@ jobs:
           (( ${#assets[@]} == 6 )) || { echo "::error::expected 6 npm assets, got ${#assets[@]}"; exit 1; }
           (cd npm && sha256sum --check SHA256SUMS)
           printf '%s\n' "${assets[@]}" > npm-assets.txt
+      # A release (or a draft left by an interrupted run) for this tag stops the job: inspect it first (docs/releases.md).
+      # A version older than the newest published release is created without taking the "Latest release" mark.
+      - name: Check existing releases
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
+          existing="$(jq -r --arg tag "$GITHUB_REF_NAME" '[.[][] | select(.tag_name == $tag) | if .draft then "draft" else "published" end] | join(",")' releases.json)"
+          if [[ -n "$existing" ]]; then
+            echo "::error::$GITHUB_REF_NAME already has a release ($existing). Inspect it before re-running; see docs/releases.md."
+            exit 1
+          fi
+          node scripts/release-aliases.mjs "$VERSION" releases.json | grep '^latest=' >> "$GITHUB_OUTPUT"
       # With assets, gh creates a draft, uploads every file, and publishes the release only once all uploads succeed.
       - name: Create release after all images publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.existing.outputs.latest }}
         shell: bash
         run: |
           mapfile -t assets < npm-assets.txt
           gh release create "$GITHUB_REF_NAME" images.txt "${assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --latest="$LATEST" \
             --title "Logbird $GITHUB_REF_NAME" --notes-file release-notes.md
+
+  # Moves X.Y and latest to the published index once the GitHub Release exists, and only when no newer published release
+  # would be moved backwards (a late or re-run older release keeps its exact tag and leaves the aliases alone).
+  aliases:
+    name: Move ${{ matrix.role }} aliases
+    needs: [preflight, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [server, worker, app, migrate]
+    env:
+      IMAGE: ghcr.io/joodlab/logbird-${{ matrix.role }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/release-aliases.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: image-${{ matrix.role }}
+      - name: Which aliases may move
+        id: allowed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
+          node scripts/release-aliases.mjs "$VERSION" releases.json --require-own >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - name: Move the aliases to the published index
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          MINOR: ${{ steps.allowed.outputs.minor }}
+          LATEST: ${{ steps.allowed.outputs.latest }}
+        shell: bash
+        run: |
+          receipt="$(cat "image-${{ matrix.role }}.txt")"
+          digest="${receipt##*@}"
+          if [[ "$receipt" != "$IMAGE:$VERSION@$digest" || ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid image receipt: $receipt" >&2
+            exit 1
+          fi
+          # The exact version tag must still point at the index this release published.
+          current="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -er '.digest')"
+          if [[ "$current" != "$digest" ]]; then
+            echo "$IMAGE:$VERSION now points at $current, not $digest" >&2
+            exit 1
+          fi
+
+          # The tag list can name an alias twice (the semver rule and the explicit latest rule both
+          # produce "latest"), so each alias is passed once. An unexpected tag fails closed.
+          minor_tag="$IMAGE:${VERSION%.*}"
+          alias_args=()
+          declare -A seen=()
+          version_tagged=false
+          while IFS= read -r tag; do
+            if [[ -z "$tag" || -n "${seen[$tag]:-}" ]]; then
+              continue
+            fi
+            seen[$tag]=1
+            if [[ "$tag" == "$IMAGE:$VERSION" ]]; then
+              version_tagged=true
+            elif [[ "$tag" == "$IMAGE:latest" ]]; then
+              if [[ "$LATEST" == true ]]; then alias_args+=(--tag "$tag"); fi
+            elif [[ "$tag" == "$minor_tag" ]]; then
+              if [[ "$MINOR" == true ]]; then alias_args+=(--tag "$tag"); fi
+            else
+              echo "Unexpected tag $tag" >&2
+              exit 1
+            fi
+          done <<< "$TAGS"
+          if [[ "$version_tagged" != true ]]; then
+            echo "The tag list does not contain $IMAGE:$VERSION" >&2
+            exit 1
+          fi
+          if (( ${#alias_args[@]} > 0 )); then
+            docker buildx imagetools create "${alias_args[@]}" "$IMAGE@$digest"
+          else
+            echo "No alias moves: a newer release is published."
+          fi
 
   nuget:
     name: Publish NuGet packages

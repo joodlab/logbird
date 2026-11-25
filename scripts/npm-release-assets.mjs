@@ -103,6 +103,8 @@ function pack(folderArg, versionArg) {
   // pnpm is a .cmd shim on Windows and needs a shell; no argument here holds a space-sensitive or shell character
   // except the folder, which is quoted.
   const shell = process.platform === 'win32';
+  // cmd expands %VAR% even inside quotes, so the folder pnpm writes to could differ from the one verified below.
+  if (shell && folder.includes('%')) throw new Error(`cannot pass a folder containing % through cmd safely: ${folder}`);
   const quoted = shell ? `"${folder}"` : folder;
   for (const { dir } of PACKAGES) {
     const cwd = join(repo, dir);

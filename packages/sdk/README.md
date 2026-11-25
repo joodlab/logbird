@@ -89,16 +89,17 @@ Do not log raw SDK error objects, events, headers or credentials. Use safe diagn
 
 ## What search can find
 
-Logbird stores each event exactly as sent (event detail and exports return all of it, up to
-the 256 KB event limit) and indexes it for search with caps. The known fields are columns
-cut to a length (`action` 200 characters, ids 256, names 512, `description` 4,096), with the
+Logbird stores each event exactly as sent, up to the 256 KB event limit (event detail returns
+it unless a field mask hides it, and the `jsonl-evidence` export carries it), and indexes it
+for search with caps. The known fields are columns
+cut to a length in UTF-16 code units (`action` 200, ids 256, names 512, `description` 4,096), with the
 first 64 `targets` and 256 `changes`. Every other field (`metadata.*`, other top-level
 fields, extra keys on the actor, executor, tenant, context or a target) becomes an attribute
 searched by its dotted path, such as `metadata.plan:pro`: flattened to six path segments
-(arrays and deeper objects as JSON text), at most 256 per event, each value's first 2 KB.
+(arrays and deeper objects as JSON text), at most 256 from your fields per event, each text value's first 2 KB.
 A field past a cap is not searchable but stays in the stored event. So an event whose
 `metadata` holds `importer` and a 300-key `settings` object indexes `metadata.importer` and
-the first 255 settings keys; the other 45 are in event detail and exports only. The
+the first 255 settings keys; the other 45 are only in event detail and the `jsonl-evidence` export. The
 [backend guide](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#what-search-can-find)
 lists every cap.
 
