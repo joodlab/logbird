@@ -212,6 +212,27 @@ describe('a change whose field JSON cannot tell fails closed', () => {
     expect(values({ field: rawJSON?.('7'), before: 'b', after: 'a' })).toEqual(['b', 'a']);
   });
 
+  it('redacts change values when primitive bigints serialize through a host toJSON', () => {
+    const previous = Object.getOwnPropertyDescriptor(BigInt.prototype, 'toJSON');
+    Object.defineProperty(BigInt.prototype, 'toJSON', {
+      configurable: true,
+      value(this: bigint) {
+        return String(this);
+      },
+    });
+    try {
+      const changes = [42n, 0n].map((field) => ({ field, before: 'b', after: 'a' }));
+      const event = { action: 'a', changes } as unknown as EventInput;
+      expect(redact({ changeFields: /^(42|0)$/ })(event).changes).toEqual([
+        { field: '42', before: '[redacted]', after: '[redacted]' },
+        { field: '0', before: '[redacted]', after: '[redacted]' },
+      ]);
+    } finally {
+      if (previous) Object.defineProperty(BigInt.prototype, 'toJSON', previous);
+      else Reflect.deleteProperty(BigInt.prototype, 'toJSON');
+    }
+  });
+
   it('keeps the shared rule for a plain own field', () => {
     expect(values({ field: 'public', before: 'b', after: 'a' })).toEqual(['b', 'a']);
     expect(values({ field: 'password', before: 'b', after: 'a' })).toEqual(redacted);

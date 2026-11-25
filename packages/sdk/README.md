@@ -214,8 +214,8 @@ exemption. For hooks that must remain the sole redaction policy, set
 `redaction: false`. Redaction operates on the JSON representation, including
 values returned by `toJSON`. Supply plain data and serialization methods without
 side effects. If a change field comes from a getter, an inherited or
-non-enumerable property, a boxed string, or a value with a `toJSON` method, the
-SDK redacts its change values.
+non-enumerable property, a boxed string, a bigint, or a value with a `toJSON`
+method, the SDK redacts its change values.
 
 The default rules and literal `addKeys` matching use the same ASCII case rules
 in both SDKs. Custom `keys` and `changeFields` run on each platform's regex engine

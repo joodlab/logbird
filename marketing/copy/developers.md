@@ -40,13 +40,14 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
 - **code sample:**
 
   ```ts
-  import { Logbird } from '@logbird/sdk';
+  import { Logbird, redact } from '@logbird/sdk';
 
   const client = new Logbird({
     endpoint: process.env.LOGBIRD_ENDPOINT, // your Logbird origin, e.g. https://audit.example.com
     apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
     enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
     defaults: { environment: 'production' },
+    beforeSend: redact(),
     onError: (error) => console.error(error.message), // capture errors, permanent rejections and background flush failures
     onDrop: (event) => console.warn('audit event dropped', event.action), // events the server rejects or a full queue discards
   });

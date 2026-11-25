@@ -143,8 +143,8 @@ function childPaths(nodes: readonly PathNode[], key: string): readonly PathNode[
  * The contract: `redact()` is exact for JSON data, which is what `EventInput` types: plain objects, arrays, primitives,
  * and `toJSON` values (such as `Date`) without side effects on other parts of the event. Getters or `toJSON` with side
  * effects on other parts of the event, or anything that changes the event while it is serialized, are outside it. A
- * change whose `field` is a getter, an inherited or non-enumerable property, a boxed string, or a value with a
- * `toJSON` has its `before` and `after` redacted, whatever the pattern. Other non-string fields are not matched.
+ * change whose `field` is a getter, an inherited or non-enumerable property, a boxed string, a bigint, or an object
+ * with a `toJSON` has its `before` and `after` redacted, whatever the pattern. Other non-string fields are not matched.
  */
 export function redact(options?: RedactionOptions): (event: EventInput) => EventInput {
   const serialize = createRedactor(options);
@@ -220,6 +220,8 @@ export function createRedactor(options: RedactionOptions = {}, report?: (error: 
         // JSON.rawJSON can supply a primitive string without using a JS string or toJSON.
         const field: unknown = isRawJSON?.(own.value) ? JSON.parse(own.value.rawJSON) : own.value;
         if (typeof field === 'string') changed = fields ? matches(fields, field) : matchesKey(field);
+        // JSON.stringify can invoke BigInt.prototype.toJSON even for primitive fields, including 0n.
+        else if (typeof field === 'bigint') changed = true;
         else
           changed =
             !!field &&
