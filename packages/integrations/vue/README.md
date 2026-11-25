@@ -1,5 +1,17 @@
 # @logbird/vue
 
+## Install
+
+Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches
+`logbird-vue-X.Y.Z.tgz` and `logbird-sdk-X.Y.Z.tgz` with a
+`SHA256SUMS` file. Download them, verify them, depend on the files and override
+`@logbird/sdk` to the same tarball, as
+[Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
+shows. Requirements: Node 20 or later, Vue 3.5.22 or later in 3.x (peer `^3.5.22`); ES modules only; the declarations are checked with
+TypeScript 6 and 7.
+
+## Usage
+
 ```ts
 import { useAuditTrail } from '@logbird/vue';
 const trail = useAuditTrail({

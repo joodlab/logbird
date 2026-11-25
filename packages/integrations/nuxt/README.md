@@ -1,5 +1,17 @@
 # @logbird/nuxt
 
+## Install
+
+Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches
+`logbird-nuxt-X.Y.Z.tgz` and `logbird-sdk-X.Y.Z.tgz` (and `logbird-vue-X.Y.Z.tgz`, which this package also depends on) with a
+`SHA256SUMS` file. Download them, verify them, depend on the files and override
+`@logbird/sdk` and `@logbird/vue` to the same tarballs, as
+[Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
+shows. Requirements: Node `^20.19.0 || >=22.12.0`, Nuxt 4.1.3 or later in 4.x (peer `^4.1.3`); ES modules only; the declarations are checked with
+TypeScript 6 and 7.
+
+## Usage
+
 ```ts
 // nuxt.config.ts
 export default defineNuxtConfig({ modules: ['@logbird/nuxt'], logbird: {

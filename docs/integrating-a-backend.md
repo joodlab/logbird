@@ -19,26 +19,99 @@ LOGBIRD_INGEST_KEY=<project ingest key>
 `LOGBIRD_ENDPOINT` is your public Logbird origin without `/v1/events`. This application
 variable is passed to `endpoint`; the SDK does not read it automatically.
 
-`@logbird/sdk` is not published on npm yet: `pnpm add @logbird/sdk` returns 404.
-Use the source package at `packages/sdk`. Inside this repository, add it to a
-workspace app with:
+### Install the SDK
+
+The TypeScript packages are not on npm yet, so `pnpm add @logbird/sdk` finds nothing.
+Each GitHub Release attaches them instead: `logbird-sdk-X.Y.Z.tgz`, `logbird-hono-X.Y.Z.tgz`,
+`logbird-vue-X.Y.Z.tgz`, `logbird-nuxt-X.Y.Z.tgz` and `logbird-tanstack-start-X.Y.Z.tgz`,
+built JavaScript with type declarations, packed exactly as a publish to npm would pack them, plus a
+`SHA256SUMS` file. Install an exact version from those files. (Releases made before the
+tarballs were attached have none; use a later one.)
+
+Requirements, as the packages' manifests state them:
+
+- Node 20 or later (`engines.node` is `>=20` for `@logbird/sdk`, `@logbird/hono` and
+  `@logbird/vue`; `@logbird/nuxt` needs `^20.19.0 || >=22.12.0` and
+  `@logbird/tanstack-start` `>=22.12.0`).
+- ES modules only: `import` the packages; there is no CommonJS build. TypeScript projects
+  need `moduleResolution` `nodenext`, `node16` or `bundler`. The declarations are checked with
+  TypeScript 6 and 7 under `strict` and `skipLibCheck: false`.
+- `@logbird/hono`: hono 4.12.3 or later in 4.x (its peer dependency).
+
+**1. Download and verify.** From your project root, with the version you want:
 
 ```sh
-pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'
+version=X.Y.Z
+base="https://github.com/joodlab/logbird/releases/download/v$version"
+mkdir -p vendor/logbird
+cd vendor/logbird
+curl -fsSLO "$base/SHA256SUMS"
+curl -fsSLO "$base/logbird-sdk-$version.tgz"
+curl -fsSLO "$base/logbird-hono-$version.tgz"   # only the integrations you use
+sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+cd ../..
 ```
 
-For a backend outside the workspace, clone Logbird beside it. Run `pnpm install`
-in the Logbird clone first so the linked source can resolve its dependencies. Then
-run this command from your backend project:
+Every downloaded tarball must print `OK`. Commit `vendor/logbird/` with your project: the
+build then installs the same bytes every time and never depends on GitHub being reachable.
 
-```sh
-pnpm add @logbird/sdk@link:../logbird/packages/sdk
+**2. Depend on the files.** `@logbird/hono` (like every integration) depends on
+`@logbird/sdk` at exactly its own version, which no registry serves yet. An override
+points that dependency at the same tarball, so your code and the integration share one SDK.
+In `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz",
+    "@logbird/hono": "file:vendor/logbird/logbird-hono-X.Y.Z.tgz"
+  }
+}
 ```
 
-The source exports TypeScript; use `tsx` (for example, `pnpm exec tsx server.ts`)
-or a bundler such as Vite or esbuild. Native Node type stripping cannot handle the
-SDK's constructor parameter property.
-See the [SDK README](../packages/sdk/README.md) for its runtime requirements.
+With **pnpm**, put the override in `pnpm-workspace.yaml` next to `package.json` (create the
+file if you have none; in a pnpm workspace, use the root one with a path from the root).
+pnpm 10 and 12 both read it there; pnpm 12 ignores a `pnpm.overrides` field in `package.json`.
+
+```yaml
+overrides:
+  '@logbird/sdk': file:vendor/logbird/logbird-sdk-X.Y.Z.tgz
+```
+
+With **npm**, add it to `package.json`:
+
+```json
+{
+  "overrides": {
+    "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz"
+  }
+}
+```
+
+`@logbird/vue` and `@logbird/tanstack-start` install the same way. `@logbird/nuxt` also
+depends on `@logbird/vue`: download both, and override `@logbird/sdk` and `@logbird/vue`.
+With the SDK alone you need no override.
+
+**3. Install and commit the lockfile.** Run `pnpm install` or `npm install`. The lockfile
+records each tarball with its SHA-512 integrity (`integrity: sha512-…`), and later installs
+with `pnpm install --frozen-lockfile` or `npm ci` refuse a tarball whose bytes differ
+(`ERR_PNPM_TARBALL_INTEGRITY`, `EINTEGRITY`). To tie that value to the verified download,
+`openssl dgst -sha512 -binary vendor/logbird/logbird-sdk-X.Y.Z.tgz | openssl base64 -A`
+prints what follows `sha512-`.
+
+To upgrade, download and verify the new version, change the version in the file names
+(dependencies and overrides), delete the old tarballs and install again.
+
+Pointing the dependencies and overrides straight at the Release URLs
+(`https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`)
+also works with pnpm 10 and with npm, where npm 12 needs `allow-remote=root` in the
+project's `.npmrc` (it refuses URL dependencies by default). pnpm 12 refuses it
+(`ERR_PNPM_EXOTIC_SUBDEP`: a sub-dependency resolved from a URL), and turning its
+`blockExoticSubdeps` protection off is not worth it. The downloaded files work with every
+one of them.
+
+A source checkout of this repository is for contributing to Logbird
+([CONTRIBUTING.md](../CONTRIBUTING.md)), not for installing it in an application.
 
 ```ts
 import { DEFAULT_SECRET_KEYS, Logbird, redact } from '@logbird/sdk';
@@ -86,6 +159,47 @@ to retain default secret protection while adding personal-data fields.
 `changeFields` defaults to that same combined pattern. Inspect the stored raw
 payload as well as attributes.
 See [SDK redaction options](../packages/sdk/README.md#host-context-options-02).
+
+### What search can find
+
+Logbird keeps each event twice: the event exactly as sent (the stored payload, which
+event detail and exports return in full) and a search index built from it. Search,
+filters and facets read the index, which has caps:
+
+- **Known fields** are indexed columns, each cut to a length: `action` 200 characters,
+  `description` 4,096, `source` 128, `environment` 64, `outcome` and `severity` 32; the
+  ids of the actor, impersonator, executor, tenant, targets and `context` 256; names and
+  the actor's email 512; types 64; `context.ip` 64 and `context.userAgent` 1,024.
+- **Targets and changes:** the first 64 `targets` and the first 256 `changes`.
+- **Every other field is an attribute**, found by its dotted path (`metadata.plan:pro`):
+  `metadata` and any other top-level field you add, extra keys on `actor`, `impersonator`,
+  `executor`, `tenant` and `context` (`actor.department`), and extra keys on a target
+  (`targets.0.status`). Objects are flattened up to six path segments; an array, or an
+  object deeper than that, is indexed as its JSON text. An event indexes at most 256
+  attributes, taken in this order: your top-level fields in the order they appear, then the
+  extra party and context keys, then the extra target keys. Each value keeps its first
+  2 KB (2,048 bytes).
+
+Anything past a cap is not searchable, but it is not lost: the stored payload keeps the
+whole event (up to the 256 KB event limit; a larger event is rejected and the SDK reports
+it through `onError`). For example:
+
+```ts
+audit.track({
+  action: 'settings.imported',
+  targets: [{ type: 'workspace', id: 'ws_7' }],
+  metadata: {
+    importer: 'nightly-feed', // attribute 1: metadata.importer:nightly-feed
+    settings: importedSettings, // 300 keys: attributes 2 to 256 are its first 255
+  },
+});
+```
+
+`metadata.importer:nightly-feed` finds the event, and so does `metadata.settings.locale:fr`
+when `locale` is among the first 255 settings keys. The last 45 keys are past the cap:
+searching for them finds nothing, while event detail and exports still show all 300. Put
+what people will search for in short fields of their own, or record one event per record
+changed with the record as a target, rather than deep in a long object or list.
 
 ### Numbers and ids
 

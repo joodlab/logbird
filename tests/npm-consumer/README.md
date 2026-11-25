@@ -24,7 +24,9 @@ node tests/npm-consumer/run.mjs --hono=latest        # the newest hono it admits
 node tests/npm-consumer/run.mjs --project=adapters   # the Vue, Nuxt and TanStack Start type check and reports
 ```
 
-CI (`.github/workflows/npm-packages.yml`) packs the five packages once, checks the tarballs with
-`scripts/check-npm-packages.mjs`, then runs the first project on Node 20 and 22 with the floor and the latest hono, and
-the adapters project once. If a floor stops passing, raise the floor in the package's `peerDependencies`; do not skip
+CI (`.github/workflows/npm-tarballs.yml`, called by `npm-packages.yml` on pull requests and by `release.yml` on a tag)
+packs the five packages once with `scripts/npm-release-assets.mjs`, which checks the tarballs with
+`scripts/check-npm-packages.mjs`, then runs the first project on Node 20 and 22 with the floor and the latest hono, the
+adapters project once, and the [release install check](../npm-release-install/README.md). A release attaches exactly
+those tarballs. If a floor stops passing, raise the floor in the package's `peerDependencies`; do not skip
 the test.

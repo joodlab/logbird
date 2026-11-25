@@ -96,6 +96,11 @@ then builds these four images on native `linux/amd64` (`ubuntu-latest`) and
 | Console | ghcr.io/joodlab/logbird-app | apps/app/Dockerfile:runtime |
 | Migrations | ghcr.io/joodlab/logbird-migrate | apps/server/Dockerfile:migrate |
 
+In parallel with the builds, the `npm` job packs and checks the TypeScript packages
+at the release version (see [npm tarballs](#npm-tarballs-on-the-github-release)).
+The image publish jobs wait for it as well as for the builds, so a failed npm check
+publishes no image tag and no release.
+
 Each platform build pushes by digest with OCI source/version/revision/MIT license
 labels, an SBOM and maximum-mode BuildKit provenance. After the builds pass, a job
 per role reads the two digest artifacts and uses `docker buildx imagetools create`
@@ -107,7 +112,7 @@ backwards. Never rebuild a completed published release under the same version.
 Preflight also rejects a tag that already has a GitHub Release, preserving a
 completed publication on full-workflow retries. Only after all four indexes publish
 does the workflow create the GitHub Release and attach `images.txt` with all four
-index digests. Notes contain the reviewed
+index digests, the five npm tarballs and their `SHA256SUMS`. Notes contain the reviewed
 Highlights, conventional-type groups in a collapsible changelog with PR/commit
 links, and a thank-you section. Human authors and co-authors are deduplicated by
 GitHub handle across email aliases; people absent before the baseline are marked
@@ -201,6 +206,53 @@ and the hosted instance builds the site from `docker-compose.site.yml` (see
 [Coolify](coolify.md#hosted-marketing-site-logbirdjoodlabcom-only)).
 It has read-only repository permissions, no registry login and never pushes.
 The owner explicitly authorized these PR builds and tag-driven publication.
+
+## npm tarballs on the GitHub Release
+
+The TypeScript packages are not published to npm: the npm scope and token are still
+an owner decision, and no workflow can publish them. Every release attaches them to its
+GitHub Release instead, so applications install an exact version from there (the recipe
+is in [Install the SDK](integrating-a-backend.md#install-the-sdk)):
+
+| Asset | Package |
+| --- | --- |
+| `logbird-sdk-X.Y.Z.tgz` | `@logbird/sdk` |
+| `logbird-hono-X.Y.Z.tgz` | `@logbird/hono` |
+| `logbird-vue-X.Y.Z.tgz` | `@logbird/vue` |
+| `logbird-nuxt-X.Y.Z.tgz` | `@logbird/nuxt` |
+| `logbird-tanstack-start-X.Y.Z.tgz` | `@logbird/tanstack-start` |
+| `SHA256SUMS` | SHA-256 of the five tarballs, in `sha256sum --check` format |
+
+One implementation produces them. `.github/workflows/npm-tarballs.yml` is a reusable
+workflow; `npm-packages.yml` calls it on pull requests and master pushes that touch the
+packages, and the release's `npm` job calls it with the release version. It:
+
+1. installs the workspace, builds and packs the five packages with
+   `scripts/npm-release-assets.mjs pack` (`pnpm pack`, which applies `publishConfig`
+   and replaces `workspace:` versions as a publish would), checks the tarballs with
+   `scripts/check-npm-packages.mjs` at the expected version, writes `SHA256SUMS` and
+   uploads the folder as the `npm-packages` artifact;
+2. installs those tarballs into outside applications: `tests/npm-consumer` (TypeScript 6
+   and 7, run, API reports; Node 20 and 22; the floor and the latest hono),
+   `tests/npm-consumer-adapters`, and `tests/npm-release-install`, which follows the
+   documented install recipe from a local stand-in for the Release URL under pnpm 10,
+   npm 10 and npm 12, reinstalls with a frozen lockfile, type-checks and runs under
+   TypeScript 6, and requires an altered tarball to be refused;
+3. verifies the artifact holds exactly the release's asset set with
+   `scripts/npm-release-assets.mjs verify` and shows the `gh release create` command
+   the release would run (the "Release assets (dry run)" job; its summary lists each
+   asset's size and SHA-256).
+
+The release job downloads that same artifact, runs the same verification and
+`sha256sum --check`, and passes the files to `gh release create` with `images.txt`.
+If any npm check fails, the image publish jobs and the release job do not run: nothing
+is tagged or attached and the run fails. A pull request's run of the npm workflow shows
+the asset set a release of that commit would attach.
+
+With assets, `gh release create` creates a draft, uploads every file and publishes the
+release only when all uploads succeed. If an upload fails, a draft release is left
+behind: delete that draft, then use "Re-run failed jobs" (the artifacts are kept for
+seven days).
 
 ## NuGet packages (.NET SDK)
 

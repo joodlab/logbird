@@ -53,6 +53,18 @@ jobs:
           path: release-notes.md
           retention-days: 7
 
+  # The npm tarballs this release attaches: packed, checked and installed by the same reusable workflow that pull requests
+  # run (npm-tarballs.yml), at the release version. Image tags and the GitHub Release wait for it, so a failed check
+  # publishes nothing.
+  npm:
+    name: npm tarballs
+    needs: preflight
+    permissions:
+      contents: read
+    uses: ./.github/workflows/npm-tarballs.yml
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+
   build:
     name: Build ${{ matrix.role }} (${{ matrix.arch }})
     needs: preflight
@@ -125,7 +137,7 @@ jobs:
 
   images:
     name: Publish ${{ matrix.role }}
-    needs: [preflight, build]
+    needs: [preflight, build, npm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -223,25 +235,54 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [preflight, images]
+    needs: [preflight, images, npm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # Only the asset check runs from the repository here, and it uses Node built-ins only (nothing is installed).
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/npm-release-assets.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
       - uses: actions/download-artifact@v8
         with:
           name: release-notes
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-packages
+          path: npm
       - uses: actions/download-artifact@v8
         with:
           pattern: image-*
           merge-multiple: true
       - name: Assemble image receipt
         run: cat image-*.txt > images.txt
+      # The npm job's artifact, checked again right before attaching: exactly one tarball per package at the release
+      # version, and SHA256SUMS matching them. The npm workflow's "Release assets (dry run)" job runs the same check on
+      # pull requests.
+      - name: Verify the npm tarballs
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          listing="$(node scripts/npm-release-assets.mjs verify npm "$VERSION")"
+          mapfile -t assets <<< "$listing"
+          (( ${#assets[@]} == 6 )) || { echo "::error::expected 6 npm assets, got ${#assets[@]}"; exit 1; }
+          (cd npm && sha256sum --check SHA256SUMS)
+          printf '%s\n' "${assets[@]}" > npm-assets.txt
+      # With assets, gh creates a draft, uploads every file, and publishes the release only once all uploads succeed.
       - name: Create release after all images publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" images.txt \
+          mapfile -t assets < npm-assets.txt
+          gh release create "$GITHUB_REF_NAME" images.txt "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Logbird $GITHUB_REF_NAME" --notes-file release-notes.md
 

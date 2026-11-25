@@ -9,6 +9,30 @@
     library lacks;
   - 4.12.3 and later pass.
 - Install `@logbird/sdk` too: your code imports the `Logbird` client from it.
+- ES modules only; the declarations are checked with TypeScript 6 and 7.
+
+## Install
+
+Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches
+`logbird-hono-X.Y.Z.tgz` and `logbird-sdk-X.Y.Z.tgz` with a `SHA256SUMS` file. Download both
+into `vendor/logbird/`, verify them with `sha256sum --check --ignore-missing SHA256SUMS`,
+depend on both files, and override `@logbird/sdk` to the same SDK tarball (this package
+depends on the SDK at exactly its own version, which no registry serves yet):
+
+```jsonc
+// package.json
+"dependencies": {
+  "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz",
+  "@logbird/hono": "file:vendor/logbird/logbird-hono-X.Y.Z.tgz"
+}
+// npm: "overrides": { "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz" } in package.json
+// pnpm: overrides: { '@logbird/sdk': file:vendor/logbird/logbird-sdk-X.Y.Z.tgz } in pnpm-workspace.yaml
+```
+
+The full recipe, with the download commands and the lockfile check, is in
+[Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk).
+
+## Usage
 
 ```ts
 import { Hono } from 'hono';

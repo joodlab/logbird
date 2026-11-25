@@ -1,17 +1,36 @@
 # @logbird/sdk
 
-Dependency-free capture for Node 22+ and modern browsers with Fetch and Web Crypto.
+Dependency-free capture for Node 20+ and modern browsers with Fetch and Web Crypto.
 The structural `EventInput` type is copied from contracts so publishing does not
 require a private workspace package. Keep envelope additions synchronized with contracts.
 
-`@logbird/sdk` is not published on npm yet; `pnpm add @logbird/sdk` returns 404.
-Use `packages/sdk` from source: inside this repository run
-`pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'`, or link a sibling
-checkout with `pnpm add @logbird/sdk@link:../logbird/packages/sdk`. Run `pnpm install`
-in that Logbird clone before linking from your backend. Source exports are
-TypeScript; use `tsx` or a bundler such as Vite or esbuild. Native Node type stripping
-does not support the SDK's constructor parameter property. See the
-[backend integration guide](../../docs/integrating-a-backend.md#configure-delivery).
+## Install
+
+`@logbird/sdk` is not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases)
+attaches it as `logbird-sdk-X.Y.Z.tgz` (built JavaScript and type declarations) with a
+`SHA256SUMS` file. Download both, verify, and install the file:
+
+```sh
+version=X.Y.Z
+base="https://github.com/joodlab/logbird/releases/download/v$version"
+mkdir -p vendor/logbird && cd vendor/logbird
+curl -fsSLO "$base/SHA256SUMS" && curl -fsSLO "$base/logbird-sdk-$version.tgz"
+sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+cd ../.. && pnpm add ./vendor/logbird/logbird-sdk-$version.tgz   # or: npm install ./vendor/logbird/…
+```
+
+Commit `vendor/logbird/` and the lockfile; the lockfile pins the tarball's SHA-512 integrity.
+Installing an integration (`@logbird/hono`, `@logbird/vue`, `@logbird/nuxt`,
+`@logbird/tanstack-start`) as well needs an override so it uses the same SDK tarball: see
+[Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
+for the full recipe for pnpm and npm.
+
+Requirements: Node 20 or later (`engines.node` `>=20`), or a runtime with Fetch and Web
+Crypto. ES modules only (no CommonJS build); TypeScript needs `moduleResolution` `nodenext`,
+`node16` or `bundler`, and the declarations are checked with TypeScript 6 and 7. A source
+checkout of this repository is for contributors ([CONTRIBUTING.md](https://github.com/joodlab/logbird/blob/master/CONTRIBUTING.md)).
+
+## Capture
 
 ```ts
 import { Logbird } from '@logbird/sdk';
@@ -61,6 +80,21 @@ audit.track({ action: 'guest.updated', actor,
 ```
 
 Do not log raw SDK error objects, events, headers or credentials. Use safe diagnostic messages as above.
+
+## What search can find
+
+Logbird stores each event exactly as sent (event detail and exports return all of it, up to
+the 256 KB event limit) and indexes it for search with caps. The known fields are columns
+cut to a length (`action` 200 characters, ids 256, names 512, `description` 4,096), with the
+first 64 `targets` and 256 `changes`. Every other field (`metadata.*`, other top-level
+fields, extra keys on the actor, executor, tenant, context or a target) becomes an attribute
+searched by its dotted path, such as `metadata.plan:pro`: flattened to six path segments
+(arrays and deeper objects as JSON text), at most 256 per event, each value's first 2 KB.
+A field past a cap is not searchable but stays in the stored event. So an event whose
+`metadata` holds `importer` and a 300-key `settings` object indexes `metadata.importer` and
+the first 255 settings keys; the other 45 are in event detail and exports only. The
+[backend guide](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#what-search-can-find)
+lists every cap.
 
 ## Outage backpressure
 
@@ -170,7 +204,7 @@ const beforeSend = event => event.action === 'health.checked' ? null : hide(even
 
 `signWebhook`, `verifyWebhook`, `generateWebhookSecret` and
 `WebhookVerificationError` are exported from `@logbird/sdk`. Signing and verification
-are async and use Web Crypto HMAC-SHA256, which Node 22+, browsers and edge runtimes
+are async and use Web Crypto HMAC-SHA256, which Node 20+, browsers and edge runtimes
 all provide, so there are no runtime dependencies. Verification computes one HMAC of
 the body per secret and compares it with each claimed signature (at most 10) in
 constant time.

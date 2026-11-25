@@ -24,7 +24,7 @@ const VUE = { name: '@logbird/vue', dir: 'packages/integrations/vue', reports: {
 const NUXT = { name: '@logbird/nuxt', dir: 'packages/integrations/nuxt', reports: { nuxt: 'index.d.ts' } };
 const TANSTACK = { name: '@logbird/tanstack-start', dir: 'packages/integrations/tanstack-start', reports: { 'tanstack-start': 'index.d.mts' } };
 /**
- * phase1: the packages published first (the publish list in release.yml is the same), type-checked, run, and reported.
+ * phase1: @logbird/sdk and @logbird/hono, the packages applications install first, type-checked, run, and reported.
  * adapters: the integrations not published yet, type-checked and reported only. They need the SDK (and Nuxt, Vue)
  * installed from their tarballs too; its report belongs to phase1.
  */
