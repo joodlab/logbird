@@ -506,12 +506,14 @@ function sharedArrays(field: string, by: string): SharedArrays | undefined {
   return { join: `ARRAY JOIN arrayZip(${a},${b}) AS facet_changes`, changeRef: (column) => `facet_changes.${column === a ? 1 : 2}` };
 }
 /**
- * How the second facet level selects its parents. Values travel as a query parameter as before; when one is long (a
- * change value can be 200 KB, too long for a URL parameter) they travel as MD5 digests instead, compared in SQL.
+ * How the second facet level selects its parents. Query parameters travel in the URL (ClickHouse refuses large
+ * multipart fields too), so the exact values go as before unless they would make the URL large: a change value can be
+ * 200 KB. Then they travel as MD5 digests, compared in SQL, and rows are matched back to parents by exact value.
  */
-const PARENT_VALUE_MAX = 1024;
+const PARENTS_URL_BUDGET = 256 * 1024;
 function parentFilter(texts: string[], expr: string, name: string) {
-  if (texts.every((t) => t.length <= PARENT_VALUE_MAX)) return { sql: `${expr} IN {${name}:Array(String)}`, params: { [name]: texts } };
+  const urlBytes = texts.reduce((n, t) => n + encodeURIComponent(t).length + 4, 0);
+  if (urlBytes <= PARENTS_URL_BUDGET) return { sql: `${expr} IN {${name}:Array(String)}`, params: { [name]: texts } };
   const digests = texts.map((t) => createHash('md5').update(t, 'utf8').digest('hex'));
   return { sql: `lower(hex(MD5(${expr}))) IN {${name}Digests:Array(String)}`, params: { [`${name}Digests`]: digests } };
 }

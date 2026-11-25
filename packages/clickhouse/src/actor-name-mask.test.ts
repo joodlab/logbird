@@ -276,19 +276,25 @@ describe('facets under the actor_email mask', () => {
     );
   });
 
-  it('selects long second-level parents by digest, at both facet paths', async () => {
-    const long = `x${'y'.repeat(2000)}`;
+  it('keeps exact second-level parents in the URL unless they are large, then selects them by digest', async () => {
     const md5 = (text: string) => createHash('md5').update(text, 'utf8').digest('hex');
-    const masked = client([[{ value: long, masked: 0, labf: 0, labt: long, count: 1, total: 1 }], []]);
-    await facets(masked.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 }, scope, undefined, key);
-    const [, maskedSecond] = calls(masked.query);
-    expect(maskedSecond?.query_params.facetKeysDigests).toEqual([md5(`0|${long}`)]);
-    expect(maskedSecond?.query_params).not.toHaveProperty('facetKeys');
-    const plain = client([[{ value: long, label: long, count: 1, total: 1 }], []]);
+    const medium = `x${'y'.repeat(2000)}`;
+    const large = `z${'w'.repeat(300 * 1024)}`;
+    // Masked path: a 2 KB parent stays an exact value; a 300 KB one travels as its digest.
+    const small = client([[{ value: medium, masked: 0, labf: 0, labt: medium, count: 1, total: 1 }], []]);
+    await facets(small.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 }, scope, undefined, key);
+    expect(calls(small.query)[1]?.query_params.facetKeys).toEqual([`0|${medium}`]);
+    const big = client([[{ value: large, masked: 0, labf: 0, labt: large, count: 1, total: 1 }], []]);
+    await facets(big.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 }, scope, undefined, key);
+    const [, bigSecond] = calls(big.query);
+    expect(bigSecond?.query_params.facetKeysDigests).toEqual([md5(`0|${large}`)]);
+    expect(bigSecond?.query).toContain("lower(hex(MD5(concat(toString(masked),'|',value)))) IN {facetKeysDigests:Array(String)}");
+    // Unmasked path.
+    const plain = client([[{ value: large, label: large, count: 1, total: 1 }], []]);
     await facets(plain.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 });
     const [, plainSecond] = calls(plain.query);
     expect(plainSecond?.query).toContain('lower(hex(MD5(value))) IN {facetValuesDigests:Array(String)}');
-    expect(plainSecond?.query_params.facetValuesDigests).toEqual([md5(long)]);
+    expect(plainSecond?.query_params.facetValuesDigests).toEqual([md5(large)]);
     // Two change levels share one zipped expansion of just the two columns they read.
     expect(plainSecond?.query).toContain('ARRAY JOIN arrayZip(changes_after,changes_fields) AS facet_changes');
   });

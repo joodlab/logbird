@@ -1,4 +1,4 @@
-import { QUERY_FIELDS, type SuggestResponse, type suggestQuerySchema } from '@logbird/contracts';
+import { CHANGES_FIELD_HINT, isUnknownChangesKey, QUERY_FIELDS, QueryError, type SuggestResponse, type suggestQuerySchema } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { read, where } from './queries';
@@ -7,10 +7,19 @@ import { read, where } from './queries';
 const SPARSE_COLUMNS = new Set(['impersonator_id']);
 
 export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<typeof suggestQuerySchema>): Promise<SuggestResponse> {
+  // A refused changes.* key has no values: suggesting a literal attribute's values would lead to a 422 on search.
+  if (isUnknownChangesKey(q.field))
+    throw new QueryError(`Unknown field ${q.field}. ${CHANGES_FIELD_HINT}`, {
+      lang: 'query',
+      reason: 'unknown_field',
+      start: null,
+      end: null,
+      hint: CHANGES_FIELD_HINT,
+    });
   const f = QUERY_FIELDS.find((f) => f.key === q.field || f.aliases?.includes(q.field));
   // A supplied filter is validated even when the field has no suggestions, so a refused query never looks complete.
   if (f?.suggest === 'none') {
-    if (q.q?.trim()) await where(ch, p, { ...q, to: q.to ?? new Date().toISOString() });
+    if (q.q) await where(ch, p, { ...q, to: q.to ?? new Date().toISOString() });
     return { field: q.field, values: [], complete: true };
   }
   const record = f?.type === 'record';

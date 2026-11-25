@@ -593,7 +593,8 @@ function querySuggestions(input: CompletionInput): Suggestion[] {
     });
   }
 
-  if (context.kind === 'value') return [...fix, ...queryValueItems(input, context)];
+  // A refused changes.* key gets no value snippets: every one of them would answer 422 (the hint names the fields).
+  if (context.kind === 'value') return isUnknownChangesKey(context.field) ? fix : [...fix, ...queryValueItems(input, context)];
   return fix;
 }
 

@@ -79,6 +79,7 @@ it('change values and the impersonator name are query fields; unknown changes.* 
     };
     const reader = await createKey({ name: 'Read', kind: 'read' });
     const masked = await createKey({ name: 'Masked t1', kind: 'scoped-read', scope: { tenantId: 't1', mask: ['actor_email'] } });
+    const masked3 = await createKey({ name: 'Masked t3', kind: 'scoped-read', scope: { tenantId: 't3', mask: ['actor_email'] } });
     const plain = await createKey({ name: 'Plain t1', kind: 'scoped-read', scope: { tenantId: 't1' } });
 
     // Webhook filters share the language: an endpoint per filter, masked and unmasked, scanning from before the ingest.
@@ -196,6 +197,15 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       },
       // An impersonator sent with a name and no id: found by impersonator.name, shown as no impersonator (documented).
       { id: 'n1', occurredAt: ts(10), action: 'article.viewed', tenant, actor, impersonator: { name: 'Nameless Support' } },
+      // Tenant t3: 100 distinct 900-character after-values, so a second facet level carries about 90 KB of parents.
+      ...Array.from({ length: 100 }, (_, n) => ({
+        id: `m${n}`,
+        occurredAt: ts(11),
+        action: 'article.updated',
+        tenant: { id: 't3' },
+        actor,
+        changes: [{ field: 'summary', before: '', after: `${String(n).padStart(3, '0')}${'s'.repeat(897)}` }],
+      })),
       {
         id: 'o1',
         occurredAt: ts(8),
@@ -329,6 +339,25 @@ it('change values and the impersonator name are query fields; unknown changes.* 
         expect(value?.groups?.map((g) => [g.value, g.count])).toEqual([[query.by === 'action' ? 'article.updated' : 'body', 1]]);
       }
     }
+    // Many medium-length parents (about 90 KB of them) at the second level, masked and unmasked.
+    for (const bearer of [reader.secret, masked3.secret]) {
+      const r = await get(
+        bearer,
+        `/facets?${new URLSearchParams({ field: 'changes.after', by: 'changes.field', from, limit: '100', q: 'tenant:t3' })}`,
+      );
+      expect(r.status, r.text.slice(0, 200)).toBe(200);
+      const values = facetResponseSchema.parse(r.body).values;
+      expect(values).toHaveLength(100);
+      for (const v of values) expect(v.groups?.map((g) => [g.value, g.count])).toEqual([['summary', 1]]);
+    }
+    // Suggestions refuse a changes key the server refuses; the explicit attribute spelling still works.
+    const suggest = (field: string) => console_(ownerCookie, `/api/projects/${projectId}/suggest?${new URLSearchParams({ field, from })}`);
+    const refusedSuggest = await suggest('changes.to');
+    expect(refusedSuggest.status).toBe(422);
+    expect((await refusedSuggest.json()).error).toMatchObject({ code: 'invalid_query', details: { reason: 'unknown_field' } });
+    const literalSuggest = await suggest('attr.changes.to');
+    expect(literalSuggest.status, await literalSuggest.clone().text()).toBe(200);
+    expect((await literalSuggest.json()).values.map((v: { value: string }) => v.value)).toContain('PUBLISHED');
     // The alias gets the same labels as the field, at both levels.
     for (const bearer of [plain.secret, masked.secret]) {
       const facet = async (query: Record<string, string>) =>
@@ -415,6 +444,8 @@ it('change values and the impersonator name are query fields; unknown changes.* 
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ IDs: mailIds }),
+        }).then((r) => {
+          if (!r.ok) throw new Error(`Mailpit cleanup answered ${r.status}`);
         }),
       );
     if (failures.length) {
