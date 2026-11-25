@@ -1,4 +1,5 @@
 import { acknowledge } from './acknowledgement';
+import { captureQueue } from './capture-queue';
 
 export {
   generateWebhookSecret,
@@ -16,6 +17,7 @@ export {
 const SDK_VERSION = '0.3.0';
 const MAX_SEND_MS = 5 * 60_000;
 const MAX_PENDING_NOTIFICATIONS = 1024;
+const MAX_OUTSTANDING_REQUESTS = 4;
 
 /**
  * A string id, or a JavaScript number from an integer key. A JS number cannot hold integers above 2^53 − 1: send
@@ -71,7 +73,16 @@ export type IngestRejectionCode =
   | 'stored_event_unreadable'
   | 'unverified_after_parse_failure';
 
-export type DropReason = 'queue_full' | 'rejected' | 'http_error' | 'too_large' | 'invalid' | 'before_send_failed' | 'filtered' | 'shutdown';
+export type DropReason =
+  | 'queue_full'
+  | 'rejected'
+  | 'http_error'
+  | 'too_large'
+  | 'invalid'
+  | 'before_send_failed'
+  | 'filtered'
+  | 'diagnostic_reentry'
+  | 'shutdown';
 
 export interface DropDetails {
   reason: DropReason;
@@ -111,12 +122,25 @@ interface QueuedEvent {
   sending: boolean;
 }
 
+interface PreparingEvent {
+  identity: EventInput;
+  done: Promise<void>;
+  finish: () => void;
+}
+
+function boundedIdentityText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return;
+  if (value.length <= 256) return value;
+  // Copy the prefix because a substring can keep the entire original string alive.
+  return String.fromCharCode(...Array.from({ length: 256 }, (_, index) => value.charCodeAt(index)));
+}
+
 function dropIdentity(event: EventInput): EventInput {
   // Local refusals may not have a usable snapshot. Do not copy invalid or oversized inputs into the notification backlog.
   try {
     const action: unknown = Object.getOwnPropertyDescriptor(event, 'action')?.value;
     const id: unknown = Object.getOwnPropertyDescriptor(event, 'id')?.value;
-    return { action: typeof action === 'string' ? action.slice(0, 256) : '', id: typeof id === 'string' ? id.slice(0, 256) : undefined };
+    return { action: boundedIdentityText(action) ?? '', id: boundedIdentityText(id) };
   } catch {
     return { action: '' };
   }
@@ -124,6 +148,8 @@ function dropIdentity(event: EventInput): EventInput {
 
 export class Logbird {
   private readonly queue: QueuedEvent[] = [];
+  private readonly preparing = new Set<PreparingEvent>();
+  private readonly options: LogbirdOptions;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private operationTimer: ReturnType<typeof setTimeout> | undefined;
   private pending: Promise<void> | undefined;
@@ -139,7 +165,11 @@ export class Logbird {
   private readonly capacity: number;
   private droppedCount = 0;
   private readonly dropCounts: Partial<Record<DropReason, number>> = {};
+  private readonly uncertainDropCounts: Partial<Record<DropReason, number>> = {};
   private notifications = 0;
+  private notificationBurst = 0;
+  private notifying = false;
+  private outstandingRequests = 0;
   private skipped = 0;
   private failed = 0;
   get dropped(): number {
@@ -147,6 +177,9 @@ export class Logbird {
   }
   get droppedByReason(): Readonly<Partial<Record<DropReason, number>>> {
     return { ...this.dropCounts };
+  }
+  get possiblyStoredDropsByReason(): Readonly<Partial<Record<DropReason, number>>> {
+    return { ...this.uncertainDropCounts };
   }
   get skippedNotifications(): number {
     return this.skipped;
@@ -159,13 +192,27 @@ export class Logbird {
   }
   private notify<T extends unknown[]>(callback: ((...args: T) => void) | undefined, ...args: T) {
     if (!callback) return;
-    if (this.notifications >= MAX_PENDING_NOTIFICATIONS) {
+    if (this.notifying || this.notifications >= MAX_PENDING_NOTIFICATIONS || this.notificationBurst >= MAX_PENDING_NOTIFICATIONS) {
       this.skipped++;
       return;
     }
+    if (this.notificationBurst === 0) {
+      // A callback that captures again after an await must still yield the event loop to the shutdown timer.
+      setTimeout(() => {
+        this.notificationBurst = 0;
+      }, 0).unref?.();
+    }
+    this.notificationBurst++;
     this.notifications++;
     void Promise.resolve()
-      .then(() => callback(...args))
+      .then(() => {
+        this.notifying = true;
+        try {
+          return callback(...args);
+        } finally {
+          this.notifying = false;
+        }
+      })
       .then(
         () => {
           this.notifications--;
@@ -179,12 +226,13 @@ export class Logbird {
   private drop(event: EventInput, details: DropDetails) {
     this.droppedCount++;
     this.dropCounts[details.reason] = (this.dropCounts[details.reason] ?? 0) + 1;
+    if (details.mayBeStored) this.uncertainDropCounts[details.reason] = (this.uncertainDropCounts[details.reason] ?? 0) + 1;
     this.notify(this.options.onDrop, event, details);
   }
   private dropQueued(entry: QueuedEvent, reason: DropReason, extra?: Pick<DropDetails, 'code' | 'status'>) {
     this.drop(entry.event, { reason, mayBeStored: entry.sending || entry.uncertain, ...extra });
   }
-  constructor(private readonly options: LogbirdOptions) {
+  constructor(options: LogbirdOptions) {
     if (options.enabled !== false && (!options.apiKey || !options.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
     this.endpoint = (options.endpoint ?? '').replace(/\/$/, '');
     this.capacity = options.maxQueueSize ?? 10_000;
@@ -208,6 +256,8 @@ export class Logbird {
       this.retries < 0
     )
       throw new Error('Invalid batching options');
+    this.options = { ...options };
+    captureQueue.set(this, (identity, prepare, onFailure) => this.deferCapture(identity, prepare, onFailure));
   }
   private report(error: unknown) {
     this.notify(this.options.onError, error instanceof Error ? error : new Error('Logbird delivery failed'));
@@ -217,8 +267,15 @@ export class Logbird {
     if (message) this.report(new Error(message));
   }
   track(event: EventInput, options?: TrackOptions): void {
+    this.trackPrepared(event, options, false);
+  }
+  private trackPrepared(event: EventInput, options: TrackOptions | undefined, duringShutdown: boolean): void {
     if (this.options.enabled === false) return;
-    if (this.closed) {
+    if (this.notifying) {
+      this.refuse(event, 'diagnostic_reentry');
+      return;
+    }
+    if (this.closed && !duringShutdown) {
       this.refuse(event, 'shutdown', 'Logbird is shut down');
       return;
     }
@@ -264,7 +321,7 @@ export class Logbird {
         return;
       }
       if (typeof copy.id !== 'string' || !copy.id.trim() || (options?.preserveId && copy.id !== id)) {
-        copy.id = id;
+        copy.id = options?.preserveId ? id : uuidv7();
         serialized = JSON.stringify(copy);
         bytes = new TextEncoder().encode(serialized).length;
         if (bytes > 256 * 1024) {
@@ -278,21 +335,54 @@ export class Logbird {
       return;
     }
     // beforeSend is host code and can shut down the client before preparation returns.
-    if (this.closed) {
+    if (this.closed && (!duringShutdown || this.stop.signal.aborted)) {
       this.dropQueued(entry, 'shutdown');
       return;
     }
-    if (this.queue.length >= this.capacity) {
-      if (this.options.dropPolicy === 'newest') {
-        this.dropQueued(entry, 'queue_full');
-        return;
-      }
-      const evicted = this.queue.shift();
-      if (evicted) this.dropQueued(evicted, 'queue_full');
+    if (!this.makeRoom()) {
+      this.dropQueued(entry, 'queue_full');
+      return;
     }
     this.queue.push(entry);
     if (this.queue.length >= this.batchSize) this.backgroundFlush();
     else this.schedule();
+  }
+  private makeRoom(): boolean {
+    if (this.queue.length + this.preparing.size < this.capacity) return true;
+    const evicted = this.options.dropPolicy === 'newest' ? undefined : this.queue.shift();
+    if (!evicted) return false;
+    this.dropQueued(evicted, 'queue_full');
+    return true;
+  }
+  private deferCapture(identity: EventInput, prepare: () => Promise<EventInput>, onFailure: () => void): Promise<void> | undefined {
+    if (this.notifying || this.closed || !this.makeRoom()) {
+      if (this.options.enabled !== false) this.refuse(identity, this.notifying ? 'diagnostic_reentry' : this.closed ? 'shutdown' : 'queue_full');
+      return;
+    }
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const capture = { identity: dropIdentity(identity), done, finish };
+    this.preparing.add(capture);
+    const fail = () => {
+      if (this.options.enabled !== false) this.refuse(capture.identity, 'invalid');
+      onFailure();
+    };
+    const settle = (event?: EventInput) => {
+      if (!this.preparing.delete(capture)) return;
+      try {
+        if (!event) fail();
+        else if (this.closed && this.options.enabled !== false) this.trackPrepared(event, { preserveId: true }, true);
+        else this.track(event, { preserveId: true });
+      } finally {
+        finish();
+      }
+    };
+    void prepare()
+      .then(settle, () => settle())
+      .catch(fail);
+    return done;
   }
   private backgroundFlush() {
     if (this.pending) return;
@@ -328,30 +418,39 @@ export class Logbird {
     }
   }
   private async request(batch: QueuedEvent[], remainingMs: number) {
+    if (this.outstandingRequests >= MAX_OUTSTANDING_REQUESTS) throw new Error('Logbird transport has too many outstanding requests');
     const body = `{"events":[${batch.map((entry) => entry.serialized).join(',')}]}`;
     let status = 0;
     let retryAfter: string | null = null;
     const answer = () => ({ status, retryAfter, result: undefined as unknown });
     try {
       return await this.timed(Math.max(1, Math.floor(Math.min(30_000, remainingMs))), answer, async (signal) => {
-        for (const entry of batch) entry.sending = true;
-        const response = await fetch(`${this.endpoint}/v1/events`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.options.apiKey}`,
-            'Content-Type': 'application/json',
-            'X-Logbird-SDK': `typescript/${SDK_VERSION}`,
-            // Must equal @logbird/contracts LOGBIRD_RETRY_HEADER / LOGBIRD_RETRY_SUBSET (the SDK has no dependencies).
-            'Logbird-Retry': 'subset',
-          },
-          body,
-          signal,
-        });
-        if (signal.aborted) return answer();
-        status = response.status;
-        retryAfter = response.headers.get('Retry-After');
-        const result: unknown = response.ok || status === 503 ? await response.json().catch(() => undefined) : undefined;
-        return { status, retryAfter, result };
+        this.outstandingRequests++;
+        try {
+          for (const entry of batch) entry.sending = true;
+          const response = await fetch(`${this.endpoint}/v1/events`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${this.options.apiKey}`,
+              'Content-Type': 'application/json',
+              'X-Logbird-SDK': `typescript/${SDK_VERSION}`,
+              // Must equal @logbird/contracts LOGBIRD_RETRY_HEADER / LOGBIRD_RETRY_SUBSET (the SDK has no dependencies).
+              'Logbird-Retry': 'subset',
+            },
+            body,
+            signal,
+          });
+          if (signal.aborted) {
+            if (response.body) void response.body.cancel().catch(() => undefined);
+            return answer();
+          }
+          status = response.status;
+          retryAfter = response.headers.get('Retry-After');
+          const result: unknown = response.ok || status === 503 ? await response.json().catch(() => undefined) : undefined;
+          return { status, retryAfter, result };
+        } finally {
+          this.outstandingRequests--;
+        }
       });
     } catch {
       this.stop.signal.throwIfAborted();
@@ -366,29 +465,44 @@ export class Logbird {
   private async send(batch: QueuedEvent[]) {
     const deadline = monotonicNow() + MAX_SEND_MS;
     const maxAttempts = batch.length + this.retries;
+    let wire = batch.slice();
+    const unsettled = new Set(batch);
     let retries = 0;
     for (let attempt = 1; ; attempt++) {
       this.stop.signal.throwIfAborted();
       const remainingMs = deadline - monotonicNow();
       if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
-      const { status, retryAfter, result } = await this.request(batch, remainingMs);
+      const { status, retryAfter, result } = await this.request(wire, remainingMs);
       const success = status >= 200 && status < 300;
       let progressed = false;
       if (!this.stop.signal.aborted && (success || status === 503)) {
         const ack = acknowledge(
           result,
-          batch.map((entry) => entry.event),
+          wire.map((entry) => entry.event),
           status === 503,
         );
         if (ack) {
-          const remaining = batch.filter((entry, index) => {
-            if (ack.rejected.has(index)) this.dropQueued(entry, 'rejected', { code: ack.rejected.get(index) });
-            return !ack.delivered.has(index) && !ack.rejected.has(index);
-          });
-          if (ack.rejected.size) this.report(new Error(`${ack.rejected.size} events rejected by Logbird`));
-          progressed = remaining.length < batch.length;
+          let rejectedCount = 0;
+          for (const [index, code] of ack.rejected) {
+            const entry = wire[index];
+            if (!entry || !unsettled.delete(entry)) continue;
+            const ambiguous = code === 'stored_event_unreadable' || code === 'unverified_after_parse_failure';
+            this.drop(entry.event, { reason: 'rejected', code, mayBeStored: ambiguous && entry.uncertain });
+            rejectedCount++;
+          }
+          if (rejectedCount) this.report(new Error(`${rejectedCount} events rejected by Logbird`));
+          if (ack.delivered)
+            for (const index of ack.delivered) {
+              const entry = wire[index];
+              if (entry) unsettled.delete(entry);
+            }
+          const remaining = batch.filter((entry) => unsettled.has(entry));
           batch.splice(0, batch.length, ...remaining);
           if (!batch.length) return;
+          if (ack.delivered && batch.length < wire.length) {
+            wire = batch.slice();
+            progressed = true;
+          }
         }
       }
       if (status < 400 || status >= 500) for (const entry of batch) entry.uncertain = true;
@@ -444,7 +558,7 @@ export class Logbird {
           await this.send(batch);
         } catch (error) {
           this.queue.unshift(...batch);
-          while (this.queue.length > this.capacity && !this.closed) {
+          while (this.queue.length + this.preparing.size > this.capacity && !this.closed) {
             const evicted = this.options.dropPolicy === 'newest' ? this.queue.pop() : this.queue.shift();
             if (evicted) this.dropQueued(evicted, 'queue_full');
           }
@@ -472,12 +586,37 @@ export class Logbird {
     if (this.shutdownTimeout === 0) abort();
     const timer = this.shutdownTimeout > 0 ? setTimeout(abort, this.shutdownTimeout) : undefined;
     try {
+      if (this.preparing.size) {
+        await Promise.all([this.waitForCaptures(), this.drain(true)]);
+      }
       await this.drain(true);
     } catch (error) {
+      this.stop.abort(error);
+      for (const capture of this.preparing) {
+        if (this.options.enabled !== false) this.refuse(capture.identity, 'shutdown');
+        capture.finish();
+      }
+      this.preparing.clear();
+      await this.pending?.catch(() => undefined);
       for (const entry of this.queue.splice(0)) this.dropQueued(entry, 'shutdown');
       throw error;
     } finally {
       clearTimeout(timer);
+    }
+  }
+  private async waitForCaptures() {
+    const signal = this.stop.signal;
+    signal.throwIfAborted();
+    let interrupt!: () => void;
+    const interrupted = new Promise<never>((_, reject) => {
+      interrupt = () => reject(signal.reason);
+    });
+    signal.addEventListener('abort', interrupt, { once: true });
+    try {
+      const prepared = Promise.all(Array.from(this.preparing, (entry) => entry.done));
+      await Promise.race([prepared, interrupted]);
+    } finally {
+      signal.removeEventListener('abort', interrupt);
     }
   }
 }

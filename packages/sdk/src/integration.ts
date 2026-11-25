@@ -1,3 +1,4 @@
+import { captureQueue } from './capture-queue';
 import { type EventInput, type Logbird, uuidv7 } from './index';
 export interface AuditCarrier {
   operationId: string;
@@ -47,19 +48,6 @@ export interface CaptureOptions<C> {
   useRequestIdHeader?: boolean;
   onError?: (error: Error) => void;
 }
-const pending = new WeakMap<object, Set<Promise<unknown>>>();
-function tasks(owner: object) {
-  let set = pending.get(owner);
-  if (!set) {
-    set = new Set();
-    pending.set(owner, set);
-  }
-  return set;
-}
-async function drain(owner: object): Promise<void> {
-  const set = tasks(owner);
-  while (set.size) await Promise.allSettled([...set]);
-}
 export function report(onError: CaptureOptions<unknown>['onError'], error: unknown): void {
   if (onError)
     void Promise.resolve()
@@ -99,10 +87,9 @@ export async function createAudit<C>(options: CaptureOptions<C>, context: C, req
 function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput): Audit {
   const local = new Set<Promise<unknown>>();
   function register<T>(promise: Promise<T>): Promise<T> {
-    const sets = [local, tasks(options), tasks(options.client)];
-    for (const set of sets) set.add(promise);
+    local.add(promise);
     const remove = () => {
-      for (const set of sets) set.delete(promise);
+      local.delete(promise);
     };
     void promise.then(remove, remove);
     return promise;
@@ -133,19 +120,15 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
     return merged;
   }
   const audit = ((action: string, event: Partial<EventInput> = {}) => {
-    const id = typeof event.id === 'string' && event.id.trim() ? event.id : uuidv7();
-    const occurredAt = event.occurredAt ?? new Date().toISOString();
-    register(
-      resolve({ ...event, action, id, occurredAt })
-        .then((resolved) => {
-          try {
-            options.client.track(resolved, { preserveId: true });
-          } catch (error) {
-            report(options.onError, error);
-          }
-        })
-        .catch((error) => report(options.onError, error)),
+    const supplied = Object.getOwnPropertyDescriptor(event, 'id')?.value as unknown;
+    const id = typeof supplied === 'string' && supplied.trim() ? supplied : uuidv7();
+    const timestamp = new Date().toISOString();
+    const task = captureQueue.get(options.client)?.(
+      { action, id },
+      async () => resolve({ ...event, action, id, occurredAt: event.occurredAt ?? timestamp }),
+      () => report(options.onError, new Error('Logbird capture failed')),
     );
+    if (task) register(task);
     return id;
   }) as Audit;
   audit.pending = async () => {
@@ -213,8 +196,6 @@ export function jobAudit(options: JobAuditOptions): Audit {
   });
 }
 export async function shutdown(options: Pick<CaptureOptions<unknown>, 'client' | 'onError'>): Promise<void> {
-  await drain(options);
-  await drain(options.client);
   await options.client.shutdown().catch((error) => {
     report(options.onError, error);
     throw error;

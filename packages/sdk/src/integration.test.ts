@@ -123,7 +123,7 @@ it('allows an explicit carrier impersonator override or omission', async () => {
   expect(await audit.carrier({ impersonator: { id: 'other-support' } })).toMatchObject({ impersonator: { id: 'other-support' } });
   expect(await audit.carrier({ impersonator: undefined })).not.toHaveProperty('impersonator');
 });
-it('shutdown waits for pending resolutions before closing the client', async () => {
+it('shutdown starts immediately and waits for pending resolutions within its budget', async () => {
   const { client, track } = fixture();
   let finish!: (actor: { id: string }) => void;
   const options = {
@@ -138,7 +138,7 @@ it('shutdown waits for pending resolutions before closing the client', async () 
   audit('pending');
   const closing = shutdown(options);
   await Promise.resolve();
-  expect(close).not.toHaveBeenCalled();
+  expect(close).toHaveBeenCalledOnce();
   finish({ id: 'late' });
   await closing;
   expect(track).toHaveBeenCalledOnce();

@@ -31,7 +31,8 @@ event, assigns UUIDv7 and a timestamp when absent, and batches by rows, bytes an
 time. `flush(): Promise<void>` settles all events queued when called or rejects with
 unresolved events retained for retry. `shutdown(): Promise<void>` closes capture
 and drains under one `shutdownTimeoutMs` budget (default 10,000 ms, 0 to stop
-immediately). The budget includes an active batch, retries and the queued tail.
+immediately). The budget includes pending integration context resolution, an active
+batch, retries and the queued tail.
 If delivery fails or takes too long, shutdown reports each remaining event as a
 `shutdown` drop and rejects. Always await shutdown in the host's lifecycle.
 
@@ -73,7 +74,7 @@ Do not log raw SDK error objects, events, headers or credentials. Use safe diagn
 
 ## Outage backpressure
 
-The SDK retains at most `maxQueueSize` queued events (default 10,000), plus one in-flight
+The SDK retains at most `maxQueueSize` queued or preparing events (default 10,000), plus one in-flight
 batch (at most `batchSize`, default 100). Each event is capped at 256 KiB; this is an event
 count limit, not a byte budget. Size the queue for your payloads and memory budget.
 `dropPolicy: 'oldest'` (default) keeps recent events; `'newest'` preserves queued history.
@@ -84,12 +85,17 @@ the full serialized event snapshot. Local refusals before enqueue carry only
 bounded id and action fields. Keep these snapshots out of operational logs.
 If `mayBeStored` is true and you replay from an outbox, reuse the original id and
 content, including the original timestamp.
+`client.possiblyStoredDropsByReason` counts uncertain drops even when a notification
+could not be delivered. Pending resolver captures reserve queue capacity. A
+reservation that is already preparing cannot be displaced by a newer capture.
 
 `client.queueSize` reports queued events. Failed batches re-enter the same bounded
 queue with the same drop policy. Diagnostic callbacks run after queue mutations.
 The SDK observes rejected callback promises and counts failures in
 `client.failedNotifications`. It skips new notifications when 1024 are outstanding
-and counts those in `client.skippedNotifications`. Flush and shutdown allow scheduled
+or 1024 have already been posted in the same event loop turn and counts those
+in `client.skippedNotifications`. Capture attempted synchronously inside a client
+diagnostic callback is counted as `diagnostic_reentry`. Flush and shutdown allow scheduled
 callbacks to start before settling. Callers own any asynchronous work in their callbacks.
 
 ```ts
@@ -328,8 +334,10 @@ The SDK validates the acknowledgement envelope, credits each accepted id once
 per occurrence and settles each rejected position once. It retries only the
 remaining events with their cached JSON (including id and occurredAt)
 in every subset body. Response indices are mapped back to the original events,
-so rejections call `onDrop` once per event. Invalid acknowledgement details keep
-the previous body unchanged. After its retry budget, only unsettled events stay
+so rejections call `onDrop` once per event. Incomplete acknowledgements keep
+the previous retry body, and valid rejections are still reported. The SDK refuses
+to dispatch when four transport operations are still outstanding after cancellation.
+After its retry budget, only unsettled events stay
 queued and `flush()` rejects. The SDK always sends `Logbird-Retry: subset`. About
 five leading bad rows fit per attempt under the server's byte budget; subset retries
 converge. An attempt settling events and shrinking the body does not consume

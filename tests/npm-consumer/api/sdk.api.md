@@ -19,7 +19,7 @@ export interface DropDetails {
 }
 
 // @public (undocumented)
-export type DropReason = 'queue_full' | 'rejected' | 'http_error' | 'too_large' | 'invalid' | 'before_send_failed' | 'filtered' | 'shutdown';
+export type DropReason = 'queue_full' | 'rejected' | 'http_error' | 'too_large' | 'invalid' | 'before_send_failed' | 'filtered' | 'diagnostic_reentry' | 'shutdown';
 
 // @public
 export type EntityId = string | number;
@@ -122,6 +122,8 @@ export class Logbird {
     get failedNotifications(): number;
     // (undocumented)
     flush(): Promise<void>;
+    // (undocumented)
+    get possiblyStoredDropsByReason(): Readonly<Partial<Record<DropReason, number>>>;
     // (undocumented)
     get queueSize(): number;
     // (undocumented)

@@ -36,7 +36,7 @@ it('retains an event when HTTP 200 lacks an acknowledgement envelope', async () 
   expect(sdk.dropped).toBe(0);
 });
 
-it('credits one occurrence of an accepted id in a 503 even when two entries share it', async () => {
+it('retains both different occurrences after an incomplete 503 credit for a shared id', async () => {
   vi.useFakeTimers();
   const fetcher = vi
     .fn()
@@ -48,14 +48,91 @@ it('credits one occurrence of an accepted id in a 503 even when two entries shar
     )
     .mockImplementation(async () => new Response(null, { status: 503 }));
   vi.stubGlobal('fetch', fetcher);
-  const sdk = client();
+  const sdk = client({ maxRetries: 1 });
   sdk.track(event('same'));
-  sdk.track(event('same'));
+  sdk.track({ ...event('same'), description: 'different' });
   const failed = expect(sdk.flush()).rejects.toThrow();
   await vi.advanceTimersByTimeAsync(0);
   await failed;
-  expect(JSON.parse(fetcher.mock.calls[1]?.[1].body).events).toHaveLength(1);
-  expect(sdk.queueSize).toBe(1);
+  expect(fetcher.mock.calls[0]?.[1].body).toBe(fetcher.mock.calls[1]?.[1].body);
+  expect(sdk.queueSize).toBe(2);
+});
+
+it('uses explicit pending indices to resolve which of two shared-ID occurrences to retry', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          error: {
+            code: 'ingest_pending',
+            details: { accepted: 1, ids: ['same'], rejected: [], indices: [0], eventIds: ['same'], warnings: [] },
+          },
+        },
+        { status: 503, headers: { 'Retry-After': '0' } },
+      ),
+    )
+    .mockResolvedValueOnce(accepted('same'));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client();
+  sdk.track({ ...event('same'), description: 'pending' });
+  sdk.track({ ...event('same'), description: 'accepted' });
+  const flushing = sdk.flush();
+  await vi.advanceTimersByTimeAsync(0);
+  await flushing;
+  expect(JSON.parse(fetcher.mock.calls[1]?.[1].body).events.map((item: EventInput) => item.description)).toEqual(['pending']);
+});
+
+it('clears lost-answer uncertainty when the server definitively rejects the content', async () => {
+  const onDrop = vi.fn();
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('lost'))
+    .mockResolvedValueOnce(
+      Response.json({
+        accepted: 0,
+        ids: [],
+        rejected: [{ index: 0, code: 'duplicate_id_conflict', reason: 'fixture' }],
+      }),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client({ onDrop });
+  sdk.track(event('conflict'));
+  await expect(sdk.flush()).rejects.toThrow();
+  await sdk.flush();
+  expect(onDrop).toHaveBeenCalledWith(expect.anything(), {
+    reason: 'rejected',
+    code: 'duplicate_id_conflict',
+    mayBeStored: false,
+  });
+});
+
+it('mints fresh direct-track ids when a hook removes a supplied id', async () => {
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
+    const ids = (JSON.parse(String(init.body)).events as EventInput[]).flatMap((item) => item.id ?? []);
+    return accepted(...ids);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client({ beforeSend: ({ action }) => ({ action }) });
+  sdk.track(event('upstream'));
+  sdk.track(event('upstream'));
+  await sdk.shutdown();
+  const ids = (JSON.parse(String(fetcher.mock.calls[0]?.[1].body)).events as EventInput[]).map((item) => item.id);
+  expect(new Set(ids).size).toBe(2);
+  expect(ids).not.toContain('upstream');
+});
+
+it('shuts down queued events even when the original options object is changed', async () => {
+  const fetcher = vi.fn(async () => accepted('queued'));
+  vi.stubGlobal('fetch', fetcher);
+  const options = { apiKey: 'fictional', endpoint: 'http://example.invalid', enabled: true };
+  const sdk = new Logbird(options);
+  sdk.track(event('queued'));
+  options.enabled = false;
+  await sdk.shutdown();
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(sdk.queueSize).toBe(0);
 });
 
 it('counts closed, hook, serialization and size refusals and filters individually', async () => {
@@ -114,8 +191,9 @@ it('runs drop hooks after queue mutation and observes rejected hook promises', a
   for (let step = 0; step < 5; step++) await Promise.resolve();
   expect(sdk.queueSize).toBe(1);
   expect(sdk.dropped).toBe(2);
-  expect(onDrop).toHaveBeenCalledTimes(2);
-  expect(sdk.failedNotifications).toBe(2);
+  expect(onDrop).toHaveBeenCalledTimes(1);
+  expect(sdk.failedNotifications).toBe(1);
+  expect(sdk.droppedByReason.diagnostic_reentry).toBe(1);
 });
 
 it('counts every refusal when the diagnostic backlog fills', async () => {
@@ -126,6 +204,45 @@ it('counts every refusal when the diagnostic backlog fills', async () => {
   expect(sdk.droppedByReason.filtered).toBe(1025);
   expect(sdk.skippedNotifications).toBe(1);
   expect(onDrop).toHaveBeenCalledTimes(1024);
+});
+
+it('counts storage uncertainty even when shutdown notifications are skipped', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise<Response>(() => undefined)),
+  );
+  const sdk = client({
+    batchSize: 2,
+    shutdownTimeoutMs: 25,
+    beforeSend: (item) => (item.action === 'filter' ? null : item),
+    onDrop: () => new Promise<void>(() => undefined),
+  });
+  for (let index = 0; index < 1024; index++) sdk.track({ action: 'filter' });
+  sdk.track(event('sending-a'));
+  sdk.track(event('sending-b'));
+  sdk.track(event('waiting'));
+  const failure = expect(sdk.shutdown()).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(25);
+  await failure;
+  expect(sdk.droppedByReason.shutdown).toBe(3);
+  expect(sdk.possiblyStoredDropsByReason.shutdown).toBe(2);
+  expect(sdk.skippedNotifications).toBe(3);
+});
+
+it('caps abandoned requests when a transport ignores cancellation', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn(() => new Promise<Response>(() => undefined));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client();
+  sdk.track(event('retained'));
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const failure = expect(sdk.flush()).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await failure;
+  }
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(sdk.queueSize).toBe(1);
 });
 
 it('refuses a beforeSend promise and observes its rejection', async () => {

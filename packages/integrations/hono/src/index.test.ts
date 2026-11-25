@@ -15,6 +15,56 @@ it('propagates delivery failure from adapter shutdown', async () => {
   }
 });
 
+it('bounds resolver waits within the client shutdown budget and counts reserved captures', async () => {
+  vi.useFakeTimers();
+  try {
+    const onDrop = vi.fn();
+    const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', maxQueueSize: 1, shutdownTimeoutMs: 25, onDrop });
+    const actor = vi.fn(() => new Promise<undefined>(() => undefined));
+    const capture = logbird({ client, actor });
+    const app = new Hono<{ Variables: AuditVariables }>();
+    app.use(capture);
+    app.get('/', (c) => {
+      c.var.audit('waiting');
+      c.var.audit('overflow');
+      return c.text('ok');
+    });
+    await app.request('/');
+    const closing = expect(capture.shutdown()).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(25);
+    await closing;
+    expect(actor).toHaveBeenCalledOnce();
+    expect(onDrop.mock.calls.map(([event, details]) => [event.action, details.reason, details.mayBeStored])).toEqual([
+      ['overflow', 'queue_full', false],
+      ['waiting', 'shutdown', false],
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+}, 500);
+
+it('counts a capture preparation failure by the returned id', async () => {
+  const onDrop = vi.fn();
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', onDrop });
+  const capture = logbird({ client });
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(capture);
+  app.get('/', (c) =>
+    c.text(
+      c.var.audit('failed', {
+        context: {
+          get operationId(): string {
+            throw new Error('fixture');
+          },
+        },
+      }),
+    ),
+  );
+  const id = await (await app.request('/')).text();
+  await capture.shutdown();
+  expect(onDrop).toHaveBeenCalledWith({ action: 'failed', id }, { reason: 'invalid', mayBeStored: false });
+});
+
 it('sends the id returned by audit for a blank input even if beforeSend changes it', async () => {
   const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', beforeSend: (event) => ({ ...event, id: 'hook' }) });
   const capture = logbird({ client });

@@ -57,7 +57,7 @@ it.each([null, {}, 'invalid', [null, false, 'invalid', {}, { index: 0.5 }, { ind
     await sdk.shutdown();
   },
 );
-it('keeps all entries when the acknowledgement contains malformed rejections', async () => {
+it('reports valid rejections once even with incomplete details and keeps the prior retry body', async () => {
   vi.useFakeTimers();
   const fetcher = vi
     .fn()
@@ -76,10 +76,10 @@ it('keeps all entries when the acknowledgement contains malformed rejections', a
   const failed = expect(sdk.flush()).rejects.toThrow('Logbird HTTP 503');
   await vi.advanceTimersByTimeAsync(0);
   await failed;
-  expect(onDrop).not.toHaveBeenCalled();
+  expect(onDrop.mock.calls.map(([event]) => event.id)).toEqual(['bad']);
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(fetcher.mock.calls[0]?.[1].body).toBe(fetcher.mock.calls[1]?.[1].body);
-  expect(sdk.queueSize).toBe(2);
+  expect(sdk.queueSize).toBe(1);
   fetcher.mockImplementation(acceptedResponse);
   await sdk.shutdown();
 });

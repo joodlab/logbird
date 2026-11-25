@@ -126,7 +126,10 @@ try {
   expect(drops.length === 1 && drops[0]?.event.action === 'stand-in.reject', `the refused event, and only it, dropped (drops ${drops.length})`);
   const drop = drops[0]?.details;
   expect(drop?.reason === 'rejected' && drop.code === 'invalid_event' && !drop.mayBeStored, 'the drop has a safe rejection code');
-  expect(client.droppedByReason.rejected === 1 && client.skippedNotifications === 0, 'the drop was counted by reason');
+  expect(
+    client.droppedByReason.rejected === 1 && client.possiblyStoredDropsByReason.rejected === undefined && client.skippedNotifications === 0,
+    'the drop was counted with its storage certainty',
+  );
   expect(errors.length === 1 && /rejected/.test(errors[0]?.message ?? ''), 'the rejection reported to onError');
   expect(received.at(-1)?.action === 'invoice.kept' && !received.some((event) => event.action === 'stand-in.reject'), 'the other event delivered');
   drops.length = 0;
