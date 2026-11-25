@@ -120,7 +120,7 @@ const readerClient = (scope: s.ReadScope | null) => (scope && queryClickhouse ? 
 const query = <T extends z.ZodType>(schema: T) =>
   validator('query', schema, (r, c) => {
     const text = c.req.query('q') ?? '';
-    if (Buffer.byteLength(text) > 4096)
+    if (Buffer.byteLength(text) > s.REQUEST_LIMITS.queryBytes)
       throw new ch.QueryError('Query exceeds 4096 bytes', {
         lang: c.req.query('lang') === 'sql' ? 'sql' : 'query',
         reason: 'too_complex',
@@ -283,7 +283,7 @@ export const publicRoutes = new Hono<AppEnv>()
     publicRateLimits.mint(),
     // A valid scope is a few KB at most: refuse larger bodies before buffering them for JSON parsing.
     bodyLimit({
-      maxSize: 16 * 1024,
+      maxSize: s.REQUEST_LIMITS.viewerTokenBodyBytes,
       onError: (c) => c.json({ error: { code: 'payload_too_large', message: 'Request exceeds 16 KB.' } }, 413),
     }),
     routeDoc(

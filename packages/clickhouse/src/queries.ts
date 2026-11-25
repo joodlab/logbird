@@ -30,6 +30,7 @@ import {
   QUERY_FIELDS,
   RECENT_PROBLEM_OUTCOMES,
   RECENT_PROBLEM_SEVERITY,
+  REQUEST_LIMITS,
 } from '@logbird/contracts';
 import type { z } from 'zod';
 import {
@@ -276,7 +277,7 @@ function cursor(s: string, projectId: string, scope?: ReadScope | null): [string
   throw new CursorError();
 }
 /** Distinct matches up to the 10,001 cap. `exact` is false when capped, past its budget, cancelled or failed. */
-export const COUNT_CAP = 10_001;
+export const COUNT_CAP = REQUEST_LIMITS.countCap;
 /** Wall-clock budget for the count, also for restricted SQL whose CONST profile allows statements 10 seconds. */
 export const COUNT_BUDGET_MS = 1000;
 type CountResult = { n: number; exact: boolean };
@@ -451,7 +452,7 @@ export async function getEvent(
   const parents: AuditEvent[] = [],
     seen = new Set([eventId]);
   let parent = row.parent_event_id;
-  while (parent && !seen.has(parent) && parents.length < 100) {
+  while (parent && !seen.has(parent) && parents.length < REQUEST_LIMITS.parentDepth) {
     seen.add(parent);
     // The chain stops at the first parent outside the scope.
     const r = await eventRow(ch, projectId, parent, scope, canonicalClient);

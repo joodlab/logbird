@@ -8,6 +8,7 @@ import {
   type QueryExpression,
   type QuerySyntaxToken,
   RECORD_HINT,
+  REQUEST_LIMITS,
 } from '@logbird/contracts';
 
 import { re2Problem } from './re2';
@@ -60,7 +61,8 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[], options: C
     operator = '=',
     countTerm = true,
   ): string {
-    if (countTerm && ++terms > 64) fail('too_complex', token.start, token.end, 'Query exceeds 64 terms');
+    if (countTerm && ++terms > REQUEST_LIMITS.queryTerms)
+      fail('too_complex', token.start, token.end, `Query exceeds ${REQUEST_LIMITS.queryTerms} terms`);
     if (field === 'record') {
       if (token.kind === 'presence' || (token.wildcard && token.value === '*' && q[token.start] !== '"')) return 'notEmpty(target_ids)';
       const pair = token.kind === 'regex' ? null : decodeRecordPair(token.value);
@@ -166,7 +168,7 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[], options: C
         const { members } = value;
         if (info && ['string', 'text'].includes(info.type) && members.every((m) => m.kind === 'value' && !m.wildcard)) {
           terms += members.length;
-          if (terms > 64) fail('too_complex', atom.valueStart, atom.end, 'Query exceeds 64 terms');
+          if (terms > REQUEST_LIMITS.queryTerms) fail('too_complex', atom.valueStart, atom.end, `Query exceeds ${REQUEST_LIMITS.queryTerms} terms`);
           return `${info.column} IN (${members.map((m) => bind(m.value)).join(',')})`;
         }
         return members.map((m) => `(${predicate(field, m)})`).join(' OR ');
@@ -186,7 +188,7 @@ function compile(q: string, now: number, tokens?: ParsedQueryToken[], options: C
         return `(${fieldValue(node)})`;
       case 'text': {
         const v = node.token;
-        if (++terms > 64) fail('too_complex', v.start, v.end, 'Query exceeds 64 terms');
+        if (++terms > REQUEST_LIMITS.queryTerms) fail('too_complex', v.start, v.end, `Query exceeds ${REQUEST_LIMITS.queryTerms} terms`);
         if (v.kind === 'regex') return `(${predicate('description', v, '=', false)})`;
         const p = bind(v.value);
         return /^[\p{L}\p{N}]+$/u.test(v.value) ? `(hasToken(search_text, lowerUTF8(${p})))` : `(position(search_text, lowerUTF8(${p})) > 0)`;
