@@ -85,10 +85,26 @@ export interface AuditEvent {
 }
 
 // @public
+export interface EventDetail {
+    childCount: number;
+    // (undocumented)
+    event: AuditEvent;
+    operationSize: number;
+    parents: AuditEvent[];
+    payload: unknown;
+}
+
+// @public
 export function isTrailQueryError(error: unknown): error is TrailQueryError;
 
 // @public
+export function iterateAuditTrail(options: ReadOptions, trail: TrailQuery, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined>;
+
+// @public
 export type RangeBound = string | Date | number;
+
+// @public
+export function readAuditEvent(options: ReadOptions, id: string, signal?: AbortSignal): Promise<EventDetail | null>;
 
 // @public
 export function readAuditTrail(options: ReadOptions, query: SearchInput, signal?: AbortSignal): Promise<SearchResponse>;
@@ -151,6 +167,12 @@ export interface SearchResponse {
 export type SearchSnapshot = Readonly<Partial<SearchQuery>>;
 
 // @public
+export const SERVER_DEFAULT_RANGE = "server-default";
+
+// @public (undocumented)
+export type ServerDefaultRange = typeof SERVER_DEFAULT_RANGE;
+
+// @public
 export function snapshotSearchQuery(query: SearchInput, where?: string): SearchSnapshot;
 
 // @public
@@ -164,13 +186,13 @@ export interface TrailQuery {
     cursor?: string;
     // (undocumented)
     limit?: number;
+    order?: 'asc' | 'desc';
     // (undocumented)
     q?: string;
-    // (undocumented)
     range?: {
         from?: RangeBound;
         to?: RangeBound;
-    };
+    } | ServerDefaultRange;
     // (undocumented)
     target?: {
         type?: string;
@@ -202,10 +224,17 @@ export type TrailSnapshot = Readonly<{
     range?: Readonly<{
         from?: string;
         to?: string;
-    }>;
+    }> | ServerDefaultRange;
+    order?: 'asc' | 'desc';
     limit?: number;
     cursor?: string;
 }>;
+
+// @public
+export function trailWindow(trail: Pick<TrailSnapshot, 'range'>, where?: string): {
+    from?: string;
+    to?: string;
+};
 
 // (No @packageDocumentation comment for this package)
 

@@ -10,7 +10,11 @@ import { endpoint, options } from './audit.server';
 const app = new Hono<{ Variables: AuditVariables }>();
 const capture = logbird(options);
 app.use(capture);
-const read = () => readAuditTrail({ endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' }, trailQuery({ target: { id: 'demo-record' } }));
+const read = () =>
+  readAuditTrail(
+    { endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' },
+    trailQuery({ target: { id: 'demo-record' }, range: { from: new Date(Date.now() - 30 * 86_400_000) } }),
+  );
 app.post('/demo', (c) => {
   c.var.audit('vue.record.updated', { targets: [{ type: 'record', id: 'demo-record' }] });
   return c.json({ ok: true });
@@ -20,7 +24,7 @@ app.get('/history', async (c) => {
   const view = createSSRApp({
     setup() {
       // The fetcher is server-owned; keys are never serialized to component props.
-      const trail = useAuditTrail({ fetcher: read, target: { id: 'demo-record' } });
+      const trail = useAuditTrail({ fetcher: read, target: { id: 'demo-record' }, range: { from: new Date(Date.now() - 30 * 86_400_000) } });
       onServerPrefetch(async () => {
         await trail.refresh();
         failed = Boolean(trail.error.value);

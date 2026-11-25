@@ -50,14 +50,39 @@ export interface SearchResponse {
   tookMs: number;
 }
 
+/** One event with its causation context, from `GET /v1/events/{id}`. */
+export interface EventDetail {
+  event: AuditEvent;
+  /** The original document as stored; null under any field mask. */
+  payload: unknown;
+  /** The nearest ancestors through `context.parentEventId`, furthest first (at most 100). */
+  parents: AuditEvent[];
+  /** How many events (in the reader's scope) name this one as their parent. */
+  childCount: number;
+  /** How many events (in the reader's scope) share its `context.operationId`, itself included. */
+  operationSize: number;
+}
+
 /** A range bound: an ISO 8601 string, a `Date`, or epoch milliseconds. Anything else is refused. */
 export type RangeBound = string | Date | number;
+/**
+ * Pass as a trail's `range` to read the server's default window on purpose: the 24 hours before now. A trail always
+ * names its window, because a read without one returns a short history that looks complete.
+ */
+export const SERVER_DEFAULT_RANGE = 'server-default';
+export type ServerDefaultRange = typeof SERVER_DEFAULT_RANGE;
 export interface TrailQuery {
   target?: { type?: string; id: string };
   actor?: string;
   tenant?: string;
   q?: string;
-  range?: { from?: RangeBound; to?: RangeBound };
+  /**
+   * Required: the window, with at least `from` (`to` defaults to now), or `SERVER_DEFAULT_RANGE` for the server's
+   * default (the 24 hours before now). `from` is inclusive and `to` exclusive, on the event's timestamp.
+   */
+  range?: { from?: RangeBound; to?: RangeBound } | ServerDefaultRange;
+  /** `desc` (default) newest first, `asc` oldest first. Events in the same millisecond are ordered by id, not by cause. */
+  order?: 'asc' | 'desc';
   limit?: number;
   cursor?: string;
 }
@@ -68,7 +93,8 @@ export type TrailSnapshot = Readonly<{
   tenant?: string;
   /** Absent when the caller's `q` was absent or blank. */
   q?: string;
-  range?: Readonly<{ from?: string; to?: string }>;
+  range?: Readonly<{ from?: string; to?: string }> | ServerDefaultRange;
+  order?: 'asc' | 'desc';
   limit?: number;
   cursor?: string;
 }>;
@@ -247,7 +273,8 @@ export function snapshotTrail(input: TrailQuery, where = 'trailQuery'): TrailSna
   const q = optionalText(where, 'q', (input as { q?: unknown }).q);
   const givenRange: unknown = (input as { range?: unknown }).range;
   let range: TrailSnapshot['range'];
-  if (givenRange !== undefined) {
+  if (givenRange === SERVER_DEFAULT_RANGE) range = SERVER_DEFAULT_RANGE;
+  else if (givenRange !== undefined) {
     if (!isRecord(givenRange)) return fail(where, '`range` must be an object with `from` and/or `to`.');
     const from = rangeBound(where, 'range.from', (givenRange as { from?: unknown }).from);
     const to = rangeBound(where, 'range.to', (givenRange as { to?: unknown }).to);
@@ -255,6 +282,7 @@ export function snapshotTrail(input: TrailQuery, where = 'trailQuery'): TrailSna
     if (from === undefined && to === undefined) return fail(where, '`range` was given without `from` or `to`; pass a bound or leave the key out.');
     range = frozen({ from, to });
   }
+  const order = optionalChoice(where, 'order', (input as { order?: unknown }).order, ['asc', 'desc'] as const);
   const limit = optionalLimit(where, (input as { limit?: unknown }).limit);
   const cursor = optionalText(where, 'cursor', (input as { cursor?: unknown }).cursor);
   return frozen({
@@ -263,6 +291,7 @@ export function snapshotTrail(input: TrailQuery, where = 'trailQuery'): TrailSna
     tenant,
     q: q === undefined || isBlank(q) ? undefined : q,
     range,
+    order,
     limit,
     cursor: cursor || undefined,
   });
@@ -325,7 +354,22 @@ export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
     actor === undefined ? '' : `actor:${quoteQueryValue(actor)}`,
     tenant === undefined ? '' : `tenant:${quoteQueryValue(tenant)}`,
   ].filter(Boolean);
-  return { ...trail.range, q: terms.join(' AND '), limit: trail.limit, cursor: trail.cursor };
+  const window = trailWindow(trail);
+  return { ...window, q: terms.join(' AND '), order: trail.order, limit: trail.limit, cursor: trail.cursor };
+}
+const NO_WINDOW =
+  "without `from` the server reads only the 24 hours before `to`, so the trail would look complete when it is not. Pass `range: { from }` (`to` defaults to now), or `range: SERVER_DEFAULT_RANGE` to read the server's default window on purpose.";
+/**
+ * The window a trail reads, as search fields. A trail always names one: without `from` the server reads only the 24
+ * hours before `to`, and a short history would look complete. `SERVER_DEFAULT_RANGE` asks for that default on purpose
+ * (no bounds are sent). Throws a TrailQueryError otherwise.
+ */
+export function trailWindow(trail: Pick<TrailSnapshot, 'range'>, where = 'trailQuery'): { from?: string; to?: string } {
+  const range = trail.range;
+  if (range === SERVER_DEFAULT_RANGE) return {};
+  if (range === undefined) return fail(where, `a trail needs a \`range\`: ${NO_WINDOW}`);
+  if (range.from === undefined) return fail(where, `\`range\` has no \`from\`: ${NO_WINDOW}`);
+  return range;
 }
 
 export interface ReadOptions {
@@ -359,4 +403,51 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
   });
   if (!response.ok) throw new Error(`Logbird read HTTP ${response.status}`);
   return response.json() as Promise<SearchResponse>;
+}
+
+/**
+ * One event by id, with its causation context: the nearest ancestors (`parents`, furthest first), how many events name
+ * it as their parent (`childCount`; list them with `parent:` in a trail's `q`), how many share its operation, and the
+ * original document (`payload`, null under a field mask). No time window applies. Resolves to null when the id is
+ * unknown or outside the key's scope (404).
+ */
+export async function readAuditEvent(options: ReadOptions, id: string, signal?: AbortSignal): Promise<EventDetail | null> {
+  if (typeof window !== 'undefined') throw new Error('Logbird read keys are server-only');
+  const eventId = selector('readAuditEvent', 'id', id);
+  const url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events/${encodeURIComponent(eventId)}`);
+  const response = await (options.fetch ?? fetch)(url, {
+    headers: { Authorization: `Bearer ${options.readKey}` },
+    signal: signal ?? AbortSignal.timeout(30_000),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Logbird read HTTP ${response.status}`);
+  return response.json() as Promise<EventDetail>;
+}
+
+/**
+ * Every event of a trail, page after page, as one async iterator: `for await (const event of iterateAuditTrail(…))`.
+ * The trail needs an explicit `range` with `from` (`SERVER_DEFAULT_RANGE` is refused here: a whole trail has to say
+ * where it starts). Pages follow `nextCursor` within the window the first page applied (its `range`), so later pages
+ * never drift with the clock, and the iterator ends after the last page. Breaking out of the loop stops it before the
+ * next request; `signal` aborts a request in flight.
+ *
+ * A pass is not a snapshot: an event stored while you iterate, with a timestamp behind your position, is not
+ * returned, and nor is one older than `from`. To pick up late arrivals, read again later with `receivedAt:>=` a time
+ * well before the last `receivedAt` you saw (receipt times are not a strict sequence) and skip ids you already have.
+ */
+export async function* iterateAuditTrail(options: ReadOptions, trail: TrailQuery, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined> {
+  const snapshot = snapshotTrail(trail, 'iterateAuditTrail');
+  if (snapshot.range === SERVER_DEFAULT_RANGE)
+    fail('iterateAuditTrail', 'a whole trail needs `range: { from }`; `SERVER_DEFAULT_RANGE` reads only the last 24 hours.');
+  let query: Partial<SearchQuery> = trailQuery({ ...snapshot, limit: snapshot.limit ?? 200 });
+  for (;;) {
+    const page = await readAuditTrail(options, query, signal);
+    for (const event of page.data) yield event;
+    const next = page.nextCursor;
+    if (!next) return;
+    // A server that hands back the cursor it was given would loop forever.
+    if (next === query.cursor) throw new Error('Logbird read: the server repeated a page cursor.');
+    // Keep the window the first page applied: a cursor carries none, and an open `to` would move with the clock.
+    query = { ...query, ...(page.range ? { from: page.range.from, to: page.range.to } : {}), cursor: next };
+  }
 }

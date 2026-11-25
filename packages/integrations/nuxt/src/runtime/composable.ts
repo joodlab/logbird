@@ -23,6 +23,10 @@ export function useAuditTrail(options: MaybeRefOrGetter<Omit<AuditTrailOptions, 
     // The boundary: every trail field read once into a frozen snapshot; the rest uses only the snapshot.
     const trail = snapshotTrail(input, 'useAuditTrail');
     const empty = !trail.target && trail.actor === undefined && trail.tenant === undefined && trail.q === undefined;
-    return { query: empty ? { ...trail.range, limit: trail.limit } : trailQuery(trail), fetcher, session };
+    // An empty trail is decided by the route's authorize hook, whose trailQuery names the window; any bounds given here
+    // are forwarded for it to use. A trail with a selector is built here, so it must name its window (trailQuery).
+    const bounds = typeof trail.range === 'object' ? trail.range : {};
+    const query = empty ? { ...bounds, order: trail.order, limit: trail.limit } : trailQuery(trail);
+    return { query, fetcher, session };
   });
 }

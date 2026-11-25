@@ -75,6 +75,8 @@ pre|     // Built from the user's account; the browser's filter is ignored.
 pre|     // trailQuery quotes the id for the query language.
 pre|     return trailQuery({
 pre|       tenant: tenantId,
+pre|       // A trail names its window: here the last year of history.
+pre|       range: { from: new Date(Date.now() - 365 * 86_400_000) },
 pre|       cursor: typeof query.cursor === 'string' ? query.cursor : undefined,
 pre|     });
 pre|   },

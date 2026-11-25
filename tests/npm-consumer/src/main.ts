@@ -18,7 +18,7 @@ import {
   WebhookVerificationError,
 } from '@logbird/sdk';
 import { createAudit } from '@logbird/sdk/integration';
-import { isTrailQueryError, readAuditTrail, trailQuery } from '@logbird/sdk/read';
+import { isTrailQueryError, iterateAuditTrail, readAuditEvent, readAuditTrail, SERVER_DEFAULT_RANGE, trailQuery } from '@logbird/sdk/read';
 import { Hono } from 'hono';
 
 const STORED = {
@@ -70,7 +70,18 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   }
   if (request.method === 'GET' && url.pathname === '/v1/events') {
     searches.push(url);
-    response.end(JSON.stringify({ data: [STORED], nextCursor: null, total: 1, tookMs: 1 }));
+    const range = { from: url.searchParams.get('from') ?? '2026-01-01T00:00:00.000Z', to: url.searchParams.get('to') ?? '2026-01-02T00:00:00.000Z' };
+    response.end(JSON.stringify({ data: [STORED], nextCursor: null, total: 1, range, tookMs: 1 }));
+    return;
+  }
+  if (request.method === 'GET' && url.pathname.startsWith('/v1/events/')) {
+    const id = decodeURIComponent(url.pathname.slice('/v1/events/'.length));
+    if (id !== STORED.id) {
+      response.statusCode = 404;
+      response.end('{}');
+      return;
+    }
+    response.end(JSON.stringify({ event: STORED, payload: { action: STORED.action }, parents: [], childCount: 0, operationSize: 1 }));
     return;
   }
   response.statusCode = 404;
@@ -208,7 +219,13 @@ try {
   await capture.shutdown();
 
   // 4. A trail read: trailQuery builds the query, readAuditTrail sends it and reads the page; no selector throws.
-  const page = await readAuditTrail({ endpoint, readKey: 'lb_read_fictional' }, trailQuery({ target: { type: 'invoice', id: 'inv_1' } }));
+  const range = { from: '2026-01-01T00:00:00.000Z' };
+  const page = await readAuditTrail(
+    { endpoint, readKey: 'lb_read_fictional' },
+    trailQuery({ target: { type: 'invoice', id: 'inv_1' }, range, order: 'asc' }),
+  );
+  expect(page.range?.from === '2026-01-01T00:00:00.000Z', 'the applied window to be read back');
+  expect(searches.at(-1)?.searchParams.get('order') === 'asc', 'the trail to read oldest first');
   const stored = page.data[0];
   expect(page.total === 1 && stored?.actor?.id === 'u1' && stored.changes[0]?.after === 'sent', 'the stored event read back');
   expect((searches.at(-1)?.searchParams.get('q') ?? '').includes('inv_1'), 'the trail query to name the target');
@@ -219,7 +236,25 @@ try {
     threw = isTrailQueryError(error);
   }
   expect(threw, 'a trail without a selector to throw TrailQueryError (#311)');
-  pass('readAuditTrail and trailQuery: page read, selector-less trail refused');
+  threw = false;
+  try {
+    trailQuery({ target: { type: 'invoice', id: 'inv_1' } });
+  } catch (error) {
+    threw = isTrailQueryError(error);
+  }
+  expect(threw, 'a trail without a window to throw TrailQueryError');
+  expect(!('from' in trailQuery({ target: { id: 'inv_1' }, range: SERVER_DEFAULT_RANGE })), 'the server default to send no bounds');
+  pass('readAuditTrail and trailQuery: page read, window stated, selector-less and window-less trails refused');
+
+  // 4b. One event with its causation context, and a whole trail through the async iterator.
+  const detail = await readAuditEvent({ endpoint, readKey: 'lb_read_fictional' }, String(STORED.id));
+  expect(detail?.event.id === STORED.id && detail.operationSize === 1, 'the event detail');
+  expect((await readAuditEvent({ endpoint, readKey: 'lb_read_fictional' }, 'missing')) === null, 'an unknown id to read as null');
+  const all: string[] = [];
+  for await (const event of iterateAuditTrail({ endpoint, readKey: 'lb_read_fictional' }, { target: { id: 'inv_1' }, range, order: 'asc' }))
+    all.push(event.id);
+  expect(all.length === 1 && all[0] === STORED.id, 'the iterator to read the whole trail');
+  pass('readAuditEvent and iterateAuditTrail: detail, 404 as null, whole trail');
 
   // 5. Webhooks: a signed payload verifies; a tampered one is refused.
   const secret = generateWebhookSecret();

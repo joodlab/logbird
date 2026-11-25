@@ -3,14 +3,27 @@ import { describe, expect, it } from 'vitest';
 import {
   isTrailQueryError,
   readAuditTrail,
+  SERVER_DEFAULT_RANGE,
   type SearchInput,
   searchKey,
   snapshotSearchQuery,
   snapshotTrail,
   type TrailQuery,
   TrailQueryError,
-  trailQuery,
+  trailQuery as trailQueryStrict,
 } from './read';
+
+/**
+ * These tests are about selectors and the input boundary, not the window: a trail that names no `range` gets the
+ * explicit default window through its prototype, so getters, Proxies and read counts behave exactly as given.
+ * read-window.test.ts covers the window rule itself.
+ */
+const trailQuery = (input: TrailQuery) =>
+  trailQueryStrict(
+    input !== null && typeof input === 'object' && !('range' in input)
+      ? (Object.create(input, { range: { value: SERVER_DEFAULT_RANGE, enumerable: true } }) as TrailQuery)
+      : input,
+  );
 
 // #311: every public read entry point first copies its input into a plain frozen snapshot of primitives, reading each
 // property once, and refuses a value that is not the primitive its field expects. These tables attack that boundary

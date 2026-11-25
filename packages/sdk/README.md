@@ -110,6 +110,32 @@ const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
   dropPolicy: 'oldest', onDrop: () => metrics.increment('audit.dropped') });
 ```
 
+A trail always names its time window. `range: { from }` reads from `from` (inclusive) to `to` (exclusive; now when
+absent), on the event's timestamp. Without `from` the server reads only the 24 hours before `to`, and a short history
+would look complete, so `trailQuery` throws a `TrailQueryError` for a trail without `range` or without `range.from`.
+To read that default window on purpose, pass `range: SERVER_DEFAULT_RANGE`. Every page states the window the server
+applied as `page.range` (absent from servers older than that field). `order: 'asc'` reads oldest first (default
+`desc`); events in the same millisecond are ordered by id, not by cause, so read causation from
+`context.parentEventId`.
+
+```ts
+import { iterateAuditTrail, readAuditEvent, readAuditTrail, trailQuery } from '@logbird/sdk/read';
+
+const options = { endpoint, readKey };
+const trail = { target: { type: 'booking', id: 'bk_1042' }, tenant: 'biz_7', range: { from: '2026-01-01T00:00:00Z' } };
+const page = await readAuditTrail(options, trailQuery({ ...trail, order: 'asc' })); // one page; page.range is the window
+for await (const event of iterateAuditTrail(options, { ...trail, order: 'asc' })) render(event); // every page
+const detail = await readAuditEvent(options, page.data[0].id); // parents, childCount, payload; null when unknown
+```
+
+`iterateAuditTrail` needs a `range` with `from`, follows `nextCursor` within the window the first page applied, and
+ends after the last page; breaking out of the loop stops it before the next request. A pass is not a snapshot: an event
+stored while you read, with a timestamp behind your position (or before `from`), is not returned. To pick up late
+arrivals, read again later with `receivedAt:>=` in `q`, starting well before the last `receivedAt` you saw (receipt
+times are not a strict sequence), and skip ids you already have. `readAuditEvent` returns one event with its nearest
+ancestors (`parents`, furthest first), how many events name it as their parent (`childCount`; list them with
+`parent:<id>` in `q`), how many share its operation, and its original `payload` (null under a field mask).
+
 `trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or
 query, and a selector key passed without a value (say `tenant: undefined`) is an error, not an absent filter. A `q` must
 parse as one complete Logbird query on its own; it is ANDed with the selectors.

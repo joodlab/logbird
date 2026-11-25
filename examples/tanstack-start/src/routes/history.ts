@@ -7,7 +7,10 @@ export const Route = createFileRoute('/history')({
       GET: async () => {
         try {
           return Response.json(
-            await readAuditTrail({ endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' }, trailQuery({ target: { id: 'demo-record' } })),
+            await readAuditTrail(
+              { endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' },
+              trailQuery({ target: { id: 'demo-record' }, range: { from: new Date(Date.now() - 30 * 86_400_000) } }),
+            ),
           );
         } catch {
           await client.flush().catch(() => console.error('Audit flush failed'));

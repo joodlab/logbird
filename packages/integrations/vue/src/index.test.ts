@@ -1,8 +1,27 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
 import { expect, it, vi } from 'vitest';
-import { effectScope, h, reactive, ref, watch } from 'vue';
-import { type AuditFetcher, type AuditTrailOptions, useAuditTrail, useAuditTrailRequests } from './index';
+import { effectScope, h, type MaybeRefOrGetter, reactive, ref, toValue, watch } from 'vue';
+import {
+  type AuditFetcher,
+  type AuditTrailOptions,
+  SERVER_DEFAULT_RANGE,
+  useAuditTrailRequests,
+  useAuditTrail as useAuditTrailStrict,
+} from './index';
+
+/**
+ * These tests are about selectors, reactivity and paging, not the window: options that name no `range` get the
+ * explicit default window through their prototype, so getters, reactive keys and read counts behave exactly as given.
+ * The window rule itself is tested at the end of this file and in the SDK.
+ */
+const useAuditTrail = (options: MaybeRefOrGetter<AuditTrailOptions>) =>
+  useAuditTrailStrict(() => {
+    const input = toValue(options);
+    return input !== null && typeof input === 'object' && !('range' in input)
+      ? (Object.create(input, { range: { value: SERVER_DEFAULT_RANGE, enumerable: true } }) as AuditTrailOptions)
+      : input;
+  });
 
 it('refreshes selectors, paginates and exposes errors without exposing keys', async () => {
   const target = ref('one');
@@ -659,4 +678,15 @@ it('keeps no waiter for explicit calls that have settled', async () => {
   // Disposal after settled calls has nothing left to settle, and a later call resolves at once.
   wrapper.unmount();
   await expect(trail.refresh()).resolves.toBeUndefined();
+});
+
+it('needs the trail to name its window and passes the order (the SDK rule, through the composable)', async () => {
+  const fetcher = vi.fn().mockResolvedValue({ data: [], nextCursor: null });
+  const none = mountTrail(() => useAuditTrailStrict({ fetcher, tenant: 'acme' }));
+  const asc = mountTrail(() => useAuditTrailStrict({ fetcher, tenant: 'acme', range: { from: '2026-11-01T00:00:00.000Z' }, order: 'asc' }));
+  await flushPromises();
+  expect(none.trail.error.value?.message).toMatch(/a trail needs a `range`/);
+  expect(fetcher.mock.calls.map((call) => call[0])).toEqual([{ q: 'tenant:"acme"', from: '2026-11-01T00:00:00.000Z', order: 'asc' }]);
+  none.wrapper.unmount();
+  asc.wrapper.unmount();
 });

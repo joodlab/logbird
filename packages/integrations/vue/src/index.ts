@@ -8,6 +8,9 @@ import {
   type TrailQuery,
   trailQuery,
 } from '@logbird/sdk/read';
+
+export { SERVER_DEFAULT_RANGE } from '@logbird/sdk/read';
+
 import { defineComponent, type MaybeRefOrGetter, onScopeDispose, type PropType, shallowRef, toValue, watch } from 'vue';
 export type AuditFetcher = (query: Partial<SearchQuery>, signal?: AbortSignal) => Promise<SearchResponse>;
 /**
