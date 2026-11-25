@@ -265,7 +265,7 @@ your policy.
 | `keys` | A regular expression that replaces the default pattern. It matches any part of a key at any depth unless you anchor it, as in `/^token$/`. The default also matches keys such as `tokenCount` and `secretary`. |
 | `addKeys` | Extra literal substrings checked separately from `keys`. ASCII letter case is ignored. Non-ASCII characters match exactly, and characters such as `.` are literal. |
 | `changeFields` | A regular expression for the `field` name of a change. This rule replaces its present `before` and `after` values and keeps the field name. Omit it to use `keys` and `addKeys` for matching change fields. |
-| `replacement` | A string that replaces each matched value. Defaults to `[redacted]`. |
+| `replacement` | A string that replaces each matched value. The console recognises the default `[redacted]` in change values and displays “value redacted”. Custom replacement strings appear as recorded. |
 | `paths` | Exact locations to redact regardless of their key. |
 | `keepPaths` | Exact locations exempt from the key match at that node. Descendants still get checked. |
 

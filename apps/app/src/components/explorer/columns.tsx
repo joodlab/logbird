@@ -53,7 +53,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
         {e.severity === 'critical' || e.severity === 'warning' ? (
           <SeverityBadge className="h-4 shrink-0 px-1.5 text-[10px]" severity={e.severity} />
         ) : null}
-        <span className="truncate" dir="auto">
+        <span className="overflow-hidden text-ellipsis [text-wrap-mode:nowrap] [white-space-collapse:preserve-spaces]" dir="auto">
           {eventSentence(e)}
         </span>
         <JobHint className="ms-auto hidden ps-1 lg:inline-flex" event={e} />
