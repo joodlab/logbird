@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server';
 import { type AuditVariables, logbird } from '@logbird/hono';
-import { Logbird, redact } from '@logbird/sdk';
+import { Logbird } from '@logbird/sdk';
 import { jobAudit } from '@logbird/sdk/integration';
 import { Hono } from 'hono';
 
@@ -8,7 +8,6 @@ const client = new Logbird({
   endpoint: process.env.LOGBIRD_ENDPOINT,
   apiKey: process.env.LOGBIRD_INGEST_KEY,
   defaults: { environment: 'staging' },
-  beforeSend: redact(),
 });
 const app = new Hono<{ Variables: AuditVariables & { user: string; requestId: string } }>();
 const capture = logbird({

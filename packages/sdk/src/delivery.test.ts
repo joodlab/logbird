@@ -138,6 +138,7 @@ it('shuts down queued events even when the original options object is changed', 
 it('counts closed, hook, serialization and size refusals and filters individually', async () => {
   const onDrop = vi.fn();
   const sdk = client({
+    redaction: false,
     beforeSend: (value) => {
       if (value.id === 'hook') throw new Error('fixture');
       return value.id === 'filter' ? null : value;

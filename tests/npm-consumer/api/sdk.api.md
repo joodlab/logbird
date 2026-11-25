@@ -19,7 +19,7 @@ export interface DropDetails {
 }
 
 // @public (undocumented)
-export type DropReason = 'queue_full' | 'rejected' | 'http_error' | 'too_large' | 'invalid' | 'before_send_failed' | 'filtered' | 'diagnostic_reentry' | 'shutdown';
+export type DropReason = 'queue_full' | 'rejected' | 'http_error' | 'too_large' | 'invalid' | 'before_send_failed' | 'redaction_failed' | 'filtered' | 'diagnostic_reentry' | 'shutdown';
 
 // @public
 export type EntityId = string | number;
@@ -160,6 +160,9 @@ export interface LogbirdOptions {
     onDrop?: (event: EventInput, details: Readonly<DropDetails>) => void;
     // (undocumented)
     onError?: (error: Error) => void;
+    // (undocumented)
+    redaction?: false | RedactionOptions;
+    // (undocumented)
     shutdownTimeoutMs?: number;
 }
 
@@ -167,11 +170,17 @@ export interface LogbirdOptions {
 export const MAX_WEBHOOK_SIGNATURES = 10;
 
 // @public
-export function redact(options?: {
-    keys?: RegExp;
+export function redact(options?: RedactionOptions): (event: EventInput) => EventInput;
+
+// @public (undocumented)
+export interface RedactionOptions {
+    addKeys?: string[];
     changeFields?: RegExp;
+    keepPaths?: string[];
+    keys?: RegExp;
+    paths?: string[];
     replacement?: string;
-}): (event: EventInput) => EventInput;
+}
 
 // @public
 export function signWebhook(input: SignWebhookOptions): Promise<string>;

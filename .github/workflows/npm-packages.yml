@@ -92,7 +92,7 @@ jobs:
         with:
           name: npm-packages
           path: tests/npm-consumer/.packages
-      - name: Verify packed delivery, adapters and public API
+      - name: Check capture, client redaction, read and public API from tarballs
         run: node tests/npm-consumer/run.mjs --skip-pack --hono=${{ matrix.hono }}
 
   # @logbird/vue, @logbird/nuxt and @logbird/tanstack-start (not published yet): type-checked and their API reports
