@@ -199,3 +199,20 @@ it('#180: binds every new cursor to its project, keeps legacy two-part cursors f
   ])
     await expect(page('qa-cursor-a', Buffer.from(JSON.stringify(bad)).toString('base64url')), JSON.stringify(bad)).rejects.toThrow('Invalid cursor');
 });
+it('states the window its rows and count used, explicit or by default, from one clock', async () => {
+  const explicit = client([], 0);
+  const page = await searchEvents(explicit.ch, 'qa-narrow-search', { from: '2026-11-07T12:00:00+02:00', to, order: 'desc', limit: 5 });
+  expect(page.range).toEqual({ from, to });
+  // Parameters reach ClickHouse as DateTime64 text: the same instants.
+  const sent = (r: { from: string; to: string }) => ({ from: r.from.replace('T', ' ').slice(0, -1), to: r.to.replace('T', ' ').slice(0, -1) });
+  for (const call of [explicit.rowCall(), explicit.countCall()]) expect(call.query_params).toMatchObject(sent({ from, to }));
+  vi.useFakeTimers({ now: Date.parse('2026-11-08T09:30:00.123Z'), toFake: ['Date'] });
+  try {
+    const fallback = client([], 0);
+    const window = await searchEvents(fallback.ch, 'qa-narrow-search', { order: 'desc', limit: 5 });
+    expect(window.range).toEqual({ from: '2026-11-07T09:30:00.123Z', to: '2026-11-08T09:30:00.123Z' });
+    for (const call of [fallback.rowCall(), fallback.countCall()]) expect(call.query_params).toMatchObject(sent(window.range));
+  } finally {
+    vi.useRealTimers();
+  }
+});

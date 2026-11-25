@@ -8,7 +8,7 @@ namespace Logbird;
 /// required members are unchanged since Logbird 0.1.0 for search and detail and since 0.2.0 for facets (search's
 /// optional <c>totalExact</c> came later). A member that is missing, or
 /// <c>null</c> where the contract does not allow it, makes the answer <c>invalid_response</c>, never an empty page or a
-/// <see langword="null"/> collection. Members the contract marks optional (<c>totalExact</c>, a facet value's
+/// <see langword="null"/> collection. Members the contract marks optional (<c>totalExact</c>, <c>range</c>, a facet value's
 /// <c>groups</c> and <c>groupsOtherCount</c>) may be absent, and members this SDK does not know are ignored.
 /// </summary>
 internal static class ResponseShape
@@ -31,6 +31,7 @@ internal static class ResponseShape
             && TextOrNull(page, "nextCursor")
             && Number(page, "total")
             && OptionalBoolean(page, "totalExact")
+            && OptionalRange(page)
             && Number(page, "tookMs");
 
     internal static bool Detail(JsonElement detail)
@@ -46,7 +47,8 @@ internal static class ResponseShape
             && Text(facets, "field")
             && TextOrNull(facets, "by")
             && ArrayOf(facets, "values", FacetValue)
-            && Number(facets, "otherCount");
+            && Number(facets, "otherCount")
+            && OptionalRange(facets);
 
     private static bool FacetValue(JsonElement value)
         => FacetGroup(value)
@@ -120,6 +122,10 @@ internal static class ResponseShape
 
     private static bool OptionalBoolean(JsonElement value, string name)
         => !value.TryGetProperty(name, out var member) || member.ValueKind is JsonValueKind.True or JsonValueKind.False;
+
+    /// <summary>The applied window (search and facets): absent on older servers, otherwise an object with two strings.</summary>
+    private static bool OptionalRange(JsonElement value)
+        => !value.TryGetProperty("range", out var range) || (range.ValueKind == JsonValueKind.Object && Texts(range, "from", "to"));
 
     private static bool ArrayOf(JsonElement value, string name, Func<JsonElement, bool> item)
         => value.TryGetProperty(name, out var member) && member.ValueKind == JsonValueKind.Array && All(member, item);

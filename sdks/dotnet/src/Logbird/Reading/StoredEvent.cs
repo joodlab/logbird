@@ -132,8 +132,28 @@ public sealed class EventPage
     /// </summary>
     public bool? TotalExact { get; init; }
 
+    /// <summary>
+    /// The time window the server applied, or <see langword="null"/> when the server does not say (older servers).
+    /// Without <see cref="EventSearch.From"/> the server reads only the 24 hours before the end, so compare this with
+    /// the window you meant before you treat a page as a complete history.
+    /// </summary>
+    public EventRange? Range { get; init; }
+
     /// <summary>How long the query took on the server, in milliseconds.</summary>
     public double TookMs { get; init; }
+}
+
+/// <summary>
+/// The time window a read applied: events whose timestamp is at or after <see cref="From"/> and before
+/// <see cref="To"/>, as ISO 8601 UTC text with milliseconds, exactly as the server sent it.
+/// </summary>
+public sealed class EventRange
+{
+    /// <summary>The inclusive start: the requested start, or the end minus 24 hours when none was given.</summary>
+    public string From { get; init; } = string.Empty;
+
+    /// <summary>The exclusive end: the requested end, or the server clock when none was given.</summary>
+    public string To { get; init; } = string.Empty;
 }
 
 /// <summary>One event with its raw payload and causation context.</summary>

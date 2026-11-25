@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  AppliedRange,
   AuditEvent,
   Entity,
   EntityKind,
@@ -22,6 +23,7 @@ import type {
   SearchResponse,
 } from '@logbird/contracts';
 import {
+  DEFAULT_RANGE_MS,
   EXPORT_SCHEMA_VERSION,
   parseJsonExact,
   pickHistogramInterval,
@@ -157,9 +159,13 @@ export async function read<T>(
     await cancellation;
   }
 }
-export function timeRange(q: RangeQuery, now = Date.now()) {
+/**
+ * The half-open window `[from, to)` on `timestamp` a read applies, as ISO 8601 UTC with milliseconds. Resolving an
+ * already resolved window returns it unchanged, so a read resolves once and states exactly the bounds it queried.
+ */
+export function timeRange(q: RangeQuery, now = Date.now()): AppliedRange {
   const to = new Date(q.to ?? now),
-    from = new Date(q.from ?? to.getTime() - 86_400_000);
+    from = new Date(q.from ?? to.getTime() - DEFAULT_RANGE_MS);
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
@@ -361,8 +367,11 @@ export async function searchEvents(
   q: SearchQuery,
   compiled?: Awaited<ReturnType<typeof filter>>,
   scope?: ReadScope | null,
-): Promise<SearchResponse> {
-  return (await searchPage(ch, projectId, q, compiled, false, undefined, undefined, scope)).page;
+): Promise<SearchResponse & { range: AppliedRange }> {
+  // One clock for the rows, the count and the stated window.
+  const range = timeRange(q);
+  const { page } = await searchPage(ch, projectId, { ...q, ...range }, compiled, false, undefined, undefined, scope);
+  return { ...page, range };
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null, canonicalClient?: ClickHouseClient) {
   // Oldest receipt first, then timestamp, then a hash of the stored document: a deterministic canonical version even
@@ -537,14 +546,27 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
 }
 /** The stored column a facet field reads (undefined for attributes). */
 export const facetColumn = (field: string) => (Object.hasOwn(columns, field) ? columns[field] : undefined);
+type FacetInput = Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number };
 export async function facets(
   ch: ClickHouseClient,
   p: string,
-  q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
+  q: FacetInput,
   scope?: ReadScope | null,
   compiled?: CompiledFilter,
   /** The field mask key (`fieldMaskKey`); required when the scope masks `actor_email`. */
   maskKey?: Buffer,
+): Promise<FacetResponse & { range: AppliedRange }> {
+  // Both levels count the same window, and the response states it.
+  const range = timeRange(q);
+  return { ...(await facetCounts(ch, p, { ...q, ...range }, scope, compiled, maskKey)), range };
+}
+async function facetCounts(
+  ch: ClickHouseClient,
+  p: string,
+  q: FacetInput,
+  scope: ReadScope | null | undefined,
+  compiled: CompiledFilter | undefined,
+  maskKey: Buffer | undefined,
 ): Promise<FacetResponse> {
   if (scope?.mask?.includes('actor_email')) {
     if (!maskKey) throw new Error('The actor_email mask requires a field mask key.');

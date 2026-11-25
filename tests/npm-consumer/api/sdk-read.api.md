@@ -136,6 +136,10 @@ export interface SearchResponse {
     data: AuditEvent[];
     // (undocumented)
     nextCursor: string | null;
+    range?: {
+        from: string;
+        to: string;
+    };
     // (undocumented)
     tookMs: number;
     // (undocumented)

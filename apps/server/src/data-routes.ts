@@ -5,7 +5,7 @@ import { type AuditPayload, type Prisma, prisma } from '@logbird/database';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
-import { resolver, validator } from 'hono-openapi';
+import { type DescribeRouteOptions, resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
 import { cancelExportQuery, clickhouse, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
@@ -32,6 +32,16 @@ import type { AppEnv } from './types';
 const ingestRequestSchema = (await resolver(s.ingestBodySchema).toOpenAPISchema()).schema;
 const viewerTokenRequestSchema = (await resolver(s.viewerTokenRequestSchema).toOpenAPISchema()).schema;
 const CSV_COLUMNS_TEXT = ch.CSV_COLUMNS.join(', ');
+const rangeHeaders = {
+  [s.RANGE_FROM_HEADER]: {
+    description: "Inclusive start of the time window applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours.",
+    schema: { type: 'string' as const, format: 'date-time' },
+  },
+  [s.RANGE_TO_HEADER]: {
+    description: "Exclusive end of the time window applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock.",
+    schema: { type: 'string' as const, format: 'date-time' },
+  },
+};
 const exportResponses = {
   429: { description: 'Export capacity is in use. Finish or cancel an export, then retry.' },
   200: {
@@ -42,10 +52,32 @@ const exportResponses = {
         schema: { type: 'string' as const, format: 'uuid' },
       },
       [s.EXPORT_SCHEMA_HEADER]: { description: 'Export format and schema version.', schema: { type: 'string' as const } },
+      ...rangeHeaders,
     },
     content: { 'text/csv': { schema: { type: 'string' as const } }, 'application/x-ndjson': { schema: { type: 'string' as const } } },
   },
 };
+/** What each /v1 read route does, and which time window it reads (OpenAPI `description`). */
+const READ_ROUTE_TEXT = {
+  search:
+    "Search stored events in one time window, one page at a time. The window runs from `from` (inclusive) to `to` (exclusive) on `timestamp`, the source's occurredAt in UTC. Without `from` it is the 24 hours before `to`; without `to` it ends at the server clock. The response states the window it applied as `range`: a history read here is complete only for that window, whatever `totalExact` says. Events sort by `timestamp`, then by event `id` in the same direction (`order`). Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`. Follow `nextCursor` until it is null, sending the same `q`, `order`, `from` and `to`; each page continues after the previous page's last event. Paging is not a snapshot: an event stored after you started, with a `timestamp` behind your position, is not on the later pages; pick late arrivals up with `receivedAt:>…` in `q`. `total` counts the whole window (a lower bound when `totalExact` is false). A scoped key or viewer token sees only its scope, and `q` cannot widen it.",
+  detail:
+    "One event by id. No time window applies. Returns the event; its original `payload` (null under any field mask); `parents`, the causation chain through `context.parentEventId`, root first, at most 100, stopping at the first parent that is missing or outside the reader's scope; `childCount`, the events in scope that name it as their parent (list them with `q=parent:<id>` on search); and `operationSize`, the events in scope that share its `context.operationId`, itself included (0 without one). 404 not_found when the id is unknown or outside the reader's scope.",
+  facets:
+    'Counts of the most frequent values of `field` (optionally split `by` a second field) among the events in one time window that match `q`. Same window rules as search: without `from` it is the 24 hours before `to`, and the response states the window it applied as `range`. Values are ordered by count, most frequent first.',
+  export:
+    'Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers the 24 hours before `to`. The X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers state the window applied. The export reads with a fixed clock: events received after it started are not in the file.',
+};
+const readDoc = (summary: string, description: string, schema: z.ZodType, parameters?: DescribeRouteOptions['parameters']) =>
+  routeDoc(
+    summary,
+    {
+      description,
+      ...(parameters ? { parameters } : {}),
+      responses: { 200: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } },
+    },
+    'readKeyOrViewerToken',
+  );
 
 const doc = (summary: string, schema: z.ZodType, status = 200, security = 'session') =>
   summary === 'Ingest events'
@@ -161,7 +193,7 @@ export const publicRoutes = new Hono<AppEnv>()
     publicRateLimits.authenticated('read'),
     publicQueryLanguage,
     projectRead,
-    doc('Search events', s.searchResponseSchema, 200, 'readKeyOrViewerToken'),
+    readDoc('Search events', READ_ROUTE_TEXT.search, s.searchResponseSchema),
     query(s.publicSearchQuerySchema),
     async (c) => {
       const input = c.req.valid('query');
@@ -177,7 +209,9 @@ export const publicRoutes = new Hono<AppEnv>()
     publicRateLimits.authenticated('read'),
     publicQueryLanguage,
     projectRead,
-    doc('Event detail', s.eventDetailSchema, 200, 'readKeyOrViewerToken'),
+    readDoc('Event detail', READ_ROUTE_TEXT.detail, s.eventDetailSchema, [
+      { name: 'eventId', in: 'path', required: true, description: 'The event `id`.', schema: { type: 'string' } },
+    ]),
     async (c) => {
       const { scope } = c.get('reader');
       const detail = found(await ch.getEvent(readerClient(scope), c.get('project').id, c.req.param('eventId'), scope, clickhouse));
@@ -198,7 +232,7 @@ export const publicRoutes = new Hono<AppEnv>()
     publicRateLimits.authenticated('read'),
     publicQueryLanguage,
     projectRead,
-    doc('Facets', s.facetResponseSchema, 200, 'readKeyOrViewerToken'),
+    readDoc('Facets', READ_ROUTE_TEXT.facets, s.facetResponseSchema),
     query(s.publicFacetQuerySchema),
     async (c) => {
       const input = c.req.valid('query');
@@ -216,7 +250,7 @@ export const publicRoutes = new Hono<AppEnv>()
     publicRateLimits.authenticated('read'),
     publicQueryLanguage,
     projectRead,
-    routeDoc('Stream CSV or JSONL', { responses: exportResponses }, 'readKeyOrViewerToken'),
+    routeDoc('Stream CSV or JSONL', { description: READ_ROUTE_TEXT.export, responses: exportResponses }, 'readKeyOrViewerToken'),
     query(s.publicExportQuerySchema),
     async (c) => {
       const input = c.req.valid('query');
@@ -323,6 +357,17 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
   const formatName = s.EXPORT_FORMAT_LABELS[input.format];
   c.header(s.EXPORT_ID_HEADER, exportId);
   c.header(s.EXPORT_SCHEMA_HEADER, `${input.format}/${s.EXPORT_SCHEMA_VERSION}`);
+  // The stream has no envelope, so the window goes in headers: the same bounds prepareExport resolves from this clock.
+  let range: s.AppliedRange | undefined;
+  try {
+    range = ch.timeRange(input, clock);
+  } catch {
+    // An invalid window states none here and fails below exactly as before.
+  }
+  if (range) {
+    c.header(s.RANGE_FROM_HEADER, range.from);
+    c.header(s.RANGE_TO_HEADER, range.to);
+  }
   const body = await auditedExport(
     async (signal) => {
       const client = caller.client ?? queryClient(input);
@@ -581,6 +626,7 @@ export const dataRoutes = new Hono<AppEnv>()
               description: 'Export format and schema version.',
               schema: { type: 'string' },
             },
+            ...rangeHeaders,
           },
           content: { 'text/csv': { schema: { type: 'string' } }, 'application/x-ndjson': { schema: { type: 'string' } } },
         },

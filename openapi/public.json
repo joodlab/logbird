@@ -32,23 +32,29 @@
   "paths": {
     "/v1/events": {
       "get": {
+        "description": "Search stored events in one time window, one page at a time. The window runs from `from` (inclusive) to `to` (exclusive) on `timestamp`, the source's occurredAt in UTC. Without `from` it is the 24 hours before `to`; without `to` it ends at the server clock. The response states the window it applied as `range`: a history read here is complete only for that window, whatever `totalExact` says. Events sort by `timestamp`, then by event `id` in the same direction (`order`). Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`. Follow `nextCursor` until it is null, sending the same `q`, `order`, `from` and `to`; each page continues after the previous page's last event. Paging is not a snapshot: an event stored after you started, with a `timestamp` behind your position, is not on the later pages; pick late arrivals up with `receivedAt:>…` in `q`. `total` counts the whole window (a lower bound when `totalExact` is false). A scoped key or viewer token sees only its scope, and `q` cannot widen it.",
         "operationId": "public_search_events",
         "parameters": [
           {
+            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
+              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
+            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
+              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
+            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -58,6 +64,7 @@
             }
           },
           {
+            "description": "Only `query` (the default). `lang=sql` is console-only and answers 422 invalid_query.",
             "in": "query",
             "name": "lang",
             "schema": {
@@ -66,6 +73,7 @@
             }
           },
           {
+            "description": "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To page one fixed window, send the first page's `range` back as `from` and `to`. A cursor works only for the project and reader scope that received it (422 validation_error otherwise).",
             "in": "query",
             "name": "cursor",
             "schema": {
@@ -73,6 +81,7 @@
             }
           },
           {
+            "description": "Events per page, 1 to 200 (default 50).",
             "in": "query",
             "name": "limit",
             "schema": {
@@ -83,6 +92,7 @@
             }
           },
           {
+            "description": "`desc` (default) is newest first, `asc` oldest first. Events sort by `timestamp`, then by event `id` in the same direction. Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`.",
             "in": "query",
             "name": "order",
             "schema": {
@@ -102,6 +112,7 @@
                 "schema": {
                   "properties": {
                     "data": {
+                      "description": "This page of events, in the requested `order`.",
                       "items": {
                         "properties": {
                           "action": {
@@ -371,20 +382,43 @@
                       "type": "array"
                     },
                     "nextCursor": {
+                      "description": "Send as `cursor` for the next page; null on the last page.",
                       "type": [
                         "string",
                         "null"
                       ]
                     },
+                    "range": {
+                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than this field.",
+                      "properties": {
+                        "from": {
+                          "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
+                          "example": "2026-11-01T00:00:00.000Z",
+                          "type": "string"
+                        },
+                        "to": {
+                          "description": "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
+                          "example": "2026-12-01T00:00:00.000Z",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to"
+                      ],
+                      "type": "object"
+                    },
                     "tookMs": {
                       "type": "number"
                     },
                     "total": {
+                      "description": "Matching events in the whole window (every page, not only this one). When `totalExact` is false it is a lower bound: the count stops at 10,001, or did not finish within its 1 second budget.",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
                     },
                     "totalExact": {
+                      "description": "False when `total` is a lower bound. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.",
                       "type": "boolean"
                     }
                   },
@@ -783,9 +817,11 @@
     },
     "/v1/events/{eventId}": {
       "get": {
+        "description": "One event by id. No time window applies. Returns the event; its original `payload` (null under any field mask); `parents`, the causation chain through `context.parentEventId`, root first, at most 100, stopping at the first parent that is missing or outside the reader's scope; `childCount`, the events in scope that name it as their parent (list them with `q=parent:<id>` on search); and `operationSize`, the events in scope that share its `context.operationId`, itself included (0 without one). 404 not_found when the id is unknown or outside the reader's scope.",
         "operationId": "public_event_detail",
         "parameters": [
           {
+            "description": "The event `id`.",
             "in": "path",
             "name": "eventId",
             "required": true,
@@ -1485,23 +1521,29 @@
     },
     "/v1/export": {
       "get": {
+        "description": "Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers the 24 hours before `to`. The X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers state the window applied. The export reads with a fixed clock: events received after it started are not in the file.",
         "operationId": "public_stream_csv_or_jsonl",
         "parameters": [
           {
+            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
+              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
+            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
+              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
+            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -1511,6 +1553,7 @@
             }
           },
           {
+            "description": "Only `query` (the default). `lang=sql` is console-only and answers 422 invalid_query.",
             "in": "query",
             "name": "lang",
             "schema": {
@@ -1519,6 +1562,7 @@
             }
           },
           {
+            "description": "`csv`, `jsonl` (one event per line) or `jsonl-evidence` (each event with its original payload; 422 masked_export for a masked scope).",
             "in": "query",
             "name": "format",
             "required": true,
@@ -1576,6 +1620,20 @@
               "X-Logbird-Export-Schema": {
                 "description": "Export format and schema version.",
                 "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Logbird-Range-From": {
+                "description": "Inclusive start of the time window applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours.",
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "X-Logbird-Range-To": {
+                "description": "Exclusive end of the time window applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock.",
+                "schema": {
+                  "format": "date-time",
                   "type": "string"
                 }
               }
@@ -1686,23 +1744,29 @@
     },
     "/v1/facets": {
       "get": {
+        "description": "Counts of the most frequent values of `field` (optionally split `by` a second field) among the events in one time window that match `q`. Same window rules as search: without `from` it is the 24 hours before `to`, and the response states the window it applied as `range`. Values are ordered by count, most frequent first.",
         "operationId": "public_facets",
         "parameters": [
           {
+            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
+              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
+            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
+              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
+            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -1712,6 +1776,7 @@
             }
           },
           {
+            "description": "Only `query` (the default). `lang=sql` is console-only and answers 422 invalid_query.",
             "in": "query",
             "name": "lang",
             "schema": {
@@ -1720,6 +1785,7 @@
             }
           },
           {
+            "description": "The field to count: a stored field, or an attribute as `attr.<path>` (array-valued attributes count each element).",
             "in": "query",
             "name": "field",
             "required": true,
@@ -1775,6 +1841,7 @@
             }
           },
           {
+            "description": "Values returned, 1 to 100 (default 10), most frequent first. Counts cover the events in the time window (`range`) that match `q`; `otherCount` counts what the listed values leave out.",
             "in": "query",
             "name": "limit",
             "schema": {
@@ -1785,6 +1852,7 @@
             }
           },
           {
+            "description": "Optional second field: the top `byLimit` values of `by` within each returned value of `field`.",
             "in": "query",
             "name": "by",
             "schema": {
@@ -1839,6 +1907,7 @@
             }
           },
           {
+            "description": "Second-level values per value of `field`, 1 to 20 (default 5).",
             "in": "query",
             "name": "byLimit",
             "schema": {
@@ -1868,6 +1937,26 @@
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
+                    },
+                    "range": {
+                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than this field.",
+                      "properties": {
+                        "from": {
+                          "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
+                          "example": "2026-11-01T00:00:00.000Z",
+                          "type": "string"
+                        },
+                        "to": {
+                          "description": "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
+                          "example": "2026-12-01T00:00:00.000Z",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to"
+                      ],
+                      "type": "object"
                     },
                     "values": {
                       "items": {

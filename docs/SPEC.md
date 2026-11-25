@@ -324,6 +324,10 @@ Recovery never restores expired events. Workspace setup reports `retentionBusy: 
 project instead of failing the workspace; its progress is a placeholder (0, nextStep null,
 firstEventAt null), not measured emptiness.
 
+Every read resolves its time range once (`[from, to)` on `timestamp`; `from` defaults to `to` minus 24 hours and
+`to` to the server clock) and states it: search and facets return `range: { from, to }`, export sets
+`X-Logbird-Range-From` and `X-Logbird-Range-To`. The rows, the count and the stated range use the same bounds.
+
 Hot-path rules: always filter `project_id` + time range first; never `FINAL` on search; dedupe in the result
 set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` via a distinct
 count capped at 10,001 with a one-second budget that runs after the row query (a page can take up to one second

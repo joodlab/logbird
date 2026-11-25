@@ -171,8 +171,39 @@ public class HardeningFollowUpTests
         Assert.Equal("evt_1", Assert.Single(read.Events).Id);
         Assert.Null(read.NextCursor);
         Assert.Null(read.TotalExact);
+        Assert.Null(read.Range);
         Assert.Equal("evt_1", (await reader.GetEventAsync("evt_1"))!.Event.Id);
-        Assert.Equal(1, Assert.Single((await reader.FacetsAsync(new FacetQuery("outcome"))).Values).Count);
+        var counted = await reader.FacetsAsync(new FacetQuery("outcome"));
+        Assert.Equal(1, Assert.Single(counted.Values).Count);
+        Assert.Null(counted.Range);
+    }
+
+    [Fact]
+    public async Task The_applied_window_is_read_from_search_and_facets()
+    {
+        const string range = "\"range\":{\"from\":\"2026-11-21T08:00:00.000Z\",\"to\":\"2026-11-22T08:00:00.000Z\"}";
+        var page = "{\"data\":[" + EventJson + "],\"nextCursor\":null,\"total\":1,\"totalExact\":true," + range + ",\"tookMs\":1}";
+        const string facets = "{\"field\":\"outcome\",\"by\":null,\"values\":[],\"otherCount\":0," + range + "}";
+        using var reader = Reader(Server020((request, _) => Task.FromResult(Json(request.RequestUri!.AbsolutePath == "/v1/facets" ? facets : page))));
+
+        var read = await reader.SearchAsync(new EventSearch());
+        Assert.Equal("2026-11-21T08:00:00.000Z", read.Range!.From);
+        Assert.Equal("2026-11-22T08:00:00.000Z", read.Range.To);
+        var counted = await reader.FacetsAsync(new FacetQuery("outcome"));
+        Assert.Equal("2026-11-21T08:00:00.000Z", counted.Range!.From);
+        Assert.Equal("2026-11-22T08:00:00.000Z", counted.Range.To);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"2026-11-21\"")]
+    [InlineData("{\"from\":\"2026-11-21T08:00:00.000Z\"}")]
+    [InlineData("{\"from\":1,\"to\":2}")]
+    public async Task A_malformed_window_is_refused(string range)
+    {
+        using var reader = Reader(new Answer(_ => Task.FromResult(Json("{\"data\":[],\"nextCursor\":null,\"total\":0,\"range\":" + range + ",\"tookMs\":1}"))));
+        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync(new EventSearch()));
+        Assert.Equal("invalid_response", error.Code);
     }
 
     // ---------------------------------------------------------------- (a) read client: timeout and ownership
