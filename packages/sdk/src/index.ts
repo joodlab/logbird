@@ -317,6 +317,9 @@ export class Logbird {
         prepared = result;
         failure = 'invalid';
       }
+      const hookId = typeof prepared.id === 'string' && prepared.id.trim() ? prepared.id : undefined;
+      const outgoingId = options?.preserveId ? id : (hookId ?? uuidv7());
+      if (prepared.id !== outgoingId) prepared = { ...prepared, id: outgoingId };
       // The serialized snapshot also enforces the id for events with a top-level toJSON.
       if (this.serializeRedacted) failure = 'redaction_failed';
       let serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : JSON.stringify(prepared);
@@ -331,8 +334,8 @@ export class Logbird {
         this.refuse(identity, 'invalid', 'An audit event could not be prepared and was dropped');
         return;
       }
-      if (typeof copy.id !== 'string' || !copy.id.trim() || (options?.preserveId && copy.id !== id)) {
-        copy.id = options?.preserveId ? id : uuidv7();
+      if (typeof copy.id !== 'string' || !copy.id.trim() || (options?.preserveId && copy.id !== outgoingId)) {
+        copy.id = outgoingId;
         serialized = JSON.stringify(copy);
         bytes = new TextEncoder().encode(serialized).length;
         if (bytes > 256 * 1024) {
