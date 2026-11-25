@@ -1,3 +1,5 @@
+import { LogbirdError, safeDiagnostic } from './errors';
+import { stringifyEvent } from './event-bounds';
 import type { EventInput } from './index';
 
 export const DEFAULT_SECRET_KEYS = /passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key/i;
@@ -138,7 +140,7 @@ function childPaths(nodes: readonly PathNode[], key: string): readonly PathNode[
  * both. It returns the event as JSON will send it: redaction runs inside `JSON.stringify` itself (as its replacer), so
  * every value is read, and every `toJSON` applied, exactly as sending the event reads them, and a matched value is
  * replaced before it is serialized (a value JSON cannot hold, such as a `BigInt` under a secret key, never stops the
- * event). An object reached twice becomes two copies, and an event with a cycle throws a `TypeError`, as sending it would.
+ * event). An object reached twice becomes two copies. A cycle throws a `LogbirdError` with code `redaction_failed`.
  *
  * The contract: `redact()` is exact for JSON data, which is what `EventInput` types: plain objects, arrays, primitives,
  * and `toJSON` values (such as `Date`) without side effects on other parts of the event. Getters or `toJSON` with side
@@ -151,7 +153,15 @@ export function redact(options?: RedactionOptions): (event: EventInput) => Event
   return (event) => JSON.parse(serialize(event)) as EventInput;
 }
 
-export function createRedactor(options: RedactionOptions = {}, report?: (error: Error) => void): (event: EventInput) => string {
+export function createRedactor(options: RedactionOptions = {}, report?: (error: LogbirdError) => void): (event: EventInput) => string {
+  try {
+    return compileRedactor(options, report);
+  } catch {
+    throw new LogbirdError('redaction_options_invalid');
+  }
+}
+
+function compileRedactor(options: RedactionOptions, report?: (error: LogbirdError) => void): (event: EventInput) => string {
   const keys = new RegExp(options.keys ?? DEFAULT_SECRET_KEYS);
   const fields = options.changeFields && new RegExp(options.changeFields);
   const names = options.addKeys?.map(asciiLower) ?? [];
@@ -172,7 +182,7 @@ export function createRedactor(options: RedactionOptions = {}, report?: (error: 
     for (const key of ['id', 'action', 'type', 'jobId', 'attempt']) {
       if (matchesKey(key)) matchesIdentifier.add(key);
     }
-    if (matchesIdentifier.size) report(new Error(`Redaction rules match protected identifier fields: ${[...matchesIdentifier].join(', ')}`));
+    if (matchesIdentifier.size) report(new LogbirdError('redaction_identifier_rule', { count: matchesIdentifier.size }));
   }
   return (event) => {
     // Redaction runs as JSON.stringify's replacer, so the event is read exactly as sending it reads it (each getter once,
@@ -236,7 +246,7 @@ export function createRedactor(options: RedactionOptions = {}, report?: (error: 
       const { level, whole, changed } = holder;
       if (!Array.isArray(this) && IDENTITY[level].includes(key)) {
         // Identifiers are scalar. Refuse malformed containers so the identity exemption cannot hide a secret subtree.
-        if (Array.isArray(value) || isObject(value)) throw new TypeError('An identifier must serialize to a scalar');
+        if (Array.isArray(value) || isObject(value)) throw new LogbirdError('redaction_identifier_invalid');
         return value;
       }
       const paths = childPaths(holder.paths, key);
@@ -267,8 +277,20 @@ export function createRedactor(options: RedactionOptions = {}, report?: (error: 
       if (matched) return omitted(value) ? undefined : replacement;
       return keep(value, level === 'top' && key === 'changes' && Array.isArray(value) ? { ...child, level: 'changes' } : child);
     }
-    const serialized = JSON.stringify(event, replacer);
-    if (!serialized?.startsWith('{')) throw new TypeError('An audit event must serialize to a JSON object');
-    return serialized;
+    try {
+      const serialized = stringifyEvent(event, replacer);
+      if (!serialized?.startsWith('{')) throw new LogbirdError('redaction_failed');
+      return serialized;
+    } catch (error) {
+      const diagnostic = safeDiagnostic(error, 'redaction_failed');
+      if (
+        diagnostic.code === 'input_too_large' ||
+        diagnostic.code === 'input_too_deep' ||
+        diagnostic.code === 'event_too_large' ||
+        diagnostic.code === 'redaction_identifier_invalid'
+      )
+        throw diagnostic;
+      throw new LogbirdError('redaction_failed');
+    }
   };
 }

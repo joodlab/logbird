@@ -218,3 +218,71 @@ it('edge waitUntil waits for async identity before flushing', async () => {
   expect(track.mock.calls[0]?.[0].actor?.id).toBe('edge-user');
   expect(flush).toHaveBeenCalledOnce();
 });
+
+it('reports resolver exceptions by stable code without their message or cause', async () => {
+  const client = new Logbird({ enabled: false });
+  const onError = vi.fn();
+  const marker = 'fixture-private-value';
+  const capture = logbird({
+    client,
+    onError,
+    actor: () => {
+      throw new Error(marker, { cause: marker });
+    },
+  });
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(capture);
+  app.get('/', (c) => c.text(c.var.audit('fixture.audit')));
+  expect((await app.request('/')).status).toBe(200);
+  await capture.shutdown();
+  expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'capture_resolver_failed' }));
+  const error = onError.mock.calls[0]?.[0];
+  expect(error.message).not.toContain(marker);
+  expect(error.cause).toBeUndefined();
+});
+
+it('refuses oversized captures before running Hono resolvers', async () => {
+  const actor = vi.fn();
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
+  const capture = logbird({ client, actor });
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(capture);
+  app.get('/', (c) => c.text(c.var.audit('fixture.audit', { metadata: { token: 'a'.repeat(2 * 1024 * 1024) } })));
+  expect((await app.request('/')).status).toBe(200);
+  await capture.shutdown();
+  expect(actor).not.toHaveBeenCalled();
+  expect(client.droppedByReason).toEqual({ input_too_large: 1 });
+});
+
+it('refuses an oversized Hono action before invoking the resolvers', async () => {
+  const actor = vi.fn();
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
+  const capture = logbird({ client, actor });
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(capture);
+  app.get('/', (c) => c.text(c.var.audit('a'.repeat(2 * 1024 * 1024))));
+  expect((await app.request('/')).status).toBe(200);
+  await capture.shutdown();
+  expect(actor).not.toHaveBeenCalled();
+  expect(client.droppedByReason).toEqual({ input_too_large: 1 });
+});
+
+it('counts the automatic event when the Hono skip hook throws', async () => {
+  const onDrop = vi.fn();
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', onDrop });
+  const capture = logbird({
+    client,
+    autoTrack: {
+      skip: () => {
+        throw new Error('fixture-private-value');
+      },
+    },
+  });
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(capture);
+  app.post('/', (c) => c.text('ok'));
+  expect((await app.request('/', { method: 'POST' })).status).toBe(200);
+  await capture.shutdown();
+  expect(client.droppedByReason).toEqual({ invalid: 1 });
+  expect(onDrop).toHaveBeenCalledWith(expect.objectContaining({ action: 'http.post' }), { reason: 'invalid', mayBeStored: false });
+});
