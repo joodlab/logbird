@@ -20,6 +20,34 @@ it('denies by default and attaches h3 audit context through the real h3 handler'
   await client.shutdown();
 });
 
+it('sends capture events through the configured client redaction', async () => {
+  const fetch = vi.fn(async (_request: unknown, init: RequestInit) => {
+    const { events } = JSON.parse(init.body as string);
+    return Response.json({ accepted: 1, ids: [events[0].id], rejected: [] }, { status: 202 });
+  });
+  vi.stubGlobal('fetch', fetch);
+  const app = createApp();
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', redaction: { paths: ['metadata.email'] } });
+  app.use(eventHandler((event) => attachAudit(event, client, { authorize: () => false })));
+  app.use(
+    eventHandler(async (event) => {
+      event.context.audit('record.updated', { metadata: { email: 'guest@example.invalid' } });
+      await event.context.audit.pending();
+      return { ok: true };
+    }),
+  );
+  try {
+    expect((await toWebHandler(app)(new Request('http://local/'))).status).toBe(200);
+    await client.shutdown();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toMatchObject({
+      events: [{ action: 'record.updated', metadata: { email: '[redacted]' } }],
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it('reads inbound correlation headers only when the hooks opt in (#321)', async () => {
   const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
   const track = vi.spyOn(client, 'track').mockReturnValue(undefined as never);

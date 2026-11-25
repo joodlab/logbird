@@ -692,7 +692,7 @@ it('merges defaults one level deep before stamping and applying hooks', async ()
   });
   expect(hook.mock.calls[0]?.[0].metadata.nested).toEqual({ fresh: true });
 });
-it.each(['null', 'undefined', 'throw'])('filters %s without overflow diagnostics', async (mode) => {
+it.each(['null', 'undefined', 'throw'])('filters nullish hooks and accounts for throwing hooks (%s)', async (mode) => {
   const onError = vi.fn(),
     onDrop = vi.fn();
   const sdk = new Logbird({
@@ -708,8 +708,8 @@ it.each(['null', 'undefined', 'throw'])('filters %s without overflow diagnostics
   sdk.track({ action: 'secret' });
   await sdk.shutdown();
   expect(sdk.queueSize).toBe(0);
-  expect(sdk.dropped).toBe(0);
-  expect(onDrop).not.toHaveBeenCalled();
+  expect(sdk.dropped).toBe(mode === 'throw' ? 1 : 0);
+  expect(onDrop).toHaveBeenCalledTimes(mode === 'throw' ? 1 : 0);
   expect(onError).toHaveBeenCalledTimes(mode === 'throw' ? 1 : 0);
 });
 

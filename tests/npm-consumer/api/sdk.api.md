@@ -135,17 +135,24 @@ export interface LogbirdOptions {
     onDrop?: (event: EventInput) => void;
     // (undocumented)
     onError?: (error: Error) => void;
+    redaction?: false | RedactionOptions;
 }
 
 // @public
 export const MAX_WEBHOOK_SIGNATURES = 10;
 
 // @public
-export function redact(options?: {
-    keys?: RegExp;
+export function redact(options?: RedactionOptions): (event: EventInput) => EventInput;
+
+// @public (undocumented)
+export interface RedactionOptions {
+    addKeys?: string[];
     changeFields?: RegExp;
+    keepPaths?: string[];
+    keys?: RegExp;
+    paths?: string[];
     replacement?: string;
-}): (event: EventInput) => EventInput;
+}
 
 // @public
 export function signWebhook(input: SignWebhookOptions): Promise<string>;
