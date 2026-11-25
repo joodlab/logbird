@@ -125,7 +125,9 @@ applied as `page.range` (absent from servers older than that field). `order: 'as
 ```ts
 import { iterateAuditTrail, readAuditEvent, readAuditTrail, trailQuery } from '@logbird/sdk/read';
 
-const options = { endpoint, readKey };
+// A tenant-scoped read key: detail and its parents stay inside the tenant too (a project-wide key's detail can
+// include another tenant's parent).
+const options = { endpoint, readKey: tenantScopedReadKey };
 const trail = { target: { type: 'booking', id: 'bk_1042' }, tenant: 'biz_7', range: { from: '2026-01-01T00:00:00Z' } };
 const page = await readAuditTrail(options, trailQuery({ ...trail, order: 'asc' })); // one page; page.range is the window
 for await (const event of iterateAuditTrail(options, { ...trail, order: 'asc' })) render(event); // every page
@@ -139,7 +141,7 @@ stored while you read, with a timestamp behind your position (or before `from`),
 arrivals, read again later with `receivedAt:>=` in `q`, starting well before the last `receivedAt` you saw (receipt
 times are not a strict sequence), and skip ids you already have. `readAuditEvent` returns one event with its nearest
 ancestors (`parents`, furthest first), how many events name it as their parent (`childCount`; list them with
-`parent:<id>` in `q`), how many share its operation, and its original `payload` (null under a field mask).
+`parent:` and the id quoted by the query language rules, over a window that covers them), how many share its operation, and its original `payload` (null under a field mask).
 
 `trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or
 query, and a selector key passed without a value (say `tenant: undefined`) is an error, not an absent filter. A `q` must

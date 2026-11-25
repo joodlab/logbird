@@ -28,7 +28,7 @@ server, not serialized runtime config. Authorize every page/cursor; tenant selec
 If authorize throws a `TrailQueryError` (a `TypeError`, from `trailQuery`) or returns a query with no `q`, the route answers 400 and reads
 nothing. Because authorize decides the scope on the server, `useAuditTrail({})` may send an empty trail to this route;
 a selector passed without a value (`tenant: undefined`) still throws on the client, and so does a trail with a
-selector but no `range.from`. The window of an empty trail is the hook's to choose: build its query with
+selector but no `range.from` (pass `range: SERVER_DEFAULT_RANGE` to read the last 24 hours on purpose). The window of an empty trail is the hook's to choose: build its query with
 `trailQuery({ …, range: { from } })`, which refuses a trail without a window (a hand-built `{ q }` without `from` reads
 only the server's last 24 hours). Bounds the component passes (`range`) arrive in the hook's `query`. Only a `TrailQueryError` from the
 SDK becomes a 400; any other error in `authorize` stays a server error.

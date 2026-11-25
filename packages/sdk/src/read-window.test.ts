@@ -286,3 +286,96 @@ describe('the helpers keep what the caller and the server gave', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('iterateAuditTrail, round two', () => {
+  const reply = (pages: Record<string, unknown>[]) => {
+    let i = 0;
+    const fetch = vi.fn(async () => json(pages[Math.min(i++, pages.length - 1)]));
+    return { fetch, options: { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch } };
+  };
+  const collect = async (options: Parameters<typeof iterateAuditTrail>[0], trail: Parameters<typeof iterateAuditTrail>[1]) => {
+    const seen: string[] = [];
+    let error: unknown;
+    try {
+      for await (const e of iterateAuditTrail(options, trail)) seen.push(e.id);
+    } catch (cause) {
+      error = cause;
+    }
+    return { seen, error: error instanceof Error ? error.message : undefined };
+  };
+  const windowed = (ids: string[], nextCursor: string | null, range: unknown = { from: FROM, to: TO }) => ({
+    data: ids.map(event),
+    nextCursor,
+    total: 9,
+    ...(range === null ? {} : { range }),
+    tookMs: 1,
+  });
+
+  it('refuses a later page that stops reporting the window, before yielding it', async () => {
+    const { options } = reply([windowed(['a'], 'c1'), windowed(['b'], null, null)]);
+    expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+      seen: ['a'],
+      error: expect.stringMatching(/stopped reporting it/),
+    });
+  });
+
+  it('refuses a reported window that is not two instants, start first', async () => {
+    for (const range of [{ from: FROM }, { from: TO, to: FROM }, { from: FROM, to: 'soon' }]) {
+      const { options } = reply([windowed(['a'], 'c1', range)]);
+      expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+        seen: [],
+        error: expect.stringMatching(/not two instants/),
+      });
+    }
+  });
+
+  it('needs bounds it can compare: with Z or an offset, a Date, or a date alone', async () => {
+    const { options, fetch } = reply([windowed(['a'], null)]);
+    expect(() => iterateAuditTrail(options, { tenant: 'acme', range: { from: '2026-11-01T00:00:00' } })).toThrow(/has no time zone/);
+    expect(() => iterateAuditTrail(options, { tenant: 'acme', range: { from: FROM, to: '2026-11-02T00:00' } })).toThrow(/has no time zone/);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await collect(options, { tenant: 'acme', range: { from: '2026-11-01', to: '2026-11-02T03:00:00+03:00' } })).toEqual({
+      seen: ['a'],
+      error: undefined,
+    });
+  });
+
+  it('refuses a page holding an event outside the window, before yielding any of it', async () => {
+    const outside = { ...windowed(['a'], null), data: [event('a'), { ...event('b'), timestamp: TO }] };
+    const { options } = reply([outside]);
+    expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
+      seen: [],
+      error: expect.stringMatching(/outside the window/),
+    });
+  });
+
+  it('reads the transport once, when called', async () => {
+    const { fetch } = reply([windowed(['a'], null)]);
+    let reads = 0;
+    const options = {
+      endpoint: 'https://logbird.test',
+      readKey: 'k',
+      get fetch() {
+        reads++;
+        return reads === 1 ? (fetch as unknown as typeof globalThis.fetch) : undefined;
+      },
+    };
+    expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({ seen: ['a'], error: undefined });
+    expect(reads).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('readAuditEvent returns only the event asked for', () => {
+  it('refuses another event, or an answer that is not a detail', async () => {
+    for (const body of [
+      { event: event('other'), payload: null, parents: [], childCount: 0, operationSize: 0 },
+      { error: { code: 'x', message: 'y' } },
+      { event: event('e1'), parents: [], childCount: 0, operationSize: 0 },
+    ]) {
+      const fetch = vi.fn(async () => json(body));
+      const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+      await expect(readAuditEvent(options, 'e1')).rejects.toThrow(/not the detail of the event asked for/);
+    }
+  });
+});

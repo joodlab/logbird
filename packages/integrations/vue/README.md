@@ -15,8 +15,9 @@ const trail = useAuditTrail({
 });
 ```
 
-`AuditTrailOptions`: required fetcher(query, signal), optional target `{ id, type? }`, actor, tenant,
-q, range `{ from, to }` (each a `Date`, epoch milliseconds or an ISO 8601 string), limit, session. Pass a ref/getter
+`AuditTrailOptions`: required fetcher(query, signal) and range `{ from, to? }` (each a `Date`, epoch milliseconds
+or an ISO 8601 string; or `SERVER_DEFAULT_RANGE` for the server's last 24 hours); optional target `{ id, type? }`,
+actor, tenant, q, order (`asc` or `desc`), limit, session. A trail without `range.from` sets `error` and fetches nothing. Pass a ref/getter
 for reactive options. Returned refs: data, loading, error, nextCursor; methods: refresh(), loadMore(). Unmount cancels
 requests; stale responses cannot replace newer selectors. Pagination deduplicates event IDs.
 Define the fetcher once (not inline in a getter): rows and cursor belong to the trail, `session` and fetcher that

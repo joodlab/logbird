@@ -75,7 +75,7 @@ pre|     // Built from the user's account; the browser's filter is ignored.
 pre|     // trailQuery quotes the id for the query language.
 pre|     return trailQuery({
 pre|       tenant: tenantId,
-pre|       // A trail names its window, fixed: a start recomputed per request would move between pages.
+pre|       // A trail names its window: a fixed start (one recomputed per request would move between pages); the end is each request's clock.
 pre|       range: { from: '2026-01-01T00:00:00Z' },
 pre|       cursor: typeof query.cursor === 'string' ? query.cursor : undefined,
 pre|     });

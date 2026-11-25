@@ -8,7 +8,7 @@ import { createSSRApp, h, onServerPrefetch } from 'vue';
 import { endpoint, options } from './audit.server';
 
 const app = new Hono<{ Variables: AuditVariables }>();
-/** The demo shows the last 30 days, fixed when the server starts. */
+/** The demo reads from 30 days before the server started; the end is each request's clock. */
 const historyFrom = new Date(Date.now() - 30 * 86_400_000);
 const capture = logbird(options);
 app.use(capture);
@@ -23,7 +23,7 @@ app.get('/history', async (c) => {
   const view = createSSRApp({
     setup() {
       // The fetcher is server-owned; keys are never serialized to component props.
-      // One fixed window for the whole history (a `from` computed per request would move between pages).
+      // A fixed start (one computed per request would move between pages); the end is each request's clock.
       const trail = useAuditTrail({ fetcher: read, target: { id: 'demo-record' }, range: { from: historyFrom } });
       onServerPrefetch(async () => {
         await trail.refresh();
