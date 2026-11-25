@@ -1,4 +1,6 @@
 import { getCaptureQueue } from './capture-queue';
+import { LogbirdError, safeDiagnostic } from './errors';
+import { checkEventBounds } from './event-bounds';
 import { type EventInput, type Logbird, uuidv7 } from './index';
 export interface AuditCarrier {
   operationId: string;
@@ -46,7 +48,7 @@ export interface CaptureOptions<C> {
    * events are recorded and searched under, and can make unrelated requests look like one.
    */
   useRequestIdHeader?: boolean;
-  onError?: (error: Error) => void;
+  onError?: (error: LogbirdError) => void;
 }
 export function report(onError: CaptureOptions<unknown>['onError'], error: unknown, client?: Logbird): void {
   if (client) {
@@ -55,7 +57,7 @@ export function report(onError: CaptureOptions<unknown>['onError'], error: unkno
   }
   if (onError)
     void Promise.resolve()
-      .then(() => onError(error instanceof Error ? error : new Error('Logbird capture failed')))
+      .then(() => onError(safeDiagnostic(error, 'capture_failed')))
       .catch(() => undefined);
 }
 /**
@@ -65,7 +67,7 @@ export function report(onError: CaptureOptions<unknown>['onError'], error: unkno
  * `trace:` search should be read that way; an ingress that must not trust it should strip or overwrite the header.
  */
 export async function createAudit<C>(options: CaptureOptions<C>, context: C, request: Request): Promise<Audit> {
-  if (typeof window !== 'undefined') throw new Error('Logbird ingest is server-only');
+  if (typeof window !== 'undefined') throw new LogbirdError('capture_server_only');
   // A correlation id is used whole or not at all (#206): cutting two long ids to 256 characters could make them one.
   // Longer than 256 means ignored, with the usual generated fallback, as in the ASP.NET Core integration.
   const header = (name: string) => {
@@ -116,9 +118,9 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
           const value = await resolver(context);
           // Missing correlation resolvers retain the request's stable fallback.
           if (value !== undefined || (field !== 'requestId' && field !== 'operationId')) target[field] = value;
-        } catch (error) {
+        } catch {
           delete target[field];
-          queue.notify(options.onError, error);
+          queue.notify(options.onError, new LogbirdError('capture_resolver_failed'));
         }
       }),
     );
@@ -137,7 +139,8 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
     const task = queue.defer(
       { action, id },
       async () => {
-        if (invalidId) throw new Error('Logbird capture failed');
+        if (invalidId) throw new LogbirdError('capture_failed');
+        checkEventBounds(event);
         const fields = Object.fromEntries(
           Object.keys(event)
             .filter((key) => key !== 'id')
@@ -151,7 +154,7 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
           occurredAt: typeof occurredAt === 'string' || typeof occurredAt === 'number' ? occurredAt : timestamp,
         });
       },
-      () => queue.notify(options.onError, new Error('Logbird capture failed')),
+      (error) => queue.notify(options.onError, error),
     );
     if (task) register(task);
     return id;
@@ -196,7 +199,7 @@ export interface JobAuditOptions {
   actor?: EventInput['actor'];
   impersonator?: EventInput['impersonator'];
   tenant?: EventInput['tenant'];
-  onError?: (error: Error) => void;
+  onError?: CaptureOptions<unknown>['onError'];
 }
 export function jobAudit(options: JobAuditOptions): Audit {
   const { job, carrier, executor } = options;

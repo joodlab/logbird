@@ -88,6 +88,28 @@ export interface AuditEvent {
 export function isTrailQueryError(error: unknown): error is TrailQueryError;
 
 // @public
+export class LogbirdError extends Error {
+    constructor(code: LogbirdErrorCode, details?: LogbirdErrorDetails);
+    // (undocumented)
+    readonly code: LogbirdErrorCode;
+    // (undocumented)
+    readonly count?: number;
+    // (undocumented)
+    readonly status?: number;
+}
+
+// @public (undocumented)
+export type LogbirdErrorCode = 'options_invalid' | 'credentials_required' | 'client_closed' | 'before_send_failed' | 'event_invalid' | 'input_too_large' | 'input_too_deep' | 'event_too_large' | 'events_rejected' | 'ingest_http_error' | 'ingest_redirect' | 'ingest_unacknowledged' | 'ingest_request_failed' | 'ingest_requests_outstanding' | 'ingest_timeout' | 'shutdown_timeout' | 'response_too_large' | 'response_invalid' | 'read_server_only' | 'read_request_failed' | 'read_http_error' | 'read_redirect' | 'read_invalid_response' | 'read_timeout' | 'capture_failed' | 'capture_incompatible_client' | 'capture_server_only' | 'capture_resolver_failed' | 'redaction_failed' | 'redaction_identifier_invalid' | 'redaction_options_invalid' | 'redaction_identifier_rule';
+
+// @public (undocumented)
+export interface LogbirdErrorDetails {
+    // (undocumented)
+    count?: number;
+    // (undocumented)
+    status?: number;
+}
+
+// @public
 export type RangeBound = string | Date | number;
 
 // @public

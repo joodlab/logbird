@@ -14,7 +14,11 @@
 import { Hono } from 'hono';
 import { Logbird } from '@logbird/sdk';
 import { logbird, type AuditVariables } from '@logbird/hono';
-const client = new Logbird({ endpoint: (process.env.LOGBIRD_ENDPOINT)!, apiKey: (process.env.LOGBIRD_INGEST_KEY)!, onError: console.error });
+const client = new Logbird({
+  endpoint: process.env.LOGBIRD_ENDPOINT!,
+  apiKey: process.env.LOGBIRD_INGEST_KEY!,
+  onError: ({ code, status, count }) => console.error('Logbird delivery', { code, status, count }),
+});
 const capture = logbird({ client, actor: c => ({ type: 'user', id: 'resolved-session-user' }), tenant: c => ({ id: 'resolved-session-tenant' }), autoTrack: {} });
 const app = new Hono<{ Variables: AuditVariables }>();
 app.use(capture);
@@ -58,8 +62,9 @@ app.post('/records', async (c, next) => {
 
 Resolvers run for each audit call; automatic tracking after the route also sees the guard's
 identity. Explicit event actor/tenant/executor/context.ip skip the corresponding resolver.
-Failures omit only the failing field and report onError. audit returns the event id immediately;
-use `await c.var.audit.carrier({ parentEventId: eventId })` to propagate into worker data.
+Failures omit only the failing field and report `capture_resolver_failed` through `onError`.
+Log the error's `code` and any numeric `status` or `count`. `audit()` returns the event ID
+immediately. Use `await c.var.audit.carrier({ parentEventId: eventId })` to propagate it into worker data.
 Edge `waitUntil` drains pending context resolution before flushing. Both
 `audit.pending()` and the edge wait include `audit.carrier()` resolvers. Carrier
 resolution is host work outside the SDK's `maxQueueSize` limit. Node hosts

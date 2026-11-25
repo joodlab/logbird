@@ -1,3 +1,4 @@
+import { LogbirdError } from '@logbird/sdk';
 import { type Audit, type CaptureOptions, createAudit, report, shutdown } from '@logbird/sdk/integration';
 import type { Context, MiddlewareHandler } from 'hono';
 
@@ -22,8 +23,8 @@ export function logbird(options: LogbirdOptions): MiddlewareHandler<{ Variables:
             outcome: c.error || c.res.status >= 400 ? 'failure' : 'success',
             metadata: { path: c.req.path, status: c.res.status },
           });
-      } catch (error) {
-        report(options.onError, error, options.client);
+      } catch {
+        report(options.onError, new LogbirdError('capture_failed'), options.client);
       }
       // Hono throws when no execution context exists on Node.
       let execution: { waitUntil: (promise: Promise<unknown>) => void } | undefined;

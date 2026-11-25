@@ -1,8 +1,9 @@
+import { LogbirdError } from './errors';
 import type { EventInput } from './index';
 
 interface CaptureQueue {
-  defer(identity: EventInput, prepare: () => Promise<EventInput>, onFailure: () => void): Promise<void> | undefined;
-  notify(callback: ((error: Error) => void) | undefined, error: unknown): void;
+  defer(identity: EventInput, prepare: () => Promise<EventInput>, onFailure: (error: LogbirdError) => void): Promise<void> | undefined;
+  notify(callback: ((error: LogbirdError) => void) | undefined, error: unknown): void;
 }
 
 // The client and its adapter can resolve the same SDK version from different installed copies.
@@ -14,6 +15,6 @@ export function attachCaptureQueue(client: object, queue: CaptureQueue) {
 
 export function getCaptureQueue(client: object): CaptureQueue {
   const queue = Reflect.get(client, captureQueue) as CaptureQueue | undefined;
-  if (!queue) throw new Error('The supplied Logbird client cannot prepare integration captures');
+  if (!queue) throw new LogbirdError('capture_incompatible_client');
   return queue;
 }

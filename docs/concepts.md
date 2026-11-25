@@ -133,6 +133,11 @@ is kept. Send a correction with a new id and `context.parentEventId` pointing to
 The TypeScript SDK reports that event through `onDrop` with the rejection code.
 Its `onError` callback receives the rejection count.
 
+The TypeScript SDK refuses a redirect for authenticated delivery and read
+requests. It bounds response bodies and reports stable diagnostic codes. The
+event data in an `onDrop` snapshot is intended for recovery, so keep it out
+of operational logs.
+
 `503 ingest_pending` and `503 ingest_unavailable` mean retry unsettled events,
 honoring `Retry-After`. Healthy siblings commit before a pending response and remain
 idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `warnings`,

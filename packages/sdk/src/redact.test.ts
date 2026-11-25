@@ -62,7 +62,7 @@ it('redacts an object reached twice as two copies, so an identity is never redac
 it('throws for an event with a cycle, as sending it would, instead of redacting forever', () => {
   const metadata: Record<string, unknown> = { plan: 'pro' };
   metadata.self = metadata;
-  expect(() => redact()({ id: 'e', action: 'a', metadata } as EventInput)).toThrow(TypeError);
+  expect(() => redact()({ id: 'e', action: 'a', metadata } as EventInput)).toThrow('Logbird redaction failed');
 });
 
 it('returns the event as JSON sends it', () => {
@@ -327,13 +327,13 @@ it('runs the hook before default redaction and checks the final serialized size'
   const { events } = capture();
   const onError = vi.fn();
   const onDrop = vi.fn();
-  const token = 'x'.repeat(300 * 1024);
+  const token = 'x'.repeat(225 * 1024);
   const beforeSend = vi.fn((event: EventInput) =>
     event.action === 'keep' ? { ...event, actor: { id: 'staff', token }, metadata: { ...event.metadata, authorization: token } } : event,
   );
   const client = new Logbird({ ...connection, beforeSend, onError, onDrop, defaults: { metadata: { password: token } } });
   client.track({ action: 'keep', metadata: { token } });
-  client.track({ action: 'oversize', metadata: { safe: token } });
+  client.track({ action: 'oversize', metadata: { safe: 'x'.repeat(300 * 1024) } });
   await client.shutdown();
   expect(beforeSend.mock.calls[0]?.[0].metadata?.token).toBe(token);
   expect(events).toMatchObject([
@@ -395,7 +395,7 @@ it.each(['', '.private', 'private.', 'private..value', 'private.**', 'private.pr
   (path) => {
     for (const option of ['paths', 'keepPaths'] as const) {
       const redaction = { [option]: ['metadata.valid', path] };
-      const message = `Invalid redaction ${option} entry at index 1`;
+      const message = 'Invalid Logbird redaction options';
       expect(() => new Logbird({ ...connection, redaction })).toThrow(message);
       expect(() => redact(redaction)).toThrow(message);
     }
@@ -418,7 +418,7 @@ it('reports identifier matches once at startup, then ignores them', async () => 
   });
   await Promise.resolve();
   expect(onError).toHaveBeenCalledOnce();
-  expect(onError.mock.calls[0]).toEqual([expect.objectContaining({ message: expect.stringMatching(/actor\.id.*targets\[\]\.type.*jobId/) })]);
+  expect(onError.mock.calls[0]).toEqual([expect.objectContaining({ code: 'redaction_identifier_rule', count: expect.any(Number) })]);
   const event = {
     action: 'a',
     id: 'keep',
@@ -457,17 +457,15 @@ it('refuses unredactable events, counts them, and keeps recording without leakin
   await client.shutdown();
   expect(events).toMatchObject([{ id: 'safe', metadata: { guest: { email: '[redacted]' } } }]);
   expect(client.dropped).toBe(3);
-  expect(client.droppedByReason.redaction_failed).toBe(3);
+  expect(client.droppedByReason).toEqual({ invalid: 1, redaction_failed: 2 });
   expect(onDrop.mock.calls).toEqual(
     ['cycle', 'throwing', 'bad-json'].map((id) => [
       { id, action: 'a' },
-      { reason: 'redaction_failed', mayBeStored: false },
+      { reason: id === 'cycle' ? 'invalid' : 'redaction_failed', mayBeStored: false },
     ]),
   );
   expect(onError).toHaveBeenCalledTimes(3);
-  for (const [error] of onError.mock.calls) {
-    expect(error.message).toBe('An audit event could not be redacted and was dropped');
-  }
+  expect(onError.mock.calls.map(([error]) => error.code)).toEqual(['event_invalid', 'redaction_failed', 'redaction_failed']);
 });
 
 it('refuses malformed identifier subtrees and reports only safe scalar identity', async () => {
@@ -487,7 +485,7 @@ it('refuses malformed identifier subtrees and reports only safe scalar identity'
       { reason: 'redaction_failed', mayBeStored: false },
     ],
   ]);
-  expect(onError.mock.calls[0]?.[0].message).toBe('An audit event could not be redacted and was dropped');
+  expect(onError.mock.calls[0]?.[0].code).toBe('redaction_failed');
 });
 
 it('accounts for throwing metadata getters and redaction hooks without exposing exceptions or data', async () => {
@@ -522,9 +520,7 @@ it('accounts for throwing metadata getters and redaction hooks without exposing 
     ],
   ]);
   expect(onError).toHaveBeenCalledTimes(2);
-  for (const [error] of onError.mock.calls) {
-    expect(error.message).toBe('An audit event could not be prepared and was dropped');
-  }
+  expect(onError.mock.calls.map(([error]) => error.code)).toEqual(['event_invalid', 'before_send_failed']);
 });
 
 it('applies client redaction to the default host and BullMQ job audit entry points', async () => {

@@ -1,6 +1,11 @@
 import { parseQueryExpression } from '@logbird/contracts/query-syntax';
 import { formatRecordTerm, quoteQueryValue } from '@logbird/contracts/record-selector';
 
+import { LogbirdError } from './errors';
+import { cancelBody, isRedirect, READ_RESPONSE_BYTES, readJson } from './response';
+
+export { LogbirdError, type LogbirdErrorCode, type LogbirdErrorDetails } from './errors';
+
 /** Structural public read types, checked against contracts in read.test.ts. */
 export interface SearchQuery {
   from?: string;
@@ -333,9 +338,19 @@ export interface ReadOptions {
  * `q: 'timestamp:*'` to read a whole project on purpose.
  */
 export async function readAuditTrail(options: ReadOptions, query: SearchInput, signal?: AbortSignal): Promise<SearchResponse> {
-  if (typeof window !== 'undefined') throw new Error('Logbird read keys are server-only');
-  const snapshot = snapshotSearchQuery(query);
-  const url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events`);
+  if (typeof window !== 'undefined') throw new LogbirdError('read_server_only');
+  let snapshot: SearchSnapshot;
+  try {
+    snapshot = snapshotSearchQuery(query);
+  } catch {
+    throw new TrailQueryError('readAuditTrail could not use the query options');
+  }
+  let url: URL;
+  try {
+    url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events`);
+  } catch {
+    throw new LogbirdError('read_request_failed');
+  }
   for (const field of SEARCH_FIELDS) {
     const value = snapshot[field];
     if (value !== undefined) url.searchParams.set(field, String(value));
@@ -347,10 +362,68 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
       'readAuditTrail',
       "the query has no `q`, so it would read the whole project; build it with trailQuery, or pass `q: 'timestamp:*'` to read the whole project on purpose.",
     );
-  const response = await (options.fetch ?? fetch)(url, {
-    headers: { Authorization: `Bearer ${options.readKey}` },
-    signal: signal ?? AbortSignal.timeout(30_000),
+  const timeout = AbortSignal.timeout(30_000);
+  const controller = new AbortController();
+  const readSignal = controller.signal;
+  const aborted = () => {
+    if (signal?.aborted) throw new DOMException('Logbird read aborted', 'AbortError');
+    if (timeout.aborted) throw new LogbirdError('read_timeout');
+  };
+  aborted();
+  const cancel = () => controller.abort();
+  signal?.addEventListener('abort', cancel, { once: true });
+  timeout.addEventListener('abort', cancel, { once: true });
+  let interrupt!: () => void;
+  const interrupted = new Promise<never>((_, reject) => {
+    interrupt = () => reject(new LogbirdError('read_request_failed'));
   });
-  if (!response.ok) throw new Error(`Logbird read HTTP ${response.status}`);
-  return response.json() as Promise<SearchResponse>;
+  readSignal.addEventListener('abort', interrupt, { once: true });
+  try {
+    let response: Response;
+    try {
+      const request = (options.fetch ?? fetch)(url, {
+        headers: { Authorization: `Bearer ${options.readKey}` },
+        redirect: 'manual',
+        signal: readSignal,
+      }).then((answer) => {
+        if (readSignal.aborted) cancelBody(answer);
+        return answer;
+      });
+      response = await Promise.race([request, interrupted]);
+    } catch {
+      aborted();
+      throw new LogbirdError('read_request_failed');
+    }
+    if (readSignal.aborted) {
+      cancelBody(response);
+      aborted();
+    }
+    const redirected = isRedirect(response);
+    if (!response.ok || redirected) {
+      cancelBody(response);
+      throw new LogbirdError(redirected ? 'read_redirect' : 'read_http_error', { status: response.status });
+    }
+    try {
+      const result = (await readJson(response, READ_RESPONSE_BYTES, readSignal)) as SearchResponse | null;
+      if (
+        !result ||
+        !Array.isArray(result.data) ||
+        !(result.nextCursor === null || typeof result.nextCursor === 'string') ||
+        !Number.isSafeInteger(result.total) ||
+        !Number.isFinite(result.tookMs) ||
+        (result.totalExact !== undefined && typeof result.totalExact !== 'boolean')
+      ) {
+        throw new LogbirdError('read_invalid_response');
+      }
+      return result;
+    } catch (error) {
+      aborted();
+      if (error instanceof LogbirdError && error.code === 'response_too_large') throw error;
+      throw new LogbirdError('read_invalid_response');
+    }
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    timeout.removeEventListener('abort', cancel);
+    readSignal.removeEventListener('abort', interrupt);
+  }
 }
