@@ -103,14 +103,14 @@ const publicLang = z
   .optional()
   .meta({ description: 'Only `query` (the default). `lang=sql` is console-only and answers 422 invalid_query.' });
 const STORED_TIMESTAMP =
-  "the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable (an unusable value is kept in `attributes['logbird.occurredAt.rejected']`)";
+  "the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable (an unusable value is usually noted, cut to 256 characters, in `attributes['logbird.occurredAt.rejected']`; the event detail's `payload` keeps what was sent)";
 /** The time window and filter of the /v1 reads, described for OpenAPI (the console routes keep the bare schema). */
 const publicWindow = {
   from: z
     .string()
     .optional()
     .meta({
-      description: `Start of the time window, inclusive, on ${STORED_TIMESTAMP}. Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: \`to\` minus 24 hours. The window applied is returned as \`range\` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).`,
+      description: `Start of the time window, inclusive, on ${STORED_TIMESTAMP}. Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: \`to\` minus 24 hours. A bound outside what the store holds (1900-01-01 to 2299-12-31, UTC) is moved onto that limit; no event lies beyond it. The window applied is returned as \`range\` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).`,
       example: '2026-11-01T00:00:00.000Z',
     }),
   to: z.string().optional().meta({
@@ -129,7 +129,7 @@ export const publicSearchQuerySchema = searchQuerySchema.extend({
   ...publicWindow,
   cursor: z.string().optional().meta({
     description:
-      "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To page one fixed set of events, send the first page's `range` back as `from` and `to`, and use absolute times in `q`. A cursor this server issues works only for the project and reader scope that received it (422 validation_error otherwise).",
+      "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To keep the same window and filter on every page, send the first page's `range` back as `from` and `to`, and use absolute times in `q`; the pages still see events stored or removed while you page. A cursor this server issues works only for the project and reader scope that received it (422 validation_error otherwise).",
   }),
   limit: z.coerce.number().int().min(1).max(200).default(50).meta({ description: 'Events per page, 1 to 200 (default 50).' }),
   order: z.enum(['desc', 'asc']).default('desc').meta({

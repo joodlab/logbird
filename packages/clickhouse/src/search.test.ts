@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { ClickHouseClient } from './client';
 import { normalizeEvent } from './normalize';
-import { getEvent, hasExpiredEvents, searchEvents } from './queries';
+import { getEvent, hasExpiredEvents, searchEvents, timeRange } from './queries';
 
 const from = '2026-11-07T10:00:00.000Z',
   to = '2026-11-07T11:00:00.000Z';
@@ -215,4 +215,16 @@ it('states the window its rows and count used, explicit or by default, from one 
   } finally {
     vi.useRealTimers();
   }
+});
+it('moves a bound outside what the store holds onto its limit, and states the moved bound', () => {
+  expect(timeRange({ from: '0000-01-01T00:00:00.000Z', to })).toEqual({ from: '1900-01-01T00:00:00.000Z', to });
+  expect(timeRange({ from: '0001-01-01T00:00:00Z', to: '+010000-01-01T00:00:00.000Z' })).toEqual({
+    from: '1900-01-01T00:00:00.000Z',
+    to: '2299-12-31T23:59:59.999Z',
+  });
+  // A window wholly outside the store collapses: refused like any empty window.
+  expect(() => timeRange({ to: '0001-01-01T00:00:00.000Z' })).toThrow('Invalid time range');
+  // An applied window resolves to itself.
+  const applied = timeRange({ from: '1850-06-01', to: '2026-11-07T11:00:00+01:00' });
+  expect(timeRange(applied)).toEqual(applied);
 });

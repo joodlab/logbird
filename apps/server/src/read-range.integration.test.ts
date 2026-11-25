@@ -37,7 +37,12 @@ beforeAll(async () => {
   ].map((e) => ({ id: e.id, action: 'document.updated', tenant: { id: e.tenant }, occurredAt: e.occurredAt, targets: [{ type: 'doc', id: 'd1' }] }));
   expect((await f.post(events)).status).toBe(202);
 });
+/** An export releases its admission lease after its outcome is confirmed, a moment after the body ends: wait for it. */
+async function exportsSettled() {
+  for (let i = 0; i < 60 && (await prisma.exportLease.count({ where: { workspaceId: f.org } })); i++) await new Promise((r) => setTimeout(r, 250));
+}
 afterAll(async () => {
+  await exportsSettled();
   // Exports record workspace activity: remove it with the fixture.
   await prisma.exportLease.deleteMany({ where: { workspaceId: f.org } });
   await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${f.org}` } });
@@ -75,10 +80,10 @@ describe('search', () => {
     const response = await get('/v1/events', {
       q: 'record:doc:d1',
       from: new Date(now - 48 * 3_600_000).toISOString(),
-      to: '2999-01-01T02:00:00+02:00',
+      to: '2199-01-01T02:00:00+02:00',
     });
     const page = (await response.json()) as Page;
-    expect(page.range).toEqual({ from: new Date(now - 48 * 3_600_000).toISOString(), to: '2999-01-01T00:00:00.000Z' });
+    expect(page.range).toEqual({ from: new Date(now - 48 * 3_600_000).toISOString(), to: '2199-01-01T00:00:00.000Z' });
     expect(ids(page)).toEqual(['edge-t1', 'old-t1', 'recent-t1', 'recent-t2']);
     expect(page.total).toBe(4);
   });
@@ -162,6 +167,7 @@ describe('export', () => {
       .sort();
   it('states the window in headers, default and explicit, and streams only that window', async () => {
     const before = Date.now();
+    await exportsSettled();
     const fallback = await get('/v1/export', { format: 'jsonl', q: 'record:doc:d1' });
     expect(fallback.status).toBe(200);
     const from = fallback.headers.get(RANGE_FROM_HEADER) ?? '';
@@ -170,13 +176,15 @@ describe('export', () => {
     expect(Date.parse(to) - Date.parse(from)).toBe(DEFAULT_RANGE_MS);
     expect(await lines(fallback)).toEqual(['edge-t1', 'recent-t1', 'recent-t2']);
 
-    const explicit = await get('/v1/export', { format: 'csv', q: 'record:doc:d1', from: old, to: '2999-01-01T00:00:00Z' });
+    await exportsSettled();
+    const explicit = await get('/v1/export', { format: 'csv', q: 'record:doc:d1', from: old, to: '2199-01-01T00:00:00Z' });
     expect(explicit.headers.get(RANGE_FROM_HEADER)).toBe(old);
-    expect(explicit.headers.get(RANGE_TO_HEADER)).toBe('2999-01-01T00:00:00.000Z');
+    expect(explicit.headers.get(RANGE_TO_HEADER)).toBe('2199-01-01T00:00:00.000Z');
     expect((await explicit.text()).trim().split('\n')).toHaveLength(5); // header + 4 events
   });
 
   it('states no window on a refusal: the headers come only with rows', async () => {
+    await exportsSettled();
     const refused = await get('/v1/export', { format: 'jsonl', q: 'action:"unterminated', from: old });
     expect(refused.status).toBe(422);
     expect(refused.headers.get(RANGE_FROM_HEADER)).toBeNull();
@@ -184,6 +192,7 @@ describe('export', () => {
   });
 
   it('states the window to a scoped key', async () => {
+    await exportsSettled();
     const scoped = await get('/v1/export', { format: 'jsonl', from: old, to: recent }, scopedSecret);
     expect(scoped.headers.get(RANGE_FROM_HEADER)).toBe(old);
     expect(scoped.headers.get(RANGE_TO_HEADER)).toBe(recent);

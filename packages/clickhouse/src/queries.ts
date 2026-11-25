@@ -167,8 +167,16 @@ export function timeRange(q: RangeQuery, now = Date.now()): AppliedRange {
   const to = new Date(q.to ?? now),
     from = new Date(q.from ?? to.getTime() - DEFAULT_RANGE_MS);
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
-  return { from: from.toISOString(), to: to.toISOString() };
+  // A bound past what DateTime64 can hold would reach ClickHouse as calendar text it reads differently (year 0000 as
+  // 1970), so the window applied would differ from the one stated. No stored event lies outside these limits, so a bound
+  // beyond them is moved onto them: the stated window stays the applied one, and it holds the same events.
+  const clamped = { from: clampToStore(from.getTime()), to: clampToStore(to.getTime()) };
+  if (clamped.from >= clamped.to) throw new Error('Invalid time range');
+  return { from: new Date(clamped.from).toISOString(), to: new Date(clamped.to).toISOString() };
 }
+/** What a DateTime64(3) column can hold: 1900-01-01 to 2299-12-31 (UTC). */
+export const STORE_TIME_LIMITS = { min: Date.UTC(1900, 0, 1), max: Date.UTC(2299, 11, 31, 23, 59, 59, 999) } as const;
+const clampToStore = (ms: number) => Math.min(STORE_TIME_LIMITS.max, Math.max(STORE_TIME_LIMITS.min, ms));
 export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: CompiledFilter, scope?: ReadScope | null) {
   const c = compiled ?? (await filter(ch, q));
   const s = scopePredicate(scope);
