@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import {
+  type ChangeValueKind,
   canonicalDecimal,
   EXACT_NUMBER_MAX_DEPTH,
   hasDeepRawNumbers,
   isRawJson,
   mayHoldInexactNumbers,
+  parseJsonExact,
   plainDecimal,
   rawJsonText,
 } from '@logbird/contracts';
@@ -56,6 +58,50 @@ function numericId(v: unknown, maxLength: number): string | null {
   return scientific !== null && scientific.length <= maxLength ? scientific : null;
 }
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
+// Non-string values already have JSON text here, including exact numbers represented internally by JSON.rawJSON.
+function indexedChangeKind(input: unknown, text: string): ChangeValueKind | undefined {
+  if (typeof input === 'string') return 'string';
+  switch (text[0]) {
+    case undefined:
+      return 'absent';
+    case 'n':
+      return 'null';
+    case '"':
+      // An in-process value with toJSON serialized to a string including its quotes.
+      return;
+    case 't':
+    case 'f':
+      return 'boolean';
+    case '{':
+    case '[':
+      return 'json';
+    default:
+      return 'number';
+  }
+}
+function wireChangeKind(input: unknown): ChangeValueKind {
+  if (input === null) return 'null';
+  const kind = typeof input;
+  if (kind === 'object') return isRawJson(input) ? 'number' : 'json';
+  if (kind === 'string' || kind === 'number' || kind === 'boolean') return kind;
+  return 'absent';
+}
+function verifiedChangeKinds(
+  wireChanges: unknown[],
+  indexedFields: unknown[],
+  indexedKinds: (ChangeValueKind | undefined)[],
+  side: 'before' | 'after',
+): ChangeValueKind[] {
+  if (Math.min(wireChanges.length, 256) !== indexedFields.length) return [];
+  const kinds: ChangeValueKind[] = [];
+  for (const [index, field] of indexedFields.entries()) {
+    const change = object(wireChanges[index]);
+    const kind = wireChangeKind(change[side]);
+    if (change.field !== field || kind !== indexedKinds[index]) return [];
+    kinds.push(kind);
+  }
+  return kinds;
+}
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
 // executor.attempt truncated toward zero from the exact decimal (1.99999999999999999 is 1, not 2), clamped to UInt16
 // as JSON.parse gave (1e400 is 65535, negatives 0). Legacy (pre-v1) columns keep the double conversion.
@@ -185,6 +231,21 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   });
   if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
   const changes = Array.isArray(e.changes) ? e.changes.slice(0, 256).map(object) : [];
+  // In-process callers may supply keyed toJSON hooks. Check the payload snapshot, which ingest also uses for identity,
+  // before labeling the existing text. An untrustworthy side keeps an empty kind array, like a legacy write.
+  const payloadInput = changes.length ? parseJsonExact(payload) : undefined;
+  const payloadChanges = object(payloadInput).changes;
+  const wireChanges = Array.isArray(payloadChanges) ? payloadChanges : [];
+  const indexedFields: unknown[] = [];
+  const beforeKinds: (ChangeValueKind | undefined)[] = [];
+  const afterKinds: (ChangeValueKind | undefined)[] = [];
+  const indexSide = (side: 'before' | 'after', kinds: (ChangeValueKind | undefined)[]) =>
+    changes.map((change, i) => {
+      const input = change[side];
+      const storedText = wellFormed(value(input));
+      kinds[i] = indexedChangeKind(input, storedText);
+      return storedText;
+    });
   const actor = object(e.actor),
     executor = object(e.executor),
     tenant = object(e.tenant),
@@ -238,9 +299,16 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     target_types: recordTargets.map((t) => text(t.type, 64)),
     target_ids: recordTargets.map((t) => idText(t.id)),
     target_names: recordTargets.map((t) => text(t.name)),
-    changes_fields: changes.map((c) => text(c.field, 256)),
-    changes_before: changes.map((c) => wellFormed(value(c.before))),
-    changes_after: changes.map((c) => wellFormed(value(c.after))),
+    // Preserve the old indexing order for in-process getters and toJSON hooks.
+    changes_fields: changes.map((change, i) => {
+      const { field } = change;
+      indexedFields[i] = field;
+      return text(field, 256);
+    }),
+    changes_before: indexSide('before', beforeKinds),
+    changes_after: indexSide('after', afterKinds),
+    changes_before_kind: verifiedChangeKinds(wireChanges, indexedFields, beforeKinds, 'before'),
+    changes_after_kind: verifiedChangeKinds(wireChanges, indexedFields, afterKinds, 'after'),
     operation_id: idText(context.operationId),
     parent_event_id: idText(context.parentEventId),
     request_id: idText(context.requestId),
@@ -267,6 +335,9 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     schema_version: idText(e.schemaVersion, 32),
     sdk: text(ctx.sdk, 128),
   };
-  return { ok: true as const, row, id, warning };
+  return { ok: true as const, row, id, warning, payloadInput };
 }
 export type EventRow = Extract<ReturnType<typeof normalizeEvent>, { ok: true }>['row'];
+type ChangeKindColumns = 'changes_before_kind' | 'changes_after_kind';
+/** Legacy JSONEachRow writers and stored rows can omit the kind columns. normalizeEvent always emits both. */
+export type StoredEventRow = Omit<EventRow, ChangeKindColumns> & Partial<Pick<EventRow, ChangeKindColumns>>;

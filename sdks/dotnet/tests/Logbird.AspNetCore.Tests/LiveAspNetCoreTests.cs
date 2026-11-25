@@ -94,7 +94,8 @@ public class LiveAspNetCoreTests(ITestOutputHelper output)
         AssertTenant(updated.Tenant);
         AssertExecutor(updated.Executor, "api", "billing-api", null, null);
         Assert.Equal([new AuditTarget("invoice", invoice) { Name = string.Empty }], updated.Targets);
-        Assert.Equal([new StoredChange("status", "draft", "sent")], updated.Changes);
+        var change = Assert.Single(updated.Changes);
+        Assert.Equal(("status", "draft", "sent"), (change.Field, change.Before, change.After));
         Assert.Equal(operation, updated.Context.OperationId);
         Assert.Equal("req_live_1", updated.Context.RequestId);
         Assert.Equal(TraceId, updated.Context.TraceId);

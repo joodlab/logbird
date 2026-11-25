@@ -104,7 +104,7 @@ it('accepted, rejected, canceled and resent invitations audit exactly once with 
         (e: { action: string; changes: { field: string }[] }) =>
           e.action === 'project.updated' && e.changes.some((change) => change.field === 'name'),
       ).changes,
-    ).toEqual([{ field: 'name', before: 'Original', after: 'Renamed' }]);
+    ).toEqual([{ field: 'name', before: 'Original', after: 'Renamed', beforeKind: 'string', afterKind: 'string' }]);
     console.log(
       'four lifecycle actions exactly once, correct actors/targets; view name and project before/after verified; retention increase creates no purge run',
     );

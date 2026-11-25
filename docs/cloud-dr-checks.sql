@@ -9,6 +9,8 @@ SELECT throwIf(count() != {manifest_count:UInt64}, 'actual raw manifest count mi
 FROM logbird.events WHERE project_id = {fixture_project:String} FORMAT Null;
 
 -- 1. No FINAL: raw bytes and multiplicity include received_at, payload and exported columns.
+-- Load expected_events with the same schema as the checkpoint. With migration 012 this compares both kind arrays,
+-- including the empty defaults for events whose kinds are unknown.
 WITH
     expected AS (SELECT * FROM expected_events WHERE project_id = {fixture_project:String}),
     actual AS (SELECT * FROM logbird.events WHERE project_id = {fixture_project:String})
