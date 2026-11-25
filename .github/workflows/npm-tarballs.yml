@@ -1,0 +1,217 @@
+name: npm tarballs
+
+# The one place the TypeScript packages are packed and checked. Pull requests and master pushes call it through
+# npm-packages.yml; a release tag calls it from release.yml, which then attaches exactly the artifact this workflow
+# uploaded (`npm-packages`) to the GitHub Release. So a release can only attach tarballs that passed every job below.
+# Nothing is published to npm here.
+#
+# With `release: true` (the tag path) every check runs on inputs the repository pins: exact Node versions, the pnpm in
+# package.json's packageManager, npm 12.1.0, the lockfiles, the hono floor (from @logbird/hono's peer range) and the
+# hono that tests/npm-consumer/package-lock.json locks. The "hono latest" cells resolve the newest hono 4.x from the
+# registry; they run on pull requests and master pushes only, where a failure is a signal, not a blocked release.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The version the tarballs must carry (X.Y.Z). Empty means the root package.json version.
+        type: string
+        required: false
+        default: ''
+      release:
+        description: The tag path. Runs only checks whose inputs are pinned by the repository (no "latest" lookups).
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    name: Pack and check the npm tarballs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: pnpm
+      # The whole workspace: the SDK bundles parts of @logbird/contracts at build time.
+      - run: pnpm install --frozen-lockfile
+      - name: Test the import scan and the asset checks
+        run: node --test scripts/check-npm-packages.test.mjs scripts/npm-release-assets.test.mjs
+      # Builds and packs the five packages, runs scripts/check-npm-packages.mjs on the tarballs, writes SHA256SUMS.
+      - name: Build, pack and check
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node scripts/npm-release-assets.mjs pack "$RUNNER_TEMP/npm" "$VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/npm
+          if-no-files-found: error
+          retention-days: 7
+
+  # @logbird/sdk and @logbird/hono: type-checked under TypeScript 6 and 7, run, and the API reports compared, on both
+  # Node lines engines.node admits, at the floor of the hono peer range and the locked hono; on pull requests and master
+  # pushes also at the newest hono 4.x.
+  consumer:
+    name: npm consumer (Node ${{ matrix.node }}, hono ${{ matrix.hono }})
+    needs: pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20.20.2', '22.23.5']
+        hono: ${{ fromJSON(inputs.release && '["floor","locked"]' || '["floor","locked","latest"]') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-packages
+          path: tests/npm-consumer/.packages
+      - name: Check capture, client redaction, read and public API from tarballs
+        env:
+          HONO: ${{ matrix.hono }}
+        run: node tests/npm-consumer/run.mjs --skip-pack --hono="$HONO"
+
+  # @logbird/vue, @logbird/nuxt and @logbird/tanstack-start: type-checked and their API reports compared, at the
+  # framework versions tested today.
+  adapters:
+    name: npm consumer (Vue, Nuxt, TanStack Start types)
+    needs: pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-packages
+          path: tests/npm-consumer-adapters/.packages
+      - run: node tests/npm-consumer/run.mjs --project=adapters --skip-pack
+
+  # The install recipe the docs give for a release (tests/npm-release-install/README.md), from a stand-in for the
+  # Release download URL, for @logbird/sdk alone and with @logbird/hono: pnpm 10 and npm 10 (Node 22's own), npm 12
+  # (which refuses URL dependencies by default) and pnpm 12 (which refuses a URL sub-dependency). Every version here is
+  # pinned: pnpm from a packageManager field (the root package.json, or tests/npm-release-install/pnpm12/package.json).
+  release-install:
+    name: Release install recipe (${{ matrix.label }})
+    needs: pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: pnpm 10, npm 10
+            node: '22.18.0'
+            managers: 'pnpm npm'
+            npm: ''
+            pnpm_manifest: package.json
+          - label: npm 12
+            node: '24.22.3'
+            managers: npm
+            npm: '12.1.0'
+            pnpm_manifest: ''
+          - label: pnpm 12
+            node: '24.22.3'
+            managers: pnpm
+            npm: ''
+            pnpm_manifest: tests/npm-release-install/pnpm12/package.json
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        if: contains(matrix.managers, 'pnpm')
+        with:
+          package_json_file: ${{ matrix.pnpm_manifest }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: npm ${{ matrix.npm }}
+        if: matrix.npm != ''
+        env:
+          NPM_VERSION: ${{ matrix.npm }}
+        # The npm CLI package declares no install scripts; --ignore-scripts keeps it that way.
+        run: npm install --global --ignore-scripts "npm@$NPM_VERSION" && npm --version
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/npm
+      - name: Install as the docs say, frozen reinstall, TypeScript 6, run, refuse altered bytes
+        env:
+          MANAGERS: ${{ matrix.managers }}
+        run: |
+          for manager in $MANAGERS; do
+            node tests/npm-release-install/run.mjs --packages="$RUNNER_TEMP/npm" --manager="$manager"
+          done
+
+  # What a release attaches, and the attach command it runs, from the same artifact and the same verification as the
+  # release job in release.yml. Everything except creating the release.
+  assets:
+    name: Release assets (dry run)
+    needs: [pack, consumer, adapters, release-install]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/npm-release-assets.mjs
+            package.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-packages
+          path: npm
+      - name: Verify the asset set and show the attach command
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          version="${VERSION:-$(node -p "require('./package.json').version")}"
+          listing="$(node scripts/npm-release-assets.mjs verify npm "$version")"
+          mapfile -t assets <<< "$listing"
+          (( ${#assets[@]} == 6 )) || { echo "::error::expected 6 npm assets, got ${#assets[@]}"; exit 1; }
+          (cd npm && sha256sum --check SHA256SUMS)
+          names=()
+          for asset in "${assets[@]}"; do names+=("npm/$(basename "$asset")"); done
+          {
+            echo "The release for v$version runs, from this job's working directory, after its images publish:"
+            echo
+            echo '```sh'
+            echo "gh release create v$version images.txt ${names[*]} --repo $GITHUB_REPOSITORY --verify-tag --latest=\"\$latest\" --title \"Logbird v$version\" --notes-file release-notes.md"
+            echo '```'
+            echo
+            echo '`$latest` is `true` unless a newer stable release is published (`scripts/release-aliases.mjs`). If the tag already has a published release holding exactly these files, the release job creates nothing and the aliases follow.'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,5 +1,18 @@
 # @logbird/tanstack-start
 
+## Install
+
+Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches this package as
+`logbird-tanstack-start-X.Y.Z.tgz`, listed in its `SHA256SUMS`. It depends on `@logbird/sdk` (`logbird-sdk-X.Y.Z.tgz`) at exactly the same
+version, attached to the same release. No check installs this package on its own yet (it is type-checked from the
+release tarballs, installed side by side with the SDK), so there is no tested install recipe for it; the tested
+recipes are for `@logbird/sdk` alone and with `@logbird/hono` ([Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)).
+
+Requirements: Node 22.12 or later, `@tanstack/react-start` 1.168.49 or later in 1.x (peer `^1.168.49`); ES modules only; the declarations are type-checked with TypeScript 6 and 7 under `bundler`
+resolution.
+
+## Usage
+
 Server-only setup:
 ```ts
 import { createStart, createServerFn } from '@tanstack/react-start';
