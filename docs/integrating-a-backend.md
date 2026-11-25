@@ -378,7 +378,11 @@ rejected on its own and the rest of the batch is stored; an otherwise valid even
 `invalid_event: event exceeds 256 KB` (a missing `action` or an unsafe `id` is reported
 first); more than 1000 events or more than 5 MB refuses the whole request with
 `413 payload_too_large`. Inspect even a 202 response:
-`rejected` lists individual failures and `warnings` reports normalization.
+`rejected` lists individual failures and `warnings` reports normalization, including
+one entry per cut of a stored event: `targets_truncated` when fewer targets are indexed than were sent (more than 64,
+or a numeric id too long to index), `changes_truncated` for more than 256 changes, and `change_fields_truncated` when,
+among the first 256 changes, a field name is longer than 256 UTF-16 code units after trimming. The event is stored
+whole; later entries add nothing to the index. See [limits](limits.md).
 Definite native storage parse failures are isolated into `invalid_event` rejections
 with zero-based indices and code-first reasons. Healthy siblings remain accepted;
 the server checks every named row alone as a canary, then inserts the parse-proven
