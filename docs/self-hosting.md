@@ -1198,9 +1198,14 @@ replace such an endpoint instead of editing it: delete the held endpoint (its
 pending deliveries go with it), then create a new one with the corrected filter.
 The new endpoint has a new signing secret, so update the receiver, and its
 cursor starts at creation, so events that arrived while the old one was held
-are not delivered (an export of that window fills the gap if you
-need them). Deleting first also keeps a project at its endpoint limit able to
-create the replacement. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
+are not delivered, and the deleted endpoint's pending deliveries (including any
+queued before the hold) are gone. Before deleting, note the held endpoint's
+cursor time (the last arrival it scanned). To fill the gap, export with the
+same masked scope, the replacement filter plus `receivedAt:>=<that time>`, and a
+`from` wide enough to include events that occurred earlier but arrived late
+(export ranges select by occurrence time), then skip events the receiver has
+already processed by id. Deleting first also keeps a project at its endpoint
+limit able to create the replacement. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
 even when `WEBHOOK_SECRET_KEY` is configured separately. Upgrade all workers
 before enabling masks, and disable masked endpoints before rolling workers back
 to code that predates masks. Releases before the impersonator was covered by

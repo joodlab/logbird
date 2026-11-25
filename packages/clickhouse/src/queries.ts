@@ -646,6 +646,9 @@ async function maskedFacets(
     `SELECT value,masked,grp,gmasked,tupleElement(argMaxIf(tuple(glf,glabel),received_at,glabel!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE concat(toString(masked),'|',value) IN {facetKeys:Array(String)} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
     { ...w.params, ...one.params, ...two.params, ...params, facetKeys: values.map((v) => v.key), byLimit: q.byLimit ?? 5 },
   );
+  // Every flag of every second-level row is checked before rows are matched to parents, so a malformed row fails the
+  // request even when it would match no parent.
+  for (const g of groups) for (const flag of [g.masked, g.gmasked, g.labf]) facetFlag(flag);
   for (const v of values) {
     const mine = groups.filter((g) => keyOf(g.masked, g.value) === v.key);
     v.groups = mine.map((g) => {
