@@ -8,6 +8,21 @@ function fixture() {
   const track = vi.spyOn(client, 'track');
   return { client, track };
 }
+
+it('replaces exceptions thrown by carrier serialization with a stable error', async () => {
+  const { client } = fixture();
+  const actor = () => ({
+    id: 'fixture',
+    toJSON() {
+      throw new Error('fixture-private-value', { cause: 'fixture-private-value' });
+    },
+  });
+  const audit = await createAudit({ client, actor }, {}, new Request('http://host'));
+  const carrier = audit.carrier();
+  await expect(carrier).rejects.toMatchObject({ code: 'capture_failed', message: 'Logbird capture failed' });
+  await expect(carrier).rejects.not.toHaveProperty('cause');
+  await client.shutdown();
+});
 it('resolves per call, skips explicit overrides and stamps id/time before async work', async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-05T10:00:00Z'));
