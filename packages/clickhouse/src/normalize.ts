@@ -86,6 +86,22 @@ function wireChangeKind(input: unknown): ChangeValueKind {
   if (kind === 'string' || kind === 'number' || kind === 'boolean') return kind;
   return 'absent';
 }
+function verifiedChangeKinds(
+  wireChanges: unknown[],
+  indexedFields: unknown[],
+  indexedKinds: (ChangeValueKind | undefined)[],
+  side: 'before' | 'after',
+): ChangeValueKind[] {
+  if (Math.min(wireChanges.length, 256) !== indexedFields.length) return [];
+  const kinds: ChangeValueKind[] = [];
+  for (const [index, field] of indexedFields.entries()) {
+    const change = object(wireChanges[index]);
+    const kind = wireChangeKind(change[side]);
+    if (change.field !== field || kind !== indexedKinds[index]) return [];
+    kinds.push(kind);
+  }
+  return kinds;
+}
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
 // executor.attempt truncated toward zero from the exact decimal (1.99999999999999999 is 1, not 2), clamped to UInt16
 // as JSON.parse gave (1e400 is 65535, negatives 0). Legacy (pre-v1) columns keep the double conversion.
@@ -214,34 +230,22 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     for (const [k, v] of Object.entries(t)) if (!['type', 'id', 'name'].includes(k)) flatten(v, `targets.${i}.${k}`, 3);
   });
   if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
-  const changes = Array.isArray(e.changes) ? e.changes.slice(0, 256) : [];
+  const changes = Array.isArray(e.changes) ? e.changes.slice(0, 256).map(object) : [];
   // In-process callers may supply keyed toJSON hooks. Check the payload snapshot, which ingest also uses for identity,
   // before labeling the existing text. An untrustworthy side keeps an empty kind array, like a legacy write.
   const payloadInput = changes.length ? parseJsonExact(payload) : undefined;
   const payloadChanges = object(payloadInput).changes;
   const wireChanges = Array.isArray(payloadChanges) ? payloadChanges : [];
-  let beforeKindsKnown = changes.length === Math.min(wireChanges.length, 256);
-  let afterKindsKnown = beforeKindsKnown;
-  const changesFields: string[] = [];
-  const changesBefore: string[] = [];
-  const changesAfter: string[] = [];
-  const changesBeforeKind: ChangeValueKind[] = [];
-  const changesAfterKind: ChangeValueKind[] = [];
-  for (const [i, change] of changes.entries()) {
-    const { field, before, after } = object(change);
-    const beforeText = wellFormed(value(before));
-    const afterText = wellFormed(value(after));
-    changesFields.push(text(field, 256));
-    changesBefore.push(beforeText);
-    changesAfter.push(afterText);
-    const wire = object(wireChanges[i]);
-    const beforeKind = wireChangeKind(wire.before);
-    const afterKind = wireChangeKind(wire.after);
-    beforeKindsKnown &&= wire.field === field && indexedChangeKind(before, beforeText) === beforeKind;
-    afterKindsKnown &&= wire.field === field && indexedChangeKind(after, afterText) === afterKind;
-    changesBeforeKind.push(beforeKind);
-    changesAfterKind.push(afterKind);
-  }
+  const indexedFields: unknown[] = [];
+  const beforeKinds: (ChangeValueKind | undefined)[] = [];
+  const afterKinds: (ChangeValueKind | undefined)[] = [];
+  const indexSide = (side: 'before' | 'after', kinds: (ChangeValueKind | undefined)[]) =>
+    changes.map((change, i) => {
+      const input = change[side];
+      const storedText = wellFormed(value(input));
+      kinds[i] = indexedChangeKind(input, storedText);
+      return storedText;
+    });
   const actor = object(e.actor),
     executor = object(e.executor),
     tenant = object(e.tenant),
@@ -295,11 +299,16 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     target_types: recordTargets.map((t) => text(t.type, 64)),
     target_ids: recordTargets.map((t) => idText(t.id)),
     target_names: recordTargets.map((t) => text(t.name)),
-    changes_fields: changesFields,
-    changes_before: changesBefore,
-    changes_after: changesAfter,
-    changes_before_kind: beforeKindsKnown ? changesBeforeKind : [],
-    changes_after_kind: afterKindsKnown ? changesAfterKind : [],
+    // Preserve the old indexing order for in-process getters and toJSON hooks.
+    changes_fields: changes.map((change, i) => {
+      const { field } = change;
+      indexedFields[i] = field;
+      return text(field, 256);
+    }),
+    changes_before: indexSide('before', beforeKinds),
+    changes_after: indexSide('after', afterKinds),
+    changes_before_kind: verifiedChangeKinds(wireChanges, indexedFields, beforeKinds, 'before'),
+    changes_after_kind: verifiedChangeKinds(wireChanges, indexedFields, afterKinds, 'after'),
     operation_id: idText(context.operationId),
     parent_event_id: idText(context.parentEventId),
     request_id: idText(context.requestId),

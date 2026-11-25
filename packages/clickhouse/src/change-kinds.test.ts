@@ -72,3 +72,20 @@ it('omits an untrustworthy kind when an in-process value serializes differently 
   expect(JSON.parse(row.payload).changes).toEqual([{ field: 'value', before: null, after: 7 }]);
   expect(toEvent(row).changes).toStrictEqual([{ field: 'value', before: 'null', beforeKind: 'null', after: 'false' }]);
 });
+
+it('preserves the legacy text evaluation order for stateful in-process values', () => {
+  let sequence = 0;
+  const value = { toJSON: (key: string) => (key === '' ? ++sequence : 0) };
+  const row = normalize({
+    action: 'record.updated',
+    changes: [
+      { field: 'first', before: value, after: value },
+      { field: 'second', before: value, after: value },
+    ],
+  });
+  expect(toEvent(row).changes).toStrictEqual([
+    { field: 'first', before: '1', after: '3', beforeKind: 'number', afterKind: 'number' },
+    { field: 'second', before: '2', after: '4', beforeKind: 'number', afterKind: 'number' },
+  ]);
+  expect(sequence).toBe(4);
+});
