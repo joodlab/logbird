@@ -47,7 +47,7 @@ track(event) never throws and never waits for the network.
 flush() and shutdown() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity allows. Permanent rejections arrive through onError and onDrop instead.
 Call shutdown() from your host's own exit hook. The SDK installs no process handlers.
 Keep ingest keys on the server. Never ship one in a browser bundle.
-Redaction: beforeSend: redact() deep-copies each event and replaces passwords, tokens, API keys, cookies and similar keys with [redacted] before sending. Add your own patterns for email or phone numbers; the default list covers secrets, not all personal data.
+Redaction: The TypeScript SDK redacts common secret keys before sending by default. Use addKeys for personal data such as email and phone fields, and keepPaths for exceptions such as a staff actor email address.
 From source (not on npm yet)
 pre| git clone --branch v0.2.1 https://github.com/example-org/logbird.git ../logbird
 pre| pnpm -C ../logbird install

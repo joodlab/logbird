@@ -78,9 +78,8 @@ Page text renders from `apps/web/src/content/developers.ts`; edit it there. This
   - Call `shutdown()` from your host's own exit hook. The SDK installs no process handlers.
   - Keep ingest keys on the server. Never ship one in a browser bundle.
   <!-- source: packages/sdk/README.md; docs/integrations.md §Design -->
-- **side note ("Redaction"):** **Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys,
-  cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the
-  default list covers secrets, not all personal data.
+- **side note ("Redaction"):** **Redaction:** The TypeScript SDK redacts common secret keys before sending by default. Use
+  `addKeys` for personal data such as email and phone fields, and `keepPaths` for exceptions such as a staff actor email address.
   <!-- source: packages/sdk/README.md §Host context options -->
 - **visual:** code sample
 

@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace Logbird.Tests;
 
@@ -17,19 +19,34 @@ public class RedactionParityTests
     private static JsonArray Cases()
         => (JsonArray)JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "redaction-parity.json"), Encoding.UTF8))!["cases"]!;
 
-    public static IEnumerable<object[]> Names() => Cases().Select(c => new object[] { (string)c!["name"]! });
+    public static IEnumerable<object[]> Names() => Cases()
+        .Where(c => c!["paths"] is null && c["keepPaths"] is null)
+        .Select(c => new object[] { (string)c!["name"]! });
+
+    private static RedactionOptions Options(JsonNode parityCase)
+    {
+        var keys = (string?)parityCase["keys"];
+        var changeFields = (string?)parityCase["changeFields"];
+        var options = new RedactionOptions
+        {
+            Keys = keys is null ? Redactor.DefaultSecretKeys : new Regex(keys, RegexOptions.CultureInvariant),
+            ChangeFields = changeFields is null ? null : new Regex(changeFields, RegexOptions.CultureInvariant),
+            Replacement = (string?)parityCase["replacement"] ?? Redactor.DefaultReplacement,
+        };
+        if (parityCase["addKeys"] is JsonArray added)
+        {
+            options.AddKeys(added.Select(key => (string)key!).ToArray());
+        }
+
+        return options;
+    }
 
     [Theory]
     [MemberData(nameof(Names))]
     public void Matches_the_shared_fixture(string name)
     {
         var parityCase = Cases().Single(c => (string)c!["name"]! == name)!;
-        var keys = (string?)parityCase["keys"];
-        var changeFields = (string?)parityCase["changeFields"];
-        var redactor = new Redactor(
-            keys is null ? null : new Regex(keys, RegexOptions.CultureInvariant),
-            changeFields is null ? null : new Regex(changeFields, RegexOptions.CultureInvariant),
-            (string?)parityCase["replacement"]);
+        var redactor = Options(parityCase).CreateRedactor()!;
         var input = parityCase["input"]!.AsObject();
         var original = input.ToJsonString();
 
@@ -37,6 +54,45 @@ public class RedactionParityTests
 
         Assert.True(JsonNode.DeepEquals(parityCase["expected"], result), name + ": " + result.ToJsonString());
         Assert.Equal(original, input.ToJsonString());
+    }
+
+    public static IEnumerable<object[]> ClientCases() => Cases()
+        .Where(c => c!["addKeys"] is not null && c["paths"] is null && c["keepPaths"] is null)
+        .Select(c => new object[] { (string)c!["name"]! });
+
+    [Theory]
+    [MemberData(nameof(ClientCases))]
+    public async Task Client_configuration_matches_the_typescript_wire_event(string name)
+    {
+        var parityCase = Cases().Single(c => (string)c!["name"]! == name)!;
+        var input = parityCase["input"]!;
+        var evt = new AuditEvent((string)input["action"]!)
+        {
+            Id = (string)input["id"]!,
+            Metadata = input["metadata"]!.AsObject(),
+        };
+        foreach (var item in input["changes"]!.AsArray())
+        {
+            var change = item!.AsObject();
+            var field = (string)change["field"]!;
+            evt.Changes.Add(change.ContainsKey("before")
+                ? change.ContainsKey("after") ? new AuditChange(field, change["before"], change["after"]) : AuditChange.Removed(field, change["before"])
+                : AuditChange.Set(field, change["after"]));
+        }
+
+        using var server = new FakeServer();
+        using var transport = new HttpClient(server);
+        await using var client = new LogbirdClient(new LogbirdOptions
+        {
+            Endpoint = new Uri("https://logbird.example.invalid"),
+            IngestKey = "fictional",
+            Redaction = Options(parityCase),
+        }, transport);
+        client.Track(evt);
+        Assert.True(await client.FlushAsync());
+        var result = JsonNode.Parse(Assert.Single(Assert.Single(server.Requests).RawEvents))!.AsObject();
+        Assert.True(result.Remove("occurredAt"));
+        Assert.True(JsonNode.DeepEquals(parityCase["expected"], result), name + ": " + result.ToJsonString());
     }
 
     [Fact]
