@@ -165,6 +165,15 @@ jobs:
         with:
           name: image-${{ matrix.role }}
           path: previous
+      # Only the release-list check runs from the repository here; it uses Node built-ins only (nothing is installed).
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/release-aliases.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -172,6 +181,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish multi-platform image and record index digest
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -180,9 +190,10 @@ jobs:
           # Once this version's GitHub Release is published, its exact tag is never written again: a re-run (even one that
           # rebuilt a platform image with another digest) keeps the index this run verified and released. It requires the
           # release's images.txt, the live tag and this run's earlier receipt to name the same digest. The registry is
-          # written only when the releases list shows, explicitly, no published release for the tag.
+          # written only when a well-formed releases list (scripts/release-aliases.mjs checks its shape and types, and
+          # fails on anything else) shows no published release for the tag.
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
-          released="$(jq -er --arg tag "v$VERSION" '[.[][] | select(.tag_name == $tag and (.draft | not))] | length' releases.json)"
+          released="$(node scripts/release-aliases.mjs published "v$VERSION" releases.json | sed -n 's/^published=//p')"
           if [[ ! "$released" =~ ^[0-9]+$ ]]; then
             echo "Could not read the published releases ('$released')" >&2
             exit 1
@@ -198,7 +209,9 @@ jobs:
               exit 1
             fi
             echo "::notice::v$VERSION is already released; $IMAGE:$VERSION is left at $digest."
-            printf '%s\n' "$line" > "image-${{ matrix.role }}.txt"
+            # The earlier receipt stays the artifact: uploading it again would delete it first (overwrite), and a runner
+            # lost in between would leave the next retry without the receipt it must compare with.
+            echo "reused=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -228,7 +241,9 @@ jobs:
             exit 1
           fi
           printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$digest" > "image-${{ matrix.role }}.txt"
+      # Not after reusing an already-released receipt (see above): that artifact is kept as it is.
       - uses: actions/upload-artifact@v7
+        if: steps.publish.outputs.reused != 'true'
         with:
           name: image-${{ matrix.role }}
           path: image-${{ matrix.role }}.txt

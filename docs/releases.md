@@ -206,12 +206,30 @@ services, so a release cannot be one atomic write; it can stop between its steps
 What each stop leaves, and what to do (the run's artifacts are kept for **seven days**;
 use "Re-run failed jobs" within that time):
 
-- **Before any image index publishes** (preflight, a build, the npm job): nothing is
-  published. Re-run, or fix on master and release a new version.
-- **After some or all X.Y.Z indexes, before the GitHub Release**: those exact version
-  tags exist, but nothing announces them and no alias moved. Re-run the failed jobs: the
-  publish job rebuilds the X.Y.Z index from the same platform digests and verifies it, and
-  the release job follows.
+- **Before any image index publishes** (preflight, a build, the npm job): no exact image
+  tag, moving alias or GitHub Release exists. Platform images that finished building may
+  already be in the registry by digest, untagged. Re-run the failed jobs, or fix on master
+  and release a new version.
+- **An image job failed, before the GitHub Release**: the exact tags of the roles that
+  succeeded exist, but nothing announces them and no alias moved. Re-run the failed jobs:
+  the failed image job republishes its X.Y.Z index from the same platform digests and
+  verifies it, and the release job follows.
+- **Every image job succeeded, then the release job finds an exact tag missing or moved**
+  ("Check the exact image tags" fails): "Re-run failed jobs" only repeats the same failure,
+  because it reruns the release job against the same receipts. Instead:
+  1. Confirm the version is still unannounced: the Releases page shows no release or draft
+     for the tag, and `docker buildx imagetools inspect` shows `X.Y` and `latest` still on
+     the previous release.
+  2. Find out why the tag changed (the package's version history in GHCR; any other
+     workflow or person that pushes to `ghcr.io/joodlab/logbird-<role>`), and stop that
+     cause before going on.
+  3. Then either re-run the affected image job: in this run, open the failed role's
+     **Publish `<role>`** job and choose **Re-run this job** (not "Re-run all jobs", which
+     would rebuild every image, and not "Re-run failed jobs"). It republishes that role's
+     X.Y.Z index from the run's retained platform digests, writes a fresh receipt, and its
+     dependent jobs (release, aliases, NuGet) run again. This works within the seven days
+     the artifacts are kept. Or abandon the version: release the next patch version from
+     master, and leave the unannounced X.Y.Z tags (or delete them in GHCR).
 - **During release creation**: `gh` uploads to a draft and publishes it only when every
   upload succeeds, deleting the draft itself if an upload fails. A runner lost mid-upload
   can leave a draft behind, and the release job refuses to continue while the tag has a
@@ -283,9 +301,12 @@ packages, and the release's `npm` job calls it with the release version. It:
 2. installs those tarballs into outside applications: `tests/npm-consumer` (TypeScript 6
    and 7, run, API reports; Node 20 and 22; hono at the floor of its peer range, at the
    version its lockfile pins and, on pull requests and master pushes only, the latest 4.x),
-   `tests/npm-consumer-adapters` (both fail if installing the tarballs resolves any package
-   outside their committed lockfile, other than the Logbird tarballs themselves and, in a
-   floor or latest cell, the exact hono version that cell asks for), and `tests/npm-release-install`, which follows the
+   and `tests/npm-consumer-adapters`. Both compare every installed package (npm's
+   `node_modules/.package-lock.json`) with their committed `package-lock.json`, version and
+   integrity, and fail on any difference, with two exceptions: a top-level
+   `node_modules/@logbird/<name>` that resolves to one of the supplied tarballs, and, in a
+   floor or latest cell, the top-level `hono` at exactly the version that cell asks for.
+   In the locked cell `hono` gets the full comparison. `tests/npm-release-install` follows the
    documented install recipes (`@logbird/sdk` alone, and with `@logbird/hono`) from a
    local stand-in for the Release URL under pnpm 10 and 12 and npm 10 and 12, reinstalls with a
    frozen lockfile, type-checks and runs under TypeScript 6, and requires an altered
@@ -314,8 +335,8 @@ the release install check. The **"hono latest" consumer cells run on pull reques
 master pushes only**: they resolve the newest hono 4.x, so a failure there is a signal
 to raise the floor or fix a regression, not a blocked release.
 
-**If the release's npm job fails**, nothing was published: no image tag moved and no
-GitHub Release exists (the platform images pushed by digest are untagged). Read the
+**If the release's npm job fails**, no exact image tag, moving alias or GitHub Release
+exists (platform images that finished building may be in the registry by digest, untagged). Read the
 failing check. A registry or network error is fixed by "Re-run failed jobs" (the image
 builds need the registry too). A real failure needs a fix on master and a new version;
 never move the tag. For a failure after the npm job, see the recovery list under
