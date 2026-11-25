@@ -60,7 +60,8 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         Assert.Equal(sent.Executor, e.Executor);
         Assert.Equal(sent.Tenant, e.Tenant);
         Assert.Equal([new AuditTarget("invoice", "inv_1001") { Name = "INV-1001" }, new AuditTarget("customer", "cus_9") { Name = string.Empty }], e.Targets);
-        Assert.Equal([new StoredChange("status", "draft", "sent"), new StoredChange("limit", "24", "48"), new StoredChange("password", "[redacted]", "[redacted]")], e.Changes);
+        Assert.Equal([("status", "draft", "sent"), ("limit", "24", "48"), ("password", "[redacted]", "[redacted]")],
+            e.Changes.Select(change => (change.Field, change.Before, change.After)));
         Assert.Equal(operation, e.Context.OperationId);
         Assert.Equal(parent, e.Context.ParentEventId);
         Assert.Equal("req_1", e.Context.RequestId);

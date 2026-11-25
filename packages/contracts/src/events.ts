@@ -128,6 +128,20 @@ export const ingestPendingDetailsSchema = ingestResponseSchema.extend({
   eventIds: z.array(z.string()),
 });
 
+export const changeValueKindSchema = z.enum(['absent', 'null', 'string', 'number', 'boolean', 'json']);
+export type ChangeValueKind = z.infer<typeof changeValueKindSchema>;
+
+const changeText = z
+  .string()
+  .describe(
+    'Existing indexed text. Absent: empty string. Null: "null". String: its contents, without JSON quotes. Number: its JSON number text (exact digits preserved by ingest). Boolean: "true" or "false". JSON: compact JSON text for an object or array. Unpaired UTF-16 surrogates in indexed text are replaced with U+FFFD.',
+  );
+const changeKind = changeValueKindSchema
+  .describe(
+    'Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.',
+  )
+  .optional();
+
 /** Normalized event as returned by every read API. */
 export const eventSchema = z.object({
   id: z.string(),
@@ -146,7 +160,7 @@ export const eventSchema = z.object({
   tenant: z.object({ id: z.string(), name: z.string() }).nullable(),
   source: z.string().nullable(),
   targets: z.array(z.object({ type: z.string(), id: z.string(), name: z.string() })),
-  changes: z.array(z.object({ field: z.string(), before: z.string(), after: z.string() })),
+  changes: z.array(z.object({ field: z.string(), before: changeText, after: changeText, beforeKind: changeKind, afterKind: changeKind })),
   context: z.object({
     operationId: z.string(),
     parentEventId: z.string(),

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
+  type ChangeValueKind,
   canonicalDecimal,
   EXACT_NUMBER_MAX_DEPTH,
   hasDeepRawNumbers,
@@ -56,6 +57,26 @@ function numericId(v: unknown, maxLength: number): string | null {
   return scientific !== null && scientific.length <= maxLength ? scientific : null;
 }
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
+// Non-string values already have JSON text here, including exact numbers represented internally by JSON.rawJSON.
+function changeKind(input: unknown, text: string): ChangeValueKind {
+  if (typeof input === 'string') return 'string';
+  switch (text[0]) {
+    case undefined:
+      return 'absent';
+    case 'n':
+      return 'null';
+    case '"':
+      return 'string';
+    case 't':
+    case 'f':
+      return 'boolean';
+    case '{':
+    case '[':
+      return 'json';
+    default:
+      return 'number';
+  }
+}
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
 // executor.attempt truncated toward zero from the exact decimal (1.99999999999999999 is 1, not 2), clamped to UInt16
 // as JSON.parse gave (1e400 is 65535, negatives 0). Legacy (pre-v1) columns keep the double conversion.
@@ -184,7 +205,22 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     for (const [k, v] of Object.entries(t)) if (!['type', 'id', 'name'].includes(k)) flatten(v, `targets.${i}.${k}`, 3);
   });
   if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
-  const changes = Array.isArray(e.changes) ? e.changes.slice(0, 256).map(object) : [];
+  const changes = Array.isArray(e.changes) ? e.changes.slice(0, 256) : [];
+  const changesFields: string[] = [];
+  const changesBefore: string[] = [];
+  const changesAfter: string[] = [];
+  const changesBeforeKind: ChangeValueKind[] = [];
+  const changesAfterKind: ChangeValueKind[] = [];
+  for (const change of changes) {
+    const { field, before, after } = object(change);
+    const beforeText = wellFormed(value(before));
+    const afterText = wellFormed(value(after));
+    changesFields.push(text(field, 256));
+    changesBefore.push(beforeText);
+    changesAfter.push(afterText);
+    changesBeforeKind.push(changeKind(before, beforeText));
+    changesAfterKind.push(changeKind(after, afterText));
+  }
   const actor = object(e.actor),
     executor = object(e.executor),
     tenant = object(e.tenant),
@@ -238,9 +274,11 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     target_types: recordTargets.map((t) => text(t.type, 64)),
     target_ids: recordTargets.map((t) => idText(t.id)),
     target_names: recordTargets.map((t) => text(t.name)),
-    changes_fields: changes.map((c) => text(c.field, 256)),
-    changes_before: changes.map((c) => wellFormed(value(c.before))),
-    changes_after: changes.map((c) => wellFormed(value(c.after))),
+    changes_fields: changesFields,
+    changes_before: changesBefore,
+    changes_after: changesAfter,
+    changes_before_kind: changesBeforeKind,
+    changes_after_kind: changesAfterKind,
     operation_id: idText(context.operationId),
     parent_event_id: idText(context.parentEventId),
     request_id: idText(context.requestId),

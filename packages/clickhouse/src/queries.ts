@@ -178,7 +178,12 @@ export async function where(ch: ClickHouseClient, projectId: string, q: RangeQue
   };
 }
 const iso = (s: string) => new Date(s.endsWith('Z') ? s : `${s.replace(' ', 'T')}Z`).toISOString();
-export function toEvent(r: EventRow & { category?: string }): AuditEvent {
+type ChangeKindColumns = 'changes_before_kind' | 'changes_after_kind';
+type ReadEventRow = Omit<EventRow, ChangeKindColumns> & Partial<Pick<EventRow, ChangeKindColumns>> & { category?: string };
+export function toEvent(r: ReadEventRow): AuditEvent {
+  // Parts written by older servers have empty kind arrays. Never infer a kind from ambiguous text.
+  const beforeKinds = r.changes_before_kind?.length === r.changes_fields.length ? r.changes_before_kind : undefined;
+  const afterKinds = r.changes_after_kind?.length === r.changes_fields.length ? r.changes_after_kind : undefined;
   return {
     id: r.event_id,
     projectId: r.project_id,
@@ -203,7 +208,17 @@ export function toEvent(r: EventRow & { category?: string }): AuditEvent {
     tenant: r.tenant_id ? { id: r.tenant_id, name: r.tenant_name } : null,
     source: r.source || null,
     targets: r.target_ids.map((id, i) => ({ id, type: r.target_types[i] ?? '', name: r.target_names[i] ?? '' })),
-    changes: r.changes_fields.map((field, i) => ({ field, before: r.changes_before[i] ?? '', after: r.changes_after[i] ?? '' })),
+    changes: r.changes_fields.map((field, i) => {
+      const beforeKind = beforeKinds?.[i];
+      const afterKind = afterKinds?.[i];
+      return {
+        field,
+        before: r.changes_before[i] ?? '',
+        after: r.changes_after[i] ?? '',
+        ...(beforeKind === undefined ? {} : { beforeKind }),
+        ...(afterKind === undefined ? {} : { afterKind }),
+      };
+    }),
     context: {
       operationId: r.operation_id,
       parentEventId: r.parent_event_id,
