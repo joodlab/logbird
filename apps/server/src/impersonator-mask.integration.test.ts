@@ -156,6 +156,8 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         actor,
         impersonator: { id: 'sup_rita', name: 'Rita@example.invalid', email: 'Rita@example.invalid' },
         context: { operationId: 'op-imp' },
+        // A literal dotted copy of the name at the top level: ingest keeps it as the attribute `impersonator.name`.
+        'impersonator.name': 'Rita@example.invalid',
       },
       {
         id: 'qa-imp-2',
@@ -383,6 +385,7 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       { q: 'impersonator.email.work:"omar.work@example.invalid"', rows: ['qa-imp-6'] },
       { q: 'action:none OR impersonator.email:nadia*', rows: ['qa-imp-4'] },
       { q: '_exists_:"impersonator.email.omar.desk@example.invalid"', rows: ['qa-imp-6'] },
+      { q: 'attr.impersonator.name:Rita*', rows: ['qa-imp-1'] },
     ];
     for (const { q, rows } of REFUSED_FILTERS) expect(await ids(unmasked.secret, q), `unmasked ${q}`).toEqual(rows);
     expect((await facets(unmasked.secret, { field: 'attr.impersonator.email' })).text).toMatch(ADDRESS);

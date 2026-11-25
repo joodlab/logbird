@@ -45,7 +45,9 @@ export const MASKED_COLUMNS: Record<NonNullable<ReadScope['mask']>[number], stri
 export const MASKED_ATTRIBUTES: Record<NonNullable<ReadScope['mask']>[number], string[]> = {
   ip: ['context.ip'],
   user_agent: ['context.userAgent'],
-  actor_email: ['actor.email'],
+  // Literal dotted copies of the masked fields (a top-level `"impersonator.name": ...` key is stored as an attribute):
+  // the name rule cannot judge them against their email, so they go, like `actor.email`.
+  actor_email: ['actor.email', 'actor.name', 'impersonator.name'],
 };
 /**
  * Attribute paths a mask shows as a pseudonym instead of removing. Every path below one (`impersonator.email.work`, from

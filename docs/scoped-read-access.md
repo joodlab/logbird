@@ -102,6 +102,8 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
     actor pseudonyms. Within each role, pseudonyms stay linkable as described above: a reader who learns the actor
     pseudonym of an address (for example by causing an actor event with it) can still recognise it in actor results.
   - Paths below it are removed from the event: their keys are producer text and can be an address themselves.
+  - Literal dotted copies of the names (a top-level `"impersonator.name"` or `"actor.name"` key, which ingest keeps
+    as an attribute) are removed too, and filters and facets on them are refused: the name rule can't judge them.
   - The impersonator's name follows the actor name rule above, judged against `impersonator.email`: a name that
     carries an address shows as a pseudonym, in events and in facet labels (`impersonator`, at both levels).
   - Filters on `impersonator.email` or a path below it, and facets on them (`field=attr.impersonator.email`; a facet
@@ -117,13 +119,17 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   (descriptions, executor, tenant or target names, ids, or other attributes such as `actor.contactEmail` or
   `impersonator.Email`) are not masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
   addresses out of those fields when scoped readers must not see them.
+- The name rule recognises an address by its `@` (and the compatibility forms above), by equality with the email,
+  or by length. A name that spells an address another way (`rita&#64;example.org`, `rita%40example.org`,
+  `rita at example dot org`) is not recognised and shows as sent. Send display names, not encoded addresses.
 - Case-insensitive matching follows the Unicode case tables of the server's Node.js runtime and of ClickHouse. A test
   pins their agreement for the examples it lists (ASCII, Latin-1, Greek, Cyrillic, Turkish and German). Case pairs
   added in Unicode 17 can differ between them (#365).
 - **Any mask also drops the original payload:** detail returns `payload: null`, and `jsonl-evidence` exports answer
   422 `masked_export`.
 - A masked scope can't filter or facet on a masked field or on the matching attribute paths (`context.ip`,
-  `context.userAgent`, `actor.email`, and for `actor_email` also `impersonator.email` and the paths below it) (422
+  `context.userAgent`, `actor.email`, and for `actor_email` also `actor.name` and `impersonator.name` as attributes,
+  and `impersonator.email` and the paths below it) (422
   `invalid_query`, reason `not_allowed`), because the answer would reveal the hidden value.
 
 ## Keys

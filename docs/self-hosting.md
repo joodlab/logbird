@@ -1191,7 +1191,11 @@ the original document. Create and PATCH reject filters on masked fields with
 HTTP 422 `invalid_query`. Retries and resends apply the endpoint's current scope
 and masks. A masked endpoint whose stored filter names a field a mask now covers
 (for example `impersonator.email`) sends nothing and is held for a filter edit,
-like any stored filter that no longer compiles. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
+like any stored filter that no longer compiles. Its pending deliveries were
+chosen by that old filter, and an edit sends those that match the new one, so
+the receiver could tell which events the old filter matched. To avoid that,
+replace such an endpoint instead of editing it: create a new endpoint with the
+corrected filter and delete the held one. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
 even when `WEBHOOK_SECRET_KEY` is configured separately. Upgrade all workers
 before enabling masks, and disable masked endpoints before rolling workers back
 to code that predates masks. Releases before the impersonator was covered by

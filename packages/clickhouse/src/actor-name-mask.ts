@@ -101,10 +101,20 @@ export const MASKED_NAME_COLUMNS: Record<string, { text: string; flag: string }>
   actor_name: { text: MASKED_ACTOR_NAME_TEXT_SQL, flag: ACTOR_NAME_IS_SENSITIVE_SQL },
   impersonator_name: { text: MASKED_IMPERSONATOR_NAME_TEXT_SQL, flag: `(${IMPERSONATOR_NAME_IS_SENSITIVE_SQL}*2)` },
 };
+/** The literal flag values a facet row may carry, as numbers or their exact digit strings. */
+const FACET_FLAGS = new Map<unknown, number>([
+  [0, 0],
+  [1, 1],
+  [2, 2],
+  ['0', 0],
+  ['1', 1],
+  ['2', 2],
+]);
 /** A facet value or label under the mask: flagged text becomes the pseudonym of the flag's role. */
 export function maskedFacetText(projectId: string, flag: number | string, text: string, secret: Buffer) {
-  // Only the exact flags 0, 1 and 2 (a number, or its digit as JSON may carry it); '' or ' ' must not read as 0.
-  const value = typeof flag === 'number' ? flag : /^[0-2]$/.test(flag) ? Number(flag) : Number.NaN;
+  // Only the exact flags 0, 1 and 2 (a number, or its digit as JSON may carry it); anything else, '' or [0] included,
+  // must not read as 0.
+  const value = FACET_FLAGS.get(flag) ?? Number.NaN;
   if (value === 0) return text;
   const role = FACET_FLAG_ROLE[value];
   // Fail closed: text under a flag this code does not know may be the address.
