@@ -1,5 +1,5 @@
 import { acknowledge } from './acknowledgement';
-import { captureQueue } from './capture-queue';
+import { attachCaptureQueue } from './capture-queue';
 
 import { createRedactor, type RedactionOptions } from './redaction';
 
@@ -122,6 +122,7 @@ export interface LogbirdOptions {
 
 interface QueuedEvent {
   event: EventInput;
+  wireId: string;
   serialized: string;
   bytes: number;
   uncertain: boolean;
@@ -160,6 +161,7 @@ export class Logbird {
   private operationTimer: ReturnType<typeof setTimeout> | undefined;
   private pending: Promise<void> | undefined;
   private stopping: Promise<void> | undefined;
+  private shutdownDeadline: number | undefined;
   private explicit = false;
   private readonly stop = new AbortController();
   private closed = false;
@@ -264,7 +266,10 @@ export class Logbird {
     )
       throw new Error('Invalid batching options');
     this.options = { ...options };
-    captureQueue.set(this, (identity, prepare, onFailure) => this.deferCapture(identity, prepare, onFailure));
+    attachCaptureQueue(this, {
+      defer: (identity, prepare, onFailure) => this.deferCapture(identity, prepare, onFailure),
+      notify: (callback, error) => this.notify(callback, error instanceof Error ? error : new Error('Logbird capture failed')),
+    });
     if (options.redaction !== false) {
       this.serializeRedacted = createRedactor(options.redaction, (error) => this.report(error));
     }
@@ -317,9 +322,10 @@ export class Logbird {
         prepared = result;
         failure = 'invalid';
       }
-      const hookId = typeof prepared.id === 'string' && prepared.id.trim() ? prepared.id : undefined;
+      const supplied: unknown = prepared.id;
+      const hookId = typeof supplied === 'string' && supplied.trim() ? supplied : undefined;
       const outgoingId = options?.preserveId ? id : (hookId ?? uuidv7());
-      if (prepared.id !== outgoingId) prepared = { ...prepared, id: outgoingId };
+      if (supplied !== outgoingId) prepared = { ...prepared, id: outgoingId };
       // The serialized snapshot also enforces the id for events with a top-level toJSON.
       if (this.serializeRedacted) failure = 'redaction_failed';
       let serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : JSON.stringify(prepared);
@@ -343,7 +349,7 @@ export class Logbird {
           return;
         }
       }
-      entry = { event: copy, serialized, bytes, uncertain: false, sending: false };
+      entry = { event: copy, wireId: copy.id.trim(), serialized, bytes, uncertain: false, sending: false };
     } catch {
       this.refuse(
         identity,
@@ -447,6 +453,7 @@ export class Logbird {
       return await this.timed(Math.max(1, Math.floor(Math.min(30_000, remainingMs))), answer, async (signal) => {
         this.outstandingRequests++;
         try {
+          this.checkShutdownDeadline();
           for (const entry of batch) entry.sending = true;
           const response = await fetch(`${this.endpoint}/v1/events`, {
             method: 'POST',
@@ -489,7 +496,7 @@ export class Logbird {
     const unsettled = new Set(batch);
     let retries = 0;
     for (let attempt = 1; ; attempt++) {
-      this.stop.signal.throwIfAborted();
+      this.checkShutdownDeadline();
       const remainingMs = deadline - monotonicNow();
       if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
       const { status, retryAfter, result } = await this.request(wire, remainingMs);
@@ -498,7 +505,7 @@ export class Logbird {
       if (!this.stop.signal.aborted && (success || status === 503)) {
         const ack = acknowledge(
           result,
-          wire.map((entry) => entry.event),
+          wire.map((entry) => entry.wireId),
           status === 503,
         );
         if (ack) {
@@ -602,7 +609,8 @@ export class Logbird {
     return this.stopping;
   }
   private async finishShutdown() {
-    const abort = () => this.stop.abort(new Error('Logbird shutdown time limit exceeded'));
+    this.shutdownDeadline = monotonicNow() + this.shutdownTimeout;
+    const abort = () => this.abortShutdown();
     if (this.shutdownTimeout === 0) abort();
     const timer = this.shutdownTimeout > 0 ? setTimeout(abort, this.shutdownTimeout) : undefined;
     try {
@@ -623,6 +631,13 @@ export class Logbird {
     } finally {
       clearTimeout(timer);
     }
+  }
+  private abortShutdown() {
+    this.stop.abort(new Error('Logbird shutdown time limit exceeded'));
+  }
+  private checkShutdownDeadline() {
+    if (this.shutdownDeadline !== undefined && monotonicNow() >= this.shutdownDeadline) this.abortShutdown();
+    this.stop.signal.throwIfAborted();
   }
   private async waitForCaptures() {
     const signal = this.stop.signal;

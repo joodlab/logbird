@@ -394,8 +394,9 @@ The SDK validates the acknowledgement envelope, credits each accepted id once
 per occurrence and settles each rejected position once. It retries only the
 remaining events with their cached JSON (including id and occurredAt)
 in every subset body. Response indices are mapped back to the original events,
-so rejections call `onDrop` once per event. Incomplete acknowledgements keep
-the previous retry body, and valid rejections are still reported. The SDK refuses
+so rejections call `onDrop` once per event. Incomplete 503 details keep the
+previous retry body, and valid rejections are still reported. A partial 2xx
+can settle unambiguous accepted rows. The SDK refuses
 to dispatch when four transport operations are still outstanding after cancellation.
 After its retry budget, only unsettled events stay
 queued and `flush()` rejects. The SDK always sends `Logbird-Retry: subset`. About

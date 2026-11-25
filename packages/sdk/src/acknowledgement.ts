@@ -1,4 +1,4 @@
-import type { EventInput, IngestRejectionCode } from './index';
+import type { IngestRejectionCode } from './index';
 
 const rejectionCodes: ReadonlySet<string> = new Set([
   'invalid_event',
@@ -12,17 +12,23 @@ function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-export function acknowledge(value: unknown, events: readonly EventInput[], partial: boolean) {
+export function acknowledge(value: unknown, wireIds: readonly string[], partial: boolean) {
   const error = object(object(value).error);
   if (partial && error.code !== 'ingest_pending' && error.code !== 'ingest_unavailable') return;
   const { accepted, ids, rejected, warnings, indices, eventIds } = object(partial ? error.details : value);
-  const validIds = Array.isArray(ids) && accepted === ids.length && ids.length <= events.length;
-  if (!partial && !validIds) return;
+  const validIds = Array.isArray(ids) && accepted === ids.length && ids.length <= wireIds.length;
   const rejections = new Map<number, IngestRejectionCode | undefined>();
   if (Array.isArray(rejected)) {
     for (const entry of rejected) {
       const { index, reason, code } = object(entry);
-      if (typeof index !== 'number' || !Number.isInteger(index) || !events[index] || typeof reason !== 'string' || rejections.has(index)) continue;
+      if (
+        typeof index !== 'number' ||
+        !Number.isInteger(index) ||
+        wireIds[index] === undefined ||
+        typeof reason !== 'string' ||
+        rejections.has(index)
+      )
+        continue;
       rejections.set(index, typeof code === 'string' && rejectionCodes.has(code) ? (code as IngestRejectionCode) : undefined);
     }
   }
@@ -36,18 +42,23 @@ export function acknowledge(value: unknown, events: readonly EventInput[], parti
     return incomplete;
   const unresolved = new Set<number>();
   const credit = new Map<string, number>();
-  const wireIds = events.map((event) => event.id?.trim());
   if (partial) {
-    if (!Array.isArray(indices) || !Array.isArray(eventIds) || indices.length !== eventIds.length || indices.length > events.length)
+    if (!Array.isArray(indices) || !Array.isArray(eventIds) || indices.length !== eventIds.length || indices.length > wireIds.length)
       return incomplete;
     for (const [position, index] of indices.entries()) {
-      if (!Number.isInteger(index) || !events[index] || wireIds[index] !== eventIds[position] || unresolved.has(index) || rejections.has(index))
+      if (
+        !Number.isInteger(index) ||
+        wireIds[index] === undefined ||
+        wireIds[index] !== eventIds[position] ||
+        unresolved.has(index) ||
+        rejections.has(index)
+      )
         return incomplete;
       unresolved.add(index);
     }
   }
   // A 503 must say which positions remain. Without them, its ID list is ambiguous.
-  if (partial && ids.length + rejections.size + unresolved.size !== events.length) return incomplete;
+  if (partial && ids.length + rejections.size + unresolved.size !== wireIds.length) return incomplete;
   for (const id of ids) {
     if (typeof id !== 'string' || id.length === 0) return incomplete;
     credit.set(id, (credit.get(id) ?? 0) + 1);
@@ -55,7 +66,7 @@ export function acknowledge(value: unknown, events: readonly EventInput[], parti
   if (!partial) {
     const occurrences = new Map<string, number>();
     for (const [index, id] of wireIds.entries()) {
-      if (id !== undefined && !rejections.has(index)) occurrences.set(id, (occurrences.get(id) ?? 0) + 1);
+      if (!rejections.has(index)) occurrences.set(id, (occurrences.get(id) ?? 0) + 1);
     }
     for (const [id, count] of credit) {
       const candidates = occurrences.get(id) ?? 0;
@@ -66,7 +77,7 @@ export function acknowledge(value: unknown, events: readonly EventInput[], parti
   }
   const delivered = new Set<number>();
   for (const [index, id] of wireIds.entries()) {
-    if (id === undefined || rejections.has(index) || unresolved.has(index)) continue;
+    if (rejections.has(index) || unresolved.has(index)) continue;
     const count = credit.get(id);
     if (!count) continue;
     delivered.add(index);

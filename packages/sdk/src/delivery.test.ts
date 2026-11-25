@@ -108,6 +108,55 @@ it('clears lost-answer uncertainty when the server definitively rejects the cont
   });
 });
 
+it('accounts for an indexed rejection even when the 202 accepted count is malformed', async () => {
+  const onDrop = vi.fn();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      Response.json({
+        accepted: 2,
+        ids: ['pending'],
+        rejected: [{ index: 1, code: 'invalid_event', reason: 'fixture' }],
+      }),
+    ),
+  );
+  const sdk = client({ onDrop });
+  sdk.track(event('pending'));
+  sdk.track(event('rejected'));
+  await expect(sdk.flush()).rejects.toThrow();
+  expect(sdk.queueSize).toBe(1);
+  expect(onDrop).toHaveBeenCalledWith(expect.objectContaining({ id: 'rejected' }), {
+    reason: 'rejected',
+    code: 'invalid_event',
+    mayBeStored: false,
+  });
+});
+
+it('matches retry acknowledgements against the IDs stored with the wire bytes', async () => {
+  vi.useFakeTimers();
+  const rejection = { index: 1, cost: 0, reason: 'fixture', code: 'invalid_event' };
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({ error: { code: 'ingest_pending', details: { rejected: [rejection] } } }, { status: 503, headers: { 'Retry-After': '0' } }),
+    )
+    .mockResolvedValueOnce(Response.json({ accepted: 1, ids: ['accepted'], rejected: [rejection] }, { status: 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client({
+    maxRetries: 1,
+    onDrop: (dropped) => {
+      Object.assign(dropped, { id: 12 });
+    },
+  });
+  sdk.track(event('accepted'));
+  sdk.track(event('rejected'));
+  const done = sdk.flush();
+  await vi.advanceTimersByTimeAsync(0);
+  await done;
+  expect(sdk.queueSize).toBe(0);
+  expect(sdk.droppedByReason.rejected).toBe(1);
+});
+
 it('mints fresh direct-track ids when a hook removes a supplied id', async () => {
   const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
     const ids = (JSON.parse(String(init.body)).events as EventInput[]).flatMap((item) => item.id ?? []);
@@ -121,6 +170,32 @@ it('mints fresh direct-track ids when a hook removes a supplied id', async () =>
   const ids = (JSON.parse(String(fetcher.mock.calls[0]?.[1].body)).events as EventInput[]).map((item) => item.id);
   expect(new Set(ids).size).toBe(2);
   expect(ids).not.toContain('upstream');
+});
+
+it('validates the same hook id value it uses for post-redaction repair', async () => {
+  const calls = vi.fn();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init: RequestInit) => {
+      const sent = JSON.parse(String(init.body)).events[0];
+      calls(sent);
+      return accepted(sent.id);
+    }),
+  );
+  let reads = 0;
+  const sdk = client({
+    beforeSend: (value) => ({
+      ...value,
+      get id() {
+        reads++;
+        return reads < 3 ? 'validated' : ({ payload: 'fictional' } as unknown as string);
+      },
+      toJSON: () => ({ action: 'test.audit' }),
+    }),
+  });
+  sdk.track(event('original'));
+  await sdk.shutdown();
+  expect(calls).toHaveBeenCalledWith({ action: 'test.audit', id: 'validated' });
 });
 
 it('shuts down queued events even when the original options object is changed', async () => {
@@ -275,6 +350,29 @@ it('uses one shutdown budget for an active request and the queued tail', async (
     ['waiting', 'shutdown', false],
   ]);
 }, 500);
+
+it('checks the monotonic shutdown deadline before dispatching a queued tail', async () => {
+  let clock = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  let reply!: (response: Response) => void;
+  const fetcher = vi.fn(
+    () =>
+      new Promise<Response>((done) => {
+        reply = done;
+      }),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = client({ batchSize: 1, shutdownTimeoutMs: 10 });
+  sdk.track(event('active'));
+  sdk.track(event('tail'));
+  const closing = expect(sdk.shutdown()).rejects.toThrow();
+  clock = 11;
+  reply(accepted('active'));
+  await closing;
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(sdk.droppedByReason.shutdown).toBe(1);
+  expect(sdk.possiblyStoredDropsByReason.shutdown).toBeUndefined();
+});
 
 it('unrefs background backoff and refs it when an explicit flush joins', async () => {
   const timer = vi.spyOn(globalThis, 'setTimeout');

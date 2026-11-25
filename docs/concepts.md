@@ -140,8 +140,9 @@ idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `war
 entry has a `code` plus a code-first explanation in `reason`. The SDK retries these
 responses; after its retry budget, only unsettled events stay queued and `flush()` rejects.
 Retry `flush()` later. TypeScript `shutdown()` uses one time budget for delivery.
-If delivery fails or the budget expires, shutdown reports each unsettled event
-through the drop counters and rejects. A drop marked `mayBeStored` may already
+It resolves after events are acknowledged or reported as permanent drops. If
+unsettled work remains after a delivery failure or the budget expires, shutdown
+reports it through the drop counters and rejects. A drop marked `mayBeStored` may already
 be present. Replay its original id and content from your outbox.
 Unresolved writes recover automatically per project after a
 bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,

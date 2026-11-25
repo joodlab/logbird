@@ -1,4 +1,4 @@
-import { captureQueue } from './capture-queue';
+import { getCaptureQueue } from './capture-queue';
 import { type EventInput, type Logbird, uuidv7 } from './index';
 export interface AuditCarrier {
   operationId: string;
@@ -48,7 +48,11 @@ export interface CaptureOptions<C> {
   useRequestIdHeader?: boolean;
   onError?: (error: Error) => void;
 }
-export function report(onError: CaptureOptions<unknown>['onError'], error: unknown): void {
+export function report(onError: CaptureOptions<unknown>['onError'], error: unknown, client?: Logbird): void {
+  if (client) {
+    getCaptureQueue(client).notify(onError, error);
+    return;
+  }
   if (onError)
     void Promise.resolve()
       .then(() => onError(error instanceof Error ? error : new Error('Logbird capture failed')))
@@ -85,6 +89,7 @@ export async function createAudit<C>(options: CaptureOptions<C>, context: C, req
   });
 }
 function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput): Audit {
+  const queue = getCaptureQueue(options.client);
   const local = new Set<Promise<unknown>>();
   function register<T>(promise: Promise<T>): Promise<T> {
     local.add(promise);
@@ -113,20 +118,34 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
           if (value !== undefined || (field !== 'requestId' && field !== 'operationId')) target[field] = value;
         } catch (error) {
           delete target[field];
-          report(options.onError, error);
+          queue.notify(options.onError, error);
         }
       }),
     );
     return merged;
   }
   const audit = ((action: string, event: Partial<EventInput> = {}) => {
-    const supplied = Object.getOwnPropertyDescriptor(event, 'id')?.value as unknown;
+    let supplied: unknown;
+    let invalidId = false;
+    try {
+      supplied = event.id;
+    } catch {
+      invalidId = true;
+    }
     const id = typeof supplied === 'string' && supplied.trim() ? supplied : uuidv7();
     const timestamp = new Date().toISOString();
-    const task = captureQueue.get(options.client)?.(
+    const task = queue.defer(
       { action, id },
-      async () => resolve({ ...event, action, id, occurredAt: event.occurredAt ?? timestamp }),
-      () => report(options.onError, new Error('Logbird capture failed')),
+      async () => {
+        if (invalidId) throw new Error('Logbird capture failed');
+        const fields = Object.fromEntries(
+          Object.keys(event)
+            .filter((key) => key !== 'id')
+            .map((key) => [key, event[key]]),
+        );
+        return resolve({ ...fields, action, id, occurredAt: fields.occurredAt ?? timestamp });
+      },
+      () => queue.notify(options.onError, new Error('Logbird capture failed')),
     );
     if (task) register(task);
     return id;
@@ -197,7 +216,7 @@ export function jobAudit(options: JobAuditOptions): Audit {
 }
 export async function shutdown(options: Pick<CaptureOptions<unknown>, 'client' | 'onError'>): Promise<void> {
   await options.client.shutdown().catch((error) => {
-    report(options.onError, error);
+    report(options.onError, error, options.client);
     throw error;
   });
 }
