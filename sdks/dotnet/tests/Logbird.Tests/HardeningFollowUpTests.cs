@@ -199,6 +199,10 @@ public class HardeningFollowUpTests
     [InlineData("\"2026-11-21\"")]
     [InlineData("{\"from\":\"2026-11-21T08:00:00.000Z\"}")]
     [InlineData("{\"from\":1,\"to\":2}")]
+    [InlineData("{\"from\":\"tomorrow\",\"to\":\"\"}")]
+    [InlineData("{\"from\":\"2026-11-22T08:00:00.000Z\",\"to\":\"2026-11-21T08:00:00.000Z\"}")]
+    [InlineData("{\"from\":\"2026-11-21T08:00:00.000Z\",\"to\":\"2026-11-21T08:00:00.000Z\"}")]
+    [InlineData("{\"from\":\"2026-11-21T08:00:00+00:00\",\"to\":\"2026-11-22T08:00:00.000Z\"}")]
     public async Task A_malformed_window_is_refused(string range)
     {
         using var reader = Reader(new Answer(_ => Task.FromResult(Json("{\"data\":[],\"nextCursor\":null,\"total\":0,\"range\":" + range + ",\"tookMs\":1}"))));

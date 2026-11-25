@@ -1864,25 +1864,20 @@
         "operationId": "console_entity_profile",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -2440,25 +2435,20 @@
         "operationId": "console_search_events",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -2479,7 +2469,6 @@
             }
           },
           {
-            "description": "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To page one fixed window, send the first page's `range` back as `from` and `to`. A cursor works only for the project and reader scope that received it (422 validation_error otherwise).",
             "in": "query",
             "name": "cursor",
             "schema": {
@@ -2487,7 +2476,6 @@
             }
           },
           {
-            "description": "Events per page, 1 to 200 (default 50).",
             "in": "query",
             "name": "limit",
             "schema": {
@@ -2498,7 +2486,6 @@
             }
           },
           {
-            "description": "`desc` (default) is newest first, `asc` oldest first. Events sort by `timestamp`, then by event `id` in the same direction. Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`.",
             "in": "query",
             "name": "order",
             "schema": {
@@ -2808,11 +2795,15 @@
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
                           "example": "2026-11-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         },
                         "to": {
                           "description": "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
                           "example": "2026-12-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         }
                       },
@@ -2826,13 +2817,13 @@
                       "type": "number"
                     },
                     "total": {
-                      "description": "Matching events in the whole window (every page, not only this one). When `totalExact` is false it is a lower bound: the count stops at 10,001, or did not finish within its 1 second budget.",
+                      "description": "Matching events in the whole window (every page, not only this one). A lower bound when `totalExact` is false.",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
                     },
                     "totalExact": {
-                      "description": "False when `total` is a lower bound. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.",
+                      "description": "False when `total` is a lower bound because the server could not establish an exact count: the count stops at 10,001, failed, did not finish within its 1 second budget, or saw fewer events than this page proves. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.",
                       "type": "boolean"
                     }
                   },
@@ -3684,25 +3675,20 @@
         "operationId": "console_stream_csv_or_jsonl",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -3920,25 +3906,20 @@
         "operationId": "console_facets",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -4126,11 +4107,15 @@
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
                           "example": "2026-11-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         },
                         "to": {
                           "description": "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
                           "example": "2026-12-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         }
                       },
@@ -4333,25 +4318,20 @@
         "operationId": "console_fields",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -4574,25 +4554,20 @@
         "operationId": "console_histogram",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -6136,25 +6111,20 @@
         "operationId": "console_live_events",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -7027,25 +6997,20 @@
         "operationId": "console_overview",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -13629,25 +13594,20 @@
         "operationId": "console_workspace_activity",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
-              "example": "2026-11-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
-              "example": "2026-12-01T00:00:00.000Z",
               "type": "string"
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -13668,7 +13628,6 @@
             }
           },
           {
-            "description": "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To page one fixed window, send the first page's `range` back as `from` and `to`. A cursor works only for the project and reader scope that received it (422 validation_error otherwise).",
             "in": "query",
             "name": "cursor",
             "schema": {
@@ -13676,7 +13635,6 @@
             }
           },
           {
-            "description": "Events per page, 1 to 200 (default 50).",
             "in": "query",
             "name": "limit",
             "schema": {
@@ -13687,7 +13645,6 @@
             }
           },
           {
-            "description": "`desc` (default) is newest first, `asc` oldest first. Events sort by `timestamp`, then by event `id` in the same direction. Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`.",
             "in": "query",
             "name": "order",
             "schema": {
@@ -13989,11 +13946,15 @@
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
                           "example": "2026-11-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         },
                         "to": {
                           "description": "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
                           "example": "2026-12-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         }
                       },
@@ -14007,13 +13968,13 @@
                       "type": "number"
                     },
                     "total": {
-                      "description": "Matching events in the whole window (every page, not only this one). When `totalExact` is false it is a lower bound: the count stops at 10,001, or did not finish within its 1 second budget.",
+                      "description": "Matching events in the whole window (every page, not only this one). A lower bound when `totalExact` is false.",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
                     },
                     "totalExact": {
-                      "description": "False when `total` is a lower bound. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.",
+                      "description": "False when `total` is a lower bound because the server could not establish an exact count: the count stops at 10,001, failed, did not finish within its 1 second budget, or saw fewer events than this page proves. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.",
                       "type": "boolean"
                     }
                   },
@@ -14895,11 +14856,11 @@
     },
     "/v1/events": {
       "get": {
-        "description": "Search stored events in one time window, one page at a time. The window runs from `from` (inclusive) to `to` (exclusive) on `timestamp`, the source's occurredAt in UTC. Without `from` it is the 24 hours before `to`; without `to` it ends at the server clock. The response states the window it applied as `range`: a history read here is complete only for that window, whatever `totalExact` says. Events sort by `timestamp`, then by event `id` in the same direction (`order`). Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`. Follow `nextCursor` until it is null, sending the same `q`, `order`, `from` and `to`; each page continues after the previous page's last event. Paging is not a snapshot: an event stored after you started, with a `timestamp` behind your position, is not on the later pages; pick late arrivals up with `receivedAt:>…` in `q`. `total` counts the whole window (a lower bound when `totalExact` is false). A scoped key or viewer token sees only its scope, and `q` cannot widen it.",
+        "description": "Search stored events in one time window, one page at a time. The window runs from `from` (inclusive) to `to` (exclusive) on the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable. Without `from` it is the 24 hours before `to`; without `to` it ends at the server clock. The response states the window it applied as `range`: a history read here is complete only for that window, whatever `totalExact` says. Events sort by `timestamp`, then by event `id` in the same direction (`order`). Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`. Follow `nextCursor` until it is null, sending the same `q`, `order`, `from` and `to`; each page continues after the previous page's last event. Paging is not a snapshot: an event stored after you started, with a `timestamp` behind your position, is not on the later pages. To pick up late arrivals, search again with `receivedAt:>` the last receipt time you saw in `q`, and a `from` early enough to cover when such events can have occurred: the window still filters on `timestamp`. `total` counts the whole window (a lower bound when `totalExact` is false). A scoped key or viewer token sees only its scope, and `q` cannot widen it.",
         "operationId": "public_search_events",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
+            "description": "Start of the time window, inclusive, on the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable (an unusable value is kept in `attributes['logbird.occurredAt.rejected']`). Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
@@ -14908,7 +14869,7 @@
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
+            "description": "End of the time window, exclusive. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
@@ -14917,7 +14878,7 @@
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
+            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term (such as `receivedAt:>…`) applies inside the window. A relative time (such as `receivedAt:>now-1h`) is read against the clock of each request.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -14936,7 +14897,7 @@
             }
           },
           {
-            "description": "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To page one fixed window, send the first page's `range` back as `from` and `to`. A cursor works only for the project and reader scope that received it (422 validation_error otherwise).",
+            "description": "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To page one fixed set of events, send the first page's `range` back as `from` and `to`, and use absolute times in `q`. A cursor this server issues works only for the project and reader scope that received it (422 validation_error otherwise).",
             "in": "query",
             "name": "cursor",
             "schema": {
@@ -15257,11 +15218,15 @@
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
                           "example": "2026-11-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         },
                         "to": {
                           "description": "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
                           "example": "2026-12-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         }
                       },
@@ -15275,13 +15240,13 @@
                       "type": "number"
                     },
                     "total": {
-                      "description": "Matching events in the whole window (every page, not only this one). When `totalExact` is false it is a lower bound: the count stops at 10,001, or did not finish within its 1 second budget.",
+                      "description": "Matching events in the whole window (every page, not only this one). A lower bound when `totalExact` is false.",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
                     },
                     "totalExact": {
-                      "description": "False when `total` is a lower bound. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.",
+                      "description": "False when `total` is a lower bound because the server could not establish an exact count: the count stops at 10,001, failed, did not finish within its 1 second budget, or saw fewer events than this page proves. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.",
                       "type": "boolean"
                     }
                   },
@@ -15680,7 +15645,7 @@
     },
     "/v1/events/{eventId}": {
       "get": {
-        "description": "One event by id. No time window applies. Returns the event; its original `payload` (null under any field mask); `parents`, the causation chain through `context.parentEventId`, root first, at most 100, stopping at the first parent that is missing or outside the reader's scope; `childCount`, the events in scope that name it as their parent (list them with `q=parent:<id>` on search); and `operationSize`, the events in scope that share its `context.operationId`, itself included (0 without one). 404 not_found when the id is unknown or outside the reader's scope.",
+        "description": "One event by id. No time window applies. Returns the event; its original `payload` (null under any field mask); `parents`, its nearest ancestors through `context.parentEventId`, furthest first, at most 100. The walk also stops at a parent that is not stored or is outside the reader's scope, at a cycle, and under the actor_email mask at a parent with tying stored versions, so the first entry is not necessarily the root. `childCount` is the number of events in scope that name it as their parent, across all stored history: to list them, search `q=parent:\"<id>\"` with a `from` early enough to cover them. `operationSize` is the number of events in scope that share its `context.operationId`, itself included, across all stored history (0 without one). 404 not_found when the id is unknown or outside the reader's scope.",
         "operationId": "public_event_detail",
         "parameters": [
           {
@@ -16384,11 +16349,11 @@
     },
     "/v1/export": {
       "get": {
-        "description": "Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers the 24 hours before `to`. The X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers state the window applied. The export reads with a fixed clock: events received after it started are not in the file.",
+        "description": "Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers the 24 hours before `to`. An answer that streams rows carries the X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers: the window applied. Membership is fixed by the export clock: an event is in the file only if its stored receipt time is at or before the moment the export started (docs/exports.md states the exact guarantee).",
         "operationId": "public_stream_csv_or_jsonl",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
+            "description": "Start of the time window, inclusive, on the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable (an unusable value is kept in `attributes['logbird.occurredAt.rejected']`). Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
@@ -16397,7 +16362,7 @@
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
+            "description": "End of the time window, exclusive. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
@@ -16406,7 +16371,7 @@
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
+            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term (such as `receivedAt:>…`) applies inside the window. A relative time (such as `receivedAt:>now-1h`) is read against the clock of each request.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -16611,7 +16576,7 @@
         "operationId": "public_facets",
         "parameters": [
           {
-            "description": "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
+            "description": "Start of the time window, inclusive, on the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable (an unusable value is kept in `attributes['logbird.occurredAt.rejected']`). Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).",
             "in": "query",
             "name": "from",
             "schema": {
@@ -16620,7 +16585,7 @@
             }
           },
           {
-            "description": "End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
+            "description": "End of the time window, exclusive. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).",
             "in": "query",
             "name": "to",
             "schema": {
@@ -16629,7 +16594,7 @@
             }
           },
           {
-            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.",
+            "description": "Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term (such as `receivedAt:>…`) applies inside the window. A relative time (such as `receivedAt:>now-1h`) is read against the clock of each request.",
             "in": "query",
             "name": "q",
             "schema": {
@@ -16807,11 +16772,15 @@
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
                           "example": "2026-11-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         },
                         "to": {
                           "description": "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
                           "example": "2026-12-01T00:00:00.000Z",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
                           "type": "string"
                         }
                       },

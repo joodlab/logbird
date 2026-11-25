@@ -179,7 +179,7 @@ export async function where(ch: ClickHouseClient, projectId: string, q: RangeQue
   const userSql = maskName ? maskActorNameInFilter(c.sql) : c.sql;
   // The scope is ANDed outside the user's filter: nothing inside `(c.sql)` can widen it.
   return {
-    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${userSql}) AND (${s.sql})`,
+    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3, 'UTC')} AND timestamp < {to:DateTime64(3, 'UTC')} AND (${userSql}) AND (${s.sql})`,
     params: { project: projectId, ...timeRange(q), ...c.params, ...s.params, ...(maskName ? ACTOR_NAME_MASK_PARAMS : {}) },
   };
 }
@@ -318,14 +318,14 @@ async function searchPage(
   let tail = '';
   const params: Params = { ...w.params, limit: q.limit + 1 };
   if (exportClock) {
-    w.sql += ' AND received_at <= {exportReceivedBefore:DateTime64(3)}';
+    w.sql += ` AND received_at <= {exportReceivedBefore:DateTime64(3, 'UTC')}`;
     params.exportReceivedBefore = exportClock;
   }
   if (q.cursor) {
     const [ts, id] = cursor(q.cursor, projectId, scope);
     params.cursorTs = ts;
     params.cursorId = id;
-    tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3)},{cursorId:String})`;
+    tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3, 'UTC')},{cursorId:String})`;
   }
   const readRows = () =>
     read<EventRow>(

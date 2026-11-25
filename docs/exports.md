@@ -52,8 +52,8 @@ Admission and final validation retry only contention, with 25–75 ms jitter and
 - **JSON Lines (all fields)** — `jsonl`. Each line is a normalized event plus `exportSchemaVersion: 1`.
   It contains every normalized field, including attributed actors and before/after changes, with normalizer caps.
 
-`X-Logbird-Range-From` (inclusive) and `X-Logbird-Range-To` (exclusive) state the time window the export read, on
-`timestamp`, as ISO 8601 UTC with milliseconds: the request's `from` and `to`, or, when one is absent, the default
+A response that streams rows carries `X-Logbird-Range-From` (inclusive) and `X-Logbird-Range-To` (exclusive): the
+time window the export read, on `timestamp`, as ISO 8601 UTC with milliseconds: the request's `from` and `to`, or, when one is absent, the default
 (`to` minus 24 hours; the server clock). A stream has no envelope, so the headers carry what search and facets return
 as `range`. An export without `from` covers only the last 24 hours: check these headers before you treat a file as a
 whole history.

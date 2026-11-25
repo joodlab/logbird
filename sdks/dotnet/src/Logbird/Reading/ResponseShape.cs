@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Text.Json;
 
 namespace Logbird;
@@ -123,9 +124,27 @@ internal static class ResponseShape
     private static bool OptionalBoolean(JsonElement value, string name)
         => !value.TryGetProperty(name, out var member) || member.ValueKind is JsonValueKind.True or JsonValueKind.False;
 
-    /// <summary>The applied window (search and facets): absent on older servers, otherwise an object with two strings.</summary>
+    /// <summary>The applied window (search and facets): absent on older servers, otherwise two UTC instants, start first.</summary>
     private static bool OptionalRange(JsonElement value)
-        => !value.TryGetProperty("range", out var range) || (range.ValueKind == JsonValueKind.Object && Texts(range, "from", "to"));
+        => !value.TryGetProperty("range", out var range)
+            || (range.ValueKind == JsonValueKind.Object
+                && Instant(range, "from", out var from)
+                && Instant(range, "to", out var to)
+                && from < to);
+
+    /// <summary>A UTC instant in the server's form, <c>2026-11-21T08:00:00.000Z</c>, and nothing else.</summary>
+    private static bool Instant(JsonElement value, string name, out DateTimeOffset instant)
+    {
+        instant = default;
+        return value.TryGetProperty(name, out var member)
+            && member.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParseExact(
+                member.GetString(),
+                "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out instant);
+    }
 
     private static bool ArrayOf(JsonElement value, string name, Func<JsonElement, bool> item)
         => value.TryGetProperty(name, out var member) && member.ValueKind == JsonValueKind.Array && All(member, item);

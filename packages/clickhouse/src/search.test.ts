@@ -53,7 +53,7 @@ it.each(['asc', 'desc'] as const)('applies the %s cursor inside the narrow selec
   expect(page.nextCursor).toBeNull();
   expect(page.data.map((e) => e.id)).toEqual(['b']);
   const sql = rowCall().query;
-  expect(sql).toContain(`AND (timestamp,event_id) ${order === 'asc' ? '>' : '<'} ({cursorTs:DateTime64(3)},{cursorId:String}) ORDER BY`);
+  expect(sql).toContain(`AND (timestamp,event_id) ${order === 'asc' ? '>' : '<'} ({cursorTs:DateTime64(3, 'UTC')},{cursorId:String}) ORDER BY`);
   expect(sql.indexOf('{cursorTs:')).toBeGreaterThan(sql.indexOf(' IN (SELECT timestamp'));
   expect(rowCall().query_params).toMatchObject({ cursorTs: '2026-11-07 10:01:00.000', cursorId });
   const countSql = countCall().query;

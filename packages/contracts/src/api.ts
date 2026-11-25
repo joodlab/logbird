@@ -29,18 +29,10 @@ export const workspaceSchema = z.object({ id: z.string(), name: z.string(), slug
  */
 /** Without `from`, a read covers this much time before `to` (24 hours). */
 export const DEFAULT_RANGE_MS = 86_400_000;
-const RANGE_FROM_TEXT =
-  "Start of the time window, inclusive: events whose `timestamp` (the source's occurredAt, UTC) is at or after it. An ISO 8601 date-time with `Z` or an offset (a date-time without one is read in the server's time zone; a date alone is midnight UTC), read to the millisecond. Default: `to` minus 24 hours. The window applied is returned as `range` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).";
-const RANGE_TO_TEXT =
-  'End of the time window, exclusive: events whose `timestamp` is before it. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).';
 export const rangeQuerySchema = z.object({
-  from: z.string().optional().meta({ description: RANGE_FROM_TEXT, example: '2026-11-01T00:00:00.000Z' }),
-  to: z.string().optional().meta({ description: RANGE_TO_TEXT, example: '2026-12-01T00:00:00.000Z' }),
-  q: z.string().max(4096).optional().meta({
-    description:
-      'Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term in `q` (such as `receivedAt:>…`) applies inside the window.',
-    example: 'action:document.updated',
-  }),
+  from: z.string().optional(), // ISO; default to − 24h
+  to: z.string().optional(), // ISO; default now
+  q: z.string().max(4096).optional().meta({ example: 'action:document.updated' }),
   lang: queryLangSchema.optional(), // absent = 'query'
 });
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
@@ -48,18 +40,20 @@ export type RangeQuery = z.infer<typeof rangeQuerySchema>;
  * The time window a read applied, so a reader can tell a short history from a short window. Same form and same rule
  * as the request's `from` and `to`: `from` inclusive, `to` exclusive, on `timestamp`, as ISO 8601 UTC with milliseconds.
  */
+const appliedInstant = z.iso.datetime({ precision: 3 });
 export const appliedRangeSchema = z
   .object({
-    from: z.string().meta({
+    from: appliedInstant.meta({
       description:
         "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
       example: '2026-11-01T00:00:00.000Z',
     }),
-    to: z.string().meta({
+    to: appliedInstant.meta({
       description: "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
       example: '2026-12-01T00:00:00.000Z',
     }),
   })
+  .refine((range) => range.from < range.to, 'The range must start before it ends.')
   .meta({
     description:
       'The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than this field.',
@@ -99,10 +93,43 @@ export const exportStatusSchema = z.object({
 export type ExportStatus = z.infer<typeof exportStatusSchema>;
 
 export const searchQuerySchema = rangeQuerySchema.extend({
-  // opaque, returned as nextCursor
+  cursor: z.string().optional(), // opaque, returned as nextCursor
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  order: z.enum(['desc', 'asc']).default('desc'),
+});
+/** `lang` on /v1: only the query language (SQL mode is console-only). */
+const publicLang = z
+  .literal('query')
+  .optional()
+  .meta({ description: 'Only `query` (the default). `lang=sql` is console-only and answers 422 invalid_query.' });
+const STORED_TIMESTAMP =
+  "the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable (an unusable value is kept in `attributes['logbird.occurredAt.rejected']`)";
+/** The time window and filter of the /v1 reads, described for OpenAPI (the console routes keep the bare schema). */
+const publicWindow = {
+  from: z
+    .string()
+    .optional()
+    .meta({
+      description: `Start of the time window, inclusive, on ${STORED_TIMESTAMP}. Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: \`to\` minus 24 hours. The window applied is returned as \`range\` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).`,
+      example: '2026-11-01T00:00:00.000Z',
+    }),
+  to: z.string().optional().meta({
+    description:
+      'End of the time window, exclusive. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).',
+    example: '2026-12-01T00:00:00.000Z',
+  }),
+  q: z.string().max(4096).optional().meta({
+    description:
+      'Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term (such as `receivedAt:>…`) applies inside the window. A relative time (such as `receivedAt:>now-1h`) is read against the clock of each request.',
+    example: 'action:document.updated',
+  }),
+  lang: publicLang,
+};
+export const publicSearchQuerySchema = searchQuerySchema.extend({
+  ...publicWindow,
   cursor: z.string().optional().meta({
     description:
-      "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To page one fixed window, send the first page's `range` back as `from` and `to`. A cursor works only for the project and reader scope that received it (422 validation_error otherwise).",
+      "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To page one fixed set of events, send the first page's `range` back as `from` and `to`, and use absolute times in `q`. A cursor this server issues works only for the project and reader scope that received it (422 validation_error otherwise).",
   }),
   limit: z.coerce.number().int().min(1).max(200).default(50).meta({ description: 'Events per page, 1 to 200 (default 50).' }),
   order: z.enum(['desc', 'asc']).default('desc').meta({
@@ -110,14 +137,8 @@ export const searchQuerySchema = rangeQuerySchema.extend({
       '`desc` (default) is newest first, `asc` oldest first. Events sort by `timestamp`, then by event `id` in the same direction. Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`.',
   }),
 });
-/** `lang` on /v1: only the query language (SQL mode is console-only). */
-const publicLang = z
-  .literal('query')
-  .optional()
-  .meta({ description: 'Only `query` (the default). `lang=sql` is console-only and answers 422 invalid_query.' });
-export const publicSearchQuerySchema = searchQuerySchema.extend({ lang: publicLang });
 /** `GET /v1/export`: the console schema without SQL mode (`lang=sql` is console-only). */
-export const publicExportQuerySchema = exportQuerySchema.extend({ lang: publicLang });
+export const publicExportQuerySchema = exportQuerySchema.extend(publicWindow);
 export type SearchQuery = z.infer<typeof searchQuerySchema>;
 
 export const searchResponseSchema = z.object({
@@ -125,13 +146,12 @@ export const searchResponseSchema = z.object({
   nextCursor: z.string().nullable().meta({ description: 'Send as `cursor` for the next page; null on the last page.' }),
   /** Number of matches in range. When `totalExact` is false it is a lower bound (capped at 10,001, or the count did not finish). */
   total: z.number().int().meta({
-    description:
-      'Matching events in the whole window (every page, not only this one). When `totalExact` is false it is a lower bound: the count stops at 10,001, or did not finish within its 1 second budget.',
+    description: 'Matching events in the whole window (every page, not only this one). A lower bound when `totalExact` is false.',
   }),
   /** False when `total` is a lower bound. Absent from older servers: treat as exact below 10,001. */
   totalExact: z.boolean().optional().meta({
     description:
-      'False when `total` is a lower bound. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.',
+      'False when `total` is a lower bound because the server could not establish an exact count: the count stops at 10,001, failed, did not finish within its 1 second budget, or saw fewer events than this page proves. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.',
   }),
   /** The window applied (absent from older servers). */
   range: appliedRangeSchema.optional(),
@@ -239,7 +259,7 @@ export type FacetResponse = z.infer<typeof facetResponseSchema>;
 export const RECENT_PROBLEM_OUTCOMES = ['failure', 'denied'] as const;
 export const RECENT_PROBLEM_SEVERITY = 'critical';
 
-export const publicFacetQuerySchema = facetQuerySchema.extend({ lang: publicLang });
+export const publicFacetQuerySchema = facetQuerySchema.extend(publicWindow);
 
 /* ------------------------------------------------------------------ */
 /* Overview dashboard                                                  */

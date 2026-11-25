@@ -176,6 +176,13 @@ describe('export', () => {
     expect((await explicit.text()).trim().split('\n')).toHaveLength(5); // header + 4 events
   });
 
+  it('states no window on a refusal: the headers come only with rows', async () => {
+    const refused = await get('/v1/export', { format: 'jsonl', q: 'action:"unterminated', from: old });
+    expect(refused.status).toBe(422);
+    expect(refused.headers.get(RANGE_FROM_HEADER)).toBeNull();
+    expect(refused.headers.get(RANGE_TO_HEADER)).toBeNull();
+  });
+
   it('states the window to a scoped key', async () => {
     const scoped = await get('/v1/export', { format: 'jsonl', from: old, to: recent }, scopedSecret);
     expect(scoped.headers.get(RANGE_FROM_HEADER)).toBe(old);

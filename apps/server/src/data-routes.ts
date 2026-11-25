@@ -60,13 +60,13 @@ const exportResponses = {
 /** What each /v1 read route does, and which time window it reads (OpenAPI `description`). */
 const READ_ROUTE_TEXT = {
   search:
-    "Search stored events in one time window, one page at a time. The window runs from `from` (inclusive) to `to` (exclusive) on `timestamp`, the source's occurredAt in UTC. Without `from` it is the 24 hours before `to`; without `to` it ends at the server clock. The response states the window it applied as `range`: a history read here is complete only for that window, whatever `totalExact` says. Events sort by `timestamp`, then by event `id` in the same direction (`order`). Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`. Follow `nextCursor` until it is null, sending the same `q`, `order`, `from` and `to`; each page continues after the previous page's last event. Paging is not a snapshot: an event stored after you started, with a `timestamp` behind your position, is not on the later pages; pick late arrivals up with `receivedAt:>…` in `q`. `total` counts the whole window (a lower bound when `totalExact` is false). A scoped key or viewer token sees only its scope, and `q` cannot widen it.",
+    "Search stored events in one time window, one page at a time. The window runs from `from` (inclusive) to `to` (exclusive) on the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable. Without `from` it is the 24 hours before `to`; without `to` it ends at the server clock. The response states the window it applied as `range`: a history read here is complete only for that window, whatever `totalExact` says. Events sort by `timestamp`, then by event `id` in the same direction (`order`). Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`. Follow `nextCursor` until it is null, sending the same `q`, `order`, `from` and `to`; each page continues after the previous page's last event. Paging is not a snapshot: an event stored after you started, with a `timestamp` behind your position, is not on the later pages. To pick up late arrivals, search again with `receivedAt:>` the last receipt time you saw in `q`, and a `from` early enough to cover when such events can have occurred: the window still filters on `timestamp`. `total` counts the whole window (a lower bound when `totalExact` is false). A scoped key or viewer token sees only its scope, and `q` cannot widen it.",
   detail:
-    "One event by id. No time window applies. Returns the event; its original `payload` (null under any field mask); `parents`, the causation chain through `context.parentEventId`, root first, at most 100, stopping at the first parent that is missing or outside the reader's scope; `childCount`, the events in scope that name it as their parent (list them with `q=parent:<id>` on search); and `operationSize`, the events in scope that share its `context.operationId`, itself included (0 without one). 404 not_found when the id is unknown or outside the reader's scope.",
+    'One event by id. No time window applies. Returns the event; its original `payload` (null under any field mask); `parents`, its nearest ancestors through `context.parentEventId`, furthest first, at most 100. The walk also stops at a parent that is not stored or is outside the reader\'s scope, at a cycle, and under the actor_email mask at a parent with tying stored versions, so the first entry is not necessarily the root. `childCount` is the number of events in scope that name it as their parent, across all stored history: to list them, search `q=parent:"<id>"` with a `from` early enough to cover them. `operationSize` is the number of events in scope that share its `context.operationId`, itself included, across all stored history (0 without one). 404 not_found when the id is unknown or outside the reader\'s scope.',
   facets:
     'Counts of the most frequent values of `field` (optionally split `by` a second field) among the events in one time window that match `q`. Same window rules as search: without `from` it is the 24 hours before `to`, and the response states the window it applied as `range`. Values are ordered by count, most frequent first.',
   export:
-    'Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers the 24 hours before `to`. The X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers state the window applied. The export reads with a fixed clock: events received after it started are not in the file.',
+    'Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers the 24 hours before `to`. An answer that streams rows carries the X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers: the window applied. Membership is fixed by the export clock: an event is in the file only if its stored receipt time is at or before the moment the export started (docs/exports.md states the exact guarantee).',
 };
 const readDoc = (summary: string, description: string, schema: z.ZodType, parameters?: DescribeRouteOptions['parameters']) =>
   routeDoc(
@@ -357,17 +357,6 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
   const formatName = s.EXPORT_FORMAT_LABELS[input.format];
   c.header(s.EXPORT_ID_HEADER, exportId);
   c.header(s.EXPORT_SCHEMA_HEADER, `${input.format}/${s.EXPORT_SCHEMA_VERSION}`);
-  // The stream has no envelope, so the window goes in headers: the same bounds prepareExport resolves from this clock.
-  let range: s.AppliedRange | undefined;
-  try {
-    range = ch.timeRange(input, clock);
-  } catch {
-    // An invalid window states none here and fails below exactly as before.
-  }
-  if (range) {
-    c.header(s.RANGE_FROM_HEADER, range.from);
-    c.header(s.RANGE_TO_HEADER, range.to);
-  }
   const body = await auditedExport(
     async (signal) => {
       const client = caller.client ?? queryClient(input);
@@ -502,6 +491,12 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
       },
     },
   );
+  // The stream has no envelope, so the window goes in headers. Only on the answer that streams rows: the export has
+  // compiled its query and read its first page by now, so these are the bounds every page uses (a refusal states none).
+  if (resolved) {
+    c.header(s.RANGE_FROM_HEADER, resolved.range.from);
+    c.header(s.RANGE_TO_HEADER, resolved.range.to);
+  }
   c.header('Content-Type', input.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
   c.header(
     'Content-Disposition',
