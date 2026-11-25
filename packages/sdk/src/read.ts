@@ -43,7 +43,7 @@ export interface SearchResponse {
   totalExact?: boolean;
   /**
    * The time window the server applied: `from` inclusive, `to` exclusive, on `timestamp` (ISO 8601 UTC). Without
-   * `from` the server reads only the 24 hours before `to`, so a short history may just be a short window. Absent
+   * `from` the server reads at most the 24 hours before `to`, so a short history may just be a short window. Absent
    * from servers older than this field.
    */
   range?: { from: string; to: string };

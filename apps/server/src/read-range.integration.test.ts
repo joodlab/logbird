@@ -39,7 +39,10 @@ beforeAll(async () => {
 });
 /** An export releases its admission lease after its outcome is confirmed, a moment after the body ends: wait for it. */
 async function exportsSettled() {
-  for (let i = 0; i < 60 && (await prisma.exportLease.count({ where: { workspaceId: f.org } })); i++) await new Promise((r) => setTimeout(r, 250));
+  const held = () => prisma.exportLease.count({ where: { workspaceId: f.org } });
+  for (let i = 0; i < 60 && (await held()); i++) await new Promise((r) => setTimeout(r, 250));
+  // Fail here, not later with a 429 or a lease deleted under a running cleanup.
+  expect(await held(), 'export leases still held after 15 s').toBe(0);
 }
 afterAll(async () => {
   await exportsSettled();

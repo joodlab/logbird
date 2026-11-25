@@ -134,7 +134,7 @@ public sealed class EventPage
 
     /// <summary>
     /// The time window the server applied, or <see langword="null"/> when the server does not say (older servers).
-    /// Without <see cref="EventSearch.From"/> the server reads only the 24 hours before the end, so compare this with
+    /// Without <see cref="EventSearch.From"/> the server reads at most the 24 hours before the end, so compare this with
     /// the window you meant before you treat a page as a complete history.
     /// </summary>
     public EventRange? Range { get; init; }
@@ -149,10 +149,10 @@ public sealed class EventPage
 /// </summary>
 public sealed class EventRange
 {
-    /// <summary>The inclusive start: the requested start, or the end minus 24 hours when none was given.</summary>
+    /// <summary>The inclusive start: the requested start, or the end minus 24 hours when none was given, never before 1900-01-01.</summary>
     public string From { get; init; } = string.Empty;
 
-    /// <summary>The exclusive end: the requested end, or the server clock when none was given.</summary>
+    /// <summary>The exclusive end: the requested end, or the server clock when none was given, never after 2299-12-31T23:59:59.999Z.</summary>
     public string To { get; init; } = string.Empty;
 }
 

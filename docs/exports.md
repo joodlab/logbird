@@ -54,8 +54,9 @@ Admission and final validation retry only contention, with 25–75 ms jitter and
 
 A response that streams rows carries `X-Logbird-Range-From` (inclusive) and `X-Logbird-Range-To` (exclusive): the
 time window the export read, on `timestamp`, as ISO 8601 UTC with milliseconds: the request's `from` and `to`, or, when one is absent, the default
-(`to` minus 24 hours; the server clock). A stream has no envelope, so the headers carry what search and facets return
-as `range`. An export without `from` covers only the last 24 hours: check these headers before you treat a file as a
+(`to` minus 24 hours; the server clock), held to what the store holds (1900-01-01T00:00:00.000Z to
+2299-12-31T23:59:59.999Z). A stream has no envelope, so the headers carry what search and facets return
+as `range`. An export without `from` covers at most the 24 hours before `to` (the last 24 hours when `to` is absent too): check these headers before you treat a file as a
 whole history.
 
 `X-Logbird-Export-Schema` is `<format>/1`. CSV `schemaVersion` and JSONL `exportSchemaVersion` version the export

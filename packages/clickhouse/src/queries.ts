@@ -705,7 +705,10 @@ export async function overview(ch: ClickHouseClient, p: string, q: RangeQuery): 
     hour = new Date(now.getTime() - 3_600_000).toISOString();
   const [m, prev, series, topActions, topActors, topTenants, topExecutors, recentProblems, stats, minutes] = await Promise.all([
     metrics(ch, p, q),
-    metrics(ch, p, { ...q, from: new Date(Date.parse(range.from) - duration).toISOString(), to: range.from }),
+    // The previous period of a window that starts at the store's earliest time holds nothing (and would be empty).
+    Date.parse(range.from) <= STORE_TIME_LIMITS.min
+      ? { events: 0, actors: 0, tenants: 0, failureRate: 0, avgConformance: 0 }
+      : metrics(ch, p, { ...q, from: new Date(Date.parse(range.from) - duration).toISOString(), to: range.from }),
     histogram(ch, p, q),
     top(ch, p, q, 'action', 'action'),
     top(ch, p, q, 'actor_id', 'actor_name', 'actor_type'),

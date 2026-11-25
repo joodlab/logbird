@@ -228,3 +228,11 @@ it('moves a bound outside what the store holds onto its limit, and states the mo
   const applied = timeRange({ from: '1850-06-01', to: '2026-11-07T11:00:00+01:00' });
   expect(timeRange(applied)).toEqual(applied);
 });
+it('reports an empty previous period for an overview window that starts at the store limit', () => {
+  // overview() skips the previous-period read in this case; the window itself is valid.
+  expect(timeRange({ from: '1900-01-01T00:00:00.000Z', to: '1900-01-02T00:00:00.000Z' })).toEqual({
+    from: '1900-01-01T00:00:00.000Z',
+    to: '1900-01-02T00:00:00.000Z',
+  });
+  expect(() => timeRange({ from: '1899-12-31T00:00:00.000Z', to: '1900-01-01T00:00:00.000Z' })).toThrow('Invalid time range');
+});

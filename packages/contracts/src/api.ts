@@ -45,18 +45,19 @@ export const appliedRangeSchema = z
   .object({
     from: appliedInstant.meta({
       description:
-        "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent.",
+        "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent, never before 1900-01-01T00:00:00.000Z.",
       example: '2026-11-01T00:00:00.000Z',
     }),
     to: appliedInstant.meta({
-      description: "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent.",
+      description:
+        "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent, never after 2299-12-31T23:59:59.999Z.",
       example: '2026-12-01T00:00:00.000Z',
     }),
   })
   .refine((range) => range.from < range.to, 'The range must start before it ends.')
   .meta({
     description:
-      'The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than this field.',
+      'The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than this field.',
   });
 export type AppliedRange = z.infer<typeof appliedRangeSchema>;
 /** `GET /v1/export` states the applied window in headers (a CSV or JSONL stream has no envelope for a field). */
@@ -73,12 +74,7 @@ export const EXPORT_FORMAT_LABELS: Record<ExportFormat, string> = {
   csv: 'Spreadsheet (CSV)',
   jsonl: 'JSON Lines (all fields)',
 };
-export const exportQuerySchema = rangeQuerySchema.extend({
-  format: exportFormatSchema.meta({
-    description:
-      '`csv`, `jsonl` (one event per line) or `jsonl-evidence` (each event with its original payload; 422 masked_export for a masked scope).',
-  }),
-});
+export const exportQuerySchema = rangeQuerySchema.extend({ format: exportFormatSchema });
 export type ExportQuery = z.infer<typeof exportQuerySchema>;
 export const exportEvidenceRowSchema = z.object({ exportSchemaVersion: z.literal(EXPORT_SCHEMA_VERSION), event: eventSchema, payload: z.unknown() });
 export const exportNormalizedRowSchema = eventSchema.extend({ exportSchemaVersion: z.literal(EXPORT_SCHEMA_VERSION) });
@@ -110,7 +106,7 @@ const publicWindow = {
     .string()
     .optional()
     .meta({
-      description: `Start of the time window, inclusive, on ${STORED_TIMESTAMP}. Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: \`to\` minus 24 hours. A bound outside what the store holds (1900-01-01 to 2299-12-31, UTC) is moved onto that limit; no event lies beyond it. The window applied is returned as \`range\` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).`,
+      description: `Start of the time window, inclusive, on ${STORED_TIMESTAMP}. Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: \`to\` minus 24 hours. A bound outside what the store holds is moved onto its limit: \`from\` no earlier than 1900-01-01T00:00:00.000Z, \`to\` no later than 2299-12-31T23:59:59.999Z (exclusive, so an event at exactly that last millisecond cannot be read). The window applied is returned as \`range\` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).`,
       example: '2026-11-01T00:00:00.000Z',
     }),
   to: z.string().optional().meta({
@@ -138,7 +134,13 @@ export const publicSearchQuerySchema = searchQuerySchema.extend({
   }),
 });
 /** `GET /v1/export`: the console schema without SQL mode (`lang=sql` is console-only). */
-export const publicExportQuerySchema = exportQuerySchema.extend(publicWindow);
+export const publicExportQuerySchema = exportQuerySchema.extend({
+  ...publicWindow,
+  format: exportFormatSchema.meta({
+    description:
+      '`csv`, `jsonl` (one event per line) or `jsonl-evidence` (each event with its original payload; 422 masked_export for a masked scope).',
+  }),
+});
 export type SearchQuery = z.infer<typeof searchQuerySchema>;
 
 export const searchResponseSchema = z.object({
