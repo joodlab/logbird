@@ -346,7 +346,7 @@ it('runs the hook before default redaction and checks the final serialized size'
   expect(onError).toHaveBeenCalledOnce();
   expect(onError.mock.calls[0]?.[0].message).toMatch(/256/);
   expect(client.dropped).toBe(1);
-  expect(onDrop).toHaveBeenCalledWith({ action: 'oversize', id: expect.any(String) });
+  expect(onDrop).toHaveBeenCalledWith({ action: 'oversize', id: expect.any(String) }, { reason: 'too_large', mayBeStored: false });
 });
 
 it('counts events made oversized by redaction, even without an onError callback', async () => {
@@ -416,6 +416,7 @@ it('reports identifier matches once at startup, then ignores them', async () => 
       paths: ['id', 'action', '*.id', 'targets.0.type', 'targets.*.id'],
     },
   });
+  await Promise.resolve();
   expect(onError).toHaveBeenCalledOnce();
   expect(onError.mock.calls[0]).toEqual([expect.objectContaining({ message: expect.stringMatching(/actor\.id.*targets\[\]\.type.*jobId/) })]);
   const event = {
@@ -456,7 +457,13 @@ it('refuses unredactable events, counts them, and keeps recording without leakin
   await client.shutdown();
   expect(events).toMatchObject([{ id: 'safe', metadata: { guest: { email: '[redacted]' } } }]);
   expect(client.dropped).toBe(3);
-  expect(onDrop.mock.calls).toEqual(['cycle', 'throwing', 'bad-json'].map((id) => [{ id, action: 'a' }]));
+  expect(client.droppedByReason.redaction_failed).toBe(3);
+  expect(onDrop.mock.calls).toEqual(
+    ['cycle', 'throwing', 'bad-json'].map((id) => [
+      { id, action: 'a' },
+      { reason: 'redaction_failed', mayBeStored: false },
+    ]),
+  );
   expect(onError).toHaveBeenCalledTimes(3);
   for (const [error] of onError.mock.calls) {
     expect(error.message).toBe('An audit event could not be redacted and was dropped');
@@ -474,7 +481,12 @@ it('refuses malformed identifier subtrees and reports only safe scalar identity'
   await client.shutdown();
   expect(send).not.toHaveBeenCalled();
   expect(client.dropped).toBe(1);
-  expect(onDrop.mock.calls).toEqual([[{ action: 'a', id: expect.stringMatching(/^[\da-f-]{36}$/) }]]);
+  expect(onDrop.mock.calls).toEqual([
+    [
+      { action: 'a', id: expect.stringMatching(/^[\da-f-]{36}$/) },
+      { reason: 'redaction_failed', mayBeStored: false },
+    ],
+  ]);
   expect(onError.mock.calls[0]?.[0].message).toBe('An audit event could not be redacted and was dropped');
 });
 
@@ -499,7 +511,16 @@ it('accounts for throwing metadata getters and redaction hooks without exposing 
   expect(send).not.toHaveBeenCalled();
   expect(client.dropped).toBe(1);
   expect(helper.dropped).toBe(1);
-  expect(onDrop.mock.calls).toEqual([[{ action: 'a', id: 'getter' }], [{ action: 'a', id: 'helper' }]]);
+  expect(onDrop.mock.calls).toEqual([
+    [
+      { action: 'a', id: 'getter' },
+      { reason: 'invalid', mayBeStored: false },
+    ],
+    [
+      { action: 'a', id: 'helper' },
+      { reason: 'before_send_failed', mayBeStored: false },
+    ],
+  ]);
   expect(onError).toHaveBeenCalledTimes(2);
   for (const [error] of onError.mock.calls) {
     expect(error.message).toBe('An audit event could not be prepared and was dropped');
