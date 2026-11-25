@@ -1,6 +1,6 @@
 # Query language and SQL expressions
 
-Logbird searches one authorized project within a half-open UTC time range. The default range is the last 24 hours. All query language values and attribute keys are ClickHouse parameters. SQL mode accepts a boolean expression on console endpoints only.
+Logbird searches one authorized project within a half-open UTC time range on the stored `timestamp` (the event's occurredAt, or its receipt time when occurredAt was absent or unusable): `from` inclusive, `to` exclusive. Without `from` the range is the 24 hours before `to`; without `to` it ends at the server clock. Search and facets return the range they applied as `range: { from, to }`, and an export that streams rows as the `X-Logbird-Range-From` and `X-Logbird-Range-To` headers, so a short answer can be told from a short window. Results sort by `timestamp`, then by event id; events in the same millisecond are ordered by id, not by cause (read `context.parentEventId`). All query language values and attribute keys are ClickHouse parameters. SQL mode accepts a boolean expression on console endpoints only.
 
 ## Query language (lang=query, default)
 

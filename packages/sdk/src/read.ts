@@ -57,6 +57,12 @@ export interface SearchResponse {
   total: number;
   /** False when `total` is a lower bound (capped at 10,001, or the count did not finish). */
   totalExact?: boolean;
+  /**
+   * The time window the server applied: `from` inclusive, `to` exclusive, on `timestamp` (ISO 8601 UTC). Without
+   * `from` the server reads at most the 24 hours before `to`, so a short history may just be a short window. Absent
+   * from servers older than this field.
+   */
+  range?: { from: string; to: string };
   tookMs: number;
 }
 
