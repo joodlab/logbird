@@ -8,6 +8,7 @@ import {
   searchKey,
   snapshotSearchQuery,
   snapshotTrail,
+  type TrailInput,
   type TrailQuery,
   TrailQueryError,
   trailQuery as trailQueryStrict,
@@ -18,11 +19,11 @@ import {
  * explicit default window through its prototype, so getters, Proxies and read counts behave exactly as given.
  * read-window.test.ts covers the window rule itself.
  */
-const trailQuery = (input: TrailQuery) =>
+const trailQuery = (input: TrailInput) =>
   trailQueryStrict(
     input !== null && typeof input === 'object' && !('range' in input)
       ? (Object.create(input, { range: { value: SERVER_DEFAULT_RANGE, enumerable: true } }) as TrailQuery)
-      : input,
+      : (input as TrailQuery),
   );
 
 // #311: every public read entry point first copies its input into a plain frozen snapshot of primitives, reading each

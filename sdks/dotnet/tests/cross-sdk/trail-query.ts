@@ -4,12 +4,12 @@
  *   pnpm exec tsx sdks/dotnet/tests/cross-sdk/trail-query.ts [--check]
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { SERVER_DEFAULT_RANGE, type TrailQuery, trailQuery } from '../../../../packages/sdk/src/read';
+import { SERVER_DEFAULT_RANGE, type TrailInput, trailQuery } from '../../../../packages/sdk/src/read';
 
 const output = 'sdks/dotnet/tests/Logbird.Tests/Fixtures/trail-query.golden.txt';
 
 // Every case is fictional. Values cover tab, newline, carriage return, quote, backslash, colon, star and non-Latin text.
-const cases: TrailQuery[] = [
+const cases: TrailInput[] = [
   { target: { id: 'inv_1001' } },
   { target: { type: 'invoice', id: 'inv_1001' } },
   { target: { type: 'invoice', id: 'inv\t1001\nline' } },

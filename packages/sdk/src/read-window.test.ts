@@ -7,8 +7,10 @@ import {
   readAuditEvent,
   SERVER_DEFAULT_RANGE,
   type SearchResponse,
+  type TrailQuery,
   TrailQueryError,
   trailQuery,
+  type WholeTrailQuery,
 } from './read';
 
 const FROM = '2026-11-01T00:00:00.000Z';
@@ -16,11 +18,13 @@ const TO = '2026-11-02T00:00:00.000Z';
 
 describe('a trail names its window', () => {
   it('refuses a trail without a range, or with no `from`, before anything is sent', () => {
-    expect(() => trailQuery({ tenant: 'acme' })).toThrow(TrailQueryError);
-    expect(() => trailQuery({ tenant: 'acme' })).toThrow(/a trail needs a `range`: without `from` the server reads only the 24 hours/);
-    expect(() => trailQuery({ tenant: 'acme', range: { to: TO } })).toThrow(/`range` has no `from`/);
+    expect(() => trailQuery({ tenant: 'acme' } as unknown as TrailQuery)).toThrow(TrailQueryError);
+    expect(() => trailQuery({ tenant: 'acme' } as unknown as TrailQuery)).toThrow(
+      /a trail needs a `range`: without `from` the server reads only the 24 hours/,
+    );
+    expect(() => trailQuery({ tenant: 'acme', range: { to: TO } } as unknown as TrailQuery)).toThrow(/`range` has no `from`/);
     // A selector error still comes first.
-    expect(() => trailQuery({})).toThrow(/an empty trail would be the whole project/);
+    expect(() => trailQuery({} as unknown as TrailQuery)).toThrow(/an empty trail would be the whole project/);
   });
 
   it('sends the bounds it is given, and none for the explicit server default', () => {
@@ -86,7 +90,7 @@ describe('readAuditEvent', () => {
     expect(fetch.mock.calls[0]?.[0]).toEqual(new URL('https://logbird.test/v1/events/e%202'));
     await expect(readAuditEvent(options, '  ')).rejects.toThrow(TrailQueryError);
     fetch.mockImplementationOnce(async () => json({ error: {} }, 500));
-    await expect(readAuditEvent(options, 'e1')).rejects.toThrow(/HTTP 500/);
+    await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: 'read_http_error' });
   });
 });
 
@@ -132,8 +136,10 @@ describe('iterateAuditTrail', () => {
     const drain = async (trail: Parameters<typeof iterateAuditTrail>[1]) => {
       for await (const _ of iterateAuditTrail(options, trail)) void _;
     };
-    await expect(drain({ tenant: 'acme' })).rejects.toThrow(/needs a `range`/);
-    await expect(drain({ tenant: 'acme', range: SERVER_DEFAULT_RANGE })).rejects.toThrow(/a whole trail needs `range: \{ from \}`/);
+    await expect(drain({ tenant: 'acme' } as unknown as WholeTrailQuery)).rejects.toThrow(/a whole trail needs/);
+    await expect(drain({ tenant: 'acme', range: SERVER_DEFAULT_RANGE } as unknown as WholeTrailQuery)).rejects.toThrow(
+      /a whole trail needs `range: \{ from \}`/,
+    );
     await expect(drain({ range: { from: FROM } })).rejects.toThrow(/empty trail/);
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -146,7 +152,7 @@ describe('iterateAuditTrail', () => {
       (async () => {
         for await (const e of iterateAuditTrail(options, { tenant: 'acme', range: { from: FROM } })) seen.push(e.id);
       })(),
-    ).rejects.toThrow(/repeated a page cursor/);
+    ).rejects.toMatchObject({ code: 'read_invalid_response' });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
@@ -165,14 +171,14 @@ describe('iterateAuditTrail checks every page before it yields', () => {
     } catch (cause) {
       error = cause;
     }
-    return { seen, error: error instanceof Error ? error.message : undefined };
+    return { seen, error: (error as { code?: string } | undefined)?.code ?? (error instanceof Error ? error.message : undefined) };
   };
 
   it('refuses a first page whose window is not the one asked for, before yielding it', async () => {
     const { options } = reply([{ data: [event('a')], nextCursor: null, total: 1, range: { from: '2026-02-01T00:00:00.000Z', to: TO }, tookMs: 1 }]);
     expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
       seen: [],
-      error: expect.stringMatching(/not the window asked for/),
+      error: 'read_window_unverified',
     });
     // A bound the server moved onto its store limit is the same window.
     const clamped = reply([{ data: [event('a')], nextCursor: null, total: 1, range: { from: '1900-01-01T00:00:00.000Z', to: TO }, tookMs: 1 }]);
@@ -189,7 +195,7 @@ describe('iterateAuditTrail checks every page before it yields', () => {
     ]);
     expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
       seen: ['a'],
-      error: expect.stringMatching(/changed the window/),
+      error: 'read_window_unverified',
     });
   });
 
@@ -200,7 +206,7 @@ describe('iterateAuditTrail checks every page before it yields', () => {
     ];
     expect(await collect(reply(pages).options, { tenant: 'acme', range: { from: FROM } })).toEqual({
       seen: [],
-      error: expect.stringMatching(/pass `range.to`/),
+      error: 'read_window_unverified',
     });
     const fixed = reply(pages);
     expect(await collect(fixed.options, { tenant: 'acme', range: { from: FROM, to: TO } })).toEqual({ seen: ['a', 'b'], error: undefined });
@@ -216,7 +222,7 @@ describe('iterateAuditTrail checks every page before it yields', () => {
     ]);
     expect(await collect(cycle.options, { tenant: 'acme', range: { from: FROM } })).toEqual({
       seen: ['a', 'b'],
-      error: expect.stringMatching(/repeated a page cursor/),
+      error: 'read_invalid_response',
     });
     const repeats = reply([
       { data: [event('a'), event('b')], nextCursor: 'c1', total: 3, range: { from: FROM, to: TO }, tookMs: 1 },
@@ -301,7 +307,7 @@ describe('iterateAuditTrail, round two', () => {
     } catch (cause) {
       error = cause;
     }
-    return { seen, error: error instanceof Error ? error.message : undefined };
+    return { seen, error: (error as { code?: string } | undefined)?.code ?? (error instanceof Error ? error.message : undefined) };
   };
   const windowed = (ids: string[], nextCursor: string | null, range: unknown = { from: FROM, to: TO }) => ({
     data: ids.map(event),
@@ -315,7 +321,7 @@ describe('iterateAuditTrail, round two', () => {
     const { options } = reply([windowed(['a'], 'c1'), windowed(['b'], null, null)]);
     expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
       seen: ['a'],
-      error: expect.stringMatching(/stopped reporting it/),
+      error: 'read_window_unverified',
     });
   });
 
@@ -324,7 +330,7 @@ describe('iterateAuditTrail, round two', () => {
       const { options } = reply([windowed(['a'], 'c1', range)]);
       expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
         seen: [],
-        error: expect.stringMatching(/not two instants/),
+        error: 'read_window_unverified',
       });
     }
   });
@@ -345,7 +351,7 @@ describe('iterateAuditTrail, round two', () => {
     const { options } = reply([outside]);
     expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
       seen: [],
-      error: expect.stringMatching(/outside the window/),
+      error: 'read_window_unverified',
     });
   });
 
@@ -375,7 +381,7 @@ describe('readAuditEvent returns only the event asked for', () => {
     ]) {
       const fetch = vi.fn(async () => json(body));
       const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
-      await expect(readAuditEvent(options, 'e1')).rejects.toThrow(/not the detail of the event asked for/);
+      await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: 'read_invalid_response' });
     }
   });
 });
@@ -394,7 +400,7 @@ describe('round three: shapes and ownership', () => {
     } catch (cause) {
       error = cause;
     }
-    return { seen, error: error instanceof Error ? error.message : undefined };
+    return { seen, error: (error as { code?: string } | undefined)?.code ?? (error instanceof Error ? error.message : undefined) };
   };
 
   it('ignores a `to` added to Object.prototype after the pass was created', async () => {
@@ -416,7 +422,7 @@ describe('round three: shapes and ownership', () => {
     const noCursor = { data: [event('a')], total: 1, range: { from: FROM, to: TO }, tookMs: 1 };
     expect(await collect(reply([noCursor]).options, { tenant: 'acme', range: { from: FROM } })).toEqual({
       seen: [],
-      error: expect.stringMatching(/not a page of events/),
+      error: 'read_invalid_response',
     });
     const noIds = {
       data: [
@@ -430,7 +436,7 @@ describe('round three: shapes and ownership', () => {
     };
     expect(await collect(reply([noIds]).options, { tenant: 'acme', range: { from: FROM } })).toEqual({
       seen: [],
-      error: expect.stringMatching(/not a page of events/),
+      error: 'read_invalid_response',
     });
   });
 
@@ -443,7 +449,7 @@ describe('round three: shapes and ownership', () => {
       const { options } = reply([{ data: [event('a')], nextCursor: null, total: 1, range, tookMs: 1 }]);
       expect(await collect(options, { tenant: 'acme', range: { from: FROM } })).toEqual({
         seen: [],
-        error: expect.stringMatching(/not two instants/),
+        error: 'read_window_unverified',
       });
     }
   });
@@ -457,7 +463,7 @@ describe('round three: shapes and ownership', () => {
     ]) {
       const fetch = vi.fn(async () => json(body));
       const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
-      await expect(readAuditEvent(options, 'e1')).rejects.toThrow(/not the detail of the event asked for/);
+      await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: 'read_invalid_response' });
     }
   });
 });

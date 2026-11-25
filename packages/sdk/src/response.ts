@@ -27,6 +27,8 @@ export async function readJson(
   signal: AbortSignal,
   status: number,
   onCancel?: (completion: Promise<void>) => void,
+  /** The body text's parser (default JSON.parse); a LogbirdError it throws is kept. */
+  parse: (text: string) => unknown = JSON.parse,
 ): Promise<unknown> {
   let declared: number;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -59,6 +61,7 @@ export async function readJson(
   let emptyChunks = 0;
   let consumed = false;
   const tooLarge = Symbol('response too large');
+  let parserRefusal: LogbirdError | undefined;
   try {
     signal.throwIfAborted();
     while (true) {
@@ -81,8 +84,16 @@ export async function readJson(
       length = next;
     }
     consumed = true;
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length))) as unknown;
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length));
+    try {
+      return parse(text);
+    } catch (error) {
+      // Only the parser's own refusal keeps its code; anything a transport throws is replaced below.
+      if (error instanceof LogbirdError && parse !== JSON.parse) parserRefusal = error;
+      throw error;
+    }
   } catch (error) {
+    if (parserRefusal && error === parserRefusal) throw error;
     throw new LogbirdError(error === tooLarge ? 'response_too_large' : 'response_invalid', { status });
   } finally {
     signal.removeEventListener('abort', cancel);

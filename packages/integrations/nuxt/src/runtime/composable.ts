@@ -1,4 +1,4 @@
-import { snapshotTrail, trailQuery } from '@logbird/sdk/read';
+import { snapshotTrail, type TrailInput, type TrailQuery, trailQuery } from '@logbird/sdk/read';
 import { type AuditFetcher, type AuditTrailOptions, useAuditTrailRequests } from '@logbird/vue';
 import { type MaybeRefOrGetter, toValue } from 'vue';
 import { useRequestFetch } from '#imports';
@@ -13,7 +13,9 @@ import { useRequestFetch } from '#imports';
  * and any read in flight. Without it, the route still re-authorizes every request, but the rows already on screen stay
  * until the next reload or trail change, and "load more" appends the new scope's next page to them.
  */
-export function useAuditTrail(options: MaybeRefOrGetter<Omit<AuditTrailOptions, 'fetcher'>>) {
+/** The composable's options: the Vue trail options without the fetcher; `range` may be absent on an empty trail. */
+export type NuxtAuditTrailOptions = Omit<AuditTrailOptions, 'fetcher' | 'range'> & Pick<TrailInput, 'range'>;
+export function useAuditTrail(options: MaybeRefOrGetter<NuxtAuditTrailOptions>) {
   const request = useRequestFetch();
   // One stable fetcher, bound to the fixed route: rows and cursor belong to it.
   const fetcher: AuditFetcher = (query, signal) => request('/api/_logbird/events', { query, signal });
@@ -39,7 +41,7 @@ export function useAuditTrail(options: MaybeRefOrGetter<Omit<AuditTrailOptions, 
       trail,
       range && typeof range === 'object' ? { range: Object.assign(Object.create(null), bounds) } : {},
     );
-    const query = empty ? { ...bounds, ...(order ? { order } : {}), limit: trail.limit } : trailQuery(own);
+    const query = empty ? { ...bounds, ...(order ? { order } : {}), limit: trail.limit } : trailQuery(own as TrailQuery);
     return { query, fetcher, session };
   });
 }

@@ -20,7 +20,15 @@ import {
   WebhookVerificationError,
 } from '@logbird/sdk';
 import { createAudit } from '@logbird/sdk/integration';
-import { isTrailQueryError, iterateAuditTrail, readAuditEvent, readAuditTrail, SERVER_DEFAULT_RANGE, trailQuery } from '@logbird/sdk/read';
+import {
+  isTrailQueryError,
+  iterateAuditTrail,
+  readAuditEvent,
+  readAuditTrail,
+  SERVER_DEFAULT_RANGE,
+  type TrailQuery,
+  trailQuery,
+} from '@logbird/sdk/read';
 import { Hono } from 'hono';
 
 const STORED = {
@@ -237,14 +245,14 @@ try {
   expect((searches.at(-1)?.searchParams.get('q') ?? '').includes('inv_1'), 'the trail query to name the target');
   let threw = false;
   try {
-    trailQuery({});
+    trailQuery({ range: SERVER_DEFAULT_RANGE });
   } catch (error) {
     threw = isTrailQueryError(error);
   }
   expect(threw, 'a trail without a selector to throw TrailQueryError (#311)');
   threw = false;
   try {
-    trailQuery({ target: { type: 'invoice', id: 'inv_1' } });
+    trailQuery({ target: { type: 'invoice', id: 'inv_1' } } as unknown as TrailQuery);
   } catch (error) {
     threw = isTrailQueryError(error);
   }

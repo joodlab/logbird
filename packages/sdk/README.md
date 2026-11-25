@@ -188,13 +188,28 @@ const first = page.data[0];
 const detail = first ? await readAuditEvent(options, first.id) : null; // parents, childCount, payload; null when unknown
 ```
 
-`iterateAuditTrail` needs a `range` with `from`, follows `nextCursor` within the window the first page applied, and
-ends after the last page; breaking out of the loop stops it before the next request. A pass is not a snapshot: an event
-stored while you read, with a timestamp behind your position (or before `from`), is not returned. To pick up late
-arrivals, read again later with `receivedAt:>=` in `q`, starting well before the last `receivedAt` you saw (receipt
-times are not a strict sequence), and skip ids you already have. `readAuditEvent` returns one event with its nearest
-ancestors (`parents`, furthest first), how many events name it as their parent (`childCount`; list them with
-`parent:` and the id quoted by the query language rules, over a window that covers them), how many share its operation, and its original `payload` (null under a field mask).
+### Reading a whole trail
+
+`iterateAuditTrail(options, trail)` needs `range: { from }` with `Z` or an offset (or `Date`s); `to` is optional. It reads
+the trail and options once, when called, and every page through the same bounded read as `readAuditTrail`. **A pass
+that completes** has yielded, once each, every event the server returned for the window the first page reported, which
+must be the window asked for (the server may only move a bound onto its store limits, 1900 to 2299): every later page
+is sent with that window and must report it, every yielded event lies in it, and the pass ends only when a page reports
+no next cursor. A page that fails any of these checks fails the pass with a `LogbirdError` (`read_window_unverified`
+or `read_invalid_response`) before any of its events is yielded, so a pass never yields a row twice or from outside the
+window, and never stops early without an error. Against a server that does not report its window, a trail without
+`to` fails before its second page. **It does not guarantee** a snapshot: each page is read when it is requested, so an
+event stored during the pass with a timestamp behind your position (or before `from`) is not returned, and a relative
+time in `q` (`receivedAt:>now-1h`) moves with each request. To pick up late arrivals, read again later over a window
+that covers when they can have occurred, with `receivedAt:>=` in `q` starting well before the last `receivedAt` you saw
+(receipt times are not a strict sequence), and skip ids you already have. Breaking out of the loop stops the pass before
+its next request.
+
+`readAuditEvent(options, id)` returns one event with its nearest ancestors (`parents`, furthest first), how many events
+name it as their parent (`childCount`; list them with `parent:` and the id quoted by the query language rules, over a
+window that covers them), how many share its operation, and its original `payload` (null under a field mask), or
+`null` for a 404. It uses the same bounded read and `LogbirdError` codes; where a runtime has no `JSON.rawJSON`, a
+payload holding a number a double cannot keep fails with `read_inexact_number` instead of being rounded.
 
 `trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or
 query, and a selector key passed without a value (say `tenant: undefined`) is an error, not an absent filter. A `q` must

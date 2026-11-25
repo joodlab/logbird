@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+
+import type { TrailInput } from '@logbird/sdk/read';
 import { flushPromises, mount } from '@vue/test-utils';
 import { expect, it, vi } from 'vitest';
 import { effectScope, h, type MaybeRefOrGetter, reactive, ref, toValue, watch } from 'vue';
@@ -15,12 +17,12 @@ import {
  * explicit default window through their prototype, so getters, reactive keys and read counts behave exactly as given.
  * The window rule itself is tested at the end of this file and in the SDK.
  */
-const useAuditTrail = (options: MaybeRefOrGetter<AuditTrailOptions>) =>
+const useAuditTrail = (options: MaybeRefOrGetter<Omit<AuditTrailOptions, 'range'> & Pick<TrailInput, 'range'>>) =>
   useAuditTrailStrict(() => {
     const input = toValue(options);
     return input !== null && typeof input === 'object' && !('range' in input)
       ? (Object.create(input, { range: { value: SERVER_DEFAULT_RANGE, enumerable: true } }) as AuditTrailOptions)
-      : input;
+      : (input as AuditTrailOptions);
   });
 
 it('refreshes selectors, paginates and exposes errors without exposing keys', async () => {
@@ -265,7 +267,9 @@ it('runs the snapshot its watcher validated: an invalid read is an error even if
       trail = useAuditTrail(() => {
         reads++;
         // First read: the tenant key is present without a value. Any later read: only the target.
-        return (reads === 1 ? { fetcher, target: { id: 'inv_1' }, tenant: undefined } : { fetcher, target: { id: 'inv_1' } }) as AuditTrailOptions;
+        return (reads === 1
+          ? { fetcher, target: { id: 'inv_1' }, tenant: undefined }
+          : { fetcher, target: { id: 'inv_1' } }) as unknown as AuditTrailOptions;
       });
       return () => h('span', String(trail.data.value.length));
     },
@@ -314,7 +318,7 @@ it('never sends a cursor from the options on page one, and survives a thrown obj
     setup() {
       trail = useAuditTrail(() => {
         if (broken) throw Object.create(null);
-        return { fetcher, tenant: 'acme', cursor: 'stale' } as AuditTrailOptions;
+        return { fetcher, tenant: 'acme', cursor: 'stale' } as unknown as AuditTrailOptions;
       });
       return () => h('span');
     },
@@ -682,7 +686,7 @@ it('keeps no waiter for explicit calls that have settled', async () => {
 
 it('needs the trail to name its window and passes the order (the SDK rule, through the composable)', async () => {
   const fetcher = vi.fn().mockResolvedValue({ data: [], nextCursor: null });
-  const none = mountTrail(() => useAuditTrailStrict({ fetcher, tenant: 'acme' }));
+  const none = mountTrail(() => useAuditTrailStrict({ fetcher, tenant: 'acme' } as unknown as AuditTrailOptions));
   const asc = mountTrail(() => useAuditTrailStrict({ fetcher, tenant: 'acme', range: { from: '2026-11-01T00:00:00.000Z' }, order: 'asc' }));
   await flushPromises();
   expect(none.trail.error.value?.message).toMatch(/a trail needs a `range`/);

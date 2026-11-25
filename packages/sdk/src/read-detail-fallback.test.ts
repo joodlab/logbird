@@ -45,9 +45,9 @@ it('reads a detail whose long digits are only inside strings', async () => {
 });
 
 it('refuses a detail holding a number a double cannot keep, however long, rather than rounding it', async () => {
-  await expect(readAuditEvent(reader(detail('e1', '{"accountId":9007199254740993}')), 'e1')).rejects.toThrow(/cannot keep exactly/);
+  await expect(readAuditEvent(reader(detail('e1', '{"accountId":9007199254740993}')), 'e1')).rejects.toMatchObject({ code: 'read_inexact_number' });
   // A digit past the first 4,096 characters of a token still counts.
-  await expect(readAuditEvent(reader(detail('e1', `{"ratio":1.${'0'.repeat(4094)}1}`)), 'e1')).rejects.toThrow(/cannot keep exactly/);
+  await expect(readAuditEvent(reader(detail('e1', `{"ratio":1.${'0'.repeat(4094)}1}`)), 'e1')).rejects.toMatchObject({ code: 'read_inexact_number' });
   const exact = await readAuditEvent(reader(detail('e1', '{"n":12.5,"big":9007199254740992}')), 'e1');
   expect(exact?.payload).toEqual({ n: 12.5, big: 9_007_199_254_740_992 });
 });

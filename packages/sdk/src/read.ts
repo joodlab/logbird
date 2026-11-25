@@ -88,21 +88,23 @@ export type RangeBound = string | Date | number;
  */
 export const SERVER_DEFAULT_RANGE = 'server-default';
 export type ServerDefaultRange = typeof SERVER_DEFAULT_RANGE;
-export interface TrailQuery {
+/** What the trail boundary accepts (`snapshotTrail`): `range` may be absent here, for a route that chooses the window. */
+export interface TrailInput {
   target?: { type?: string; id: string };
   actor?: string;
   tenant?: string;
   q?: string;
-  /**
-   * Required: the window, with at least `from` (`to` defaults to now), or `SERVER_DEFAULT_RANGE` for the server's
-   * default (the 24 hours before now). `from` is inclusive and `to` exclusive, on the event's timestamp.
-   */
   range?: { from?: RangeBound; to?: RangeBound } | ServerDefaultRange;
   /** `desc` (default) newest first, `asc` oldest first. Events in the same millisecond are ordered by id, not by cause. */
   order?: 'asc' | 'desc';
   limit?: number;
   cursor?: string;
 }
+/**
+ * A trail for `trailQuery`: it names its window. `range` is `{ from, to? }` (`to` defaults to now; `from` inclusive, `to`
+ * exclusive, on the event's timestamp), or `SERVER_DEFAULT_RANGE` for the server's default (the 24 hours before now).
+ */
+export type TrailQuery = Omit<TrailInput, 'range'> & { range: { from: RangeBound; to?: RangeBound } | ServerDefaultRange };
 /** A trail after the input boundary: plain, deeply frozen, holding only strings and numbers. */
 export type TrailSnapshot = Readonly<{
   target?: Readonly<{ type?: string; id: string }>;
@@ -269,7 +271,7 @@ function frozen<T extends object>(fields: T): Readonly<T> {
 }
 
 /** The trail input boundary: the caller's trail as a plain frozen snapshot of primitives, each property read once. */
-export function snapshotTrail(input: TrailQuery, where = 'trailQuery'): TrailSnapshot {
+export function snapshotTrail(input: TrailInput, where = 'trailQuery'): TrailSnapshot {
   if (!isRecord(input)) return fail(where, 'expects an options object.');
   let target: TrailSnapshot['target'];
   const givenTarget = readOnce(input, 'target');
@@ -504,6 +506,35 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
       'readAuditTrail',
       "the query has no `q`, so it would read the whole project; build it with trailQuery, or pass `q: 'timestamp:*'` to read the whole project on purpose.",
     );
+  return boundedRead(options, url, signal, (value, status) => {
+    const result = value as SearchResponse | null;
+    if (
+      !result ||
+      !Array.isArray(result.data) ||
+      !result.data.every(isStoredEvent) ||
+      !(result.nextCursor === null || typeof result.nextCursor === 'string') ||
+      !Number.isSafeInteger(result.total) ||
+      !Number.isFinite(result.tookMs) ||
+      (result.totalExact !== undefined && typeof result.totalExact !== 'boolean')
+    )
+      throw new LogbirdError('read_invalid_response', { status });
+    return result;
+  });
+}
+
+/**
+ * The one bounded read every read helper goes through: no redirect followed with the key, a byte-capped body, a cap on
+ * outstanding requests per transport, abort and timeout checks, and stable LogbirdError codes. `accept` checks the
+ * parsed answer; `notFound` (when given) is returned for a 404; `parse` replaces JSON.parse for the body text.
+ */
+async function boundedRead<T>(
+  options: ReadOptions,
+  url: URL,
+  signal: AbortSignal | undefined,
+  accept: (value: unknown, status: number) => T,
+  notFound?: T,
+  parse?: (text: string) => unknown,
+): Promise<T> {
   const timeout = AbortSignal.timeout(30_000);
   const controller = new AbortController();
   const readSignal = controller.signal;
@@ -558,32 +589,33 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
       cancellation = cancelBody(response);
       throw new LogbirdError('read_invalid_response');
     }
+    if (notFound !== undefined && status === 404 && !redirected) {
+      cancellation = cancelBody(response);
+      return notFound;
+    }
     if (!ok || redirected) {
       cancellation = cancelBody(response);
       throw new LogbirdError(redirected ? 'read_redirect' : 'read_http_error', { status });
     }
     let value: unknown;
     try {
-      value = await readJson(response, READ_RESPONSE_BYTES, readSignal, status, (completion) => {
-        cancellation = completion;
-      });
+      value = await readJson(
+        response,
+        READ_RESPONSE_BYTES,
+        readSignal,
+        status,
+        (completion) => {
+          cancellation = completion;
+        },
+        parse,
+      );
     } catch (error) {
-      throw new LogbirdError(error instanceof LogbirdError && error.code === 'response_too_large' ? error.code : 'read_invalid_response', { status });
+      const code = error instanceof LogbirdError ? error.code : undefined;
+      throw new LogbirdError(code === 'response_too_large' || code === 'read_inexact_number' ? code : 'read_invalid_response', { status });
     }
-    const result = value as SearchResponse | null;
-    if (
-      !result ||
-      !Array.isArray(result.data) ||
-      !result.data.every(isStoredEvent) ||
-      !(result.nextCursor === null || typeof result.nextCursor === 'string') ||
-      !Number.isSafeInteger(result.total) ||
-      !Number.isFinite(result.tookMs) ||
-      (result.totalExact !== undefined && typeof result.totalExact !== 'boolean')
-    )
-      throw new LogbirdError('read_invalid_response', { status });
-    return result;
+    return accept(value, status);
   };
-  let work: Promise<SearchResponse> | undefined;
+  let work: Promise<T> | undefined;
   try {
     signal?.throwIfAborted();
     work = send().finally(() => {
@@ -605,80 +637,52 @@ export async function readAuditTrail(options: ReadOptions, query: SearchInput, s
 
 /**
  * One event by id, with its causation context: its nearest ancestors (`parents`, furthest first), how many events name
- * it as their parent (`childCount`; list them with `parent:` and the id quoted by the query language rules in a
- * trail's `q`, over a window that covers them), how many share its operation (`operationSize`, 0 without an operation
- * id), and the original document (`payload`, null under a field mask). No time window applies. Resolves to null when
- * the id is unknown or outside the key's scope (404). With a project-wide read key, `parents`, `childCount` and
- * `operationSize` can include events of other tenants: read a customer's view with a tenant-scoped key.
+ * it as their parent (`childCount`; list them with `parent:` and the id quoted by the query language rules, over a
+ * window that covers them), how many share its operation (`operationSize`, 0 without an operation id), and the original
+ * document (`payload`, null under a field mask). No time window applies. Resolves to null for a 404 (an unknown id, or
+ * one outside the key's scope). With a project-wide key, `parents`, `childCount` and `operationSize` can include other
+ * tenants' events: read a customer's view with a tenant-scoped key.
  *
- * The payload keeps the exact digits of every number it holds (64-bit ids, long decimals) on runtimes with
- * `JSON.rawJSON` (Node 21 or later). Where a runtime cannot, a detail holding such a number is refused with an error
- * rather than returned rounded.
+ * The request goes through the same bounded read as `readAuditTrail` and fails with the same LogbirdError codes. The
+ * payload keeps the exact digits of its numbers on runtimes with `JSON.rawJSON` (Node 21 or later); elsewhere a detail
+ * holding a number a double cannot keep fails with `read_inexact_number` rather than being rounded.
  */
 export async function readAuditEvent(options: ReadOptions, id: string, signal?: AbortSignal): Promise<EventDetail | null> {
-  if (typeof window !== 'undefined') throw new Error('Logbird read keys are server-only');
+  signal?.throwIfAborted();
+  if (typeof window !== 'undefined') throw new LogbirdError('read_server_only');
   const eventId = selector('readAuditEvent', 'id', id);
   // A URL path has no spelling for these two ids (`%2E` is a dot segment too): they would address another route.
   if (eventId === '.' || eventId === '..')
-    fail('readAuditEvent', `the id "${eventId}" cannot be addressed in a URL path; search with \`id:\` instead.`);
-  const url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events/${encodeURIComponent(eventId)}`);
-  const response = await (options.fetch ?? fetch)(url, {
-    headers: { Authorization: `Bearer ${options.readKey}` },
-    signal: signal ?? AbortSignal.timeout(30_000),
-  });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Logbird read HTTP ${response.status}`);
-  const text = await response.text();
-  if (!supportsExactJson && holdsInexactNumber(text))
-    throw new Error(
-      'Logbird read: this event holds a number this runtime cannot keep exactly (it has no JSON.rawJSON); read it on Node 21 or later.',
-    );
-  const detail = parseJsonExact(text) as Partial<EventDetail> | null;
-  // Only the event asked for, in the detail shape: never another event (a cache or proxy answering for a different
-  // id) or an error envelope with a 200 status.
-  if (
-    !detail ||
-    typeof detail !== 'object' ||
-    !isEvent(detail.event) ||
-    detail.event.id !== eventId ||
-    !Array.isArray(detail.parents) ||
-    !detail.parents.every(isEvent) ||
-    !isCount(detail.childCount) ||
-    !isCount(detail.operationSize) ||
-    !('payload' in detail)
-  )
-    throw new Error('Logbird read: the answer is not the detail of the event asked for.');
-  return detail as EventDetail;
+    fail('readAuditEvent', 'the ids "." and ".." cannot be addressed in a URL path; search with `id:` instead.');
+  let url: URL;
+  try {
+    url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events/${encodeURIComponent(eventId)}`);
+  } catch {
+    throw new LogbirdError('read_request_failed');
+  }
+  const accept = (value: unknown, status: number): EventDetail => {
+    const detail = value as Partial<EventDetail> | null;
+    // Only the detail of the id asked for: never another event (a cache answering for another id) or an error envelope.
+    if (
+      !detail ||
+      !isStoredEvent(detail.event) ||
+      (detail.event as AuditEvent).id !== eventId ||
+      !Array.isArray(detail.parents) ||
+      !detail.parents.every(isStoredEvent) ||
+      !isCount(detail.childCount) ||
+      !isCount(detail.operationSize) ||
+      !Object.hasOwn(detail, 'payload')
+    )
+      throw new LogbirdError('read_invalid_response', { status });
+    return detail as EventDetail;
+  };
+  return boundedRead<EventDetail | null>(options, url, signal, accept, null, exactJson);
 }
 const isCount = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
-const isObjectValue = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-const EVENT_TEXTS = [
-  'id',
-  'projectId',
-  'timestamp',
-  'receivedAt',
-  'environment',
-  'action',
-  'category',
-  'outcome',
-  'severity',
-  'description',
-  'schemaVersion',
-  'sdk',
-] as const;
-/** The stored-event shape every read answer carries (the server's contract), checked before an event reaches a caller. */
-function isEvent(value: unknown): value is AuditEvent {
-  if (!isObjectValue(value)) return false;
-  for (const key of EVENT_TEXTS) if (typeof value[key] !== 'string') return false;
-  return (
-    typeof value.conformance === 'number' &&
-    Array.isArray(value.targets) &&
-    Array.isArray(value.changes) &&
-    isObjectValue(value.context) &&
-    isObjectValue(value.attributes) &&
-    ['actor', 'impersonator', 'executor', 'tenant'].every((key) => value[key] === null || isObjectValue(value[key])) &&
-    (value.source === null || typeof value.source === 'string')
-  );
+/** JSON.parse that keeps exact number digits, or refuses where the runtime cannot keep them. */
+function exactJson(text: string): unknown {
+  if (!supportsExactJson && holdsInexactNumber(text)) throw new LogbirdError('read_inexact_number');
+  return parseJsonExact(text);
 }
 /** A whole JSON number token, matched at one position (sticky), however long. */
 const NUMBER_TOKEN = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
@@ -700,134 +704,91 @@ function holdsInexactNumber(json: string): boolean {
   return false;
 }
 
-/** Bounds the server may move a requested bound onto: what its store holds (1900-01-01 to 2299-12-31, UTC). */
+/** What the store holds (1900-01-01 to 2299-12-31, UTC): the only move the server makes to a requested bound. */
 const STORE_MIN = Date.UTC(1900, 0, 1);
 const STORE_MAX = Date.UTC(2299, 11, 31, 23, 59, 59, 999);
-/** Whether `applied` is the bound the caller asked for, allowing only the server's documented move onto its limits. */
-function sameBound(requested: string, applied: string) {
-  const asked = Date.parse(requested);
-  const got = Date.parse(applied);
-  if (!Number.isFinite(asked) || !Number.isFinite(got)) return false;
-  return got === Math.min(STORE_MAX, Math.max(STORE_MIN, asked));
-}
-/**
- * A bound the iterator can compare with the server's: an instant with `Z` or an offset, or a date alone (midnight
- * UTC). A date-time without an offset is read in the server's time zone, which the SDK cannot know.
- */
+const sameBound = (asked: string, applied: string) => Date.parse(applied) === Math.min(STORE_MAX, Math.max(STORE_MIN, Date.parse(asked)));
+/** A bound the SDK can compare with the server's: `Z` or an offset, or a date alone (midnight UTC). */
 const UNAMBIGUOUS_BOUND = /(?:Z|[+-]\d{2}:?\d{2})$|^\d{4}-\d{2}-\d{2}$/i;
 /** The server's instant form: ISO 8601 UTC with exactly three fractional digits. */
 const instant = (value: unknown): value is string =>
   typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && new Date(value).toISOString() === value;
-/** A reported window: two instants in the server's form, start first. */
-function validRange(range: unknown): range is { from: string; to: string } {
-  if (!range || typeof range !== 'object') return false;
-  const { from, to } = range as { from?: unknown; to?: unknown };
-  return instant(from) && instant(to) && Date.parse(from) < Date.parse(to);
-}
+const validRange = (range: unknown): range is { from: string; to: string } =>
+  !!range &&
+  typeof range === 'object' &&
+  instant((range as { from?: unknown }).from) &&
+  instant((range as { to?: unknown }).to) &&
+  (range as { from: string }).from < (range as { to: string }).to;
+/** A copy of an object's own fields on a null prototype: nothing added to Object.prototype later can join it. */
+const bare = <T extends object>(value: T): T => Object.assign(Object.create(null) as T, value);
+/** A trail for a whole pass: its window must have a start. */
+export type WholeTrailQuery = Omit<TrailQuery, 'range'> & { range: { from: RangeBound; to?: RangeBound } };
 
 /**
- * Every event of a trail, page after page, as one async iterator: `for await (const event of iterateAuditTrail(…))`.
- * The trail needs an explicit `range` with `from` (`SERVER_DEFAULT_RANGE` is refused here: a whole trail has to say
- * where it starts), and bounds with `Z` or an offset (or `Date`s). The trail and the reader options are read once,
- * when you call it; nothing is sent until the first `next()`. Every page is checked before any of its events is
- * yielded:
- *
- * - The first page must report the window you asked for (the server only moves a bound onto its store limits, 1900 to
- *   2299). Later pages are sent with that same window, so `to` never moves with the clock, and must report it too.
- *   Against a server that does not report its window (older than that field), a trail without `to` is refused before
- *   the second page: pass `range.to`.
- * - Every event must lie in that window, and a cursor the pass has already used ends it with an error, not a loop.
- * - An event id the pass has already yielded is skipped (an id can sit at two positions in older stored data).
- *
- * It ends after the last page. Breaking out of the loop stops it before the next request, and `signal` stops both a
- * request in flight and the events of a page not yet yielded.
- *
- * A pass is not a snapshot: an event stored while you iterate, with a timestamp behind your position (or before
- * `from`), is not returned, and a relative time in `q` (`receivedAt:>now-1h`) is read again on every page. To pick up
- * late arrivals, read again later with a window that covers when they can have occurred and `receivedAt:>=` in `q`,
- * starting well before the last `receivedAt` you saw (receipt times are not a strict sequence), and skip ids you
- * already have. A `cursor` in the trail starts the pass partway through its window.
+ * Every event of a trail, page after page: `for await (const event of iterateAuditTrail(options, trail))`. See the
+ * contract in the README ("Reading a whole trail"). In short: the trail and options are read once, when called; the
+ * first page must report the window asked for (only the store limits, 1900 to 2299, may move a bound) and every later
+ * page is sent with that window and must report it; every event of a page must lie in it, and a cursor already used
+ * ends the pass. A page that fails a check fails the pass (`read_window_unverified` or `read_invalid_response`) before
+ * any of its events is yielded, so a pass never yields a row twice, a row outside the window, or stops early without
+ * an error. A completed pass holds every event stored in the window when each page was read, once; it is not a
+ * snapshot (an event stored meanwhile behind the position is not returned).
  */
-export function iterateAuditTrail(options: ReadOptions, trail: TrailQuery, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined> {
+export function iterateAuditTrail(options: ReadOptions, trail: WholeTrailQuery, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined> {
   const snapshot = snapshotTrail(trail, 'iterateAuditTrail');
-  if (own(snapshot, 'range') === SERVER_DEFAULT_RANGE)
-    fail('iterateAuditTrail', 'a whole trail needs `range: { from }`; `SERVER_DEFAULT_RANGE` reads only the last 24 hours.');
-  // Rebuilt from the snapshot's own fields only, on a null prototype: nothing inherited can add a range or an order.
-  const first: Partial<SearchQuery> = trailQuery(ownFields(snapshot, { limit: own(snapshot, 'limit') ?? 200 }));
-  for (const [field, bound] of [
-    ['range.from', first.from],
-    ['range.to', first.to],
-  ] as const)
+  const range = Object.hasOwn(snapshot, 'range') ? snapshot.range : undefined;
+  if (typeof range !== 'object' || range === null || !Object.hasOwn(range, 'from'))
+    fail('iterateAuditTrail', 'a whole trail needs `range: { from }` (`SERVER_DEFAULT_RANGE` reads only the last 24 hours).');
+  // Rebuilt from the snapshot's own fields on null prototypes, so nothing inherited can add a bound or an order.
+  const own = bare({ ...snapshot, range: bare({ ...(range as object) }), limit: Object.hasOwn(snapshot, 'limit') ? snapshot.limit : 200 });
+  const first = bare(trailQuery(own as TrailQuery));
+  for (const bound of [first.from, first.to])
     if (bound !== undefined && !UNAMBIGUOUS_BOUND.test(bound))
-      fail('iterateAuditTrail', `\`${field}\` has no time zone: give it \`Z\` or an offset (or pass a Date), so each page's window can be checked.`);
+      fail('iterateAuditTrail', 'a bound has no time zone: give it `Z` or an offset (or pass a Date), so each page can be checked.');
   if (!isRecord(options)) fail('iterateAuditTrail', 'expects an options object.');
-  const endpoint = text('iterateAuditTrail', 'endpoint', options.endpoint);
-  const readKey = text('iterateAuditTrail', 'readKey', options.readKey);
-  // Read once: the transport the pass uses is the one given when it was created.
+  // Read once: the pass uses the endpoint, key and transport given when it was created.
   const transport: unknown = options.fetch;
   if (transport !== undefined && typeof transport !== 'function') fail('iterateAuditTrail', '`fetch` must be a function.');
-  const reader: ReadOptions = Object.freeze({ endpoint, readKey, ...(transport === undefined ? {} : { fetch: transport as typeof fetch }) });
-  // The request leaves as a null-prototype copy of its own fields: nothing added to Object.prototype later reaches it.
-  return pages(reader, bare(first), signal);
+  const reader: ReadOptions = Object.freeze({
+    endpoint: text('iterateAuditTrail', 'endpoint', options.endpoint),
+    readKey: text('iterateAuditTrail', 'readKey', options.readKey),
+    ...(transport === undefined ? {} : { fetch: transport as typeof fetch }),
+  });
+  return pages(reader, first, signal);
 }
-/** A snapshot's own fields (and its range's own bounds) on null-prototype objects, plus `extra`. */
-function ownFields(snapshot: TrailSnapshot, extra: Partial<TrailSnapshot>): TrailSnapshot {
-  const out: Record<string, unknown> = Object.create(null);
-  for (const key of Object.keys(snapshot)) out[key] = snapshot[key as keyof TrailSnapshot];
-  const range = own(snapshot, 'range');
-  if (range && typeof range === 'object') {
-    const bounds: Record<string, unknown> = Object.create(null);
-    for (const key of Object.keys(range)) bounds[key] = range[key as 'from' | 'to'];
-    out.range = bounds;
-  }
-  return Object.assign(out, extra) as TrailSnapshot;
-}
-/** A copy of an object's own fields on a null prototype. */
-const bare = <T extends object>(value: T): T => Object.assign(Object.create(null) as T, value);
 async function* pages(reader: ReadOptions, first: Partial<SearchQuery>, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined> {
   const asked = { from: first.from as string, to: first.to };
-  const usedCursors = new Set<string>(first.cursor ? [first.cursor] : []);
+  const used = new Set<string>(first.cursor ? [first.cursor] : []);
   const yielded = new Set<string>();
   let query = first;
   let pinned: { from: string; to: string } | undefined;
   for (;;) {
+    // readAuditTrail checks the page's shape (rows, nextCursor null or a string); the window is checked here.
     const page = await readAuditTrail(reader, query, signal);
-    // Check the whole page before yielding any of it: its shape, its window, then its rows.
-    if (!Array.isArray(page.data) || !(typeof page.nextCursor === 'string' || page.nextCursor === null) || !page.data.every(isEvent))
-      throw new Error('Logbird read: the answer is not a page of events.');
     const reported: unknown = page.range;
-    if (pinned) {
-      // Once a page has reported the window, every later page must report the same one.
-      if (!validRange(reported) || reported.from !== pinned.from || reported.to !== pinned.to)
-        throw new Error('Logbird read: the server changed the window between pages, or stopped reporting it.');
-    } else if (reported !== undefined) {
-      if (!validRange(reported)) throw new Error('Logbird read: the server reported a window that is not two instants, start first.');
-      if (!sameBound(asked.from, reported.from) || (asked.to !== undefined && !sameBound(asked.to, reported.to)))
-        throw new Error(`Logbird read: the server applied ${reported.from} to ${reported.to}, not the window asked for.`);
+    if (pinned ? !validRange(reported) || reported.from !== pinned.from || reported.to !== pinned.to : reported !== undefined) {
+      if (pinned || !validRange(reported) || !sameBound(asked.from, reported.from) || (asked.to !== undefined && !sameBound(asked.to, reported.to)))
+        throw new LogbirdError('read_window_unverified');
       pinned = { from: reported.from, to: reported.to };
     }
-    const window = pinned ?? (asked.to !== undefined ? { from: asked.from, to: asked.to } : { from: asked.from });
-    const start = Date.parse(window.from);
-    const end = 'to' in window && window.to !== undefined ? Date.parse(window.to) : Number.POSITIVE_INFINITY;
+    const start = Date.parse(pinned?.from ?? asked.from);
+    const end = Date.parse(pinned?.to ?? asked.to ?? '');
     for (const event of page.data) {
       const at = Date.parse(event.timestamp);
-      if (!(at >= start && at < end)) throw new Error(`Logbird read: the server returned an event outside the window (${event.timestamp}).`);
+      if (!(at >= start && (Number.isNaN(end) || at < end))) throw new LogbirdError('read_window_unverified');
     }
     const next = page.nextCursor;
-    if (next) {
-      if (usedCursors.has(next)) throw new Error('Logbird read: the server repeated a page cursor.');
-      if (!pinned && asked.to === undefined)
-        throw new Error('Logbird read: this server does not report the window it applied, so the pass cannot keep a fixed end; pass `range.to`.');
-    }
+    if (next !== null && (used.has(next) || (!pinned && asked.to === undefined)))
+      // A repeated cursor would loop; without a reported window or a `to`, the next page's end would move.
+      throw new LogbirdError(used.has(next) ? 'read_invalid_response' : 'read_window_unverified');
     for (const event of page.data) {
       signal?.throwIfAborted();
-      if (yielded.has(event.id)) continue;
+      if (yielded.has(event.id)) continue; // an id stored at two positions (older data) is yielded once
       yielded.add(event.id);
       yield event;
     }
-    if (!next) return;
-    usedCursors.add(next);
-    // Keep the window the first page applied: a cursor carries none, and an open `to` would move with the clock.
+    if (next === null) return;
+    used.add(next);
     query = bare({ ...query, ...(pinned ?? {}), cursor: next });
   }
 }
