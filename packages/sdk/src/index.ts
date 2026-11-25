@@ -1,3 +1,5 @@
+import { acknowledge } from './acknowledgement';
+
 export {
   generateWebhookSecret,
   MAX_WEBHOOK_SIGNATURES,
@@ -13,6 +15,7 @@ export {
 // Keep in sync with packages/sdk/package.json (verified by index.test.ts).
 const SDK_VERSION = '0.3.0';
 const MAX_SEND_MS = 5 * 60_000;
+const MAX_PENDING_NOTIFICATIONS = 1024;
 
 /**
  * A string id, or a JavaScript number from an integer key. A JS number cannot hold integers above 2^53 − 1: send
@@ -61,6 +64,28 @@ export function uuidv7(): string {
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+export type IngestRejectionCode =
+  | 'invalid_event'
+  | 'invalid_event_id'
+  | 'duplicate_id_conflict'
+  | 'stored_event_unreadable'
+  | 'unverified_after_parse_failure';
+
+export type DropReason = 'queue_full' | 'rejected' | 'http_error' | 'too_large' | 'invalid' | 'before_send_failed' | 'filtered' | 'shutdown';
+
+export interface DropDetails {
+  reason: DropReason;
+  /** A dispatch may have stored this event. Replay with the original id and content. */
+  mayBeStored: boolean;
+  code?: IngestRejectionCode;
+  status?: number;
+}
+
+export interface TrackOptions {
+  /** Preserve a nonblank event id already returned to the caller, even if beforeSend changes it. */
+  preserveId?: boolean;
+}
+
 export interface LogbirdOptions {
   apiKey?: string;
   endpoint?: string;
@@ -69,41 +94,103 @@ export interface LogbirdOptions {
   beforeSend?: (event: EventInput) => EventInput | null | undefined;
   batchSize?: number;
   flushIntervalMs?: number;
+  /** Total delivery time allowed at shutdown, including any request already in progress. Defaults to 10 seconds. */
+  shutdownTimeoutMs?: number;
   maxRetries?: number;
   onError?: (error: Error) => void;
   maxQueueSize?: number;
   dropPolicy?: 'oldest' | 'newest';
-  onDrop?: (event: EventInput) => void;
+  onDrop?: (event: EventInput, details: Readonly<DropDetails>) => void;
 }
+
+interface QueuedEvent {
+  event: EventInput;
+  serialized: string;
+  bytes: number;
+  uncertain: boolean;
+  sending: boolean;
+}
+
+function dropIdentity(event: EventInput): EventInput {
+  // Local refusals may not have a usable snapshot. Do not copy invalid or oversized inputs into the notification backlog.
+  try {
+    const action: unknown = Object.getOwnPropertyDescriptor(event, 'action')?.value;
+    const id: unknown = Object.getOwnPropertyDescriptor(event, 'id')?.value;
+    return { action: typeof action === 'string' ? action.slice(0, 256) : '', id: typeof id === 'string' ? id.slice(0, 256) : undefined };
+  } catch {
+    return { action: '' };
+  }
+}
+
 export class Logbird {
-  private readonly queue: EventInput[] = [];
+  private readonly queue: QueuedEvent[] = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private operationTimer: ReturnType<typeof setTimeout> | undefined;
   private pending: Promise<void> | undefined;
+  private stopping: Promise<void> | undefined;
+  private explicit = false;
+  private readonly stop = new AbortController();
   private closed = false;
   private readonly batchSize: number;
   private readonly interval: number;
+  private readonly shutdownTimeout: number;
+  private readonly endpoint: string;
   private readonly retries: number;
   private readonly capacity: number;
   private droppedCount = 0;
+  private readonly dropCounts: Partial<Record<DropReason, number>> = {};
+  private notifications = 0;
+  private skipped = 0;
+  private failed = 0;
   get dropped(): number {
     return this.droppedCount;
+  }
+  get droppedByReason(): Readonly<Partial<Record<DropReason, number>>> {
+    return { ...this.dropCounts };
+  }
+  get skippedNotifications(): number {
+    return this.skipped;
+  }
+  get failedNotifications(): number {
+    return this.failed;
   }
   get queueSize(): number {
     return this.queue.length;
   }
-  private drop(event: EventInput) {
-    this.droppedCount++;
-    try {
-      this.options.onDrop?.(event);
-    } catch {
-      /* Diagnostics cannot break capture. */
+  private notify<T extends unknown[]>(callback: ((...args: T) => void) | undefined, ...args: T) {
+    if (!callback) return;
+    if (this.notifications >= MAX_PENDING_NOTIFICATIONS) {
+      this.skipped++;
+      return;
     }
+    this.notifications++;
+    void Promise.resolve()
+      .then(() => callback(...args))
+      .then(
+        () => {
+          this.notifications--;
+        },
+        () => {
+          this.notifications--;
+          this.failed++;
+        },
+      );
+  }
+  private drop(event: EventInput, details: DropDetails) {
+    this.droppedCount++;
+    this.dropCounts[details.reason] = (this.dropCounts[details.reason] ?? 0) + 1;
+    this.notify(this.options.onDrop, event, details);
+  }
+  private dropQueued(entry: QueuedEvent, reason: DropReason, extra?: Pick<DropDetails, 'code' | 'status'>) {
+    this.drop(entry.event, { reason, mayBeStored: entry.sending || entry.uncertain, ...extra });
   }
   constructor(private readonly options: LogbirdOptions) {
     if (options.enabled !== false && (!options.apiKey || !options.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
+    this.endpoint = (options.endpoint ?? '').replace(/\/$/, '');
     this.capacity = options.maxQueueSize ?? 10_000;
     this.batchSize = options.batchSize ?? 100;
     this.interval = options.flushIntervalMs ?? 1000;
+    this.shutdownTimeout = options.shutdownTimeoutMs ?? 10_000;
     this.retries = options.maxRetries ?? 5;
     if (
       !Number.isInteger(this.capacity) ||
@@ -114,22 +201,30 @@ export class Logbird {
       this.batchSize > 1000 ||
       !Number.isFinite(this.interval) ||
       this.interval < 1 ||
+      !Number.isInteger(this.shutdownTimeout) ||
+      this.shutdownTimeout < 0 ||
+      this.shutdownTimeout > 3_600_000 ||
       !Number.isInteger(this.retries) ||
       this.retries < 0
     )
       throw new Error('Invalid batching options');
   }
   private report(error: unknown) {
-    try {
-      this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
-    } catch {
-      /* A diagnostic hook must never break capture. */
-    }
+    this.notify(this.options.onError, error instanceof Error ? error : new Error('Logbird delivery failed'));
   }
-  track(event: EventInput): void {
+  private refuse(event: EventInput, reason: DropReason, message?: string) {
+    this.drop(dropIdentity(event), { reason, mayBeStored: false });
+    if (message) this.report(new Error(message));
+  }
+  track(event: EventInput, options?: TrackOptions): void {
     if (this.options.enabled === false) return;
+    if (this.closed) {
+      this.refuse(event, 'shutdown', 'Logbird is shut down');
+      return;
+    }
+    let entry: QueuedEvent;
+    let failure: DropReason = 'invalid';
     try {
-      if (this.closed) throw new Error('Logbird is shut down');
       const defaults = this.options.defaults;
       let prepared: EventInput = {
         ...defaults,
@@ -137,213 +232,253 @@ export class Logbird {
         context: { ...defaults?.context, ...event.context },
         metadata: { ...defaults?.metadata, ...event.metadata },
       };
-      prepared.id ??= uuidv7();
+      const id = typeof prepared.id === 'string' && prepared.id.trim() ? prepared.id : uuidv7();
+      prepared.id = id;
       prepared.occurredAt ??= new Date().toISOString();
       if (this.options.beforeSend) {
+        failure = 'before_send_failed';
         const result = this.options.beforeSend(prepared);
-        if (result == null) return;
-        prepared = result;
-      }
-      // The server mints a fresh id for a missing, blank or non-string id (numbers included), which a retry could
-      // never match. Mint it here instead, on a copy, so a frozen or caller-owned beforeSend result is never mutated.
-      if (typeof prepared.id !== 'string' || !prepared.id.trim()) prepared = { ...prepared, id: uuidv7() };
-      const serialized = JSON.stringify(prepared);
-      if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
-      const copy = JSON.parse(serialized) as EventInput;
-      if (this.queue.length >= this.capacity) {
-        if (this.options.dropPolicy === 'newest') {
-          this.drop(copy);
+        if (result == null) {
+          this.refuse(event, 'filtered');
           return;
         }
-        this.drop(this.queue.shift()!);
+        if (typeof result.then === 'function') {
+          // beforeSend prepares the event synchronously. Observe an accidental async return without queuing it.
+          void Promise.resolve(result).catch(() => undefined);
+          this.refuse(event, 'before_send_failed', 'Logbird beforeSend must be synchronous');
+          return;
+        }
+        prepared = result;
+        failure = 'invalid';
       }
-      this.queue.push(copy);
-      if (this.queue.length >= this.batchSize) void this.flush().catch((e) => this.report(e));
-      else this.schedule();
-    } catch (e) {
-      this.report(e);
+      // The serialized snapshot also enforces the id for events with a top-level toJSON.
+      let serialized = JSON.stringify(prepared);
+      let bytes = new TextEncoder().encode(serialized).length;
+      if (bytes > 256 * 1024) {
+        this.refuse(event, 'too_large', 'Event exceeds 256 KB');
+        return;
+      }
+      const copy = JSON.parse(serialized) as EventInput;
+      if (!copy || typeof copy !== 'object' || Array.isArray(copy)) {
+        this.refuse(event, 'invalid', 'Invalid Logbird event');
+        return;
+      }
+      if (typeof copy.id !== 'string' || !copy.id.trim() || (options?.preserveId && copy.id !== id)) {
+        copy.id = id;
+        serialized = JSON.stringify(copy);
+        bytes = new TextEncoder().encode(serialized).length;
+        if (bytes > 256 * 1024) {
+          this.refuse(event, 'too_large', 'Event exceeds 256 KB');
+          return;
+        }
+      }
+      entry = { event: copy, serialized, bytes, uncertain: false, sending: false };
+    } catch {
+      this.refuse(event, failure, failure === 'before_send_failed' ? 'Logbird beforeSend failed' : 'Invalid Logbird event');
+      return;
     }
+    // beforeSend is host code and can shut down the client before preparation returns.
+    if (this.closed) {
+      this.dropQueued(entry, 'shutdown');
+      return;
+    }
+    if (this.queue.length >= this.capacity) {
+      if (this.options.dropPolicy === 'newest') {
+        this.dropQueued(entry, 'queue_full');
+        return;
+      }
+      const evicted = this.queue.shift();
+      if (evicted) this.dropQueued(evicted, 'queue_full');
+    }
+    this.queue.push(entry);
+    if (this.queue.length >= this.batchSize) this.backgroundFlush();
+    else this.schedule();
+  }
+  private backgroundFlush() {
+    if (this.pending) return;
+    void this.drain(false).catch((error) => this.report(error));
   }
   private schedule() {
     if (this.timer || this.closed) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void this.flush().catch((e) => this.report(e));
+      this.backgroundFlush();
     }, this.interval);
-    (this.timer as unknown as { unref?: () => void }).unref?.();
+    this.timer.unref?.();
   }
-  private async send(batch: EventInput[]) {
-    // Monotonic: a wall-clock step (NTP, suspend, a test clock) must not shorten or extend the send cap.
-    const deadline = monotonicNow() + MAX_SEND_MS;
-    const serialized = batch.map((event) => JSON.stringify(event));
-    let attemptIndices = batch.map((_, index) => index);
-    const serializeBody = () => `{"events":[${attemptIndices.map((index) => serialized[index]).join(',')}]}`;
-    let body = serializeBody();
-    const settledIndices = new Set<number>();
-    const reject = (rejections: unknown) => {
-      if (!Array.isArray(rejections)) return;
-      const fresh: { index: number; reason: string }[] = [];
-      for (const rejection of rejections) {
-        if (!rejection || typeof rejection !== 'object' || !Number.isInteger(rejection.index) || typeof rejection.reason !== 'string') continue;
-        const index = attemptIndices[rejection.index];
-        if (index === undefined || settledIndices.has(index)) continue;
-        settledIndices.add(index);
-        fresh.push(rejection);
-        this.drop(batch[index]!);
-      }
-      if (fresh.length) this.report(new Error(`${fresh.length} events rejected by Logbird: ${fresh.map((r) => r.reason).join('; ')}`));
-    };
-    let retries = 0;
+  private async timed<T>(milliseconds: number, timeout: () => T, operation?: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    this.stop.signal.throwIfAborted();
+    const controller = new AbortController();
+    const stop = () => controller.abort(this.stop.signal.reason);
+    this.stop.signal.addEventListener('abort', stop, { once: true });
     try {
-      for (let attempt = 0; ; attempt++) {
-        const remainingMs = deadline - monotonicNow();
-        if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
-        let progressed = false;
-        let response: Response | undefined, error: unknown;
-        try {
-          response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${this.options.apiKey}`,
-              'Content-Type': 'application/json',
-              'X-Logbird-SDK': `typescript/${SDK_VERSION}`,
-              // Must equal @logbird/contracts LOGBIRD_RETRY_HEADER / LOGBIRD_RETRY_SUBSET (the SDK has no dependencies).
-              'Logbird-Retry': 'subset',
-            },
-            body,
-            // AbortSignal.timeout() accepts integers only; the monotonic clock is fractional.
-            signal: AbortSignal.timeout(Math.max(1, Math.floor(Math.min(30_000, remainingMs)))),
-          });
-        } catch (e) {
-          error = e;
-        }
-        if (response?.ok) {
-          const result = (await response.json()) as { rejected?: { index: number; reason: string }[] };
-          reject(result.rejected);
-          return;
-        }
-        if (response?.status === 503) {
-          // Retry the identical body unless the server settled rows; then resend only unsettled rows.
-          const result = (await response.json().catch(() => null)) as {
-            error?: {
-              code?: string;
-              details?: {
-                accepted?: number;
-                ids?: string[];
-                rejected?: { index: number; reason: string }[];
-                indices?: number[];
-                eventIds?: string[];
-                warnings?: unknown[];
-              };
-            };
-          } | null;
-          if (result?.error?.code === 'ingest_pending' || result?.error?.code === 'ingest_unavailable') {
-            const details = result.error.details;
-            reject(details?.rejected);
-            if (
-              details &&
-              Array.isArray(details.ids) &&
-              details.ids.every((id) => typeof id === 'string') &&
-              details.accepted === details.ids.length &&
-              Array.isArray(details.rejected) &&
-              details.rejected.every(
-                (r) =>
-                  r && typeof r === 'object' && Number.isInteger(r.index) && attemptIndices[r.index] !== undefined && typeof r.reason === 'string',
-              ) &&
-              Array.isArray(details.indices) &&
-              details.indices.every((index) => Number.isInteger(index) && attemptIndices[index] !== undefined) &&
-              Array.isArray(details.eventIds) &&
-              details.eventIds.every((id) => typeof id === 'string') &&
-              details.indices.length === details.eventIds.length &&
-              new Set(details.indices).size === details.indices.length &&
-              new Set(details.rejected.map((r) => r.index)).size === details.rejected.length &&
-              details.indices.every((index, position) => {
-                const id = batch[attemptIndices[index]!]!.id;
-                return typeof id === 'string' && details.eventIds?.[position] === id.trim() && !details.rejected?.some((r) => r.index === index);
-              }) &&
-              Array.isArray(details.warnings)
-            ) {
-              const accepted = new Set(details.ids);
-              const unresolved = new Set(details.indices);
-              attemptIndices.forEach((index, wireIndex) => {
-                const event = batch[index]!;
-                if (!unresolved.has(wireIndex) && typeof event.id === 'string' && accepted.has(event.id.trim())) settledIndices.add(index);
-              });
-              // Require every omitted position to be settled; malformed details must keep the previous body.
-              if (attemptIndices.every((index, wireIndex) => unresolved.has(wireIndex) || settledIndices.has(index))) {
-                const remaining = attemptIndices.filter((index) => !settledIndices.has(index));
-                if (!remaining.length) return;
-                if (remaining.length < attemptIndices.length) {
-                  attemptIndices = remaining;
-                  body = serializeBody();
-                  progressed = true;
-                }
-              }
-            }
-          }
-        }
-        const retry = !response || response.status === 429 || response.status >= 500;
-        if (!retry) {
-          batch.forEach((event, index) => {
-            if (!settledIndices.has(index)) this.drop(event);
-          });
-          this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
-          return;
-        }
-        // Progress attempts strictly shrink the body, so there can be at most batch.length of them.
-        // Only non-progress failures consume maxRetries; retain a hard total-attempt bound as well.
-        if ((!progressed && retries >= this.retries) || attempt >= batch.length + this.retries - 1)
-          throw error ?? new Error(`Logbird HTTP ${response?.status}`);
-        const retryAfter = response?.headers.get('Retry-After');
-        const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
-        const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
-        if (!progressed) retries++;
-        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay, deadline - monotonicNow()))));
-      }
+      return await new Promise<T>((resolve, reject) => {
+        controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+        this.operationTimer = setTimeout(() => {
+          resolve(timeout());
+          controller.abort();
+        }, milliseconds);
+        if (!this.explicit) this.operationTimer.unref?.();
+        if (operation) void operation(controller.signal).then(resolve, reject);
+      });
     } finally {
-      // On every exceptional exit, flush can requeue only events not already accepted or rejected.
-      const remaining = batch.filter((_, index) => !settledIndices.has(index));
-      batch.splice(0, batch.length, ...remaining);
+      clearTimeout(this.operationTimer);
+      this.operationTimer = undefined;
+      this.stop.signal.removeEventListener('abort', stop);
     }
   }
-  flush(): Promise<void> {
+  private async request(batch: QueuedEvent[], remainingMs: number) {
+    const body = `{"events":[${batch.map((entry) => entry.serialized).join(',')}]}`;
+    let status = 0;
+    let retryAfter: string | null = null;
+    const answer = () => ({ status, retryAfter, result: undefined as unknown });
+    try {
+      return await this.timed(Math.max(1, Math.floor(Math.min(30_000, remainingMs))), answer, async (signal) => {
+        for (const entry of batch) entry.sending = true;
+        const response = await fetch(`${this.endpoint}/v1/events`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.options.apiKey}`,
+            'Content-Type': 'application/json',
+            'X-Logbird-SDK': `typescript/${SDK_VERSION}`,
+            // Must equal @logbird/contracts LOGBIRD_RETRY_HEADER / LOGBIRD_RETRY_SUBSET (the SDK has no dependencies).
+            'Logbird-Retry': 'subset',
+          },
+          body,
+          signal,
+        });
+        if (signal.aborted) return answer();
+        status = response.status;
+        retryAfter = response.headers.get('Retry-After');
+        const result: unknown = response.ok || status === 503 ? await response.json().catch(() => undefined) : undefined;
+        return { status, retryAfter, result };
+      });
+    } catch {
+      this.stop.signal.throwIfAborted();
+      return answer();
+    } finally {
+      for (const entry of batch) {
+        if (this.stop.signal.aborted && entry.sending && (status < 400 || status >= 500)) entry.uncertain = true;
+        entry.sending = false;
+      }
+    }
+  }
+  private async send(batch: QueuedEvent[]) {
+    const deadline = monotonicNow() + MAX_SEND_MS;
+    const maxAttempts = batch.length + this.retries;
+    let retries = 0;
+    for (let attempt = 1; ; attempt++) {
+      this.stop.signal.throwIfAborted();
+      const remainingMs = deadline - monotonicNow();
+      if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
+      const { status, retryAfter, result } = await this.request(batch, remainingMs);
+      const success = status >= 200 && status < 300;
+      let progressed = false;
+      if (!this.stop.signal.aborted && (success || status === 503)) {
+        const ack = acknowledge(
+          result,
+          batch.map((entry) => entry.event),
+          status === 503,
+        );
+        if (ack) {
+          const remaining = batch.filter((entry, index) => {
+            if (ack.rejected.has(index)) this.dropQueued(entry, 'rejected', { code: ack.rejected.get(index) });
+            return !ack.delivered.has(index) && !ack.rejected.has(index);
+          });
+          if (ack.rejected.size) this.report(new Error(`${ack.rejected.size} events rejected by Logbird`));
+          progressed = remaining.length < batch.length;
+          batch.splice(0, batch.length, ...remaining);
+          if (!batch.length) return;
+        }
+      }
+      if (status < 400 || status >= 500) for (const entry of batch) entry.uncertain = true;
+      this.stop.signal.throwIfAborted();
+      const retry = success || status === 0 || status === 429 || status >= 500;
+      if (!retry) {
+        for (const entry of batch.splice(0)) this.dropQueued(entry, 'http_error', { status });
+        this.report(new Error(`Logbird HTTP ${status}; batch dropped`));
+        return;
+      }
+      if ((!progressed && retries >= this.retries) || attempt >= maxAttempts) {
+        if (success) throw new Error('Logbird response did not acknowledge all events');
+        throw new Error(status ? `Logbird HTTP ${status}` : 'Logbird request failed');
+      }
+      const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
+      const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
+      if (!progressed) retries++;
+      await this.timed(Math.max(0, Math.min(60_000, delay, deadline - monotonicNow())), () => undefined);
+    }
+  }
+  private drain(explicit: boolean): Promise<void> {
     if (this.options.enabled === false) return Promise.resolve();
+    if (explicit) {
+      this.explicit = true;
+      this.operationTimer?.ref?.();
+    }
     if (this.pending) return this.pending;
-    if (this.timer) clearTimeout(this.timer);
+    clearTimeout(this.timer);
     this.timer = undefined;
-    this.pending = (async () => {
+    let start!: () => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      start = () => void this.drainQueue().then(resolve, reject);
+    });
+    this.pending = promise;
+    start();
+    return promise;
+  }
+  private async drainQueue() {
+    try {
       while (this.queue.length) {
-        const batch: EventInput[] = [];
+        this.stop.signal.throwIfAborted();
+        const batch: QueuedEvent[] = [];
         let bytes = 32;
-        while (this.queue.length && batch.length < this.batchSize) {
+        while (batch.length < this.batchSize) {
           const next = this.queue[0];
           if (!next) break;
-          const size = new TextEncoder().encode(JSON.stringify(next)).length + 1;
-          if (batch.length && bytes + size > 5 * 1024 * 1024) break;
+          if (batch.length && bytes + next.bytes + 1 > 5 * 1024 * 1024) break;
           this.queue.shift();
           batch.push(next);
-          bytes += size;
+          bytes += next.bytes + 1;
         }
         try {
           await this.send(batch);
-        } catch (e) {
+        } catch (error) {
           this.queue.unshift(...batch);
-          while (this.queue.length > this.capacity) {
-            this.drop(this.options.dropPolicy === 'newest' ? this.queue.pop()! : this.queue.shift()!);
+          while (this.queue.length > this.capacity && !this.closed) {
+            const evicted = this.options.dropPolicy === 'newest' ? this.queue.pop() : this.queue.shift();
+            if (evicted) this.dropQueued(evicted, 'queue_full');
           }
-          throw e;
+          throw error;
         }
       }
-    })().finally(() => {
+    } finally {
       this.pending = undefined;
-    });
-    return this.pending;
+      this.explicit = false;
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
   }
-  async shutdown(): Promise<void> {
+  flush(): Promise<void> {
+    return this.stopping ?? this.drain(true);
+  }
+  shutdown(): Promise<void> {
+    if (this.stopping) return this.stopping;
     this.closed = true;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = undefined;
-    await this.flush();
+    this.stopping = this.finishShutdown();
+    return this.stopping;
+  }
+  private async finishShutdown() {
+    const abort = () => this.stop.abort(new Error('Logbird shutdown time limit exceeded'));
+    if (this.shutdownTimeout === 0) abort();
+    const timer = this.shutdownTimeout > 0 ? setTimeout(abort, this.shutdownTimeout) : undefined;
+    try {
+      await this.drain(true);
+    } catch (error) {
+      for (const entry of this.queue.splice(0)) this.dropQueued(entry, 'shutdown');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

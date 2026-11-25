@@ -3,6 +3,38 @@ import { Hono } from 'hono';
 import { expect, it, vi } from 'vitest';
 import { type AuditVariables, logbird } from './index';
 
+it('propagates delivery failure from adapter shutdown', async () => {
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', maxRetries: 0 });
+  const capture = logbird({ client });
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(null, { status: 500 }));
+  try {
+    client.track({ action: 'failed' });
+    await expect(capture.shutdown()).rejects.toThrow();
+  } finally {
+    fetch.mockRestore();
+  }
+});
+
+it('sends the id returned by audit for a blank input even if beforeSend changes it', async () => {
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', beforeSend: (event) => ({ ...event, id: 'hook' }) });
+  const capture = logbird({ client });
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(capture);
+  app.get('/', (c) => c.text(c.var.audit('test.audit', { id: '   ' })));
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+    const id = JSON.parse(String(init?.body)).events[0].id;
+    return Response.json({ accepted: 1, ids: [id], rejected: [], warnings: [] }, { status: 202 });
+  });
+  try {
+    const id = await (await app.request('/')).text();
+    await capture.shutdown();
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)).events[0].id).toBe(id);
+  } finally {
+    fetch.mockRestore();
+  }
+});
+
 it('isolates concurrent requests, merges causation and auto-tracks mutations', async () => {
   const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
   const track = vi.spyOn(client, 'track').mockImplementation(() => undefined);

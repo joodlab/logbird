@@ -61,11 +61,10 @@ async function drain(owner: object): Promise<void> {
   while (set.size) await Promise.allSettled([...set]);
 }
 export function report(onError: CaptureOptions<unknown>['onError'], error: unknown): void {
-  try {
-    onError?.(error instanceof Error ? error : new Error(String(error)));
-  } catch {
-    /* diagnostics are best effort */
-  }
+  if (onError)
+    void Promise.resolve()
+      .then(() => onError(error instanceof Error ? error : new Error('Logbird capture failed')))
+      .catch(() => undefined);
 }
 /**
  * Captures the request's correlation once and returns the request-scoped `audit` function. The operation and request
@@ -134,13 +133,13 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
     return merged;
   }
   const audit = ((action: string, event: Partial<EventInput> = {}) => {
-    const id = event.id ?? uuidv7();
+    const id = typeof event.id === 'string' && event.id.trim() ? event.id : uuidv7();
     const occurredAt = event.occurredAt ?? new Date().toISOString();
     register(
       resolve({ ...event, action, id, occurredAt })
         .then((resolved) => {
           try {
-            options.client.track(resolved);
+            options.client.track(resolved, { preserveId: true });
           } catch (error) {
             report(options.onError, error);
           }
@@ -216,5 +215,8 @@ export function jobAudit(options: JobAuditOptions): Audit {
 export async function shutdown(options: Pick<CaptureOptions<unknown>, 'client' | 'onError'>): Promise<void> {
   await drain(options);
   await drain(options.client);
-  await options.client.shutdown().catch((error) => report(options.onError, error));
+  await options.client.shutdown().catch((error) => {
+    report(options.onError, error);
+    throw error;
+  });
 }

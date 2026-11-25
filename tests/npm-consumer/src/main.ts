@@ -6,6 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { type AuditVariables, logbird } from '@logbird/hono';
 import {
+  type DropDetails,
   type EventInput,
   generateWebhookSecret,
   IDENTIFIER_FIELDS,
@@ -90,14 +91,16 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 
 try {
   // 1. The client queues, redacts through beforeSend, sends one batch and reads the acknowledgement.
-  const drops: EventInput[] = [];
+  const drops: { event: EventInput; details: Readonly<DropDetails> }[] = [];
   const errors: Error[] = [];
+  const redactEvent = redact();
   const client = new Logbird({
     endpoint,
     apiKey: 'lb_ingest_fictional',
     flushIntervalMs: 60_000,
-    beforeSend: redact(),
-    onDrop: (event) => drops.push(event),
+    beforeSend: (event) => redactEvent(event.action === 'invoice.sent' ? { ...event, id: 'hook-replacement' } : event),
+    shutdownTimeoutMs: 1000,
+    onDrop: (event, details) => drops.push({ event, details }),
     onError: (error) => errors.push(error),
   });
   client.track({
@@ -120,7 +123,10 @@ try {
   client.track({ action: 'stand-in.reject', actor: { type: 'user', id: 'u1' } });
   client.track({ action: 'invoice.kept', actor: { type: 'user', id: 'u1' } });
   await client.flush();
-  expect(drops.length === 1 && drops[0]?.action === 'stand-in.reject', `the refused event, and only it, dropped (drops ${drops.length})`);
+  expect(drops.length === 1 && drops[0]?.event.action === 'stand-in.reject', `the refused event, and only it, dropped (drops ${drops.length})`);
+  const drop = drops[0]?.details;
+  expect(drop?.reason === 'rejected' && drop.code === 'invalid_event' && !drop.mayBeStored, 'the drop has a safe rejection code');
+  expect(client.droppedByReason.rejected === 1 && client.skippedNotifications === 0, 'the drop was counted by reason');
   expect(errors.length === 1 && /rejected/.test(errors[0]?.message ?? ''), 'the rejection reported to onError');
   expect(received.at(-1)?.action === 'invoice.kept' && !received.some((event) => event.action === 'stand-in.reject'), 'the other event delivered');
   drops.length = 0;
@@ -129,16 +135,18 @@ try {
 
   // 2. The Hono middleware fills the request context; an inbound x-request-id is ignored by default (#321).
   const app = new Hono<{ Variables: AuditVariables }>();
-  app.use(logbird({ client, actor: () => ({ type: 'user', id: 'u2' }), tenant: () => ({ id: 't2' }) }));
-  app.post('/invoices/:id', (c) => {
-    c.get('audit')('invoice.sent', { targets: [{ type: 'invoice', id: c.req.param('id') }] });
-    return c.text('ok');
-  });
+  const capture = logbird({ client, actor: () => ({ type: 'user', id: 'u2' }), tenant: () => ({ id: 't2' }) });
+  app.use(capture);
+  app.post('/invoices/:id', (c) =>
+    c.text(c.get('audit')('invoice.sent', { id: '   ', targets: [{ type: 'invoice', id: c.req.param('id') }] })),
+  );
   const response = await app.request('/invoices/inv_9', { method: 'POST', headers: { 'x-request-id': 'req_from_client' } });
   expect(response.status === 200, `the route to answer 200, not ${response.status}`);
+  const auditId = await response.text();
   await client.flush();
   const viaHono = received.at(-1) as
     | {
+        id: string;
         action: string;
         actor: { id: string };
         tenant: { id: string };
@@ -147,6 +155,7 @@ try {
       }
     | undefined;
   expect(viaHono?.action === 'invoice.sent' && viaHono.targets[0]?.id === 'inv_9', 'the route event with its target');
+  expect(uuid.test(auditId) && viaHono?.id === auditId, 'audit returns the id sent after the hook');
   expect(viaHono?.actor.id === 'u2' && viaHono.tenant.id === 't2', 'the resolved actor and tenant');
   expect(
     uuid.test(viaHono?.context.requestId ?? '') && uuid.test(viaHono?.context.operationId ?? ''),
@@ -176,7 +185,7 @@ try {
   const direct = received.at(-1) as { action: string; context: { requestId: string } } | undefined;
   expect(direct?.action === 'direct.capture' && direct.context.requestId === 'req_trusted', 'the opted-in header to be used');
   pass('createAudit: useRequestIdHeader takes the inbound header');
-  await client.shutdown();
+  await capture.shutdown();
 
   // 4. A trail read: trailQuery builds the query, readAuditTrail sends it and reads the page; no selector throws.
   const page = await readAuditTrail({ endpoint, readKey: 'lb_read_fictional' }, trailQuery({ target: { type: 'invoice', id: 'inv_1' } }));

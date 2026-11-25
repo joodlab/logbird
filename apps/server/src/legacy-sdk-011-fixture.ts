@@ -1,4 +1,12 @@
-import type { EventInput, LogbirdOptions } from '../../../packages/sdk/src/index';
+import type { EventInput } from '../../../packages/sdk/src/index';
+
+interface LegacyOptions {
+  apiKey: string;
+  endpoint: string;
+  maxRetries?: number;
+  onDrop?: (event: EventInput) => void;
+  onError?: (error: Error) => void;
+}
 
 /**
  * Compatibility fixture. send() is copied verbatim from
@@ -14,7 +22,7 @@ export class LegacySdk011Fixture {
   private readonly queue: EventInput[] = [];
   private readonly retries: number;
   private pending: Promise<void> | undefined;
-  constructor(private readonly options: LogbirdOptions) {
+  constructor(private readonly options: LegacyOptions) {
     this.retries = options.maxRetries ?? 5;
   }
   get queueSize() {
@@ -34,7 +42,7 @@ export class LegacySdk011Fixture {
     for (let attempt = 0; ; attempt++) {
       let response: Response | undefined, error: unknown;
       try {
-        response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
+        response = await fetch(`${this.options.endpoint.replace(/\/$/, '')}/v1/events`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Logbird-SDK': 'typescript/0.2.0' },
           body,

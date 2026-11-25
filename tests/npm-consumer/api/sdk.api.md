@@ -7,6 +7,20 @@
 // @public (undocumented)
 export const DEFAULT_SECRET_KEYS: RegExp;
 
+// @public (undocumented)
+export interface DropDetails {
+    // (undocumented)
+    code?: IngestRejectionCode;
+    mayBeStored: boolean;
+    // (undocumented)
+    reason: DropReason;
+    // (undocumented)
+    status?: number;
+}
+
+// @public (undocumented)
+export type DropReason = 'queue_full' | 'rejected' | 'http_error' | 'too_large' | 'invalid' | 'before_send_failed' | 'filtered' | 'shutdown';
+
 // @public
 export type EntityId = string | number;
 
@@ -95,10 +109,17 @@ export function generateWebhookSecret(): string;
 export const IDENTIFIER_FIELDS: readonly string[];
 
 // @public (undocumented)
+export type IngestRejectionCode = 'invalid_event' | 'invalid_event_id' | 'duplicate_id_conflict' | 'stored_event_unreadable' | 'unverified_after_parse_failure';
+
+// @public (undocumented)
 export class Logbird {
     constructor(options: LogbirdOptions);
     // (undocumented)
     get dropped(): number;
+    // (undocumented)
+    get droppedByReason(): Readonly<Partial<Record<DropReason, number>>>;
+    // (undocumented)
+    get failedNotifications(): number;
     // (undocumented)
     flush(): Promise<void>;
     // (undocumented)
@@ -106,7 +127,9 @@ export class Logbird {
     // (undocumented)
     shutdown(): Promise<void>;
     // (undocumented)
-    track(event: EventInput): void;
+    get skippedNotifications(): number;
+    // (undocumented)
+    track(event: EventInput, options?: TrackOptions): void;
 }
 
 // @public (undocumented)
@@ -132,9 +155,10 @@ export interface LogbirdOptions {
     // (undocumented)
     maxRetries?: number;
     // (undocumented)
-    onDrop?: (event: EventInput) => void;
+    onDrop?: (event: EventInput, details: Readonly<DropDetails>) => void;
     // (undocumented)
     onError?: (error: Error) => void;
+    shutdownTimeoutMs?: number;
 }
 
 // @public
@@ -157,6 +181,11 @@ export interface SignWebhookOptions {
     // (undocumented)
     secrets: readonly string[];
     timestamp: number;
+}
+
+// @public (undocumented)
+export interface TrackOptions {
+    preserveId?: boolean;
 }
 
 // @public (undocumented)

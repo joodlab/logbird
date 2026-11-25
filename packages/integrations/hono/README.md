@@ -60,5 +60,9 @@ Resolvers run for each audit call; automatic tracking after the route also sees 
 identity. Explicit event actor/tenant/executor/context.ip skip the corresponding resolver.
 Failures omit only the failing field and report onError. audit returns the event id immediately;
 use `await c.var.audit.carrier({ parentEventId: eventId })` to propagate into worker data.
-Edge waitUntil drains pending context resolution before flushing; Node hosts await
-capture.shutdown(). See the [SDK options and worker guide](../../sdk/README.md).
+Edge `waitUntil` drains pending context resolution before flushing. Node hosts
+await `capture.shutdown()`, which drains pending context resolution and then
+starts the SDK's shutdown budget. Handle a rejected shutdown promise as a
+delivery failure. Blank event ids get a UUID. The id returned by `audit()`
+is preserved in the event sent even when `beforeSend` returns a different id.
+See the [SDK options and worker guide](../../sdk/README.md).
