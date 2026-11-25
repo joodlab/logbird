@@ -1,5 +1,5 @@
 {
-  "description": "Redaction parity between the TypeScript SDK's redact() and the .NET SDK's Redactor: both run every case and must produce exactly the expected event. keys and changeFields are pattern sources without flags, using only syntax that means the same in both engines (null: the default pattern; changeFields null: keys); replacement null is [redacted]. Read by packages/sdk/src/redact.test.ts and sdks/dotnet/tests/Logbird.Tests/RedactionParityTests.cs.",
+  "description": "Redaction parity for the TypeScript and .NET SDKs. Both use the same expected JSON. keys and changeFields are pattern sources (ignoreCase applies the native case-insensitive flag to both); null uses the default (changeFields defaults to keys plus addKeys). replacement null uses [redacted]. Cases with paths or keepPaths exercise the path options. expectedDotnet documents a native regex difference.",
   "cases": [
     {
       "name": "the default pattern redacts nested secrets, array entries and change values",
@@ -577,6 +577,515 @@
             "after": "[redacted]"
           }
         ]
+      }
+    },
+    {
+      "name": "literal added names use ASCII-only substrings and augment custom keys and default change fields",
+      "keys": "^secret$",
+      "changeFields": null,
+      "replacement": "hidden",
+      "addKeys": ["email", "a.b", "key"],
+      "input": {
+        "id": "e",
+        "action": "a",
+        "context": {},
+        "metadata": {
+          "workEMAIL": "guest@example.invalid",
+          "A.B": 1,
+          "AxB": 2,
+          "KÉY": 3,
+          "Key": 4,
+          "Key": 5,
+          "SECRET": 6,
+          "secret": 7,
+          "token": 8
+        },
+        "changes": [
+          {
+            "field": "workEMAIL",
+            "before": "old",
+            "after": "new"
+          },
+          {
+            "field": "token",
+            "after": "kept"
+          }
+        ]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "context": {},
+        "metadata": {
+          "workEMAIL": "hidden",
+          "A.B": "hidden",
+          "AxB": 2,
+          "KÉY": 3,
+          "Key": 4,
+          "Key": "hidden",
+          "SECRET": 6,
+          "secret": "hidden",
+          "token": 8
+        },
+        "changes": [
+          {
+            "field": "workEMAIL",
+            "before": "hidden",
+            "after": "hidden"
+          },
+          {
+            "field": "token",
+            "after": "kept"
+          }
+        ]
+      }
+    },
+    {
+      "name": "explicit change pattern replaces key and added-name matching for change fields only",
+      "keys": null,
+      "changeFields": "^phone$",
+      "replacement": "",
+      "addKeys": ["email"],
+      "input": {
+        "id": "e",
+        "action": "a",
+        "context": {},
+        "metadata": {
+          "Email": "guest@example.invalid",
+          "password": "fictional"
+        },
+        "changes": [
+          {
+            "field": "email",
+            "after": "kept"
+          },
+          {
+            "field": "password",
+            "before": "kept"
+          },
+          {
+            "field": "phone",
+            "after": "hidden"
+          }
+        ]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "context": {},
+        "metadata": {
+          "Email": "",
+          "password": ""
+        },
+        "changes": [
+          {
+            "field": "email",
+            "after": "kept"
+          },
+          {
+            "field": "password",
+            "before": "kept"
+          },
+          {
+            "field": "phone",
+            "after": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "anchored alternatives with native ASCII case-insensitivity agree on ordinary keys and change fields",
+      "keys": "^(billing|guestId)$",
+      "changeFields": "^(guest\\.phone|guest-email)$",
+      "ignoreCase": true,
+      "replacement": null,
+      "input": {
+        "id": "e",
+        "action": "a",
+        "metadata": {
+          "BILLING": "hidden",
+          "GuestId": "hidden",
+          "guestIdSuffix": "visible"
+        },
+        "changes": [
+          { "field": "GUEST.Phone", "after": "hidden" },
+          { "field": "guest.email", "after": "visible" }
+        ]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "metadata": {
+          "BILLING": "[redacted]",
+          "GuestId": "[redacted]",
+          "guestIdSuffix": "visible"
+        },
+        "changes": [
+          { "field": "GUEST.Phone", "after": "[redacted]" },
+          { "field": "guest.email", "after": "visible" }
+        ]
+      }
+    },
+    {
+      "name": "native regex difference: .NET dollar matches before a final line feed",
+      "keys": "^label$",
+      "changeFields": "^label$",
+      "replacement": null,
+      "input": {
+        "id": "e",
+        "action": "a",
+        "metadata": { "label\n": "value" },
+        "changes": [{ "field": "label\n", "after": "value" }]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "metadata": { "label\n": "value" },
+        "changes": [{ "field": "label\n", "after": "value" }]
+      },
+      "expectedDotnet": {
+        "id": "e",
+        "action": "a",
+        "metadata": { "label\n": "[redacted]" },
+        "changes": [{ "field": "label\n", "after": "[redacted]" }]
+      }
+    },
+    {
+      "name": "keep staff identity while redacting guest data and secrets",
+      "keys": null,
+      "changeFields": null,
+      "replacement": null,
+      "addKeys": ["email", "phone", "notes", "name"],
+      "keepPaths": [
+        "actor.email",
+        "actor.name",
+        "impersonator.email",
+        "impersonator.name",
+        "changes.*.after"
+      ],
+      "paths": ["metadata.guest.name"],
+      "input": {
+        "id": "e",
+        "action": "a",
+        "actor": {
+          "id": "staff",
+          "name": "Operator",
+          "email": "staff@example.invalid",
+          "token": "fictional",
+          "profile": {
+            "email": "extra@example.invalid"
+          }
+        },
+        "impersonator": {
+          "id": "support",
+          "name": "Support",
+          "email": "support@example.invalid",
+          "apiKey": "fictional"
+        },
+        "metadata": {
+          "guest": {
+            "email": "guest@example.invalid",
+            "phone": "123",
+            "notes": "private",
+            "name": "Guest",
+            "password": "fictional"
+          }
+        },
+        "changes": [
+          {
+            "field": "guest.email",
+            "after": "guest@example.invalid"
+          },
+          {
+            "field": "phone",
+            "before": "123"
+          },
+          {
+            "field": "status",
+            "after": "open"
+          }
+        ]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "actor": {
+          "id": "staff",
+          "name": "Operator",
+          "email": "staff@example.invalid",
+          "token": "[redacted]",
+          "profile": {
+            "email": "[redacted]"
+          }
+        },
+        "impersonator": {
+          "id": "support",
+          "name": "Support",
+          "email": "support@example.invalid",
+          "apiKey": "[redacted]"
+        },
+        "metadata": {
+          "guest": {
+            "email": "[redacted]",
+            "phone": "[redacted]",
+            "notes": "[redacted]",
+            "name": "[redacted]",
+            "password": "[redacted]"
+          }
+        },
+        "changes": [
+          {
+            "field": "guest.email",
+            "after": "[redacted]"
+          },
+          {
+            "field": "phone",
+            "before": "[redacted]"
+          },
+          {
+            "field": "status",
+            "after": "open"
+          }
+        ]
+      }
+    },
+    {
+      "name": "paths use exact depth and case, literal escapes, and one-segment array and object wildcards",
+      "keys": null,
+      "changeFields": null,
+      "replacement": null,
+      "paths": [
+        "targets.*.name",
+        "metadata.a\\.b.\\*.x\\\\y",
+        "metadata.list.*.value",
+        "metadata.map.*.name",
+        "metadata.one.1"
+      ],
+      "input": {
+        "id": "e",
+        "action": "a",
+        "targets": [
+          {
+            "id": "first",
+            "type": "record",
+            "name": "private"
+          },
+          {
+            "id": "second",
+            "type": "record",
+            "name": "private"
+          }
+        ],
+        "metadata": {
+          "a.b": {
+            "*": {
+              "x\\y": "private",
+              "child": {
+                "x\\y": "kept"
+              }
+            }
+          },
+          "a": {
+            "b": {
+              "*": {
+                "x\\y": "kept"
+              }
+            }
+          },
+          "list": [
+            {
+              "value": "private",
+              "Value": "kept"
+            },
+            [
+              {
+                "value": "kept"
+              }
+            ]
+          ],
+          "map": {
+            "entry": {
+              "name": "private"
+            }
+          },
+          "one": [1, 2]
+        }
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "targets": [
+          {
+            "id": "first",
+            "type": "record",
+            "name": "[redacted]"
+          },
+          {
+            "id": "second",
+            "type": "record",
+            "name": "[redacted]"
+          }
+        ],
+        "metadata": {
+          "a.b": {
+            "*": {
+              "x\\y": "[redacted]",
+              "child": {
+                "x\\y": "kept"
+              }
+            }
+          },
+          "a": {
+            "b": {
+              "*": {
+                "x\\y": "kept"
+              }
+            }
+          },
+          "list": [
+            {
+              "value": "[redacted]",
+              "Value": "kept"
+            },
+            [
+              {
+                "value": "kept"
+              }
+            ]
+          ],
+          "map": {
+            "entry": {
+              "name": "[redacted]"
+            }
+          },
+          "one": [1, "[redacted]"]
+        }
+      }
+    },
+    {
+      "name": "forced paths win, keep exemptions are local, and identifiers survive path matches",
+      "keys": "secret|profile|^actor$",
+      "changeFields": null,
+      "replacement": null,
+      "paths": [
+        "id",
+        "action",
+        "actor.id",
+        "actor.name",
+        "tenant",
+        "targets.0",
+        "targets.*.id",
+        "changes.*.before.value",
+        "changes.0.after"
+      ],
+      "keepPaths": [
+        "actor",
+        "actor.name",
+        "actor.profile",
+        "tenant.name",
+        "targets.*.name",
+        "changes.*.after"
+      ],
+      "input": {
+        "id": "e",
+        "action": "a",
+        "actor": {
+          "type": "user",
+          "id": "staff",
+          "name": "Operator",
+          "profile": {
+            "secret": "private",
+            "safe": true
+          }
+        },
+        "tenant": {
+          "id": "tenant",
+          "name": "private"
+        },
+        "targets": [
+          {
+            "id": "target",
+            "type": "record",
+            "name": "private"
+          }
+        ],
+        "changes": [
+          {
+            "field": "public",
+            "before": {
+              "value": "private",
+              "keep": 1
+            },
+            "after": "private"
+          }
+        ]
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "actor": {
+          "type": "user",
+          "id": "staff",
+          "name": "[redacted]",
+          "profile": {
+            "secret": "[redacted]",
+            "safe": true
+          }
+        },
+        "tenant": {
+          "id": "tenant",
+          "name": "[redacted]"
+        },
+        "targets": [
+          {
+            "id": "target",
+            "type": "record",
+            "name": "[redacted]"
+          }
+        ],
+        "changes": [
+          {
+            "field": "public",
+            "before": {
+              "value": "[redacted]",
+              "keep": 1
+            },
+            "after": "[redacted]"
+          }
+        ]
+      }
+    },
+    {
+      "name": "keep paths can exempt literal or wildcard array indices from keys",
+      "keys": "^(0|1|password)$",
+      "changeFields": null,
+      "replacement": null,
+      "keepPaths": ["metadata.keep.*"],
+      "input": {
+        "id": "e",
+        "action": "a",
+        "metadata": {
+          "keep": [
+            {
+              "password": "secret"
+            },
+            "visible"
+          ],
+          "other": [1, 2, 3]
+        }
+      },
+      "expected": {
+        "id": "e",
+        "action": "a",
+        "metadata": {
+          "keep": [
+            {
+              "password": "[redacted]"
+            },
+            "visible"
+          ],
+          "other": ["[redacted]", "[redacted]", 3]
+        }
       }
     }
   ]

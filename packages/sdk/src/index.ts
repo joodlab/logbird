@@ -1,3 +1,6 @@
+import { createRedactor, type RedactionOptions } from './redaction';
+
+export { DEFAULT_SECRET_KEYS, IDENTIFIER_FIELDS, type RedactionOptions, redact } from './redaction';
 export {
   generateWebhookSecret,
   MAX_WEBHOOK_SIGNATURES,
@@ -67,6 +70,8 @@ export interface LogbirdOptions {
   enabled?: boolean;
   defaults?: Partial<EventInput>;
   beforeSend?: (event: EventInput) => EventInput | null | undefined;
+  /** Redacts events after beforeSend and before the size limit. Defaults to the built-in secret-key rules. */
+  redaction?: false | RedactionOptions;
   batchSize?: number;
   flushIntervalMs?: number;
   maxRetries?: number;
@@ -84,6 +89,7 @@ export class Logbird {
   private readonly interval: number;
   private readonly retries: number;
   private readonly capacity: number;
+  private readonly serializeRedacted: ReturnType<typeof createRedactor> | undefined;
   private droppedCount = 0;
   get dropped(): number {
     return this.droppedCount;
@@ -118,6 +124,9 @@ export class Logbird {
       this.retries < 0
     )
       throw new Error('Invalid batching options');
+    if (options.redaction !== false) {
+      this.serializeRedacted = createRedactor(options.redaction, (error) => this.report(error));
+    }
   }
   private report(error: unknown) {
     try {
@@ -128,15 +137,18 @@ export class Logbird {
   }
   track(event: EventInput): void {
     if (this.options.enabled === false) return;
+    let action = '';
+    let id: string | undefined;
+    let refusal: string | undefined;
     try {
       if (this.closed) throw new Error('Logbird is shut down');
+      refusal = 'An audit event could not be prepared and was dropped';
       const defaults = this.options.defaults;
-      let prepared: EventInput = {
-        ...defaults,
-        ...event,
-        context: { ...defaults?.context, ...event.context },
-        metadata: { ...defaults?.metadata, ...event.metadata },
-      };
+      let prepared: EventInput = { ...defaults, ...event };
+      if (typeof prepared.action === 'string') action = prepared.action;
+      if (typeof prepared.id === 'string' && prepared.id.trim()) id = prepared.id;
+      prepared.context = { ...defaults?.context, ...event.context };
+      prepared.metadata = { ...defaults?.metadata, ...event.metadata };
       prepared.id ??= uuidv7();
       prepared.occurredAt ??= new Date().toISOString();
       if (this.options.beforeSend) {
@@ -146,10 +158,20 @@ export class Logbird {
       }
       // The server mints a fresh id for a missing, blank or non-string id (numbers included), which a retry could
       // never match. Mint it here instead, on a copy, so a frozen or caller-owned beforeSend result is never mutated.
-      if (typeof prepared.id !== 'string' || !prepared.id.trim()) prepared = { ...prepared, id: uuidv7() };
-      const serialized = JSON.stringify(prepared);
-      if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
+      const preparedId = prepared.id;
+      if (typeof preparedId === 'string' && preparedId.trim()) id = preparedId;
+      else {
+        id = uuidv7();
+        prepared = { ...prepared, id };
+      }
+      if (this.serializeRedacted) refusal = 'An audit event could not be redacted and was dropped';
+      const serialized = this.serializeRedacted ? this.serializeRedacted(prepared) : JSON.stringify(prepared);
+      if (new TextEncoder().encode(serialized).length > 256 * 1024) {
+        refusal = 'Event exceeds 256 KB and was dropped';
+        throw new Error(refusal);
+      }
       const copy = JSON.parse(serialized) as EventInput;
+      refusal = undefined;
       if (this.queue.length >= this.capacity) {
         if (this.options.dropPolicy === 'newest') {
           this.drop(copy);
@@ -161,7 +183,11 @@ export class Logbird {
       if (this.queue.length >= this.batchSize) void this.flush().catch((e) => this.report(e));
       else this.schedule();
     } catch (e) {
-      this.report(e);
+      if (refusal) {
+        // Preparation failed before a safe payload was available. Report scalar identity and fixed diagnostics.
+        this.drop(id === undefined ? { action } : { action, id });
+        this.report(new Error(refusal));
+      } else this.report(e);
     }
   }
   private schedule() {
@@ -345,162 +371,4 @@ export class Logbird {
     this.timer = undefined;
     await this.flush();
   }
-}
-
-export const DEFAULT_SECRET_KEYS = /passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key/i;
-/**
- * The parties' identifier and classification fields: never redacted, whatever the pattern. A redacted id would merge
- * every identity into one, and an executor's attempt must stay a number. To pseudonymise an id, transform it before
- * recording. The .NET SDK's `Redactor.IdentifierFields` lists the same fields.
- */
-export const IDENTIFIER_FIELDS: readonly string[] = Object.freeze([
-  'actor.type',
-  'actor.id',
-  'impersonator.id',
-  'executor.type',
-  'executor.id',
-  'executor.jobId',
-  'executor.attempt',
-  'tenant.id',
-  'targets[].type',
-  'targets[].id',
-]);
-
-type Level = 'nested' | 'top' | 'actor' | 'impersonator' | 'executor' | 'tenant' | 'targets' | 'target' | 'changes' | 'change' | 'plain';
-
-const IDENTITY: Record<Level, readonly string[]> = {
-  nested: [],
-  top: ['id', 'action'],
-  actor: ['id', 'type'],
-  impersonator: ['id'],
-  executor: ['id', 'type', 'jobId', 'attempt'],
-  tenant: ['id'],
-  targets: [],
-  target: ['id', 'type'],
-  changes: [],
-  change: [],
-  plain: [],
-};
-
-const PARTIES: Record<string, Level> = { actor: 'actor', impersonator: 'impersonator', executor: 'executor', tenant: 'tenant', targets: 'targets' };
-
-/**
- * Redact a deep copy; combine this hook with application-specific filtering as needed.
- *
- * A key matches when the pattern matches any part of it (the default redacts `tokenCount` and `secretary` too); anchor
- * your own pattern (`/^name$/`) to match whole keys. A matching key keeps its name and its value becomes the replacement,
- * at any depth. Identity is never redacted: the top-level `id` and `action`, and {@link IDENTIFIER_FIELDS}. A pattern
- * that matches a party's own key (`actor`, `impersonator`, `executor`, `tenant` or `targets`), or a target's index, redacts
- * every other field of that party and keeps its identifier fields; a party object is never replaced as a whole (one that
- * is not an object is replaced like any other value). A change's
- * values are replaced when its `field` is a string the change pattern matches.
- *
- * The .NET SDK's `Redactor` follows the same rules, checked against one shared fixture: with the default pattern (and
- * names added like the .NET `AddKeys`), both redact exactly the same keys. A pattern of your own runs on each platform's
- * regular-expression engine, which can differ at the edges (in .NET, `$` also matches before a final line feed; flags
- * such as `i` fold case differently), so keep custom patterns to plain alternatives and anchors that mean the same in
- * both. It returns the event as JSON will send it: redaction runs inside `JSON.stringify` itself (as its replacer), so
- * every value is read, and every `toJSON` applied, exactly as sending the event reads them, and a matched value is
- * replaced before it is serialized (a value JSON cannot hold, such as a `BigInt` under a secret key, never stops the
- * event). An object reached twice becomes two copies, and an event with a cycle throws a `TypeError`, as sending it would.
- *
- * The contract: `redact()` is exact for JSON data, which is what `EventInput` types: plain objects, arrays, primitives,
- * and `toJSON` values (such as `Date`) without side effects on other parts of the event. Getters or `toJSON` with side
- * effects on other parts of the event, or anything that changes the event while it is serialized, are outside it. A
- * change whose `field` is a getter, an inherited or non-enumerable property, or a value (an object or a function) with a
- * `toJSON` has its `before` and `after` redacted, whatever the pattern; any other non-string `field`, or none, is not
- * matched.
- */
-export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
-  const keys = options.keys ?? DEFAULT_SECRET_KEYS;
-  const fields = options.changeFields ?? keys;
-  const replacement = options.replacement ?? '[redacted]';
-  const matches = (pattern: RegExp, key: string) => {
-    pattern.lastIndex = 0;
-    return pattern.test(key);
-  };
-  return (event) => {
-    // Redaction runs as JSON.stringify's replacer, so the event is read exactly as sending it reads it (each getter once,
-    // in order; toJSON applied first; boxed primitives unwrapped; a cycle throws a TypeError). The replacer sees each
-    // value after toJSON and before it is serialized: a matched value is replaced without being serialized. Each object
-    // it lets through is recorded with the rules for its own children; serialization is depth-first, so an object reached
-    // twice is finished in its first place before its second. The result is the event as JSON will send it, which is also
-    // the tree the .NET SDK redacts.
-    type Context = { level: Level; whole: boolean; changed: boolean };
-    const contexts = new WeakMap<object, Context>();
-    const omitted = (value: unknown) => value === undefined || typeof value === 'function' || typeof value === 'symbol';
-    // A boxed primitive as JSON.stringify tells one, by its internal slot (any realm), not by its prototype: only a real
-    // Number, String, Boolean or BigInt object is serialized as its primitive.
-    const brands: Array<(this: unknown) => unknown> = [
-      Number.prototype.valueOf,
-      String.prototype.valueOf,
-      Boolean.prototype.valueOf,
-      BigInt.prototype.valueOf,
-    ];
-    const boxed = (value: object) =>
-      brands.some((unbox) => {
-        try {
-          unbox.call(value);
-          return true;
-        } catch {
-          return false;
-        }
-      });
-    const isObject = (value: unknown): value is Record<string, unknown> =>
-      !!value && typeof value === 'object' && !Array.isArray(value) && !boxed(value);
-    const keep = (value: unknown, context: Context) => {
-      if (value && typeof value === 'object') contexts.set(value, context);
-      return value;
-    };
-    const plain: Context = { level: 'plain', whole: false, changed: false };
-    const nested: Context = { level: 'nested', whole: false, changed: false };
-    // A change's values are decided from its field's property descriptor, before anything is serialized and without
-    // reading the field. An own, enumerable string data property is matched against the change pattern. A field whose
-    // value JSON cannot tell this way (a getter, an inherited or non-enumerable property, or a value with a toJSON) fails
-    // closed: the entry's before and after are redacted. Any other JSON value, or no field, is not matched, as in .NET.
-    const changeEntry = (entry: Record<string, unknown>) => {
-      const own = Object.getOwnPropertyDescriptor(entry, 'field');
-      let changed: boolean;
-      if (own === undefined) changed = 'field' in entry;
-      else if (!('value' in own) || !own.enumerable) changed = true;
-      else if (typeof own.value === 'string') changed = matches(fields, own.value);
-      else
-        changed =
-          !!own.value &&
-          (typeof own.value === 'object' || typeof own.value === 'function') &&
-          typeof (own.value as { toJSON?: unknown }).toJSON === 'function';
-      return keep(entry, { level: 'change', whole: false, changed });
-    };
-    function replacer(this: unknown, key: string, value: unknown): unknown {
-      const holder = this && typeof this === 'object' ? contexts.get(this) : undefined;
-      if (!holder) return keep(value, { level: 'top', whole: false, changed: false });
-      const { level, whole, changed } = holder;
-      if (level === 'plain') return keep(value, plain);
-      if (Array.isArray(this)) {
-        if (level === 'targets') {
-          // Target entries are parties: never replaced as a whole, and their type and id are kept. A pattern matching
-          // an entry's index (or the targets key) redacts the entry's other fields; a scalar entry is replaced.
-          const matched = whole || matches(keys, key);
-          if (isObject(value)) return keep(value, { level: 'target', whole: matched, changed: false });
-          return matched ? replacement : keep(value, nested);
-        }
-        // Array entries are matched by their index ("0", "1", ...), as Object.entries gives them.
-        if (matches(keys, key)) return replacement;
-        // Change values are decided on the field as recorded; only an object entry with a string field is matched.
-        if (level === 'changes' && isObject(value)) return changeEntry(value);
-        return keep(value, nested);
-      }
-      if (IDENTITY[level].includes(key)) return keep(value, plain);
-      if (whole || (changed && (key === 'before' || key === 'after'))) return omitted(value) ? undefined : replacement;
-      const party = level === 'top' && Object.hasOwn(PARTIES, key) ? PARTIES[key]! : 'nested';
-      const matched = matches(keys, key);
-      if (party !== 'nested' && (party === 'targets' ? Array.isArray(value) : isObject(value))) {
-        // A party is never replaced as a whole; a match redacts everything but its identity.
-        return keep(value, { level: party, whole: matched, changed: false });
-      }
-      if (matched) return omitted(value) ? undefined : replacement;
-      return keep(value, level === 'top' && key === 'changes' && Array.isArray(value) ? { level: 'changes', whole: false, changed: false } : nested);
-    }
-    return JSON.parse(JSON.stringify(event, replacer)) as EventInput;
-  };
 }

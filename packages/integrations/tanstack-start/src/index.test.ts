@@ -3,20 +3,32 @@ import { expect, it, vi } from 'vitest';
 import { logbird, readAuditTrail, trailQuery } from './index';
 
 it('runs the framework request middleware and passes typed audit through next', async () => {
-  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
-  const track = vi.spyOn(client, 'track').mockImplementation(() => undefined);
+  const fetch = vi.fn(async (_request: unknown, init: RequestInit) => {
+    const { events } = JSON.parse(init.body as string);
+    return Response.json({ accepted: 1, ids: [events[0].id], rejected: [] }, { status: 202 });
+  });
+  vi.stubGlobal('fetch', fetch);
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake', redaction: { paths: ['metadata.email'] } });
   const integration = logbird({ client, actor: () => ({ id: 'actor' }), tenant: () => ({ id: 'tenant' }) });
   const handler = integration.requestMiddleware.options.server;
   if (!handler) throw new Error('missing middleware');
   const next = vi.fn(async ({ context }) => {
-    context.audit('record.updated');
+    context.audit('record.updated', { metadata: { email: 'guest@example.invalid' } });
+    await context.audit.pending();
     return { context };
   });
-  await handler({ request: new Request('http://local'), pathname: '/', context: {}, handlerType: 'router', next } as unknown as Parameters<
-    typeof handler
-  >[0]);
-  await integration.shutdown();
-  expect(track.mock.calls[0]?.[0].actor?.id).toBe('actor');
+  try {
+    await handler({ request: new Request('http://local'), pathname: '/', context: {}, handlerType: 'router', next } as unknown as Parameters<
+      typeof handler
+    >[0]);
+    await integration.shutdown();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toMatchObject({
+      events: [{ actor: { id: 'actor' }, metadata: { email: '[redacted]' } }],
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 it('answers an incomplete trail with an error and sends no request (#263)', async () => {
