@@ -16,6 +16,61 @@ export const EXECUTOR_TYPES = ['api', 'worker', 'scheduler', 'webhook', 'script'
 export const outcomeSchema = z.enum(OUTCOMES);
 export const severitySchema = z.enum(SEVERITIES);
 
+/**
+ * What one event keeps in its indexed columns (what search, facets, `record:` and exports read). Over a limit the event
+ * is still accepted and its stored `payload` keeps everything sent; only `payloadBytes` rejects the event. Cuts of
+ * targets, changes and change field names come back as ingest `warnings` and are recorded on the event in the
+ * reserved `logbird.truncated.*` attributes (see TRUNCATED_ATTRIBUTES). docs/limits.md lists every limit.
+ */
+export const EVENT_LIMITS = {
+  /** Targets indexed per event, in the order sent. */
+  targets: 64,
+  /** Changes indexed per event, in the order sent. */
+  changes: 256,
+  /** UTF-16 code units of a change's `field` that are indexed. */
+  changeField: 256,
+  /** Attribute keys indexed per event (fields outside the envelope, flattened). */
+  attributes: 256,
+  /** UTF-8 bytes of one attribute value that are indexed. */
+  attributeBytes: 2048,
+  /** Path segments of an attribute key: a deeper object is indexed as JSON text at this depth. */
+  attributeDepth: 6,
+  /** UTF-16 code units of `description` that are indexed. */
+  description: 4096,
+  /** Serialized size of one event; a larger event is rejected (invalid_event), its siblings are still stored. */
+  payloadBytes: 256 * 1024,
+} as const;
+/**
+ * Reserved attributes Logbird sets on an event whose targets, changes or change field names were cut at ingest. Each
+ * holds a count as decimal text: the targets sent, the changes sent, the change field names that were cut. Only
+ * Logbird sets them: a value the producer sends under `logbird.truncated` is dropped from the attributes (the payload
+ * keeps it), so they can be neither forged nor collided with.
+ */
+export const TRUNCATED_ATTRIBUTES = {
+  targets: 'logbird.truncated.targets',
+  changes: 'logbird.truncated.changes',
+  changeFields: 'logbird.truncated.changeFields',
+} as const;
+export const TRUNCATED_ATTRIBUTE_PREFIX = 'logbird.truncated';
+/** Per-request limits of ingest and of the /v1 reads. docs/limits.md lists them (a test checks the numbers). */
+export const REQUEST_LIMITS = {
+  /** Events per ingest request (413 payload_too_large above). */
+  ingestEvents: 1000,
+  /** Ingest body bytes after gzip decoding (413 payload_too_large above). */
+  ingestBodyBytes: 5 * 1024 * 1024,
+  /** Events per search page. */
+  pageSize: 200,
+  /** Values per facet, and second-level values per value. */
+  facetValues: 100,
+  facetGroups: 20,
+  /** UTF-8 bytes of `q` (422 invalid_query above). */
+  queryBytes: 4096,
+  /** Search `total` stops counting here (`totalExact: false`). */
+  countCap: 10_001,
+  /** Parents an event detail walks up `context.parentEventId`. */
+  parentDepth: 100,
+} as const;
+
 const id = z.string().min(1).max(256);
 /** Entity ids may also be numbers (integer keys); a number is stored as the plain decimal of its exact value. */
 // parseJsonExact keeps a number a double cannot hold as a raw JSON value with its exact digits.
@@ -45,7 +100,7 @@ export const targetInputSchema = z.looseObject({
 });
 
 export const changeInputSchema = z.object({
-  field: z.string().min(1).max(256),
+  field: z.string().min(1).max(EVENT_LIMITS.changeField),
   before: z.unknown().optional(),
   after: z.unknown().optional(),
 });
@@ -75,14 +130,14 @@ export const eventInputSchema = z.looseObject({
   environment: z.string().max(64).optional(), // default "production"
   outcome: z.string().max(32).optional(), // recommended: one of OUTCOMES; default "success"
   severity: z.string().max(32).optional(), // recommended: one of SEVERITIES; default "info"
-  description: z.string().max(4096).optional(),
+  description: z.string().max(EVENT_LIMITS.description).optional(),
   actor: actorInputSchema.optional(),
   impersonator: actorInputSchema.optional(),
   executor: executorInputSchema.optional(),
   tenant: z.looseObject({ id: entityId, name: shortText.optional() }).optional(),
   source: z.string().max(128).optional(), // external system that supplied the change, e.g. "channel-manager"
-  targets: z.array(targetInputSchema).max(64).optional(),
-  changes: z.array(changeInputSchema).max(256).optional(),
+  targets: z.array(targetInputSchema).max(EVENT_LIMITS.targets).optional(),
+  changes: z.array(changeInputSchema).max(EVENT_LIMITS.changes).optional(),
   context: contextInputSchema.optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   schemaVersion: z.string().max(32).optional(),
@@ -103,13 +158,35 @@ export const ingestRejectionCodeSchema = z.enum([
   'stored_event_unreadable',
   'unverified_after_parse_failure',
 ]);
+/**
+ * Stable codes of the cut warnings. `targets_truncated` and `changes_truncated` carry `sent` (how many the event had),
+ * `indexed` (how many are searchable) and `limit`; `change_fields_truncated` carries `cut` (field names shortened) and
+ * `limit` (code units kept). Warnings without a code (an adjusted occurredAt, a numeric id) carry only `reason`.
+ */
+export const INGEST_WARNING_CODES = ['targets_truncated', 'changes_truncated', 'change_fields_truncated'] as const;
+export const ingestWarningSchema = z.object({
+  index: z.number().int().meta({ description: 'Position of the event in the request.' }),
+  reason: z.string().meta({ description: 'What was adjusted, in words. Never contains event data.' }),
+  code: z
+    .enum(INGEST_WARNING_CODES)
+    .optional()
+    .meta({ description: 'Set on a cut: targets_truncated, changes_truncated or change_fields_truncated. Absent on other warnings.' }),
+  sent: z.number().int().optional().meta({ description: 'targets_truncated, changes_truncated: how many the event had.' }),
+  indexed: z.number().int().optional().meta({ description: 'targets_truncated, changes_truncated: how many are indexed (searchable).' }),
+  cut: z.number().int().optional().meta({ description: 'change_fields_truncated: how many change field names were shortened.' }),
+  limit: z.number().int().optional().meta({ description: 'The limit that applied (a count, or code units for field names).' }),
+});
+export type IngestWarning = z.infer<typeof ingestWarningSchema>;
 export const ingestResponseSchema = z.object({
   accepted: z.number().int(),
   ids: z.array(z.string()),
   /** Conflicts start with duplicate_id_conflict: followed by actionable guidance. Original content is kept. */
   rejected: z.array(z.object({ index: z.number().int(), reason: z.string(), code: ingestRejectionCodeSchema })),
-  /** Accepted events that were adjusted, e.g. an unusable occurredAt stored at receive time (original kept in attributes). */
-  warnings: z.array(z.object({ index: z.number().int(), reason: z.string() })).default([]),
+  /**
+   * Accepted events that were adjusted, e.g. an unusable occurredAt stored at receive time (original kept in attributes).
+   * A cut of targets, changes or change field names adds one entry per cut, with a stable `code` and counts only.
+   */
+  warnings: z.array(ingestWarningSchema).default([]),
 });
 export type IngestResponse = z.infer<typeof ingestResponseSchema>;
 /** Request header a client sends to declare it resends only unsettled events (`Logbird-Retry: subset`). */

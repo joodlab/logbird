@@ -1,12 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import {
   canonicalDecimal,
+  EVENT_LIMITS,
   EXACT_NUMBER_MAX_DEPTH,
   hasDeepRawNumbers,
   isRawJson,
   mayHoldInexactNumbers,
   plainDecimal,
   rawJsonText,
+  TRUNCATED_ATTRIBUTE_PREFIX,
+  TRUNCATED_ATTRIBUTES,
 } from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
@@ -45,7 +48,7 @@ const PLAIN_PADDING = 32;
 // never equal one. A code-unit cap keeps at least `cap - 1` units (one less when a surrogate pair straddles it); the
 // 2 KB attribute cut keeps at least 2,045 bytes (a split UTF-8 sequence is dropped, up to 3 bytes).
 const textNumberMax = (cap: number) => cap - 2;
-const ATTRIBUTE_BYTES = 2048;
+const ATTRIBUTE_BYTES = EVENT_LIMITS.attributeBytes;
 const ATTRIBUTE_NUMBER_MAX = ATTRIBUTE_BYTES - 4;
 /** The index text of a number: plain decimal, else unique scientific, else null; never longer than `maxLength`. */
 function numericId(v: unknown, maxLength: number): string | null {
@@ -83,6 +86,45 @@ function endsInsideString(json: string): boolean {
   }
   return inside;
 }
+/** A cut at ingest: what the warning says (counts only, never event data) and the reserved attribute it sets. */
+export type IngestCut =
+  | { code: 'targets_truncated' | 'changes_truncated'; reason: string; sent: number; indexed: number; limit: number }
+  | { code: 'change_fields_truncated'; reason: string; cut: number; limit: number };
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+function truncations(e: Record<string, unknown>, indexedTargets: number, changes: Record<string, unknown>[]) {
+  const cuts: (IngestCut & { attribute: string })[] = [];
+  const sentTargets = Array.isArray(e.targets) ? e.targets.length : 0;
+  if (indexedTargets < sentTargets)
+    cuts.push({
+      code: 'targets_truncated',
+      attribute: TRUNCATED_ATTRIBUTES.targets,
+      sent: sentTargets,
+      indexed: indexedTargets,
+      limit: EVENT_LIMITS.targets,
+      reason: `${plural(sentTargets, 'target', 'targets')} sent, ${indexedTargets} indexed (at most ${EVENT_LIMITS.targets} per event, in the order sent; a numeric id too long to index is left out). A search by record does not find this event for the others; the stored payload keeps them all.`,
+    });
+  const sentChanges = Array.isArray(e.changes) ? e.changes.length : 0;
+  if (changes.length < sentChanges)
+    cuts.push({
+      code: 'changes_truncated',
+      attribute: TRUNCATED_ATTRIBUTES.changes,
+      sent: sentChanges,
+      indexed: changes.length,
+      limit: EVENT_LIMITS.changes,
+      reason: `${plural(sentChanges, 'change', 'changes')} sent, the first ${changes.length} indexed (at most ${EVENT_LIMITS.changes} per event). The stored payload keeps them all.`,
+    });
+  // The same test as the column cap: a field longer than the cap after trimming is cut (see textOf).
+  const cut = changes.filter((c) => typeof c.field === 'string' && wellFormed(c.field.trim()).length > EVENT_LIMITS.changeField).length;
+  if (cut)
+    cuts.push({
+      code: 'change_fields_truncated',
+      attribute: TRUNCATED_ATTRIBUTES.changeFields,
+      cut,
+      limit: EVENT_LIMITS.changeField,
+      reason: `${plural(cut, 'change field name', 'change field names')} longer than ${EVENT_LIMITS.changeField} UTF-16 code units, cut to at most ${EVENT_LIMITS.changeField} in the index. The stored payload keeps ${cut === 1 ? 'the whole name' : 'the whole names'}.`,
+    });
+  return cuts;
+}
 export const DEEP_NUMBERS_REASON = `invalid_event: numbers nested deeper than ${EXACT_NUMBER_MAX_DEPTH.toLocaleString('en-US')} levels cannot be stored exactly`;
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {
   // Only identifiers index numbers (integer primary keys); other text columns keep string-only semantics.
@@ -109,18 +151,19 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     return { ok: false as const, reason: 'event must be JSON serializable' };
   }
   if (mayHoldInexactNumbers(payload) && hasDeepRawNumbers(input)) return { ok: false as const, reason: DEEP_NUMBERS_REASON };
-  if (Buffer.byteLength(payload) > 256 * 1024) return { ok: false as const, reason: 'event exceeds 256 KB' };
+  if (Buffer.byteLength(payload) > EVENT_LIMITS.payloadBytes) return { ok: false as const, reason: 'event exceeds 256 KB' };
   const attributes: Record<string, string> = Object.create(null);
   let invalidAttributeKey = false;
   const flatten = (v: unknown, path: string, depth: number) => {
-    if (Object.keys(attributes).length >= 256) return;
+    if (Object.keys(attributes).length >= EVENT_LIMITS.attributes) return;
     // Reject instead of repairing keys: replacement could merge distinct attribute paths.
     if (/[\uD800-\uDFFF]/u.test(path)) {
       invalidAttributeKey = true;
       return;
     }
     const entries = Object.entries(object(v));
-    if (entries.length && depth < 6) for (const [key, child] of entries) flatten(child, path ? `${path}.${key}` : key, depth + 1);
+    if (entries.length && depth < EVENT_LIMITS.attributeDepth)
+      for (const [key, child] of entries) flatten(child, path ? `${path}.${key}` : key, depth + 1);
     else if (!ctx.legacyColumns && (isRawJson(v) || (typeof v === 'number' && Number.isFinite(v)))) {
       // A number is indexed whole, as the plain decimal of its value (0.0000001, not 1e-7) or else its unique scientific
       // spelling, or not at all: a 2 KB prefix of its digits would match a different number. Legacy (pre-v1) columns
@@ -174,7 +217,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   for (const [key, v] of Object.entries(e)) if (!top.includes(key)) flatten(v, key, 1);
   for (const [key, fields] of Object.entries(known))
     for (const [k, v] of Object.entries(object(e[key]))) if (!fields.includes(k)) flatten(v, `${key}.${k}`, 2);
-  const targets = Array.isArray(e.targets) ? e.targets.slice(0, 64).map(object) : [];
+  const targets = Array.isArray(e.targets) ? e.targets.slice(0, EVENT_LIMITS.targets).map(object) : [];
   // A numeric target id too long to index is left out of the record columns (the payload keeps it): an empty id would
   // make every such target one shared `type:` record.
   const recordTargets = ctx.legacyColumns ? targets : targets.filter((t) => !(isNumber(t.id) && idText(t.id) === ''));
@@ -184,7 +227,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     for (const [k, v] of Object.entries(t)) if (!['type', 'id', 'name'].includes(k)) flatten(v, `targets.${i}.${k}`, 3);
   });
   if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
-  const changes = Array.isArray(e.changes) ? e.changes.slice(0, 256).map(object) : [];
+  const changes = Array.isArray(e.changes) ? e.changes.slice(0, EVENT_LIMITS.changes).map(object) : [];
   const actor = object(e.actor),
     executor = object(e.executor),
     tenant = object(e.tenant),
@@ -202,6 +245,16 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     if (rejected !== null) attributes['logbird.occurredAt.rejected'] = rejected;
     else delete attributes['logbird.occurredAt.rejected'];
   } else if (!ctx.legacyColumns) delete attributes['logbird.occurredAt.rejected']; // reserved: only Logbird sets it
+  // Cuts of targets, changes and change field names: the event is kept whole in payload; the indexed columns hold
+  // the first ones. Each cut is recorded on the event (reserved attributes, counts only) and returned as a warning.
+  // Legacy columns are frozen as the pre-v1 normalizer wrote them, which recorded no cuts.
+  const cuts = ctx.legacyColumns ? [] : truncations(e, recordTargets.length, changes);
+  if (!ctx.legacyColumns) {
+    // Reserved: only Logbird writes under logbird.truncated, so a producer can neither forge a cut nor hide one.
+    for (const key of Object.keys(attributes))
+      if (key === TRUNCATED_ATTRIBUTE_PREFIX || key.startsWith(`${TRUNCATED_ATTRIBUTE_PREFIX}.`)) delete attributes[key];
+    for (const cut of cuts) attributes[cut.attribute] = String(cut.code === 'change_fields_truncated' ? cut.cut : cut.sent);
+  }
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
@@ -220,7 +273,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     environment: text(e.environment, 64) || 'production',
     outcome: text(e.outcome, 32) || 'success',
     severity: text(e.severity, 32) || 'info',
-    description: text(e.description, 4096),
+    description: text(e.description, EVENT_LIMITS.description),
     actor_type: text(actor.type, 64),
     actor_id: idText(actor.id),
     actor_name: text(actor.name),
@@ -238,7 +291,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     target_types: recordTargets.map((t) => text(t.type, 64)),
     target_ids: recordTargets.map((t) => idText(t.id)),
     target_names: recordTargets.map((t) => text(t.name)),
-    changes_fields: changes.map((c) => text(c.field, 256)),
+    changes_fields: changes.map((c) => text(c.field, EVENT_LIMITS.changeField)),
     changes_before: changes.map((c) => wellFormed(value(c.before))),
     changes_after: changes.map((c) => wellFormed(value(c.after))),
     operation_id: idText(context.operationId),
@@ -267,6 +320,6 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     schema_version: idText(e.schemaVersion, 32),
     sdk: text(ctx.sdk, 128),
   };
-  return { ok: true as const, row, id, warning };
+  return { ok: true as const, row, id, warning, cuts: cuts.map(({ attribute: _attribute, ...cut }) => cut) };
 }
 export type EventRow = Extract<ReturnType<typeof normalizeEvent>, { ok: true }>['row'];

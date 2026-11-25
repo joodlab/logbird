@@ -25,6 +25,7 @@ import {
   CogIcon,
   FilterIcon,
   GitBranchIcon,
+  InfoIcon,
   LinkIcon,
   SearchXIcon,
   TerminalIcon,
@@ -52,6 +53,7 @@ import {
   unlinkedPartyLabel,
 } from '@/lib/events';
 import { formatDuration, formatNumber, formatTimeMs } from '@/lib/format';
+import { ingestCuts } from '@/lib/ingest-cuts';
 import { andQuery, formatTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
@@ -164,6 +166,16 @@ function Section({ title, children, actions, className }: { title: string; child
       </div>
       {children}
     </section>
+  );
+}
+
+/** What ingest cut from the indexed copy: plain text under the section title, pointing to the raw payload. */
+function CutNote({ children }: { children: ReactNode }) {
+  return (
+    <p className="flex items-start gap-1.5 text-muted-foreground text-xs" role="note">
+      <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
   );
 }
 
@@ -615,6 +627,7 @@ function EventDetailBody({
   const ctx = e.context;
   const caused = useChildren(detail, { updatedAt: detailUpdatedAt, fetching: detailFetching }, e, projectId);
   const depth = detail?.parents.length ?? 0;
+  const cuts = ingestCuts(e);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -779,14 +792,32 @@ function EventDetailBody({
           ) : null}
         </Section>
 
-        {e.targets.length > 0 ? (
-          <Section title={`Targets · ${e.targets.length}`}>
+        {e.targets.length > 0 || cuts.targets ? (
+          <Section title={cuts.targets ? `Targets · ${cuts.targets.indexed} of ${cuts.targets.sent}` : `Targets · ${e.targets.length}`}>
+            {cuts.targets ? (
+              <CutNote>
+                {formatNumber(cuts.targets.indexed)} of {formatNumber(cuts.targets.sent)} targets indexed. A search by record does not find this event
+                for the other {formatNumber(cuts.targets.sent - cuts.targets.indexed)}; the raw payload below has them all.
+              </CutNote>
+            ) : null}
             <TargetList key={e.id} onFilter={onFilter} projectId={projectId} targets={e.targets} />
           </Section>
         ) : null}
 
-        {e.changes.length > 0 ? (
-          <Section title={`Changes · ${e.changes.length}`}>
+        {e.changes.length > 0 || cuts.changes ? (
+          <Section title={cuts.changes ? `Changes · ${cuts.changes.indexed} of ${cuts.changes.sent}` : `Changes · ${e.changes.length}`}>
+            {cuts.changes ? (
+              <CutNote>
+                {formatNumber(cuts.changes.indexed)} of {formatNumber(cuts.changes.sent)} changes indexed and shown here; the raw payload below has
+                them all.
+              </CutNote>
+            ) : null}
+            {cuts.changeFields ? (
+              <CutNote>
+                {cuts.changeFields === 1 ? '1 field name is' : `${formatNumber(cuts.changeFields)} field names are`} cut to at most 256 characters
+                here; the raw payload below has {cuts.changeFields === 1 ? 'it' : 'them'} whole.
+              </CutNote>
+            ) : null}
             <div className="overflow-hidden rounded-lg border">
               <table className="w-full table-fixed text-[13px]">
                 <thead className="bg-muted/40 text-[11px] text-muted-foreground">

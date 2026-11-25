@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { normalizeEvent, projectMaintenance } from '@logbird/clickhouse';
-import { ingestPendingDetailsSchema, ingestResponseSchema, parseJsonExact } from '@logbird/contracts';
+import { type IngestWarning, ingestPendingDetailsSchema, ingestResponseSchema, parseJsonExact, REQUEST_LIMITS } from '@logbird/contracts';
 import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { logIngestRecoveryFailure, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
@@ -26,7 +26,7 @@ export async function readIngestBody(request: Request): Promise<unknown> {
   try {
     for await (const chunk of body) {
       size += chunk.length;
-      if (size > 5 * 1024 * 1024) throw new ApiError(413, 'payload_too_large', 'Request exceeds 5 MB.');
+      if (size > REQUEST_LIMITS.ingestBodyBytes) throw new ApiError(413, 'payload_too_large', 'Request exceeds 5 MB.');
       chunks.push(Buffer.from(chunk));
     }
     // Keep digits a double cannot hold (64-bit ids, long decimals) exactly as sent.
@@ -44,17 +44,19 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
   if (!Array.isArray(events) || !events.length) throw new ApiError(422, 'validation_error', 'events must be a nonempty array.');
   // Request limits stay whole-request. An event over 256 KB is rejected on its own by normalizeEvent
   // (invalid_event: event exceeds 256 KB), so its healthy siblings are still stored.
-  if (events.length > 1000) throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events per request.');
+  if (events.length > REQUEST_LIMITS.ingestEvents) throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events per request.');
   const candidates: IngestCandidate[] = [],
     ids: string[] = [],
     rejected: { index: number; reason: string; code: string }[] = [],
-    warnings: { index: number; reason: string }[] = [];
+    warnings: IngestWarning[] = [];
   for (const [index, event] of events.entries()) {
     const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(), sdk });
     if (normalized.ok) {
       // Internal audit callers can pass Dates/toJSON values; identity is always the parsed wire payload.
       candidates.push({ index, input: parseJsonExact(normalized.row.payload), row: normalized.row });
       if (normalized.warning) warnings.push({ index, reason: normalized.warning });
+      // One entry per cut (targets, changes, field names), with a stable code and counts only.
+      for (const cut of normalized.cuts) warnings.push({ index, ...cut });
     } else {
       const code = normalized.reason.startsWith('invalid_event_id:') ? 'invalid_event_id' : 'invalid_event';
       rejected.push({ index, reason: normalized.reason.startsWith(`${code}:`) ? normalized.reason : `${code}: ${normalized.reason}`, code });
@@ -70,7 +72,8 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
       candidates,
       supportsSubsetRetry,
       (index, reason) => {
-        const warning = warnings.findIndex((item) => item.index === index);
+        // Only the occurredAt warning (no code) can change at acceptance; cuts do not depend on the clock.
+        const warning = warnings.findIndex((item) => item.index === index && item.code === undefined);
         if (warning >= 0) warnings.splice(warning, 1);
         if (reason) warnings.push({ index, reason });
       },
@@ -167,7 +170,7 @@ export async function requireProjectReadable(projectId: string) {
   });
 }
 
-function settledDetails(error: ApiError, rejected: { index: number; reason: string; code: string }[], warnings: { index: number; reason: string }[]) {
+function settledDetails(error: ApiError, rejected: { index: number; reason: string; code: string }[], warnings: IngestWarning[]) {
   if (!['ingest_pending', 'ingest_unavailable'].includes(error.code) || !error.details) return error;
   const details = ingestPendingDetailsSchema.parse(error.details);
   return new ApiError(
