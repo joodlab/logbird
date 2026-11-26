@@ -43,19 +43,19 @@ checkout of this repository is for contributors ([CONTRIBUTING.md](https://githu
 Run the download and verification from the package that uses the SDK. Commit its
 `vendor/logbird/` directory and the workspace lockfile. Use
 `file:vendor/logbird/logbird-sdk-X.Y.Z.tgz` in that package's `package.json`.
-A root-level tarball also works when the build keeps it. If Docker installs from pruned manifests,
-copy the app's `vendor/` into the same path under the pruned workspace before installing.
-A clean frozen install fails with `ENOENT` if the lockfile's tarball path is missing.
+If Docker installs from pruned manifests, copy the app's `vendor/` into the same path under
+the pruned workspace before installing. With pnpm 11.8.0, a clean frozen install failed with
+`ENOENT` when the tarball was missing from the path in the lockfile.
 [Dockerfile example](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#pnpm-11-workspaces).
 
-When pnpm 11.8.0 reuses an SDK Release URL tarball from the store during workspace resolution,
-it can write the lockfile entry without `integrity`. When adding the SDK or bumping its version,
+In pnpm 11.8.0, workspace resolution has omitted `integrity` from the SDK's lockfile entry
+when reusing the Release URL tarball from the store. When adding the SDK or bumping its version,
 start with the lockfile from before the SDK change, keep the new URL in `package.json`, and run
 `pnpm install --lockfile-only --store-dir <empty temporary directory>` from the workspace root.
 Check for `integrity` in the SDK's lockfile entry, run `pnpm install --frozen-lockfile` with your
 normal store, then delete the temporary store.
 
-A frozen install with a missing hash prints this error.
+With the missing hash, pnpm 11.8.0 reported this error on frozen install.
 
 ```text
 [ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
