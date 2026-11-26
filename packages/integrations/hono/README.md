@@ -38,12 +38,15 @@ The full recipe, with the download commands and the lockfile check, is in
 
 For `@logbird/sdk` alone, the workspace check passed frozen reinstalls with the verified tarball
 under the app's `vendor/logbird/` or at the workspace root. In an app-only prune, keeping the app's
-`vendor/logbird/` directory let the frozen reinstall pass. A clean frozen install failed with
-`ENOENT` when the prune omitted the root tarball.
+`vendor/logbird/` directory let the frozen reinstall pass. A manifest-only install needs the
+app's `vendor/` directory copied in at the path in the lockfile before installing. A clean frozen
+install with a missing tarball failed with `ENOENT`.
+[Dockerfile example](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#pnpm-11-workspaces).
 
 For the SDK alone, root resolution and `pnpm --filter <package> add <Release URL>` both worked
-in the small pnpm 11.8.0 check. A pnpm 11 workspace reported unrelated peer changes after a
-filtered add and a missing integrity hash after root resolution. A frozen install with that
+in small pnpm 11.8.0 workspaces with the default or `hoisted` linker. A large hoisted workspace
+reported a missing hash after root resolution. Try the scoped add and review the full lockfile
+diff for peer changes, or use the app-local `file:` recipe for the SDK. A frozen install with that
 missing hash prints this error.
 
 ```text

@@ -153,18 +153,27 @@ SDK error objects that may contain sensitive details.
 #### pnpm 11 workspaces
 
 Verify the tarball as above, then commit it under the package that uses it, for example
-`apps/api/vendor/logbird/`. Use `file:vendor/logbird/logbird-sdk-X.Y.Z.tgz` in that package's
-`package.json` and commit the workspace lockfile. In a full checkout, a path to a tarball
-at the workspace root also works. If your build prunes the workspace before installing,
-the tarball must still be present at the path in the lockfile. Include the app's `vendor/logbird/`
-directory in the files copied into the build. If the build omits a root-level tarball, a clean frozen
-install fails with `ENOENT`.
+`packages/app/vendor/logbird/logbird-sdk-X.Y.Z.tgz`. Use `file:vendor/logbird/logbird-sdk-X.Y.Z.tgz`
+in `packages/app/package.json` and commit the workspace lockfile. A root-level tarball also works
+when the build retains it at the path recorded in the lockfile.
+
+If Docker installs from a pruned directory that contains only manifests and the lockfile,
+copy the app's `vendor/` directory into the install stage first. With the full workspace as
+the Docker build context and the pruned workspace root as the working directory, add these lines
+after copying the manifests and lockfile.
+
+```dockerfile
+COPY packages/app/vendor/ ./packages/app/vendor/
+RUN pnpm install --frozen-lockfile
+```
+
+A clean frozen install fails with `ENOENT` when that tarball is absent from the path in the lockfile.
 
 For `@logbird/sdk` alone, pnpm 11.8.0 wrote SHA-512 integrity and passed `pnpm install --frozen-lockfile`
-in our small workspace with both `pnpm install --lockfile-only` from the root and
-`pnpm --filter <package> add <Release URL>`. A pnpm 11 workspace reported a missing hash
-after root resolution and unrelated peer changes after a filtered add. We could not reproduce
-the missing hash in the small fixture. Review the full lockfile diff after a filtered add.
+in our small workspaces with both root resolution and `pnpm --filter <package> add <Release URL>`.
+The hoisted fixture also kept the hash with `overrides`, `patchedDependencies` and `allowBuilds`.
+A large hoisted pnpm 11 workspace reported a missing hash after root resolution. Try the scoped
+add and review the full lockfile diff for unrelated peer changes, or use the app-local `file:` recipe.
 When a URL entry lacks integrity, pnpm refuses the frozen install and prints this error.
 
 ```text

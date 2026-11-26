@@ -101,10 +101,11 @@ const quote = (arg) => {
   return /[\s"&|<>^()]/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg;
 };
 // Asynchronous, so the stand-in server below (in this process) keeps answering while a package manager runs.
-function exec(command, commandArgs, cwd, capture) {
+function exec(command, commandArgs, cwd, capture, env) {
   const shell = isWindows && command !== process.execPath;
   const child = spawn(command, shell ? commandArgs.map(quote) : commandArgs, {
     cwd,
+    env,
     shell,
     stdio: ['ignore', capture ? 'pipe' : 'inherit', capture ? 'pipe' : 'inherit'],
   });
@@ -120,9 +121,9 @@ function exec(command, commandArgs, cwd, capture) {
     child.on('close', (status) => resolve({ status, output }));
   });
 }
-async function run(command, commandArgs, cwd, { capture = false } = {}) {
+async function run(command, commandArgs, cwd, { capture = false, env } = {}) {
   console.log(`$ ${command} ${commandArgs.join(' ')}`);
-  const { status, output } = await exec(command, commandArgs, cwd, capture);
+  const { status, output } = await exec(command, commandArgs, cwd, capture, env);
   if (capture) process.stdout.write(output);
   if (status !== 0) throw new Error(`${command} ${commandArgs.join(' ')} exited with ${status}`);
   return output;
@@ -199,17 +200,132 @@ server.listen(0, '127.0.0.1');
 await once(server, 'listening');
 const releaseUrl = `http://127.0.0.1:${server.address().port}${downloadPath}`;
 
+const workspaceAppPath = 'packages/app';
+const workspaceApp = { name: 'fixture-app', private: true };
+const writeManifest = (dir, manifest) => writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
+function writeWorkspace(dir, packageManager, { settings = '', siblingDependencies } = {}) {
+  const appDir = join(dir, workspaceAppPath);
+  const siblingDir = join(dir, 'packages', 'sibling');
+  mkdirSync(appDir, { recursive: true });
+  mkdirSync(siblingDir);
+  writeManifest(dir, { name: 'release-workspace', private: true, packageManager });
+  writeManifest(appDir, workspaceApp);
+  writeManifest(siblingDir, { name: 'fixture-sibling', private: true, dependencies: siblingDependencies });
+  writeFileSync(join(dir, 'pnpm-workspace.yaml'), `packages:\n  - packages/*\n${settings}`);
+  return appDir;
+}
+
+function removeWorkspaceModules(dir) {
+  for (const project of [dir, join(dir, workspaceAppPath), join(dir, 'packages', 'sibling')]) {
+    rmSync(join(project, 'node_modules'), { recursive: true, force: true });
+  }
+}
+
+function withoutSdkEntries(lock, url) {
+  const key = `  '@logbird/sdk@${url}':`;
+  const pkgStart = lock.indexOf(`${key}\n`);
+  const pkgEnd = lock.indexOf('\n\n', pkgStart);
+  if (pkgStart < 0 || pkgEnd <= pkgStart) throw new Error('could not isolate the SDK package entry');
+  const app = `  ${workspaceAppPath}:`;
+  const importer = `${app}\n    dependencies:\n      '@logbird/sdk':\n        specifier: ${url}\n        version: ${url}\n`;
+  return `${lock.slice(0, pkgStart)}${lock.slice(pkgEnd + 2)}`.replace(importer, `${app} {}\n`).replace(`${key} {}\n\n`, '');
+}
+
+async function checkHoistedWorkspace(work, packageManager, url, expectedIntegrity) {
+  // Keep a real, unrelated entry in the lockfile so the targeted deletion must preserve it.
+  const siblingDependencies = { picocolors: '1.1.1' };
+  const pinned = 'sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==';
+  // Match interactive `pnpm install` semantics even on a CI runner, where plain install defaults to frozen.
+  const env = { ...process.env, CI: 'false' };
+  const additions = [
+    ['linker', 'nodeLinker: hoisted\n'],
+    ['overrides', 'overrides:\n  picocolors: 1.1.1\n'],
+    ['patch', "patchedDependencies:\n  'picocolors@1.1.1': picocolors.patch\n"],
+    ['allowBuilds', 'allowBuilds:\n  picocolors: false\n'],
+  ];
+  const passed = [];
+  let settings = '';
+  for (const [stage, addition] of additions) {
+    settings += addition;
+    const base = join(work, `hoisted-${stage}`);
+    const seed = join(base, 'seed');
+    writeWorkspace(seed, packageManager, { settings, siblingDependencies });
+    const patched = settings.includes('patchedDependencies:');
+    if (patched) copyFileSync(join(here, 'pnpm11', 'picocolors.patch'), join(seed, 'picocolors.patch'));
+    const lockPath = (dir) => join(dir, 'pnpm-lock.yaml');
+    const runPnpm = (dir, command, store) => run('pnpm', [...command, '--store-dir', join(base, store)], dir, { env });
+    console.log(`\n== ${packageManager} workspace: hoisted settings through ${stage}`);
+    await runPnpm(seed, ['install', '--lockfile-only'], 'seed-store');
+    const seedLock = readFileSync(lockPath(seed), 'utf8');
+    check(
+      Object.keys(registryPackages('pnpm', seedLock)).length === 1 && seedLock.includes(`picocolors@1.1.1:\n    resolution: {integrity: ${pinned}}`),
+      'the only registry package is picocolors pinned by version and SHA-512',
+    );
+    const newCase = (name, specifier = url) => {
+      const dir = join(base, name);
+      cpSync(seed, dir, { recursive: true });
+      if (specifier) writeManifest(join(dir, workspaceAppPath), { ...workspaceApp, dependencies: { '@logbird/sdk': specifier } });
+      return dir;
+    };
+    const checkUrlLock = (dir, label) => {
+      const lock = readFileSync(lockPath(dir), 'utf8');
+      check(lock.includes(`resolution: {integrity: ${expectedIntegrity}, tarball: ${url}}`), `${label} records the SDK URL and its SHA-512`);
+      check(withoutSdkEntries(lock, url) === seedLock, `${label} left the unrelated lockfile entries unchanged`);
+      return lock;
+    };
+    const reinstall = async (dir, label) => {
+      const lock = readFileSync(lockPath(dir), 'utf8');
+      removeWorkspaceModules(dir);
+      await runPnpm(dir, ['install', '--frozen-lockfile'], `${label}-frozen-store`);
+      check(existsSync(join(dir, 'node_modules', '@logbird', 'sdk', 'package.json')), `${label} installed the SDK into the hoisted node_modules`);
+      if (patched) {
+        const readme = readFileSync(join(dir, 'node_modules', 'picocolors', 'README.md'), 'utf8');
+        check(readme.startsWith('# picocolors fixture\n'), `${label} applied the unrelated package patch`);
+      }
+      check(readFileSync(lockPath(dir), 'utf8') === lock, `${label} frozen install left the lockfile unchanged`);
+    };
+
+    const lockOnly = newCase('lockfile-only');
+    await runPnpm(lockOnly, ['install', '--lockfile-only'], 'lock-only-store');
+    checkUrlLock(lockOnly, 'a: lockfile-only');
+    await runPnpm(lockOnly, ['install'], 'lock-only-store');
+    checkUrlLock(lockOnly, 'a: subsequent plain install');
+    await reinstall(lockOnly, 'a');
+
+    const plain = newCase('plain');
+    await runPnpm(plain, ['install'], 'plain-store');
+    const afterPlain = checkUrlLock(plain, 'b: plain install with a pre-SDK lockfile');
+    await runPnpm(plain, ['install', '--fix-lockfile'], 'plain-store');
+    const afterFix = checkUrlLock(plain, 'c: fix-lockfile after plain install');
+    check(afterFix === afterPlain, 'c: fix-lockfile left the successful plain install lockfile unchanged');
+    await reinstall(plain, 'b-c');
+
+    const removed = newCase('removed-sdk');
+    writeFileSync(lockPath(removed), withoutSdkEntries(afterFix, url));
+    await runPnpm(removed, ['install', '--frozen-lockfile=false'], 'removed-store');
+    checkUrlLock(removed, 'd: re-resolution after removing only the SDK entries');
+    await reinstall(removed, 'd');
+
+    const filtered = newCase('filtered', null);
+    const before = requests;
+    await runPnpm(filtered, ['--filter', workspaceApp.name, 'add', url], 'filtered-store');
+    check(requests > before, 'filtered add downloaded the SDK tarball');
+    checkUrlLock(filtered, 'filtered add');
+    await reinstall(filtered, 'filtered');
+    passed.push(`${packageManager} workspace: hoisted through ${stage}`);
+  }
+  return passed;
+}
+
 async function checkPnpmWorkspace(work) {
   const { packageManager } = JSON.parse(readFileSync(join(here, 'pnpm11', 'package.json'), 'utf8'));
   const workspaceVersion = (await run('pnpm', ['--version'], work, { capture: true })).trim();
   check(packageManager === `pnpm@${workspaceVersion}`, `workspace check uses the pinned ${packageManager}`);
-  const appPath = 'packages/app';
-  const app = { name: 'fixture-app', private: true };
-  const writeManifest = (dir, manifest) => writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   const url = `${releaseUrl}${sdkFile}`;
   const expectedIntegrity = integrity(served.get(sdkFile));
   const cases = [
-    { name: 'app-file', specifier: `file:vendor/logbird/${sdkFile}`, assetDir: appPath },
+    { name: 'app-file', specifier: `file:vendor/logbird/${sdkFile}`, assetDir: workspaceAppPath },
     { name: 'root-file', specifier: `file:../../vendor/logbird/${sdkFile}`, assetDir: '.' },
     { name: 'workspace-url', specifier: url },
     { name: 'filtered-url', specifier: url },
@@ -218,14 +334,7 @@ async function checkPnpmWorkspace(work) {
   for (const { name, specifier, assetDir } of cases) {
     console.log(`\n== pnpm ${workspaceVersion} workspace: ${name}`);
     const dir = join(work, name);
-    const appDir = join(dir, appPath);
-    const siblingDir = join(dir, 'packages', 'sibling');
-    mkdirSync(appDir, { recursive: true });
-    mkdirSync(siblingDir);
-    writeManifest(dir, { name: 'release-workspace', private: true, packageManager });
-    writeManifest(appDir, app);
-    writeManifest(siblingDir, { name: 'fixture-sibling', private: true });
-    writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+    const appDir = writeWorkspace(dir, packageManager);
     const lockfile = join(dir, 'pnpm-lock.yaml');
     const resolveLockfile = ['install', '--lockfile-only', '--no-frozen-lockfile', '--store-dir', join(work, `${name}-resolve-store`)];
     await run('pnpm', resolveLockfile, dir);
@@ -246,10 +355,10 @@ async function checkPnpmWorkspace(work) {
     }
     if (name === 'filtered-url') {
       const before = requests;
-      await run('pnpm', ['--filter', app.name, 'add', url, '--store-dir', join(work, `${name}-add-store`)], dir);
+      await run('pnpm', ['--filter', workspaceApp.name, 'add', url, '--store-dir', join(work, `${name}-add-store`)], dir);
       check(requests > before, 'filtered add downloaded the SDK tarball');
     } else {
-      writeManifest(appDir, { ...app, dependencies: { '@logbird/sdk': specifier } });
+      writeManifest(appDir, { ...workspaceApp, dependencies: { '@logbird/sdk': specifier } });
       await run('pnpm', resolveLockfile, dir);
     }
     const manifest = JSON.parse(readFileSync(join(appDir, 'package.json'), 'utf8'));
@@ -262,10 +371,7 @@ async function checkPnpmWorkspace(work) {
       'the lockfile resolves only the SDK tarball, with its expected path and SHA-512 integrity',
     );
     const frozen = (suffix) => ['install', '--frozen-lockfile', '--store-dir', join(work, `${name}-${suffix}-store`)];
-    const removeModules = () => {
-      for (const project of [dir, appDir, siblingDir]) rmSync(join(project, 'node_modules'), { recursive: true, force: true });
-    };
-    removeModules();
+    removeWorkspaceModules(dir);
     const before = requests;
     await run('pnpm', frozen('frozen'), dir);
     check(
@@ -278,7 +384,7 @@ async function checkPnpmWorkspace(work) {
     if (name === 'workspace-url') {
       // Whole-workspace resolution preserved integrity in this fixture. Inject its absence to check pnpm's refusal.
       writeFileSync(lockfile, lock.replace(`integrity: ${expectedIntegrity}, `, ''));
-      removeModules();
+      removeWorkspaceModules(dir);
       const refused = await attempt('pnpm', frozen('missing-integrity'), dir);
       const error = `[ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@${url}": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.`;
       check(
@@ -290,28 +396,29 @@ async function checkPnpmWorkspace(work) {
     if (assetDir) {
       // Copy the root metadata and what lives under the app, without the sibling or root-level vendor directory.
       const pruned = join(work, `${name}-pruned`);
-      mkdirSync(join(pruned, appPath), { recursive: true });
+      const prunedApp = join(pruned, workspaceAppPath);
+      mkdirSync(prunedApp, { recursive: true });
       for (const file of ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml']) copyFileSync(join(dir, file), join(pruned, file));
-      copyFileSync(join(appDir, 'package.json'), join(pruned, appPath, 'package.json'));
-      if (assetDir === appPath) {
-        cpSync(join(appDir, 'vendor'), join(pruned, appPath, 'vendor'), { recursive: true });
+      copyFileSync(join(appDir, 'package.json'), join(prunedApp, 'package.json'));
+      const refused = await attempt('pnpm', frozen('pruned-missing'), pruned);
+      check(
+        refused.status !== 0 && refused.output.includes('[ENOENT]') && refused.output.includes(sdkFile),
+        'frozen install refused the manifest-only workspace without its tarball',
+      );
+      if (assetDir === workspaceAppPath) {
+        removeWorkspaceModules(pruned);
+        cpSync(join(appDir, 'vendor'), join(prunedApp, 'vendor'), { recursive: true });
         await run('pnpm', frozen('pruned'), pruned);
         check(
-          existsSync(join(pruned, appPath, 'node_modules', '@logbird', 'sdk', 'package.json')),
-          'the app-local tarball installs in the pruned workspace',
+          existsSync(join(prunedApp, 'node_modules', '@logbird', 'sdk', 'package.json')),
+          'copying the app vendor directory made the pruned install pass',
         );
         check(readFileSync(join(pruned, 'pnpm-lock.yaml'), 'utf8') === lock, 'the pruned install left the lockfile unchanged');
-      } else {
-        const refused = await attempt('pnpm', frozen('pruned'), pruned);
-        check(
-          refused.status !== 0 && refused.output.includes('[ENOENT]') && refused.output.includes(sdkFile),
-          'frozen install refused the pruned workspace without its root tarball',
-        );
       }
     }
     passed.push(`pnpm ${workspaceVersion} workspace: ${name}`);
   }
-  return passed;
+  return [...passed, ...(await checkHoistedWorkspace(work, packageManager, url, expectedIntegrity))];
 }
 
 const work = mkdtempSync(join(tmpdir(), 'logbird-release-install-'));
