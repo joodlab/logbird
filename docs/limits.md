@@ -47,11 +47,11 @@ A cut is reported twice: in the ingest answer, and on the stored event.
   `targets.length` and `changes.length` of the event. Find cut events with `attr.logbird.truncated.targets:*`,
   `attr.logbird.truncated.changes:*` or `attr.logbird.truncated.changeFields:*` (join them with `OR` for all three).
 
-From this release on, only Logbird writes under `logbird.truncated`: a value a producer sends there is never indexed
-(the payload keeps it), so a cut can be neither forged nor hidden on events this release stores. Two kinds of stored
+From 0.4.0 on, only Logbird writes under `logbird.truncated`: a value a producer sends there is never indexed
+(the payload keeps it), so a cut can be neither forged nor hidden on events stored by 0.4.0 or later. Two kinds of stored
 events need care:
 
-- Events stored by an earlier release (or by an earlier server during a rolling upgrade) carry no Logbird-issued
+- Events stored before 0.4.0 (or by an older server during a rolling upgrade) carry no Logbird-issued
   count even when they were cut, and may hold a producer value under these keys. An exact retry of such an event (the
   same string `id`, with a stored identity that still matches) is accepted without storing anything new: its answer warns
   about the cut, and the stored event keeps no count. A retry whose stored identity no longer matches is a

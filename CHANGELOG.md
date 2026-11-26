@@ -2,6 +2,350 @@
 
 ## Unreleased
 
+## 0.4.0
+
+### Highlights
+
+- The console shows recorded field changes in record, actor and tenant histories. Queries can search change values (`changes.before`, `changes.after`) and the support person's name (`impersonator.name`), and Logbird keeps the JSON kind of each change value.
+- Every search, facet and export says which time window it read. TypeScript trail reads must name their window, and `iterateAuditTrail` reads every page of one.
+- The TypeScript SDK redacts common secret keys by default, accounts for every event through `flush()` and `shutdown()`, and refuses redirects. Each GitHub Release now attaches the TypeScript packages as tarballs with a `SHA256SUMS` file.
+
+### Changes
+
+This is a minor release because callers must act on several changes. Read
+[Breaking changes in 0.4.0](#breaking-changes-in-040) before you upgrade.
+
+**Change history in the console.** Record, actor and tenant histories show the
+first two recorded field changes of each event, and a count opens the full
+event. Long values show both ends, and the full value on hover or keyboard
+focus. On a record page, click a field to see its history, and pick the tenant
+when one record ID is used by several tenants. Set, removed, null, empty-string
+and redacted values read differently. The console recognises only the default
+`[redacted]` replacement; custom replacements appear as recorded. Within one
+loaded page, events in the same millisecond are ordered by their parent links.
+Live rows follow arrival order. (#405)
+
+**Change value kinds.** Ingest records the JSON kind of each side of a change
+(`absent`, `null`, `string`, `number`, `boolean`, `json`). Event reads, JSONL
+exports, the CSV `changes` cell and webhook bodies return them as optional
+`beforeKind` and `afterKind`. The `before` and `after` text, the CSV headers
+and the export schema version are unchanged. Events stored before 0.4.0, or by
+an older server during the upgrade, have no kinds, so they cannot tell `null`
+from the text "null", or an absent value from an empty string. Send numbers as
+numbers and explicit nulls as `null`, omit `before` when a field is created and
+`after` when it is removed. Kinds are read metadata, not query fields. (#401, #415)
+
+**Query.** `changes.before` and `changes.after` match the value text of any
+change of the event, exactly and case-sensitively. They support prefixes,
+regexes, value groups, presence and negation, but no ordered comparisons. They
+are facet fields and work in webhook filters. Facets on them count elements, not
+events. Each field is matched on its own: `changes.field:status
+changes.after:PUBLISHED` also matches an event where another field became
+`PUBLISHED`. Open the events to check which field took the value; a paired form
+is tracked in #410. Only the first 256 changes of an event are indexed.
+`impersonator.name` searches the support person's display name, and
+`impersonator.id` is an alias of `impersonator`. An impersonator sent with a
+name and no id is found by `impersonator.name`, but the event still shows no
+impersonator (#409). Other `changes` keys and ordered comparisons against `*`
+are now refused; see the breaking changes. (#404, #415)
+
+**Read windows.** `GET /v1/events` and `GET /v1/facets` return
+`range: { from, to }`, and exports send `X-Logbird-Range-From` and
+`X-Logbird-Range-To`, which viewer-token browser reads can also see. They are
+the bounds the query used: `from` inclusive, `to` exclusive, on `timestamp`, in
+ISO 8601 UTC with milliseconds. The default is unchanged: without `from`, a read
+covers only the 24 hours before `to`. Compare the stated window with the one you
+meant before you treat a result as a whole history. Event detail applies no
+window. The OpenAPI document now describes every `/v1` read and its parameters,
+the sort order (events in the same millisecond are ordered by id, not by cause)
+and paging: a cursor carries no window, so send the first page's `range` back,
+and paging is not a snapshot. (#398)
+
+**Ingest cuts and limits.** An event with more than 64 targets, more than 256
+changes or a change field name longer than 256 UTF-16 code units is still
+accepted, and its stored payload keeps everything sent; only the indexed copy is
+cut. Ingest now says so: the answer has one coded warning per cut
+(`targets_truncated`, `changes_truncated`, `change_fields_truncated`) with counts
+only, and the event carries `logbird.truncated.targets`,
+`logbird.truncated.changes` or `logbird.truncated.changeFields`. Find cut events
+with `attr.logbird.truncated.targets:*` (and the other two). Only Logbird writes
+under `logbird.truncated`: a producer value there is left out of the indexed
+attributes, and the payload keeps it. The event drawer shows titles such as
+"Targets · 64 of 70". Events stored before 0.4.0 carry no such attribute even
+when they were cut. Attribute count, attribute value size, attribute depth and
+description length are documented but not flagged. The new
+[limits page](docs/limits.md) lists the per-event and per-request limits and
+what happens past each. (#400)
+
+**Scoped read.** The `actor_email` mask now also covers the impersonator, in
+search, event detail, facets, CSV and JSONL exports, viewer tokens and masked
+webhooks. `impersonator.email` shows as a pseudonym. Impersonator pseudonyms are
+keyed by role, so they do not match the actor pseudonym of the same address. An
+impersonator name that carries an address shows as a pseudonym too. For actors
+and impersonators, a name that carries an address now always shows the email's
+pseudonym when there is an email, and names of 511 or more UTF-16 code units are
+treated as carrying one. Pseudonyms stay linkable within a role. The mask does
+not cover addresses in other fields (descriptions, executor, tenant or target
+names, ids, other attributes), or an address spelled without `@`, such as
+`rita%40example.org`. (#396)
+
+**TypeScript SDK.** Client redaction takes `addKeys` (literal names, ASCII case
+ignored), `paths` (exact locations) and `keepPaths` (exemptions), with a fixed
+precedence documented in the SDK README. `readAuditEvent` returns one event with
+its parents, child count, operation size and original payload. `iterateAuditTrail`
+reads every page of a trail and fails with a `LogbirdError` if the server's
+window does not match the one asked for. A completed pass is not a snapshot: an
+event stored during the pass with a timestamp behind your position is not
+returned. To pick up late arrivals, read again later with `receivedAt:>=` and
+skip ids you already have. A pass keeps every yielded id in memory. Trails take
+`order: 'asc' | 'desc'`, and pages expose `range`. The client exposes
+`droppedByReason` and `possiblyStoredDropsByReason`, `onDrop` details,
+`track(event, { preserveId: true })`, `LogbirdError` codes and `onWarning` codes.
+The SDK does not surface the server's ingest warnings yet. (#393, #394, #398,
+#402, #403)
+
+**.NET SDK.** `RedactionOptions.AddPaths` and `KeepPaths` use the TypeScript
+path syntax and precedence. Invalid paths throw when the client is constructed,
+naming the option and entry index. The read client adds `EventPage.Range` and
+`FacetResult.Range` (`EventRange`, `null` from servers older than 0.4.0),
+`StoredChange.BeforeKind` and `AfterKind`, and the facet fields
+`changes.before`, `changes.after`, `impersonator.name` and `impersonator.id`.
+`ExportAsync` does not expose the range headers. (#397, #398, #401, #404)
+
+**Release packages.** Each GitHub Release from 0.4.0 on attaches
+`logbird-sdk-0.4.0.tgz`, `logbird-hono-0.4.0.tgz`, `logbird-vue-0.4.0.tgz`,
+`logbird-nuxt-0.4.0.tgz`, `logbird-tanstack-start-0.4.0.tgz` and `SHA256SUMS`.
+Install them as described in
+[Install the SDK](docs/integrating-a-backend.md#install-the-sdk). The Vue, Nuxt
+and TanStack Start tarballs are type-checked, but no tested install recipe
+exists for them yet. The console's install snippet still shows the
+source-checkout command. The `0.4` and `latest` image tags now move only after
+the GitHub Release exists, and never back to an older release. (#395)
+
+### Breaking changes in 0.4.0
+
+Each item says what changed, who is affected and what to change.
+
+**TypeScript SDK and integrations**
+
+- **Redaction is on by default.** The client replaces values under common
+  secret keys (passwords, secrets, tokens, OTPs, API keys, authorization,
+  cookies, credentials, private keys) in every event, including events from the
+  framework adapters, `createAudit` and `jobAudit`. It runs after `beforeSend`
+  and before the 256 KiB size check. The default pattern matches any part of a
+  key, so it also matches keys such as `tokenCount` and `secretary`. Identifier
+  fields are kept. Affected: anyone whose events carry such keys they want
+  stored, and anyone whose `beforeSend` hook is the only redaction policy. To
+  keep the old behaviour, pass `redaction: false`. Otherwise set your policy
+  with `keys`, `addKeys`, `paths` and `keepPaths`. A value already replaced by
+  `beforeSend` cannot be restored by `keepPaths`. (#393)
+- **`flush()` covers what was queued at the call.** It covers events queued or
+  already sending when it is called, and settles independently of later
+  captures. It resolves when those events are acknowledged or reported as
+  drops. After retry exhaustion it rejects and keeps the unresolved events
+  queued, within `maxQueueSize` and the drop policy. A malformed or incomplete
+  acknowledgement leaves events eligible for retry. Affected: code that treats
+  a resolved `flush()` as covering events captured later. Call `flush()` after
+  the captures it should cover, and handle its rejection. (#394)
+- **`shutdown()` rejects on delivery failure, and the Hono adapter propagates
+  it.** Shutdown closes capture at once and applies one `shutdownTimeoutMs`
+  budget (default 10,000 ms, 0 to stop at once) to pending capture preparation,
+  the active request, retries and the queued tail. On delivery failure or
+  timeout it reports each remaining event as a `shutdown` drop, clears the queue
+  and rejects. Hono `capture.shutdown()` now rejects the same way. Affected:
+  every host that calls `shutdown()`. Await it in the host lifecycle and catch
+  its rejection, for the client and for `capture.shutdown()`. (#394)
+- **Drop accounting.** `onDrop(event, details)` gets `details.reason`,
+  `mayBeStored`, and a safe rejection code or HTTP status when available;
+  one-argument callbacks still work. `dropped` counts every drop: queue
+  evictions, server rejections, permanent HTTP failures, size, depth and
+  serialization refusals, a failed `beforeSend`, hook filters and shutdown
+  refusals. `droppedByReason` splits it by `queue_full`, `rejected`,
+  `http_error`, `too_large`, `input_too_large`, `input_too_deep`, `invalid`,
+  `before_send_failed`, `redaction_failed`, `filtered`, `diagnostic_reentry`
+  and `shutdown`. `possiblyStoredDropsByReason` keeps the uncertain subset even
+  when a notification is skipped. Diagnostic callbacks now run asynchronously
+  after the queue changes; their failures count in `failedNotifications`, and
+  callbacks past a backlog of 1024 count in `skippedNotifications`. Affected:
+  alerting on `dropped`, and code that expects `onDrop` or `onError` to run
+  synchronously. Alert on the reasons you care about. When `mayBeStored` is
+  true, replay from your outbox with the original id, timestamp and content.
+  Queued drop snapshots hold the full event, so keep them out of logs.
+  (#394, #402)
+- **Authenticated requests never follow redirects.** Ingest and read requests
+  use manual redirect handling. Ingest counts a redirect as an `http_error`
+  drop with `ingest_redirect`, and a read rejects with `read_redirect`. In a
+  browser, an opaque redirect is treated as a transport failure and the batch
+  is kept for retry. Affected: an `endpoint` that redirects (for example
+  `http` to `https`, or an old host name). Set `endpoint` to the origin that
+  serves the console and `/v1`. (#402)
+- **Diagnostics are `LogbirdError` codes without server text.** Capture,
+  delivery, resolver, read and redaction errors are `LogbirdError`s with a
+  stable `code` and safe `status` or `count` fields. They no longer carry
+  server response text or the original thrown error. `onWarning` receives a
+  `LogbirdWarning` with a code and a field path. A promise returned from
+  `beforeSend`, which must be synchronous, is refused. A throwing Hono
+  automatic-capture skip hook counts as an `invalid` drop. Affected: code that
+  matches error messages or original error types. Match on `error.code`. A read
+  cancelled by the caller still rejects with `AbortError`: with the caller's
+  reason before dispatch, and with a fixed message after it. (#394, #402)
+- **Size and depth guards before hooks.** Before copying input or running
+  `beforeSend` and redaction, the SDK refuses an event whose estimated JSON size
+  exceeds 1 MiB (`input_too_large`), or whose metadata or a change value nests
+  deeper than 1,000 levels (`input_too_deep`), with `mayBeStored: false`, even if
+  redaction would have made it smaller. The estimate is a lower bound and is
+  approximate near the limit, and the TypeScript and .NET SDKs estimate numbers
+  differently. The 256 KiB limit on the serialized event is unchanged
+  (`too_large`). Affected: producers that pass large or accessor-backed objects.
+  Pass plain JSON data and convert accessors to values at capture. (#402)
+- **Response caps and read budget.** Ingest acknowledgements are capped at
+  4 MiB and read pages at 64 MiB; oversized and unused bodies are cancelled.
+  An oversized acknowledgement keeps the events queued and a flush that
+  exhausts its retries rejects with `response_too_large`. A read has a
+  30-second budget (`read_timeout`) and validates the page and its rows. While
+  four cancelled or abandoned requests are still cleaning up, new dispatch is
+  refused (`ingest_requests_outstanding`, `read_requests_outstanding`). Affected: callers that read
+  very large pages or start many reads at once. Lower `limit` and bound your
+  own read concurrency. (#394, #402)
+- **Node timers no longer keep the process alive.** Background batching,
+  request and backoff timers are unreferenced on Node. Affected: scripts that
+  relied on the SDK to keep the process running until delivery. Await
+  `flush()` or `shutdown()` before exit. (#394)
+- **Adapters keep the returned event id.** Hono and job capture send the id
+  that `audit()` returned, even if `beforeSend` changes it. Affected: hooks
+  that rewrite `id` in adapter captures. Set the id before capture instead.
+  Direct `track()` keeps a hook's id unless you pass `{ preserveId: true }`.
+  (#394)
+- **Trails must name their time window.** `trailQuery` throws a
+  `TrailQueryError` for a trail without `range` or `range.from`, and
+  `TrailQuery.range` is required in the types. This covers Vue and Nuxt
+  `useAuditTrail`, the Nuxt `authorize()` hook and the TanStack Start helpers.
+  Affected: every trail read without `range.from`, which silently read only the
+  last 24 hours. Pass `range: { from }` (`to` defaults to now), or
+  `range: SERVER_DEFAULT_RANGE` to read the server's default 24 hours on
+  purpose. (#403)
+
+**API and query language**
+
+- **An unknown `changes.*` key is refused.** Any `changes` key other than
+  `changes.field`, `changes.before` and `changes.after` (for example
+  `changes.to`, `changes` alone, `_exists_:changes.x`, or `Changes.field` in
+  another letter case) fails the whole query with 422 `invalid_query`, reason
+  `unknown_field`, including inside `OR` or `NOT`. This applies to search,
+  facet `q`, export and suggestions; as a facet `field` or `by` such a key gets
+  422 `validation_error`. A saved view with such a key shows the error when
+  opened. A webhook endpoint whose stored filter has one is held, and create
+  and edit refuse it. Such a term never matched anything. Affected: saved views,
+  webhook filters and API callers with such a term. Remove the term, or write
+  `attr.changes.<key>` for a literal attribute, then edit a held endpoint's
+  filter to resume it. (#404)
+- **Literal attributes named like the new fields.** `changes.before`,
+  `changes.after`, `impersonator.name` and `impersonator.id` now read the
+  event's columns. An attribute sent as a literal top-level dotted key with one
+  of those names is reached only as `attr.changes.after` (and so on). Affected:
+  saved views and webhook filters that read such an attribute; they now match
+  the column, without an error. Rewrite those terms to `attr.<key>` before
+  upgrading. (#404)
+- **Ordered comparisons against `*` are refused.** `attempt:>*` or
+  `actor:>*` used to mean presence, or always true on numbers. They now answer
+  422 on every field. Open bounds inside ranges, such as `attempt:[2 TO *]`, are
+  unchanged. Write `field:*` or `_exists_:field` for presence. (#404)
+
+**Scoped read**
+
+- **`actor_email` also masks the impersonator.** Masked keys, viewer tokens
+  minted with the mask and masked webhook endpoints now pseudonymize
+  `impersonator.email`, remove the attribute paths below it, and pseudonymize
+  an impersonator name that carries an address. Literal dotted `actor.name` and
+  `impersonator.name` attribute keys are removed. Filters and facets on
+  `impersonator.email`, a path below it, or those literal keys answer 422
+  `invalid_query`, reason `not_allowed`; webhook create and edit refuse them. A
+  masked endpoint whose stored filter names `impersonator.email` sends nothing
+  and is held. Affected: tenant-facing views and receivers that showed or
+  filtered on the impersonator's address. Remove such filters. Replace a held
+  endpoint rather than editing it, as
+  [the webhook settings](docs/self-hosting.md#webhook-endpoint-settings)
+  describe, because an edit would reveal which pending events the old filter
+  matched. (#396)
+- **Masked attribute paths match in any ASCII letter case, with their
+  children.** For all three masks (`ip`, `user_agent`, `actor_email`), keys such
+  as `Context.IP`, `Actor.Email` or `impersonator.EMAIL.work` are treated like
+  the masked path: removed (or, for `impersonator.email`, pseudonymized) and
+  refused in filters and facets. Paths below a masked path, such as
+  `context.ip.v4`, are removed and refused too. Only A to Z are folded.
+  Affected: masked readers that saw such keys. Send addresses in `actor.email`
+  or `impersonator.email`, and IPs and user agents in the context fields. (#396)
+- **Name pseudonyms.** A name that carries an address now shows the pseudonym
+  of the stored email whenever there is one, and names of 511 or more UTF-16
+  code units show as pseudonyms. Affected: masked readers that compared name and
+  email pseudonyms, or that showed very long names. (#396)
+
+**.NET SDK**
+
+- `Redactor.Redact(JsonObject)` refuses identifier values that are JSON
+  objects or arrays. Pass scalar identifiers. (#397)
+- `StoredChange` record equality now includes `BeforeKind` and `AfterKind`, so
+  the same change read from an older and a newer server can compare unequal.
+  Compare `Field`, `Before` and `After` when that matters. (#401)
+
+### Self-hoster actions
+
+Follow [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups) to
+stop writers and take matched backups. Pin `LOGBIRD_VERSION=0.4.0` after the
+images publish. Run the migrate service before starting the new API and worker.
+
+- **ClickHouse migration `012_change_value_kinds.sql`** adds the
+  `changes_before_kind` and `changes_after_kind` columns to `events` with
+  `ALTER TABLE … ADD COLUMN IF NOT EXISTS`. It runs with the normal migrate step.
+  It changes metadata only: existing data parts stay in place, nothing is
+  backfilled, and existing events read with unknown kinds. An older server can
+  keep writing to the migrated table. The new API checks for the columns and
+  stops with a startup error before listening if it cannot read them.
+- There is no PostgreSQL migration.
+- Upgrade every API and worker replica together, or drain the old ones, before
+  relying on the impersonator mask: older replicas return and send the
+  impersonator's email in clear to masked readers. Before rolling back to a
+  release before 0.4.0, follow the rollback steps in
+  [webhook endpoint settings](docs/self-hosting.md#webhook-endpoint-settings),
+  which now include viewer tokens.
+- Before upgrading, review saved views and webhook filters for the three query
+  changes above: unknown `changes.*` keys (refused or held), terms that read a
+  literal attribute named `changes.before`, `changes.after`,
+  `impersonator.name` or `impersonator.id` (rewrite to `attr.<key>`), and
+  masked endpoints that filter on `impersonator.email` (replace them).
+- If you follow the `0.4` or `latest` image tags, they now move only after the
+  GitHub Release exists. Pin exact versions or digests for controlled upgrades.
+
+### SDK users
+
+- Neither SDK is on npm or nuget.org yet. Install the TypeScript packages from
+  the GitHub Release tarballs as described in
+  [Install the SDK](docs/integrating-a-backend.md#install-the-sdk); releases
+  before 0.4.0 have no tarballs. The TypeScript packages need Node 20 or later
+  and are ES modules only. Build the .NET SDK from source as the
+  [.NET guide](docs/sdk-dotnet.md#1-install) describes.
+- Work through the [breaking changes](#breaking-changes-in-040) for the
+  TypeScript SDK and integrations before upgrading them.
+- Send change values as their JSON types so kinds are recorded.
+
+### Known limits
+
+- Change fields and change values are matched independently (#410). Only the
+  first 256 changes and 64 targets of an event are indexed.
+- A trail pass, a paged read and an export are not snapshots.
+- The SDK size guard is an estimate, approximate near its boundary.
+- Custom redaction patterns (`keys`, `changeFields`) follow each platform's
+  regex engine; for example `^label# Changelog
+
+ also matches a trailing line feed in
+  .NET. Prefer `addKeys` when a literal name is enough.
+- The TypeScript SDK does not surface ingest warnings, and the .NET
+  `ExportAsync` does not expose the range headers.
+- The `actor_email` mask covers the actor's and impersonator's email and name
+  only, and does not recognise encoded addresses.
+- Edge cases in TypeScript SDK delivery and transport are tracked in #399, and
+  console history follow-ups in #407.
+
 ## 0.3.0
 
 ### Highlights

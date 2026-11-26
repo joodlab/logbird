@@ -233,6 +233,6 @@ See [security](security.md#viewer-tokens) for the token format and secret deriva
 - One tenant per scope.
 - A target scope matches an indexed target of an event. Every release indexes at most the first 64 targets of an
   event (see [limits](limits.md)), so a target scope on a record named only after them does not see that event. Such
-  an event stored by this release or later carries `logbird.truncated.targets` with the number of targets sent.
+  an event stored by 0.4.0 or later carries `logbird.truncated.targets` with the number of targets sent.
 - Field masks are presets (`ip`, `user_agent`, `actor_email`), not arbitrary paths.
 - Revoking a key reaches its viewer tokens within 30 seconds.

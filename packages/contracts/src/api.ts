@@ -57,7 +57,7 @@ export const appliedRangeSchema = z
   .refine((range) => range.from < range.to, 'The range must start before it ends.')
   .meta({
     description:
-      'The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than this field.',
+      'The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.0.',
   });
 export type AppliedRange = z.infer<typeof appliedRangeSchema>;
 /** `GET /v1/export` states the applied window in headers (a CSV or JSONL stream has no envelope for a field). */

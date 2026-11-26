@@ -93,7 +93,7 @@ A value matches its stored text, exactly and case-sensitively:
 Queries match only that text: `null` and the text "null", or an absent value and an empty string, match the same
 terms. A returned change may also carry `beforeKind` and `afterKind` (`absent`, `null`, `string`, `number`,
 `boolean`, `json`), which tell them apart when reading; those kinds are not query fields. Both are optional: they
-are absent on events stored before value kinds existed, and such events cannot tell `null` from the text "null"
+are absent on events stored before 0.4.0 (or by an older server during the upgrade), and such events cannot tell `null` from the text "null"
 (or an absent value from an empty string).
 
 `changes.before:*` and `changes.after:*` mean some change has a non-empty value on that side. Up to 256 changes per
