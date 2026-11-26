@@ -32,6 +32,9 @@ depends on the SDK at exactly its own version, which no registry serves yet):
 
 The full recipe, with the download commands and the lockfile check, is in
 [Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk).
+pnpm 11 and 12 refuse the Release URLs for this package (`ERR_PNPM_EXOTIC_SUBDEP`), so use
+the files. [pnpm 11 workspaces](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#pnpm-11-workspaces)
+covers `@logbird/sdk` in a pnpm workspace; no check installs this package in one yet.
 
 ## Usage
 

@@ -3,11 +3,13 @@
 // SDK README tell a user to, from a local stand-in for the GitHub Release download URL, into a fresh application outside
 // this repository. From the repository root:
 //
-//   node tests/npm-release-install/run.mjs --packages=<folder> [--manager=pnpm|npm] [--source=file|url] [--shape=sdk|hono]
+//   node tests/npm-release-install/run.mjs --packages=<folder> [--manager=pnpm|npm] [--source=file|url] [--shape=sdk|hono|workspace]
 //
 // <folder> holds the release asset set (scripts/npm-release-assets.mjs pack writes it). Without the filters it runs every
 // combination. Shapes: `sdk` installs @logbird/sdk alone (no override); `hono` installs @logbird/sdk and @logbird/hono
-// with the override that points the integration's own @logbird/sdk dependency at the same tarball. Each combination:
+// with the override that points the integration's own @logbird/sdk dependency at the same tarball; `workspace` (pnpm
+// only) puts @logbird/sdk in one package of a small pnpm workspace and asserts what each pnpm major does with every
+// form the docs discuss, failures included (workspace.mjs). The `sdk` and `hono` combinations:
 // 1. "downloads" the assets over HTTP from the stand-in (which redirects, as GitHub does) and, for --source=file,
 //    verifies them against SHA256SUMS the way the docs do (`grep … SHA256SUMS | sha256sum --check` where it exists);
 // 2. installs: shape `sdk` runs the documented command (`pnpm add <file or URL>`, `npm install <file or URL>`); shape
@@ -35,6 +37,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { parseSums, SUMS, tarballName, verifyAssets } from '../../scripts/npm-release-assets.mjs';
+import { workspaceCheck } from './workspace.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..');
@@ -67,6 +70,8 @@ const PINNED_OVERRIDES = { 'undici-types': locked('undici-types') };
 const DEV = { typescript: '6.0.3', '@types/node': TYPES_NODE };
 
 const SHAPES = {
+  // workspace.mjs: @logbird/sdk in one package of a pnpm workspace (pnpm only).
+  workspace: { released: ['@logbird/sdk'] },
   sdk: {
     released: ['@logbird/sdk'],
     registry: {},
@@ -88,7 +93,7 @@ const pick = (name, all) => {
 };
 const managers = pick('manager', ['pnpm', 'npm']);
 const sources = pick('source', ['file', 'url']);
-const shapes = pick('shape', ['sdk', 'hono']);
+const shapes = pick('shape', ['sdk', 'hono', 'workspace']);
 
 // Through cmd (pnpm and npm are .cmd shims on Windows), an argument with a space or metacharacter must be quoted.
 // A % is refused outright: cmd expands %VAR% even inside quotes, and no quoting prevents it.
@@ -122,6 +127,13 @@ async function run(command, commandArgs, cwd, { capture = false } = {}) {
   if (capture) process.stdout.write(output);
   if (status !== 0) throw new Error(`${command} ${commandArgs.join(' ')} exited with ${status}`);
   return output;
+}
+// Runs a command whose outcome the caller asserts, success or failure.
+async function outcome(command, commandArgs, cwd) {
+  console.log(`$ ${command} ${commandArgs.join(' ')}`);
+  const result = await exec(command, commandArgs, cwd, true);
+  process.stdout.write(result.output);
+  return result;
 }
 async function attempt(command, commandArgs, cwd) {
   console.log(`$ ${command} ${commandArgs.join(' ')}   (expected to fail)`);
@@ -202,7 +214,8 @@ try {
     const shape = SHAPES[shapeName];
     for (const manager of managers) {
       for (const source of sources) {
-        const label = `${shapeName === 'sdk' ? '@logbird/sdk alone' : '@logbird/sdk + @logbird/hono'}, ${manager}, ${
+        if (shapeName === 'workspace' && manager !== 'pnpm') continue;
+        const label = `${{ sdk: '@logbird/sdk alone', hono: '@logbird/sdk + @logbird/hono', workspace: '@logbird/sdk in a pnpm workspace' }[shapeName]}, ${manager}, ${
           source === 'file' ? 'downloaded tarballs (file:)' : 'Release URLs'
         }`;
         console.log(`\n== ${label}`);
@@ -212,6 +225,28 @@ try {
         let cacheRound = 0;
         const freshCache = () => join(caches, String(++cacheRound));
         const managerVersion = (await run(manager, ['--version'], dir, { capture: true })).trim();
+
+        if (shapeName === 'workspace') {
+          const sdkName = tarballName('@logbird/sdk', version);
+          const sdkBytes = readFileSync(join(packages, sdkName));
+          const lines = await workspaceCheck({
+            dir,
+            source,
+            managerVersion,
+            sdkFile: sdkName,
+            sdkBytes,
+            altered: gzipSync(Buffer.concat([gunzipSync(sdkBytes), Buffer.alloc(512)])),
+            sdkUrl: `${releaseUrl}${sdkName}`,
+            serve: (bytes) => served.set(sdkName, bytes),
+            requests: () => requests,
+            outcome,
+            check,
+            integrity,
+          });
+          served.set(sdkName, sdkBytes);
+          passed.push(...lines.map((line) => `${line} (pnpm ${managerVersion})`));
+          continue;
+        }
 
         // 1. The specifier of each released package, and for file: the verified download.
         const files = Object.fromEntries(shape.released.map((name) => [name, tarballName(name, version)]));
@@ -308,10 +343,10 @@ try {
             ? // In CI pnpm defaults to --frozen-lockfile, so the first install says it may write the lockfile.
               await run('pnpm', ['install', frozen ? '--frozen-lockfile' : '--no-frozen-lockfile', '--store-dir', freshCache()], dir)
             : await run('npm', [frozen ? 'ci' : 'install', '--no-audit', '--no-fund', '--cache', freshCache()], dir);
-        // pnpm 12 blocks a sub-dependency resolved from a URL (blockExoticSubdeps, on by default), which is what the
+        // pnpm 11 and 12 block a sub-dependency resolved from a URL (blockExoticSubdeps, on by default), which is what the
         // override makes of @logbird/hono's @logbird/sdk. The docs say so and send pnpm users to the downloaded tarballs,
         // which pnpm trusts; this proves the refusal is that rule and not something else.
-        if (shapeName === 'hono' && manager === 'pnpm' && source === 'url' && Number(managerVersion.split('.')[0]) >= 12) {
+        if (shapeName === 'hono' && manager === 'pnpm' && source === 'url' && Number(managerVersion.split('.')[0]) >= 11) {
           const refused = await attempt('pnpm', ['install', '--no-frozen-lockfile', '--store-dir', freshCache()], dir);
           check(
             refused.status !== 0 && /blockExoticSubdeps/.test(refused.output),

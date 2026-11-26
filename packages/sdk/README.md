@@ -26,7 +26,25 @@ Commit `vendor/logbird/` and the lockfile; the lockfile pins the tarball's SHA-5
 You can also depend on the Release URL directly:
 `pnpm add https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`,
 or the same with `npm install` (npm 12 first needs `allow-remote=root` in the project's
-`.npmrc`). With `@logbird/hono` as well, an override makes it use the same SDK tarball: see
+`.npmrc`). With the URL, pnpm 10 and 11 leave the tarball's integrity out of the lockfile
+when their store already holds that tarball, so check the lockfile entry shows
+`integrity: sha512-…` before you commit it.
+
+### pnpm 11 workspaces
+
+In a pnpm workspace, put the verified tarball inside the package that depends on it (for
+example `apps/api/vendor/logbird/`), write `"@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz"`
+in that package's `package.json`, and run `pnpm install` at the root. The lockfile pins it
+whatever the store holds, and a build that prunes the workspace per app keeps the file. A
+tarball at the workspace root works too, but a pruned copy without it fails (`ENOENT`). With
+the Release URL, pnpm 11 writes no integrity when its store already holds the tarball, and
+the next frozen install stops with `ERR_PNPM_MISSING_TARBALL_INTEGRITY` (`pnpm --filter <app> add <URL>`
+stops with it itself); resolving once with `pnpm install --lockfile-only --store-dir "$(mktemp -d)"`
+avoids that. Details and the exact errors are in
+[pnpm 11 workspaces](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#pnpm-11-workspaces).
+Publishing to the npm registry would remove this problem; that is planned, but not done.
+
+With `@logbird/hono` as well, an override makes it use the same SDK tarball: see
 [Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
 for that recipe for pnpm and npm. `@logbird/vue`, `@logbird/nuxt` (which also depends on `@logbird/vue`) and
 `@logbird/tanstack-start` are attached to the same release and type-checked from those tarballs, but there is

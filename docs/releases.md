@@ -327,7 +327,8 @@ would attach.
 
 **What gates a release.** On a tag, the npm workflow runs with `release: true`, and only
 checks whose inputs the repository pins can fail it: exact Node versions (20.20.2,
-22.18.0, 22.23.5, 24.22.3), the pnpm version in the root `package.json`, pnpm 12.6.0
+22.18.0, 22.23.5, 24.22.3), the pnpm version in the root `package.json`, pnpm 11.8.0
+(`tests/npm-release-install/pnpm11/package.json`), pnpm 12.6.0
 (`tests/npm-release-install/pnpm12/package.json`), npm 12.1.0, the
 workspace and consumer lockfiles, the hono floor read from `@logbird/hono`'s peer range,
 the hono `tests/npm-consumer/package-lock.json` locks, and the exact registry packages of

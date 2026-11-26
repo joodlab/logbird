@@ -112,9 +112,10 @@ jobs:
       - run: node tests/npm-consumer/run.mjs --project=adapters --skip-pack
 
   # The install recipe the docs give for a release (tests/npm-release-install/README.md), from a stand-in for the
-  # Release download URL, for @logbird/sdk alone and with @logbird/hono: pnpm 10 and npm 10 (Node 22's own), npm 12
-  # (which refuses URL dependencies by default) and pnpm 12 (which refuses a URL sub-dependency). Every version here is
-  # pinned: pnpm from a packageManager field (the root package.json, or tests/npm-release-install/pnpm12/package.json).
+  # Release download URL, for @logbird/sdk alone, with @logbird/hono, and (pnpm only) in a small pnpm workspace:
+  # pnpm 10 and npm 10 (Node 22's own), pnpm 11, npm 12 (which refuses URL dependencies by default) and pnpm 12 (pnpm 11
+  # and 12 refuse a URL sub-dependency). Every version here is pinned: pnpm from a packageManager field (the root
+  # package.json, tests/npm-release-install/pnpm11/package.json or tests/npm-release-install/pnpm12/package.json).
   release-install:
     name: Release install recipe (${{ matrix.label }})
     needs: pack
@@ -131,6 +132,11 @@ jobs:
             managers: 'pnpm npm'
             npm: ''
             pnpm_manifest: package.json
+          - label: pnpm 11
+            node: '22.18.0'
+            managers: pnpm
+            npm: ''
+            pnpm_manifest: tests/npm-release-install/pnpm11/package.json
           - label: npm 12
             node: '24.22.3'
             managers: npm

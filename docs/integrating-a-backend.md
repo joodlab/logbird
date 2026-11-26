@@ -80,7 +80,7 @@ install check uses exactly this manifest with hono 4.13.21):
 
 With **pnpm**, put the override in `pnpm-workspace.yaml` next to `package.json` (create the
 file if you have none; in a pnpm workspace, use the root one with a path from the root).
-pnpm 10 and 12 both read it there; pnpm 12 ignores a `pnpm.overrides` field in `package.json`.
+pnpm 10, 11 and 12 all read it there; pnpm 12 ignores a `pnpm.overrides` field in `package.json`.
 
 ```yaml
 overrides:
@@ -118,13 +118,74 @@ To upgrade, download and verify the new version, change the version in the file 
 Pointing the dependencies and overrides straight at the Release URLs
 (`https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`)
 also works with pnpm 10 and with npm, where npm 12 needs `allow-remote=root` in the
-project's `.npmrc` (it refuses URL dependencies by default). With an integration, pnpm 12
-refuses it (`ERR_PNPM_EXOTIC_SUBDEP`: the override makes the integration's SDK a
-sub-dependency resolved from a URL), and turning its `blockExoticSubdeps` protection off is
-not worth it. For `@logbird/sdk` alone (a direct dependency, no override) pnpm 12 accepts
+project's `.npmrc` (it refuses URL dependencies by default). With an integration, pnpm 11
+and 12 refuse it (`ERR_PNPM_EXOTIC_SUBDEP`: the override makes the integration's SDK a
+sub-dependency resolved from a URL), and turning their `blockExoticSubdeps` protection off is
+not worth it. For `@logbird/sdk` alone (a direct dependency, no override) pnpm 11 and 12 accept
 the URL: `pnpm add <URL>`, or `npm install <URL>` with `allow-remote=root`. The lockfile
-then pins the tarball's integrity just the same. The downloaded files work with every one
+then pins the tarball's integrity just the same, except that pnpm 10 and 11 leave the
+integrity out when their store already holds that tarball (see
+[pnpm 11 workspaces](#pnpm-11-workspaces)). The downloaded files work with every one
 of them and keep builds independent of GitHub being reachable.
+
+#### pnpm 11 workspaces
+
+In a pnpm workspace, commit the tarball inside the package that depends on it and use
+`file:`. The release install check runs every form below in a small workspace (two apps
+and a shared package; one app depends on `@logbird/sdk`) with pnpm 11.8.0, as well as
+pnpm 10.30.3 and 12.6.0, using pnpm's default settings:
+
+- **`file:`, tarball inside the package (recommended).** Put the verified download in that
+  package, for example `apps/api/vendor/logbird/`, write
+  `"@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz"` in `apps/api/package.json`,
+  and run `pnpm install` at the workspace root. The lockfile records
+  `tarball: file:apps/api/vendor/logbird/logbird-sdk-X.Y.Z.tgz` with its integrity, also when
+  the pnpm store already holds the tarball, and a frozen install refuses other bytes. A copy
+  that holds only the workspace root's `package.json`, `pnpm-lock.yaml` and
+  `pnpm-workspace.yaml` and the app's own packages installs with
+  `pnpm install --frozen-lockfile --filter <app>...`, so a build that prunes the workspace per
+  app before installing keeps the tarball.
+- **`file:`, tarball at the workspace root** (`file:../../vendor/logbird/…` from `apps/api`)
+  pins it as well, but the lockfile then points outside the app
+  (`file:vendor/logbird/…`), and that pruned copy fails:
+  `ENOENT: no such file or directory, open '…/vendor/logbird/logbird-sdk-X.Y.Z.tgz'`.
+- **The Release URL** in the app's `package.json`. pnpm 11 writes its integrity when its store
+  does not hold the tarball yet. If the store already holds that URL's tarball (from an
+  earlier install with the same store, for example in another workspace),
+  `pnpm install`, `pnpm install --fix-lockfile`, and `pnpm install --lockfile-only` after an
+  earlier `--lockfile-only`, write `resolution: {tarball: <URL>}` with no `integrity`, and the
+  next frozen install stops:
+
+  ```text
+  [ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
+  ```
+
+  `pnpm --filter <app> add <URL>` on such a store stops with the same error itself. On a
+  store that does not hold the tarball, both a whole-workspace resolution and the scoped add
+  pin the integrity. In the check's small workspace the scoped add changes no other
+  project's lockfile entry; in a large workspace it has been seen to re-resolve peer
+  dependencies across unrelated projects, which the check cannot reproduce.
+
+  To use the URL in a workspace anyway, add it to the app's `package.json` by hand and
+  resolve the whole workspace once against a new, empty store, then install as usual:
+
+  ```sh
+  pnpm install --lockfile-only --store-dir "$(mktemp -d)"
+  pnpm install
+  ```
+
+  The lockfile then pins the integrity even though the usual store holds the tarball, a
+  frozen install with the usual store works, and a frozen install from an empty store
+  refuses other bytes. Before you commit
+  the lockfile, check that its entry for the tarball shows `integrity: sha512-…` (the
+  `openssl` command above prints the value to compare). Never commit a URL entry without one.
+- **pnpm 10** leaves the integrity out in the same cases without any error: its frozen
+  install then installs whatever bytes the URL serves, an altered tarball included.
+  **pnpm 12.6.0** writes the integrity in every one of these cases. A single project
+  (`pnpm add <URL>`) shows the same store effect with pnpm 10 and 11.
+
+Nothing here needs a pnpm protection turned off. Publishing the packages to the npm
+registry would remove this problem; that is planned, but not done.
 
 A source checkout of this repository is for contributing to Logbird
 ([CONTRIBUTING.md](../CONTRIBUTING.md)), not for installing it in an application.
