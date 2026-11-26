@@ -174,7 +174,7 @@ const assets = createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://assets');
   const file = url.pathname.startsWith('/release-assets/') ? url.pathname.slice('/release-assets/'.length) : '';
   if (served.has(file)) {
-    requests += 1;
+    if (request.method === 'GET') requests += 1;
     response.setHeader('content-type', 'application/octet-stream');
     response.end(served.get(file));
     return;
@@ -220,6 +220,62 @@ function removeWorkspaceModules(dir) {
   for (const project of [dir, join(dir, workspaceAppPath), join(dir, 'packages', 'sibling')]) {
     rmSync(join(project, 'node_modules'), { recursive: true, force: true });
   }
+}
+
+async function checkWarmStore(work, packageManager, url, expectedIntegrity) {
+  console.log(`\n== ${packageManager} workspace: warm store`);
+  const warm = join(work, 'warm-store');
+  const seed = join(work, 'warm-store-seed');
+  const dir = join(work, 'warm-store-workspace');
+  writeWorkspace(seed, packageManager);
+  const appDir = writeWorkspace(dir, packageManager);
+  const hasIntegrity = (lock) => lock.includes(`resolution: {integrity: ${expectedIntegrity}, tarball: ${url}}`);
+  const lockfile = join(dir, 'pnpm-lock.yaml');
+  const resolve = ['install', '--lockfile-only', '--no-frozen-lockfile'];
+  const frozen = ['install', '--frozen-lockfile', '--store-dir', warm];
+
+  // Warm the cache used by lockfile-only resolution without installing into the target workspace.
+  const beforeSeed = requests;
+  await run('pnpm', ['--filter', workspaceApp.name, 'add', url, '--lockfile-only', '--store-dir', warm], seed);
+  check(
+    requests > beforeSeed && hasIntegrity(readFileSync(join(seed, 'pnpm-lock.yaml'), 'utf8')),
+    'the seed fetched the SDK and recorded its SHA-512',
+  );
+  await run('pnpm', [...resolve, '--store-dir', warm], dir);
+  const beforeSdk = readFileSync(lockfile, 'utf8');
+  writeManifest(appDir, { ...workspaceApp, dependencies: { '@logbird/sdk': url } });
+
+  const beforeWarm = requests;
+  const log = await run('pnpm', [...resolve, '--store-dir', warm, '--reporter=ndjson'], dir, { capture: true });
+  const warmLock = readFileSync(lockfile, 'utf8');
+  if (packageManager.startsWith('pnpm@11.')) {
+    check(
+      requests === beforeWarm && log.split('\n').some((line) => line.includes('"status":"found_in_store"') && line.includes(JSON.stringify(url))),
+      'whole-workspace resolution reported found_in_store and did not fetch the SDK',
+    );
+    check(warmLock.includes(`resolution: {tarball: ${url}}`), 'warm resolution wrote the SDK URL without integrity');
+    const refused = await attempt('pnpm', frozen, dir);
+    const error = `[ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@${url}": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.`;
+    check(refused.status !== 0 && stripVTControlCharacters(refused.output).includes(error), 'frozen install refused the warm-store lockfile');
+
+    writeFileSync(lockfile, beforeSdk);
+    removeWorkspaceModules(dir);
+    const beforeCold = requests;
+    await run('pnpm', [...resolve, '--store-dir', join(work, 'empty-store')], dir);
+    check(requests > beforeCold, 'empty-store regeneration fetched the SDK');
+    check(hasIntegrity(readFileSync(lockfile, 'utf8')), 'empty-store regeneration recorded the SDK SHA-512');
+  } else {
+    check(hasIntegrity(warmLock), 'warm resolution kept the SDK SHA-512');
+  }
+
+  const lock = readFileSync(lockfile, 'utf8');
+  await run('pnpm', frozen, dir);
+  check(
+    existsSync(join(appDir, 'node_modules', '@logbird', 'sdk', 'package.json')),
+    'frozen install against the original warm store installed the SDK',
+  );
+  check(readFileSync(lockfile, 'utf8') === lock, 'the frozen install left the lockfile unchanged');
+  return `${packageManager} workspace: warm store`;
 }
 
 function withoutSdkEntries(lock, url) {
@@ -381,18 +437,6 @@ async function checkPnpmWorkspace(work) {
     check(existsSync(join(appDir, 'node_modules', '@logbird', 'sdk', 'package.json')), 'the app has an installed SDK');
     check(readFileSync(lockfile, 'utf8') === lock, 'the frozen install left the lockfile unchanged');
 
-    if (name === 'workspace-url') {
-      // Whole-workspace resolution preserved integrity in this fixture. Inject its absence to check pnpm's refusal.
-      writeFileSync(lockfile, lock.replace(`integrity: ${expectedIntegrity}, `, ''));
-      removeWorkspaceModules(dir);
-      const refused = await attempt('pnpm', frozen('missing-integrity'), dir);
-      const error = `[ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@${url}": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.`;
-      check(
-        refused.status !== 0 && stripVTControlCharacters(refused.output).includes(error),
-        'frozen install refused the URL after removing its integrity',
-      );
-    }
-
     if (assetDir) {
       // Copy the root metadata and what lives under the app, without the sibling or root-level vendor directory.
       const pruned = join(work, `${name}-pruned`);
@@ -418,7 +462,11 @@ async function checkPnpmWorkspace(work) {
     }
     passed.push(`pnpm ${workspaceVersion} workspace: ${name}`);
   }
-  return [...passed, ...(await checkHoistedWorkspace(work, packageManager, url, expectedIntegrity))];
+  return [
+    ...passed,
+    await checkWarmStore(work, packageManager, url, expectedIntegrity),
+    ...(await checkHoistedWorkspace(work, packageManager, url, expectedIntegrity)),
+  ];
 }
 
 const work = mkdtempSync(join(tmpdir(), 'logbird-release-install-'));
@@ -439,6 +487,9 @@ try {
         let cacheRound = 0;
         const freshCache = () => join(caches, String(++cacheRound));
         const managerVersion = (await run(manager, ['--version'], dir, { capture: true })).trim();
+        if (manager === 'pnpm' && managerVersion.startsWith('12.') && shapeName === 'sdk' && source === 'url') {
+          passed.push(await checkWarmStore(work, `pnpm@${managerVersion}`, `${releaseUrl}${sdkFile}`, integrity(served.get(sdkFile))));
+        }
 
         // 1. The specifier of each released package, and for file: the verified download.
         const files = Object.fromEntries(shape.released.map((name) => [name, tarballName(name, version)]));

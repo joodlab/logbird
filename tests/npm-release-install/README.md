@@ -49,8 +49,14 @@ pass a frozen reinstall with an empty store:
 | URL, whole workspace | Set the app's dependency and run `pnpm install --lockfile-only` from the root |
 | URL, filtered add | Run `pnpm --filter fixture-app add <URL>` from the root |
 
-Neither URL case drops integrity in the small fixture. The check removes it from the whole-workspace
-URL lockfile and verifies that a frozen install fails with `ERR_PNPM_MISSING_TARBALL_INTEGRITY`.
+Both URL cases above use a cold store. A separate case seeds a store with a scoped lockfile-only add,
+then resolves the URL in another workspace with a pre-SDK lockfile and the same store. pnpm 11.8.0
+must log `found_in_store`, drop integrity without fetching the tarball, and fail the frozen install
+with `ERR_PNPM_MISSING_TARBALL_INTEGRITY`. Restoring the pre-SDK lockfile and resolving with an empty
+store must fetch the tarball, record its SHA-512 and allow a frozen install against the original store.
+The pnpm 12.6.0 cell runs the same warm-store case as part of its SDK-only URL check. It must keep
+the SHA-512 and pass the frozen install without regeneration.
+
 The prune check copies only the workspace metadata and app manifest into a fresh directory. Both file
 paths fail with `ENOENT` there. Copying the app's `vendor/` to its original path makes the app-local case pass.
 

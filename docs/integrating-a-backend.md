@@ -169,12 +169,14 @@ RUN pnpm install --frozen-lockfile
 
 A clean frozen install fails with `ENOENT` when that tarball is absent from the path in the lockfile.
 
-For `@logbird/sdk` alone, pnpm 11.8.0 wrote SHA-512 integrity and passed `pnpm install --frozen-lockfile`
-in our small workspaces with both root resolution and `pnpm --filter <package> add <Release URL>`.
-The hoisted fixture also kept the hash with `overrides`, `patchedDependencies` and `allowBuilds`.
-A large hoisted pnpm 11 workspace reported a missing hash after root resolution. Try the scoped
-add and review the full lockfile diff for unrelated peer changes, or use the app-local `file:` recipe.
-When a URL entry lacks integrity, pnpm refuses the frozen install and prints this error.
+When pnpm 11.8.0 reuses an SDK Release URL tarball from the store during workspace resolution,
+it can write the lockfile entry without `integrity`. When adding the SDK or bumping its version,
+start with the lockfile from before the SDK change, keep the new URL in `package.json`, and run
+`pnpm install --lockfile-only --store-dir <empty temporary directory>` from the workspace root.
+Check for `integrity` in the SDK's lockfile entry, run `pnpm install --frozen-lockfile` with your
+normal store, then delete the temporary store.
+
+A frozen install with a missing hash prints this error.
 
 ```text
 [ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.

@@ -48,10 +48,13 @@ copy the app's `vendor/` into the same path under the pruned workspace before in
 A clean frozen install fails with `ENOENT` if the lockfile's tarball path is missing.
 [Dockerfile example](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#pnpm-11-workspaces).
 
-In small pnpm 11.8.0 workspaces with the default or `hoisted` linker, both root resolution and
-`pnpm --filter <package> add <Release URL>` wrote the hash and passed a frozen reinstall.
-A large hoisted workspace reported a missing hash after root resolution. Try a filtered add and
-review the full lockfile diff for peer changes, or use the app-local `file:` recipe.
+When pnpm 11.8.0 reuses an SDK Release URL tarball from the store during workspace resolution,
+it can write the lockfile entry without `integrity`. When adding the SDK or bumping its version,
+start with the lockfile from before the SDK change, keep the new URL in `package.json`, and run
+`pnpm install --lockfile-only --store-dir <empty temporary directory>` from the workspace root.
+Check for `integrity` in the SDK's lockfile entry, run `pnpm install --frozen-lockfile` with your
+normal store, then delete the temporary store.
+
 A frozen install with a missing hash prints this error.
 
 ```text

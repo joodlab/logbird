@@ -43,11 +43,14 @@ app's `vendor/` directory copied in at the path in the lockfile before installin
 install with a missing tarball failed with `ENOENT`.
 [Dockerfile example](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#pnpm-11-workspaces).
 
-For the SDK alone, root resolution and `pnpm --filter <package> add <Release URL>` both worked
-in small pnpm 11.8.0 workspaces with the default or `hoisted` linker. A large hoisted workspace
-reported a missing hash after root resolution. Try the scoped add and review the full lockfile
-diff for peer changes, or use the app-local `file:` recipe for the SDK. A frozen install with that
-missing hash prints this error.
+For the SDK alone, if pnpm 11.8.0 reuses its Release URL tarball from the store during workspace
+resolution, it can write the lockfile entry without `integrity`. When adding the SDK or bumping
+its version, start with the lockfile from before the SDK change, keep the new URL in `package.json`,
+and run `pnpm install --lockfile-only --store-dir <empty temporary directory>` from the workspace root.
+Check for `integrity` in the SDK's lockfile entry, run `pnpm install --frozen-lockfile` with your
+normal store, then delete the temporary store.
+
+A frozen install with a missing hash prints this error.
 
 ```text
 [ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
