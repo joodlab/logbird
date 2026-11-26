@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 
-// docs/reading-history.md is a guide a stranger follows with a read key. This keeps two things in it honest: every curl
-// calls a public route with only query parameters that route documents and authenticates with a key variable, and every
-// limit it quotes is the number docs/limits.md states (which limits-doc.test.ts checks against the code). It does not
-// run the recipes.
+// docs/reading-history.md is a guide a stranger follows with a read key. This keeps parts of it honest without running
+// it: every call (curl or the guide's `lb` helper) reaches a public route with only query parameters that route
+// documents, authenticates with a read key variable, and uses only shell variables an earlier line assigns; and every
+// limit it quotes is the number docs/limits.md states (which limits-doc.test.ts checks against the code).
 const root = new URL('../../../', import.meta.url);
 const guide = readFileSync(new URL('docs/reading-history.md', root), 'utf8');
 const limits = readFileSync(new URL('docs/limits.md', root), 'utf8');
@@ -12,12 +12,15 @@ const openapi = JSON.parse(readFileSync(new URL('openapi/public.json', root), 'u
   paths: Record<string, Record<string, { parameters?: { name: string; in: string }[] }>>;
 };
 
-/** The shell blocks of the guide, with line continuations joined. */
+/** The shell blocks of the guide, in order, with line continuations joined. */
 const shell = [...guide.matchAll(/```(?:sh|bash)\n([\s\S]*?)```/g)].map((m) => (m[1] ?? '').replace(/\\\n\s*/g, ' '));
-/** Every curl command in those blocks (comment lines aside). */
-const curls = shell.flatMap((block) => block.split('\n')).filter((line) => !line.trimStart().startsWith('#') && /\bcurl\s/.test(line));
-/** The one header variable a block may define, and the only values it may hold. */
-const READ_HEADER = /^Authorization: Bearer \$LOGBIRD_(?:READ|MASKED)_KEY$/;
+const code = (line: string) => !line.trimStart().startsWith('#');
+/** Every call in those blocks: curl, or the `lb` helper, except the helpers' own pass-through curl (`"$@"`). */
+const calls = shell
+  .flatMap((block) => block.split('\n'))
+  .filter((line) => code(line) && /(?:^|[\s=;])(?:curl|lb)\s/.test(line) && !line.includes('"$@"') && !/^\s*lb\(\)/.test(line));
+/** The only authorization headers a call may send. */
+const READ_HEADER = /^Authorization: Bearer (?:\$LOGBIRD_(?:READ|MASKED|TENANT)_KEY|\$\{KEY:-\$LOGBIRD_READ_KEY\})$/;
 
 /** The OpenAPI path a URL in the guide addresses (`/v1/events/evt_1` is `/v1/events/{eventId}`). */
 function operation(url: string) {
@@ -27,8 +30,8 @@ function operation(url: string) {
 }
 
 it('calls only public read routes, with every parameter documented by its route', () => {
-  expect(curls.length).toBeGreaterThan(10);
-  for (const line of curls) {
+  expect(calls.length).toBeGreaterThan(15);
+  for (const line of calls) {
     const url = line.match(/"\$LOGBIRD_URL[^"]*"/)?.[0];
     expect(url, line).toBeDefined();
     const { path, template, get } = operation(url as string);
@@ -44,18 +47,35 @@ it('calls only public read routes, with every parameter documented by its route'
   }
 });
 
-it('authenticates every call with a read key variable, never a literal key', () => {
-  for (const line of curls) {
-    const headers = [...line.matchAll(/-H\s+"([^"]*)"/g)].map((m) => m[1] as string);
-    expect(headers.length, line).toBeGreaterThan(0);
-    for (const header of headers) {
-      if (header === '$AUTH') continue;
-      expect(header, line).toMatch(READ_HEADER);
+it('authenticates every request with a read key variable, never a literal key', () => {
+  const headers = shell.flatMap((block) => [...block.matchAll(/-H\s+"([^"]*)"/g)].map((m) => m[1] as string));
+  expect(headers.length).toBeGreaterThan(2);
+  for (const header of headers) if (header !== '$AUTH') expect(header).toMatch(READ_HEADER);
+  for (const [, value] of guide.matchAll(/\bAUTH="([^"]*)"/g)) expect(value).toMatch(READ_HEADER);
+  for (const line of calls) if (/\bcurl\s/.test(line)) expect(line, line).toMatch(/-H\s+"(?:Authorization: Bearer [^"]+|\$AUTH)"/);
+  expect(guide).not.toMatch(/lb_(?:read|ingest)_[A-Za-z0-9]{8,}/);
+});
+
+/** A block's shell text without comments and single-quoted strings (jq and awk programs, literal values). */
+const shellText = (block: string) =>
+  block
+    .split('\n')
+    .filter(code)
+    .map((line) => line.replace(/\s#\s.*$/, ''))
+    .join('\n')
+    .replace(/'[^']*'/g, "''");
+
+it('uses only shell variables that the same block or an earlier one assigns', () => {
+  const assigned = new Set<string>();
+  for (const block of shell) {
+    const text = shellText(block);
+    for (const m of text.matchAll(/(?:^|[\s;(])(?:export\s+)?([A-Za-z_]\w*)\+?=/g)) assigned.add(m[1] as string);
+    for (const m of text.matchAll(/\blocal\s+([A-Za-z_][\w ]*)/g)) for (const name of (m[1] ?? '').split(/\s+/)) if (name) assigned.add(name);
+    for (const m of text.matchAll(/\$\{?([A-Za-z_]\w*)(:[-+])?/g)) {
+      if (m[2]) continue; // ${NAME:-default} and ${NAME:+word} are defined whether or not NAME is set
+      expect(assigned, `${m[0]} is used but never assigned before or in its block:\n${block}`).toContain(m[1]);
     }
   }
-  for (const [, value] of guide.matchAll(/AUTH="([^"]*)"/g)) expect(value).toMatch(READ_HEADER);
-  for (const [line] of guide.matchAll(/^.*Authorization:.*$/gm)) expect(line).toMatch(/Authorization: Bearer \$LOGBIRD_(?:READ|MASKED)_KEY"/);
-  expect(guide).not.toMatch(/lb_(?:read|ingest)_[A-Za-z0-9]{8,}/);
 });
 
 /** The value cell of the docs/limits.md table row whose first cell is `label`. */
@@ -76,7 +96,7 @@ it('quotes the limits that docs/limits.md states', () => {
     `(\`limit\`, default ${defaultOf('Facet values (`limit`)')}, at most ${first('Facet values (`limit`)')})`,
     `(\`byLimit\`, default ${defaultOf('Facet second level (`byLimit`)')}, at most ${first('Facet second level (`byLimit`)')})`,
     `reads only the ${first('Time window of search, facets and export without `from`')} hours before \`to\``,
-    `past its ${first('Targets indexed')}th target`,
+    `Entries after ${first('Targets indexed')} contribute no index entry`,
   ];
   for (const phrase of quoted) expect(guide.replace(/\s+/g, ' '), phrase).toContain(phrase);
 });
