@@ -368,9 +368,15 @@ never move the tag. For a failure after the npm job, see the recovery list under
    the package exists is unverified. If Settings is unavailable, the owner must
    first publish the public package with an authenticated npm session. Keep the
    workflow disabled during that first publication. Use the exact GitHub Release
-   tarball if the workflow will later run for that version.
-3. In each package's Settings, open Trusted publishing, choose GitHub Actions and
-   allow direct publishing. For `@logbird/sdk`, `@logbird/hono`, `@logbird/vue`,
+   tarball if the workflow will later run for that version. Add
+   `--provenance=false` to that manual `npm publish`: the tarballs ask for
+   provenance, and npm generates it only inside a supported CI system. A version
+   published this way has no provenance. Versions the workflow publishes do.
+   The publish job exists only in tags cut after it was added. An earlier
+   release can reach npm only by this manual route.
+3. In each package's Settings, open Trusted publishing and choose GitHub Actions.
+   Under Allowed actions, allow `npm publish`: the job publishes directly and
+   does not stage. For `@logbird/sdk`, `@logbird/hono`, `@logbird/vue`,
    `@logbird/nuxt` and `@logbird/tanstack-start`, enter owner `joodlab`,
    repository `logbird` and workflow filename `release.yml`. Leave Environment
    blank. Time setup for a release that will publish a new version. npm requires

@@ -31,8 +31,11 @@ export async function publishAssets(folder, version, lookup, publish) {
 }
 
 async function main(folder, version) {
-  // GitHub's job condition compares strings case-insensitively.
-  if (process.env.NPM_PUBLISH_ENABLED !== 'true') return;
+  // GitHub's job condition compares strings case-insensitively; this check is exact, as the NuGet gate is.
+  if (process.env.NPM_PUBLISH_ENABLED !== 'true') {
+    console.log("::notice::NPM_PUBLISH_ENABLED is not exactly 'true'; no npm package is published.");
+    return;
+  }
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Expected a stable release version X.Y.Z');
   mkdirSync(folder);
   const base = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/v${version}`;
