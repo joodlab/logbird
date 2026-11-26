@@ -171,7 +171,7 @@ A trail always names its time window. `range: { from }` reads from `from` (inclu
 absent), on the event's timestamp. Without `from` the server reads only the 24 hours before `to`, and a short history
 would look complete, so `trailQuery` throws a `TrailQueryError` for a trail without `range` or without `range.from`.
 To read that default window on purpose, pass `range: SERVER_DEFAULT_RANGE`. Every page states the window the server
-applied as `page.range` (absent from servers older than that field). `order: 'asc'` reads oldest first (default
+applied as `page.range` (absent from servers older than 0.4.0). `order: 'asc'` reads oldest first (default
 `desc`); events in the same millisecond are ordered by id, not by cause, so read causation from
 `context.parentEventId`.
 

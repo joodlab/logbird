@@ -1,6 +1,6 @@
 {
   "name": "logbird-release-install-pnpm12",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Only the packageManager pin pnpm/action-setup reads for the pnpm 12 cell of the release install check (npm-tarballs.yml).",
   "packageManager": "pnpm@12.6.0"

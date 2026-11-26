@@ -297,7 +297,7 @@ app.get(
 );
 const openApiOptions: Parameters<typeof generateSpecs>[1] = {
   documentation: {
-    info: { title: 'Logbird API', version: '0.3.0' },
+    info: { title: 'Logbird API', version: '0.4.0' },
     servers: [{ url: env.APP_URL, description: 'This Logbird instance' }],
     components: {
       securitySchemes: {

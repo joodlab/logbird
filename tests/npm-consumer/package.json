@@ -1,6 +1,6 @@
 {
   "name": "logbird-npm-consumer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Installs the packed @logbird/sdk and @logbird/hono tarballs like an outside application and checks them. See README.md.",
   "type": "module",
