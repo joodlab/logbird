@@ -223,20 +223,20 @@ payload holding a number a double cannot keep fails with `read_inexact_number` i
 
 `readHistoryHorizon(options)` returns how far back the key's history reaches: `oldestEventAt`, the timestamp of the
 oldest event the key or viewer token can find through search (within its scope), or null when it finds none, and the
-project's `retentionDays` policy. For a whole-history pass, read from `oldestEventAt` to a `to` more than a day after
-now (an event can be dated up to one day after it was received, and without `to` the window ends at the server clock).
-`oldestEventAt` describes what is stored now: an empty history before it does not prove that nothing happened, since
-retention deletes, for good, events dated more than `retentionDays` before each run. It can also move back: an event
-dated before it can arrive later, and a pass from the earlier value misses it, so read the horizon again before each
-whole-history pass. It uses the same bounded read and
-`LogbirdError` codes; a server without the route answers `read_http_error` with status 404.
+project's configured `retentionDays` policy. For a whole-history pass, read from `oldestEventAt` to the end of the
+searchable range, `2299-12-31T23:59:59.999Z` (`to` is exclusive): an event can be dated up to one day after the server received it,
+so a `to` from your own clock can miss events. `oldestEventAt` describes what is stored now: an empty history before it
+does not prove that nothing happened, since retention runs delete older events for good. It can also move back: an
+event dated before it can arrive later, and a pass from the earlier value misses it, so read the horizon again before
+each whole-history pass. It uses the same bounded read and `LogbirdError` codes; a server without the route answers
+`read_http_error` with status 404.
 
 ```ts
 import { iterateAuditTrail, readHistoryHorizon } from '@logbird/sdk/read';
 
 const horizon = await readHistoryHorizon(options); // { retentionDays, oldestEventAt }
 if (horizon.oldestEventAt) {
-  const range = { from: horizon.oldestEventAt, to: new Date(Date.now() + 2 * 86_400_000) };
+  const range = { from: horizon.oldestEventAt, to: '2299-12-31T23:59:59.999Z' }; // the end of the searchable range
   for await (const event of iterateAuditTrail(options, { ...trail, range, order: 'asc' })) render(event);
 }
 ```

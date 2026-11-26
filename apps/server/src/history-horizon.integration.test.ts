@@ -156,6 +156,26 @@ describe('GET /v1/project', () => {
     expect(await horizon(secrets.empty)).toEqual({ retentionDays: 90, oldestEventAt: null });
   });
 
+  it('is fenced like every read while retention runs, and HEAD never reaches the query', async () => {
+    const run = await prisma.retentionRun.create({
+      data: { projectId: f.project, kind: 'retention', status: 'running', retentionDays: 30, cutoff: new Date(now - 30 * day) },
+    });
+    try {
+      const fenced = await get('/v1/project', secrets.read);
+      expect(fenced.status).toBe(503);
+      expect(await fenced.json()).toMatchObject({ error: { code: 'retention_unavailable' } });
+      const search = await get('/v1/events', secrets.read);
+      expect(search.status).toBe(503);
+      await search.text();
+      const head = await get('/v1/project', secrets.read, {}, 'HEAD');
+      expect(head.status).toBe(405);
+      expect(head.headers.get('allow')).toBe('GET');
+    } finally {
+      await prisma.retentionRun.delete({ where: { id: run.id } });
+    }
+    expect((await get('/v1/project', secrets.read)).status).toBe(200);
+  });
+
   it('refuses HEAD, ingest keys, missing keys and SQL mode', async () => {
     const head = await get('/v1/project', secrets.read, {}, 'HEAD');
     expect(head.status).toBe(405);

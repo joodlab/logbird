@@ -188,7 +188,7 @@ Authorization: Bearer lb_read_…
 - `ttlSeconds` is 60–3600, default 900.
 - The token's scope must be equal to or narrower than the key's: the same tenant; the key's target if it has one;
   action prefixes inside the key's prefixes; and at least the key's masks. Otherwise 403 `scope_exceeded`.
-- Send the token as `Authorization: Bearer lbv1…` on the four read routes above. Never put it in a URL. It is never
+- Send the token as `Authorization: Bearer lbv1…` on the read routes above. Never put it in a URL. It is never
   accepted for ingest or management.
 - Revoking or expiring the minting key invalidates its tokens within 30 seconds (each API process caches the key
   lookup for up to 30 seconds).
