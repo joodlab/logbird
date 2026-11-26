@@ -745,11 +745,12 @@ public sealed class LogbirdReadClient : IDisposable
     }
 
     /// <summary>
-    /// Reads how far back this reader's history reaches (<c>GET /v1/project</c>): the project's retention policy and the
-    /// oldest event the key or viewer token can find through search, within its scope. For a whole-history read, use
-    /// <see cref="HistoryHorizon.OldestEventAt"/> as <see cref="EventSearch.From"/> and a <see cref="EventSearch.To"/> more than
-    /// a day after now (an event can be dated up to one day after it was received), and do not take an empty history before
-    /// it as proof that nothing happened.
+    /// Reads how far back this reader's history reaches (<c>GET /v1/project</c>): the project's configured retention policy
+    /// and the oldest event the key or viewer token can find through search, within its scope. For a whole-history read,
+    /// use <see cref="HistoryHorizon.OldestEventAt"/> as <see cref="EventSearch.From"/> and the end of the searchable range,
+    /// <c>2299-12-31T23:59:59.999Z</c>, as <see cref="EventSearch.To"/> (exclusive): an event can be dated up to one day after the server
+    /// received it, so a <c>To</c> from your own clock can miss events. Do not take an empty history before it as proof
+    /// that nothing happened.
     /// </summary>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="LogbirdApiException">

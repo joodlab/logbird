@@ -61,16 +61,16 @@ export const appliedRangeSchema = z
   });
 export type AppliedRange = z.infer<typeof appliedRangeSchema>;
 /**
- * `GET /v1/project`: how far back the caller's history reaches, so a reader can tell "nothing happened before X" from
- * "older events are no longer stored". `oldestEventAt` is the `timestamp` of the first event a search in `order=asc` over
- * the widest window returns to the same caller: within its scope for a scoped key or viewer token. `retentionDays` is the
- * project's policy, the same for every reader of the project.
+ * `GET /v1/project`: how far back the caller's history reaches. `oldestEventAt` is the `timestamp` of the first event a
+ * search in `order=asc` over the widest window returns to the same caller (within its scope for a scoped key or viewer
+ * token), or null when search finds none. `retentionDays` is the project's configured policy, the same for every reader.
+ * Together they let a reader say that events before `oldestEventAt` are not stored, rather than that nothing happened.
  */
 export const historyHorizonSchema = z
   .object({
     retentionDays: z.number().int().positive().meta({
       description:
-        "The project's retention policy in days, the same for every reader of the project. Each retention run (hourly, and right after the window is shortened) deletes for good the events dated more than this many days before the run. Between runs, older events can still be stored and found, so this is not a bound on what a search returns.",
+        "The project's configured retention policy in days, the same for every reader of the project. Retention runs (hourly, and right after the policy is shortened) delete older events for good. It is a policy, not a bound on what a search returns: between runs, older events can still be stored and found.",
       example: 90,
     }),
     oldestEventAt: appliedInstant.nullable().meta({
@@ -81,7 +81,7 @@ export const historyHorizonSchema = z
   })
   .meta({
     description:
-      'How far back the caller can read. To read a whole history, search from `oldestEventAt` to a `to` more than a day after now (an event can be dated up to one day after it was received), and do not take an empty answer before `oldestEventAt` as proof that nothing happened.',
+      'How far back the caller can read. To read a whole history, search from `oldestEventAt` to `to` 2299-12-31T23:59:59.999Z, the end of the searchable range (an event can be dated up to one day after the server received it, so a `to` from your own clock can miss events), and do not take an empty answer before `oldestEventAt` as proof that nothing happened.',
   });
 export type HistoryHorizon = z.infer<typeof historyHorizonSchema>;
 /** `GET /v1/export` states the applied window in headers (a CSV or JSONL stream has no envelope for a field). */

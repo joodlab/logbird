@@ -715,9 +715,9 @@ const isCount = (value: unknown) => Number.isSafeInteger(value) && (value as num
 /** How far back a reader's history reaches, from `GET /v1/project`. */
 export interface HistoryHorizon {
   /**
-   * The project's retention policy in days, the same for every reader of the project. Each retention run (hourly, and
-   * right after the window is shortened) deletes for good the events dated more than this many days before the run;
-   * between runs older events can still be stored and found.
+   * The project's configured retention policy in days, the same for every reader of the project. Retention runs (hourly,
+   * and right after the policy is shortened) delete older events for good. It is a policy, not a bound: between runs older
+   * events can still be stored and found.
    */
   retentionDays: number;
   /**
@@ -729,10 +729,10 @@ export interface HistoryHorizon {
 
 /**
  * How far back the reader's history reaches: the project's retention policy and the oldest event the key or viewer
- * token can find through search, within its scope. For a whole-history read, use `oldestEventAt` as `from` and a `to` more than
- * a day after now, since an event can be dated up to one day after it was received
- * (`range: { from: horizon.oldestEventAt, to: new Date(Date.now() + 2 * 86_400_000) }`), and do not take an empty history
- * before it as proof that nothing happened. The request goes through the same bounded read as `readAuditTrail` and fails with
+ * token can find through search, within its scope. For a whole-history read, use `oldestEventAt` as `from` and the end of
+ * the searchable range as `to` (`range: { from: horizon.oldestEventAt, to: '2299-12-31T23:59:59.999Z' }`): an event can be dated up to
+ * one day after the server received it, so a `to` from your own clock can miss events. Do not take an empty history
+ * before `oldestEventAt` as proof that nothing happened. The request goes through the same bounded read as `readAuditTrail` and fails with
  * the same LogbirdError codes; a server without this route answers `read_http_error` with status 404.
  */
 export async function readHistoryHorizon(options: ReadOptions, signal?: AbortSignal): Promise<HistoryHorizon> {

@@ -189,9 +189,9 @@ public sealed class EventDetail
 public sealed class HistoryHorizon
 {
     /// <summary>
-    /// The project's retention policy in days, the same for every reader of the project. Each retention run (hourly, and
-    /// right after the window is shortened) deletes for good the events dated more than this many days before the run;
-    /// between runs older events can still be stored and found.
+    /// The project's configured retention policy in days, the same for every reader of the project. Retention runs (hourly,
+    /// and right after the policy is shortened) delete older events for good. It is a policy, not a bound: between runs
+    /// older events can still be stored and found.
     /// </summary>
     [JsonRequired]
     public int RetentionDays { get; init; }

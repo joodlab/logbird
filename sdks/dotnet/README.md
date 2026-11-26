@@ -405,16 +405,16 @@ await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: inv
 }
 
 EventDetail? detail = await reader.GetEventAsync(eventId);   // null when it does not exist
-HistoryHorizon horizon = await reader.GetHistoryHorizonAsync(); // retention days and the oldest event this key can see
+HistoryHorizon horizon = await reader.GetHistoryHorizonAsync(); // retention policy and the oldest event search finds, or null
 ```
 
 `GetHistoryHorizonAsync` tells you how far back the key's history reaches: `OldestEventAt`, the timestamp of the
 oldest event the key or viewer token can find through search (within its scope), or `null` when it finds none, and the
-project's `RetentionDays` policy. For a whole-history search, use it as `From` and set `To` more than a day after now:
-an event can be dated up to one day after it was received, and without `To` the window ends at the server clock.
-`OldestEventAt` describes what is stored now: an empty history before it does not prove that nothing happened, since
-retention deletes, for good, events dated more than `RetentionDays` before each run. It can also move back: an event
-dated before it can arrive later, and a search from the earlier value misses it, so read the horizon again before each
+project's configured `RetentionDays` policy. For a whole-history search, use it as `From` and the end of the searchable
+range, `2299-12-31T23:59:59.999Z`, as `To` (exclusive): an event can be dated up to one day after the server received it, so a `To`
+from your own clock can miss events. `OldestEventAt` describes what is stored now: an empty history before it does not
+prove that nothing happened, since retention runs delete older events for good. It can also move back: an event dated
+before it can arrive later, and a search from the earlier value misses it, so read the horizon again before each
 whole-history search. A server without the route answers 404 (`LogbirdApiException`, code `not_found`).
 
 Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
