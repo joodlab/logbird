@@ -7,7 +7,7 @@
 ### Highlights
 
 - The console shows recorded field changes in record, actor and tenant histories. Queries can search change values (`changes.before`, `changes.after`) and the support person's name (`impersonator.name`), and Logbird keeps the JSON kind of each change value.
-- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trail reads must name their window, and `iterateAuditTrail` reads every page of one. A new guide, [Read a record's whole history back](docs/reading-history.md), shows how to put these together.
+- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trails built with `trailQuery` must name their window, and `iterateAuditTrail` reads every page of one. A new guide, [Read a record's whole history back](docs/reading-history.md), shows how to put these together.
 - The TypeScript SDK redacts common secret keys by default, accounts for every event through `flush()` and `shutdown()`, and refuses redirects. The GitHub Release attaches the TypeScript packages as tarballs with a `SHA256SUMS` file.
 
 ### Changes
@@ -19,7 +19,10 @@ This is a minor release because callers must act on several changes. Read
 first two recorded field changes of each event, and a count opens the full
 event. Long values show both ends, and the full value on hover or keyboard
 focus. On a record page, click a field to see its history, and pick the tenant
-when one record ID is used by several tenants. Set, removed, null, empty-string
+when one record ID is used by several tenants. These controls replace or remove
+only a matching exact `changes.field` or `tenant` term that constrains the whole
+query (including inside a parenthesized AND), and leave terms inside `OR` and
+`NOT` groups as they are. Set, removed, null, empty-string
 and redacted values read differently, and typed strings show in JSON quotes
 (`"10"` is not the number 10). The console recognises only the default
 `[redacted]` replacement; custom replacements appear as recorded. Phone rows
@@ -65,7 +68,9 @@ ISO 8601 UTC with milliseconds, held to what the store can hold (1900-01-01 to
 2299-12-31). The default is unchanged: without `from`, a read covers at most
 the 24 hours before `to`. Compare the stated window with the one you meant
 before you treat a result as a whole history; a window that is empty after
-those bounds still answers 422. Event detail applies no window. The OpenAPI
+those bounds still answers 422. If you send sentinel dates outside the store's
+range (such as year 1 or 9999), replace them with bounds inside it (up to
+`2299-12-31T23:59:59.999Z`) and check the returned `range`. Event detail applies no window. The OpenAPI
 document now describes every `/v1` read and its parameters, the sort order
 (events in the same millisecond are ordered by id, not by cause) and paging: a
 cursor carries no window, so send the first page's `range` back, and paging is
@@ -140,7 +145,9 @@ tenant or target names, ids, other attributes), or an address spelled without
 case ignored), `paths` (exact locations) and `keepPaths` (exemptions), with a
 fixed precedence documented in the SDK README. `readAuditEvent` returns one
 event with its parents, child count, operation size and original payload; it
-returns `null` for an unknown id, the payload is `null` under a field mask, and
+returns `null` for any 404 (an unknown id, or an event outside the caller's
+scope), so `null` does not prove that the event does not exist; the payload is
+`null` under a field mask, and
 on a runtime without `JSON.rawJSON` a payload number a double cannot keep fails
 with `read_inexact_number`. `iterateAuditTrail` reads every page of a trail and
 fails with a `LogbirdError` if the window the server reports differs from the
@@ -150,8 +157,10 @@ completed pass is not a snapshot: an event stored during the pass with a
 timestamp behind your position, or before `from`, is not returned, and a
 relative time in `q` moves with each request. To pick up late arrivals, read
 again later over a window that covers when they can have occurred, with
-`receivedAt:>=` starting well before the last `receivedAt` you saw (receipt
-times are not a strict sequence), and skip ids you already have. A pass keeps
+`receivedAt:>=` an absolute time well before the last `receivedAt` you saw,
+the same on every page, and skip ids you already have. Receipt times are not a
+strict sequence, and a recovered event can keep a receipt time earlier than
+your overlap, so treat such a pass as best effort. A pass keeps
 every yielded id in memory. Trails take `order: 'asc' | 'desc'`, and pages
 expose `range`. The client exposes `droppedByReason` and
 `possiblyStoredDropsByReason`, `onDrop` details,
@@ -195,8 +204,10 @@ Each item says what changed, who is affected and what to change.
   To keep the old behaviour, pass `redaction: false`. Otherwise set your policy:
   `addKeys` adds literal substrings (`name` also matches `username`), an
   anchored `keys` pattern such as `/^token$/` matches whole keys but replaces
-  the default pattern, `paths` forces exact locations and `keepPaths` exempts
-  them. Send identifiers as strings or numbers. A value already replaced by
+  the default pattern (include any default names you still need in it),
+  `paths` forces exact locations and `keepPaths` exempts them. An invalid path
+  throws `redaction_options_invalid` when the client is constructed; fix it
+  before deploying. Send identifiers as strings or numbers. A value already replaced by
   `beforeSend` cannot be restored by `keepPaths`. (#393)
 - **Options are read once, at construction.** The client copies every
   supported option, including inherited ones, when it is created. Changing the
@@ -231,8 +242,11 @@ Each item says what changed, who is affected and what to change.
   `http_error`, `too_large`, `input_too_large`, `input_too_deep`, `invalid`,
   `before_send_failed`, `redaction_failed`, `filtered`, `diagnostic_reentry`
   and `shutdown`. `possiblyStoredDropsByReason` keeps the uncertain subset even
-  when a notification is skipped. Diagnostic callbacks now run asynchronously
-  after the queue changes; their failures count in `failedNotifications`, and
+  when a notification is skipped. A `track()` called synchronously inside a
+  client diagnostic callback (`onDrop`, `onError`, `onWarning`) is refused and
+  counted as `diagnostic_reentry`, even with free queue capacity; capture from
+  such a callback asynchronously or through another client. Diagnostic
+  callbacks now run asynchronously after the queue changes; their failures count in `failedNotifications`, and
   notifications are skipped and counted in `skippedNotifications` while 1024 are
   outstanding or after 1024 in one event-loop turn. Queued drops carry the full
   event; refusals before enqueue carry only bounded id and action fields.
@@ -250,8 +264,11 @@ Each item says what changed, who is affected and what to change.
   `http` to `https`, or an old host name). Set `endpoint` to the origin that
   serves the console and `/v1`. (#402)
 - **Diagnostics are `LogbirdError` codes without server text.** Capture,
-  delivery, resolver, read and redaction errors are `LogbirdError`s with a
-  stable `code` and safe `status` or `count` fields. They no longer carry
+  delivery, resolver, read and redaction diagnostics are `LogbirdError`s with a
+  stable `code` and safe `status` or `count` fields. Invalid read input is the
+  exception: it throws a `TrailQueryError` (a `TypeError` with code
+  `trail_query_invalid`; test with `isTrailQueryError`) before any request, for
+  example `readAuditEvent(options, '.')`. They no longer carry
   server response text or the original thrown error. A promise returned from
   `beforeSend`, which must be synchronous, is refused. A throwing Hono
   automatic-capture skip hook counts as an `invalid` drop. Affected: code that
@@ -300,10 +317,15 @@ Each item says what changed, who is affected and what to change.
   `TrailQuery.range` is required in the types. Affected: every trail read
   without `range.from`, which silently read at most the last 24 hours. Per entry
   point:
-  - `trailQuery` / `readAuditTrail`, Vue `useAuditTrail` and the TanStack Start
-    helpers: pass `range: { from }` (`to` defaults to now), or
+  - `trailQuery`, Vue `useAuditTrail` and the TanStack Start helpers: pass
+    `range: { from }` (`to` defaults to now), or
     `range: SERVER_DEFAULT_RANGE` to read the server's default window on
     purpose.
+  - `readAuditTrail` takes a search query with top-level `q`, `from` and `to`,
+    not a trail, and drops any other field, so a `range` passed to it directly
+    is ignored and the read covers only the default window. Pass
+    `readAuditTrail(options, trailQuery({ tenant, range: { from } }))`, or
+    `readAuditTrail(options, { q, from })`.
   - `iterateAuditTrail` does not accept `SERVER_DEFAULT_RANGE`: pass
     `range: { from }` with `Z` or an offset (or a `Date`). Against a server
     older than 0.4.0, which does not report its window, also pass `to`.
@@ -326,8 +348,10 @@ Each item says what changed, who is affected and what to change.
   and edit refuse it. Before 0.4.0 such a key read an attribute of that literal
   name, so it matched events that carry a top-level dotted key such as
   `"changes.to"`, and nothing otherwise. Affected: saved views, webhook filters
-  and API callers with such a term. Before upgrading, rewrite the term as
-  `attr.changes.<key>` if your events carry that literal attribute; remove it
+  and API callers with such a term. Before upgrading, prefix the whole
+  original field spelling with `attr.` (`attr.changes.to`, `attr.Changes.field`;
+  the attribute lookup keeps letter case) if your events carry that literal
+  attribute; remove it
   only if they do not, because removing a term can widen a filter. Then edit a
   held endpoint's filter to resume it. (#404)
 - **Literal attributes named like the new fields.** `changes.before`,
@@ -350,9 +374,10 @@ Each item says what changed, who is affected and what to change.
   an impersonator name that carries an address. Literal dotted `actor.name` and
   `impersonator.name` attribute keys are removed. Filters on
   `impersonator.email`, a path below it, or those literal keys, and attribute
-  facets on them (`field=attr.impersonator.email`), answer 422 `invalid_query`,
-  reason `not_allowed`; webhook create and edit refuse them. (A facet field
-  without the `attr.` prefix is not an attribute facet and answers 422
+  facets on them (`field=attr.impersonator.email` or
+  `field=attributes.impersonator.email`), answer 422 `invalid_query`, reason
+  `not_allowed`; webhook create and edit refuse them. (The bare facet field
+  `field=impersonator.email` is not a facet field and answers 422
   `validation_error`.) An `impersonator.name` filter reads a name that carries
   an address as an empty name, as `actor.name` already did. Affected:
   tenant-facing views and receivers that showed or filtered on the
@@ -408,8 +433,8 @@ images publish. Run the migrate service before starting the new API and worker.
   [webhook endpoint settings](docs/self-hosting.md#webhook-endpoint-settings),
   which now include viewer tokens.
 - Before upgrading, review saved views and webhook filters for the query
-  changes above: unknown `changes.*` keys (rewrite to `attr.changes.<key>` or
-  remove), terms that read a literal attribute named `changes.before`,
+  changes above: unknown `changes.*` keys (prefix the original spelling with
+  `attr.`, or remove the term), terms that read a literal attribute named `changes.before`,
   `changes.after`, `impersonator.name` or `impersonator.id` (rewrite to
   `attr.<key>`), and ordered comparisons against `*` (use `field:*` or
   `_exists_:field`). For masked webhook endpoints whose filter names a field a
