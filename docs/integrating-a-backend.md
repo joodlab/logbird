@@ -26,7 +26,8 @@ Each GitHub Release attaches them instead: `logbird-sdk-X.Y.Z.tgz`, `logbird-hon
 `logbird-vue-X.Y.Z.tgz`, `logbird-nuxt-X.Y.Z.tgz` and `logbird-tanstack-start-X.Y.Z.tgz`,
 built JavaScript with type declarations, packed exactly as a publish to npm would pack them, plus a
 `SHA256SUMS` file. Install an exact version from those files. (Releases before 0.4.1 have
-none; use 0.4.1 or later.)
+none; use 0.4.1 or later.) Publishing to the npm registry is planned and would remove
+the need for either tarball recipe.
 
 Requirements, as the packages' manifests state them:
 
@@ -148,6 +149,36 @@ const audit = new Logbird({
 Validate required configuration at startup. To disable capture deliberately in
 development, pass `enabled: false`. Never log keys, request headers, raw events or
 SDK error objects that may contain sensitive details.
+
+#### pnpm 11 workspaces
+
+Verify the tarball as above, then commit it under the package that uses it, for example
+`packages/app/vendor/logbird/logbird-sdk-X.Y.Z.tgz`. Use `file:vendor/logbird/logbird-sdk-X.Y.Z.tgz`
+in `packages/app/package.json` and commit the workspace lockfile. A root-level tarball also works
+when the build retains it at the path recorded in the lockfile.
+
+If Docker installs from a pruned directory that contains only manifests and the lockfile,
+copy the app's `vendor/` directory into the install stage first. With the full workspace as
+the Docker build context and the pruned workspace root as the working directory, add these lines
+after copying the manifests and lockfile.
+
+```dockerfile
+COPY packages/app/vendor/ ./packages/app/vendor/
+RUN pnpm install --frozen-lockfile
+```
+
+A clean frozen install fails with `ENOENT` when that tarball is absent from the path in the lockfile.
+
+For `@logbird/sdk` alone, pnpm 11.8.0 wrote SHA-512 integrity and passed `pnpm install --frozen-lockfile`
+in our small workspaces with both root resolution and `pnpm --filter <package> add <Release URL>`.
+The hoisted fixture also kept the hash with `overrides`, `patchedDependencies` and `allowBuilds`.
+A large hoisted pnpm 11 workspace reported a missing hash after root resolution. Try the scoped
+add and review the full lockfile diff for unrelated peer changes, or use the app-local `file:` recipe.
+When a URL entry lacks integrity, pnpm refuses the frozen install and prints this error.
+
+```text
+[ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
+```
 
 ## Model the event
 

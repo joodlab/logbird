@@ -1,0 +1,7 @@
+{
+  "name": "logbird-release-install-pnpm11",
+  "version": "0.4.1",
+  "private": true,
+  "description": "The packageManager pin for the pnpm 11 workspace release install check (npm-tarballs.yml).",
+  "packageManager": "pnpm@11.8.0"
+}

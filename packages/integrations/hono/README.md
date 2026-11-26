@@ -13,7 +13,8 @@
 
 ## Install
 
-Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches
+Publishing to the npm registry is planned and would remove the need for the tarball install.
+Each [GitHub Release](https://github.com/joodlab/logbird/releases) currently attaches
 `logbird-hono-X.Y.Z.tgz` and `logbird-sdk-X.Y.Z.tgz` with a `SHA256SUMS` file. Download both
 into `vendor/logbird/`, verify both against `SHA256SUMS` (stop if either does not print `OK`),
 depend on both files, and override `@logbird/sdk` to the same SDK tarball (this package
@@ -32,6 +33,25 @@ depends on the SDK at exactly its own version, which no registry serves yet):
 
 The full recipe, with the download commands and the lockfile check, is in
 [Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk).
+
+### pnpm 11 workspaces
+
+For `@logbird/sdk` alone, the workspace check passed frozen reinstalls with the verified tarball
+under the app's `vendor/logbird/` or at the workspace root. In an app-only prune, keeping the app's
+`vendor/logbird/` directory let the frozen reinstall pass. A manifest-only install needs the
+app's `vendor/` directory copied in at the path in the lockfile before installing. A clean frozen
+install with a missing tarball failed with `ENOENT`.
+[Dockerfile example](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#pnpm-11-workspaces).
+
+For the SDK alone, root resolution and `pnpm --filter <package> add <Release URL>` both worked
+in small pnpm 11.8.0 workspaces with the default or `hoisted` linker. A large hoisted workspace
+reported a missing hash after root resolution. Try the scoped add and review the full lockfile
+diff for peer changes, or use the app-local `file:` recipe for the SDK. A frozen install with that
+missing hash prints this error.
+
+```text
+[ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
+```
 
 ## Usage
 
