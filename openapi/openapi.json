@@ -26,7 +26,7 @@
   "info": {
     "description": "Development documentation",
     "title": "Logbird API",
-    "version": "0.4.0"
+    "version": "0.4.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -2570,7 +2570,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -2586,7 +2586,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -2817,7 +2817,7 @@
                       ]
                     },
                     "range": {
-                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.0.",
+                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.1.",
                       "properties": {
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent, never before 1900-01-01T00:00:00.000Z.",
@@ -3075,7 +3075,7 @@
                                 "type": "string"
                               },
                               "afterKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -3091,7 +3091,7 @@
                                 "type": "string"
                               },
                               "beforeKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -3373,7 +3373,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -3389,7 +3389,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -4188,7 +4188,7 @@
                       "type": "integer"
                     },
                     "range": {
-                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.0.",
+                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.1.",
                       "properties": {
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent, never before 1900-01-01T00:00:00.000Z.",
@@ -6323,7 +6323,7 @@
                               "type": "string"
                             },
                             "afterKind": {
-                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                               "enum": [
                                 "absent",
                                 "null",
@@ -6339,7 +6339,7 @@
                               "type": "string"
                             },
                             "beforeKind": {
-                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                               "enum": [
                                 "absent",
                                 "null",
@@ -6769,7 +6769,7 @@
                               "type": "string"
                             },
                             "afterKind": {
-                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                               "enum": [
                                 "absent",
                                 "null",
@@ -6785,7 +6785,7 @@
                               "type": "string"
                             },
                             "beforeKind": {
-                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                               "enum": [
                                 "absent",
                                 "null",
@@ -7333,7 +7333,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -7349,7 +7349,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -8561,7 +8561,7 @@
                                         "type": "string"
                                       },
                                       "afterKind": {
-                                        "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                        "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                         "enum": [
                                           "absent",
                                           "null",
@@ -8577,7 +8577,7 @@
                                         "type": "string"
                                       },
                                       "beforeKind": {
-                                        "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                        "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                         "enum": [
                                           "absent",
                                           "null",
@@ -14015,7 +14015,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -14031,7 +14031,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -14262,7 +14262,7 @@
                       ]
                     },
                     "range": {
-                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.0.",
+                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.1.",
                       "properties": {
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent, never before 1900-01-01T00:00:00.000Z.",
@@ -15313,7 +15313,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -15329,7 +15329,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -15560,7 +15560,7 @@
                       ]
                     },
                     "range": {
-                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.0.",
+                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.1.",
                       "properties": {
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent, never before 1900-01-01T00:00:00.000Z.",
@@ -16166,7 +16166,7 @@
                                 "type": "string"
                               },
                               "afterKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -16182,7 +16182,7 @@
                                 "type": "string"
                               },
                               "beforeKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -16464,7 +16464,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -16480,7 +16480,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.0 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before 0.4.1 (or by an older server during the upgrade), which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -17269,7 +17269,7 @@
                       "type": "integer"
                     },
                     "range": {
-                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.0.",
+                      "description": "The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.1.",
                       "properties": {
                         "from": {
                           "description": "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent, never before 1900-01-01T00:00:00.000Z.",

@@ -258,7 +258,7 @@ const git = (...args) => run('git', args).trim();
 
 // Tags whose release never completed: the images were not all published and no GitHub Release exists. The notes of
 // the next release start from the last release people could actually install, so these are never a baseline.
-export const unpublishedTags = new Set(['v0.1.2']);
+export const unpublishedTags = new Set(['v0.1.2', 'v0.4.0']);
 
 export function previousTag(to, gitCommand = git, unpublished = unpublishedTags) {
   const tags = gitCommand('tag', '--merged', to, '--list', 'v*', '--sort=-version:refname')

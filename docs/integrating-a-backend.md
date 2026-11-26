@@ -25,8 +25,8 @@ The TypeScript packages are not on npm yet, so `pnpm add @logbird/sdk` finds not
 Each GitHub Release attaches them instead: `logbird-sdk-X.Y.Z.tgz`, `logbird-hono-X.Y.Z.tgz`,
 `logbird-vue-X.Y.Z.tgz`, `logbird-nuxt-X.Y.Z.tgz` and `logbird-tanstack-start-X.Y.Z.tgz`,
 built JavaScript with type declarations, packed exactly as a publish to npm would pack them, plus a
-`SHA256SUMS` file. Install an exact version from those files. (Releases before 0.4.0 have
-none; use 0.4.0 or later.)
+`SHA256SUMS` file. Install an exact version from those files. (Releases before 0.4.1 have
+none; use 0.4.1 or later.)
 
 Requirements, as the packages' manifests state them:
 

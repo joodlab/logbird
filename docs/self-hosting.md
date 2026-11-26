@@ -3,13 +3,13 @@
 ## Five-minute quickstart
 
 Install Docker Engine and Compose >=2.24.4 (Linux containers). The default stack
-pulls the four published GHCR images for `LOGBIRD_VERSION=0.4.0`; it does not
+pulls the four published GHCR images for `LOGBIRD_VERSION=0.4.1`; it does not
 compile source. Images are available only after the corresponding tagged release
 finishes publishing. Check the [release page](https://github.com/joodlab/logbird/releases)
 before installing; release preparation in Git is not proof of registry availability.
 
 ```sh
-git clone --branch v0.4.0 https://github.com/joodlab/logbird.git
+git clone --branch v0.4.1 https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
@@ -96,7 +96,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
 | VIEWER_READ_RATE_LIMIT_PER_MINUTE / VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE | 300 per minting key and tenant (viewer-token reads, on top of the project read limit) / 600 viewer tokens minted per key. See [scoped read access](scoped-read-access.md) |
 | LOGBIRD_BIND / LOGBIRD_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
-| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.4.0; pulls `<registry>/logbird-<role>:<version>` |
+| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.4.1; pulls `<registry>/logbird-<role>:<version>` |
 | LOGBIRD_SOURCE_VERSION | local; only the source-build override uses this tag |
 | LOGBIRD_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
 | NODE_ENV / PORT | Source development / 4601; containers force production and service ports |
@@ -268,8 +268,8 @@ instead of pulling, and the image-tag check doesn't apply.
    values and warns if the file still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird`
    namespace; remove that line so the default `ghcr.io/joodlab` applies. It keeps the
    existing `LOGBIRD_VERSION`, and that value overrides the new revision's Compose
-   default, so set it to the tested release without the `v` (tag `v0.4.0` means
-   `LOGBIRD_VERSION=0.4.0`). A `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in
+   default, so set it to the tested release without the `v` (tag `v0.4.1` means
+   `LOGBIRD_VERSION=0.4.1`). A `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in
    your shell overrides the env file: unset it, or set it to the same values. Run
    `docker compose config --images` with the installation's project, env-file and `-f`
    flags and check the full names: all four must be
@@ -294,7 +294,7 @@ for signal handling; its live acceptance is pending in #77.
 
 The normal migrate step adds two event columns for change value kinds using a metadata-only
 `ALTER TABLE … ADD COLUMN`. It leaves existing data parts in place. Earlier writers can keep
-using the migrated table. Kinds are unknown for events written before 0.4.0 (or by an older server during the upgrade), so reads
+using the migrated table. Kinds are unknown for events written before 0.4.1 (or by an older server during the upgrade), so reads
 omit the kind properties for those events. The new API checks for the columns before listening
 and reports a startup error if it cannot read them.
 
@@ -1218,10 +1218,10 @@ already processed by id. Deleting first also keeps a project at its endpoint
 limit able to create the replacement. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
 even when `WEBHOOK_SECRET_KEY` is configured separately. Upgrade all workers
 before enabling masks, and disable masked endpoints before rolling workers back
-to code that predates masks. Releases before 0.4.0, where `actor_email` does not cover the
+to code that predates masks. Releases before 0.4.1, where `actor_email` does not cover the
 impersonator, send and return the impersonator's email in clear to masked
 readers: upgrade every API and worker replica together (or drain the old ones)
-before relying on it. Before rolling back to a release before 0.4.0, disable masked
+before relying on it. Before rolling back to a release before 0.4.1, disable masked
 endpoints and masked keys, stop minting viewer tokens with masks (any read key
 can mint one), and keep viewer-token reads on upgraded replicas until the tokens
 already issued have expired (at most one hour, plus 30 seconds of clock skew).
