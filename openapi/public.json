@@ -168,7 +168,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -184,7 +184,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -1021,7 +1021,7 @@
                                 "type": "string"
                               },
                               "afterKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -1037,7 +1037,7 @@
                                 "type": "string"
                               },
                               "beforeKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -1319,7 +1319,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -1335,7 +1335,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",

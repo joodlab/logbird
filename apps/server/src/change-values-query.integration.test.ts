@@ -342,7 +342,7 @@ it('change values and the impersonator name are query fields; unknown changes.* 
         expect(value?.groups?.map((g) => [g.value, g.count])).toEqual([[query.by === 'action' ? 'article.updated' : 'body', 1]]);
       }
     }
-    // Two 150 KB parents (over the 256 KB URL budget, so they travel as digests): each keeps its own child.
+    // Two 150 KB parents (each over the 127 KiB parameter budget, so they travel as digests): each keeps its own child.
     for (const bearer of [plain.secret, masked.secret]) {
       const r = await get(
         bearer,
