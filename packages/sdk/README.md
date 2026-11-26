@@ -8,7 +8,8 @@ require a private workspace package. Keep envelope additions synchronized with c
 
 `@logbird/sdk` is not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases)
 attaches it as `logbird-sdk-X.Y.Z.tgz` (built JavaScript and type declarations) with a
-`SHA256SUMS` file. Download both, verify, and install the file. The commands are one
+`SHA256SUMS` file. Publishing to the npm registry is planned and would remove the need for
+either tarball recipe. For now, download both, verify, and install the file. The commands are one
 chain, so a failed download or a checksum that does not match stops it before the install
 (on macOS, use `shasum -a 256 --check` for `sha256sum --check`; with npm, `npm install` for
 `pnpm add`):
@@ -42,7 +43,8 @@ checkout of this repository is for contributors ([CONTRIBUTING.md](https://githu
 Run the download and verification from the package that uses the SDK. Commit its
 `vendor/logbird/` directory and the workspace lockfile. Use
 `file:vendor/logbird/logbird-sdk-X.Y.Z.tgz` in that package's `package.json`.
-A root-level tarball also works when the build keeps it. A pruned build that omits it fails with `ENOENT`.
+A root-level tarball also works when the build keeps it. A clean frozen install fails with
+`ENOENT` if pruning omits the tarball.
 
 In a small pnpm 11.8.0 workspace, both `pnpm install --lockfile-only` from the root and
 `pnpm --filter <package> add <Release URL>` wrote the hash and passed a frozen reinstall.
@@ -53,8 +55,6 @@ with a missing hash prints this error.
 ```text
 [ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
 ```
-
-Publishing to the npm registry would remove the need for either tarball recipe. It is planned and still pending.
 
 ## Capture
 

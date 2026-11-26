@@ -26,7 +26,8 @@ Each GitHub Release attaches them instead: `logbird-sdk-X.Y.Z.tgz`, `logbird-hon
 `logbird-vue-X.Y.Z.tgz`, `logbird-nuxt-X.Y.Z.tgz` and `logbird-tanstack-start-X.Y.Z.tgz`,
 built JavaScript with type declarations, packed exactly as a publish to npm would pack them, plus a
 `SHA256SUMS` file. Install an exact version from those files. (Releases before 0.4.1 have
-none; use 0.4.1 or later.)
+none; use 0.4.1 or later.) Publishing to the npm registry is planned and would remove
+the need for either tarball recipe.
 
 Requirements, as the packages' manifests state them:
 
@@ -155,8 +156,9 @@ Verify the tarball as above, then commit it under the package that uses it, for 
 `apps/api/vendor/logbird/`. Use `file:vendor/logbird/logbird-sdk-X.Y.Z.tgz` in that package's
 `package.json` and commit the workspace lockfile. In a full checkout, a path to a tarball
 at the workspace root also works. If your build prunes the workspace before installing,
-the tarball must still be present at the path in the lockfile. Keeping it inside the app
-lets it travel with the app. Omitting a root-level tarball makes the frozen install fail with `ENOENT`.
+the tarball must still be present at the path in the lockfile. Include the app's `vendor/logbird/`
+directory in the files copied into the build. If the build omits a root-level tarball, a clean frozen
+install fails with `ENOENT`.
 
 For `@logbird/sdk` alone, pnpm 11.8.0 wrote SHA-512 integrity and passed `pnpm install --frozen-lockfile`
 in our small workspace with both `pnpm install --lockfile-only` from the root and
@@ -168,8 +170,6 @@ When a URL entry lacks integrity, pnpm refuses the frozen install and prints thi
 ```text
 [ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
 ```
-
-Publishing to the npm registry would remove the need for either tarball recipe. It is planned and still pending.
 
 ## Model the event
 

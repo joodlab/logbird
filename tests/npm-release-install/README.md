@@ -39,7 +39,7 @@ pin belongs to the test application, not to the documented recipe.
 
 `--workspace` runs a separate SDK-only check against the pnpm version pinned in `pnpm11/package.json`.
 Each case starts with a root, two packages and a shared lockfile. The SDK has no registry dependencies.
-With default pnpm settings, all four cases must record the released tarball's SHA-512 integrity and
+With default supply-chain policies, all four cases must record the released tarball's SHA-512 integrity and
 pass a frozen reinstall with an empty store:
 
 | Source | How the SDK enters the workspace |

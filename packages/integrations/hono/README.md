@@ -13,7 +13,8 @@
 
 ## Install
 
-Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches
+Publishing to the npm registry is planned and would remove the need for the tarball install.
+Each [GitHub Release](https://github.com/joodlab/logbird/releases) currently attaches
 `logbird-hono-X.Y.Z.tgz` and `logbird-sdk-X.Y.Z.tgz` with a `SHA256SUMS` file. Download both
 into `vendor/logbird/`, verify both against `SHA256SUMS` (stop if either does not print `OK`),
 depend on both files, and override `@logbird/sdk` to the same SDK tarball (this package
@@ -35,10 +36,10 @@ The full recipe, with the download commands and the lockfile check, is in
 
 ### pnpm 11 workspaces
 
-Keep the verified tarballs in the app's `vendor/logbird/` when the build prunes the workspace
-before installing. Put the override in the root `pnpm-workspace.yaml` and write its `file:`
-path from the workspace root. The SDK-only check passed frozen reinstalls with a tarball at
-either location in a full checkout. A pruned build that omits the root tarball fails with `ENOENT`.
+For `@logbird/sdk` alone, the workspace check passed frozen reinstalls with the verified tarball
+under the app's `vendor/logbird/` or at the workspace root. In an app-only prune, keeping the app's
+`vendor/logbird/` directory let the frozen reinstall pass. A clean frozen install failed with
+`ENOENT` when the prune omitted the root tarball.
 
 For the SDK alone, root resolution and `pnpm --filter <package> add <Release URL>` both worked
 in the small pnpm 11.8.0 check. A pnpm 11 workspace reported unrelated peer changes after a
@@ -48,8 +49,6 @@ missing hash prints this error.
 ```text
 [ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
 ```
-
-Publishing to the npm registry would remove the need for either tarball recipe. It is planned and still pending.
 
 ## Usage
 
