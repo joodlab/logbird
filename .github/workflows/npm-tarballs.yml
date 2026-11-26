@@ -51,6 +51,19 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: node scripts/npm-release-assets.mjs pack "$RUNNER_TEMP/npm" "$VERSION"
+      - uses: actions/setup-node@v7
+        if: github.event_name == 'pull_request' && !inputs.release
+        with:
+          node-version: '24.22.3'
+          package-manager-cache: false
+      - name: Dry-run npm publish for the five tarballs
+        if: github.event_name == 'pull_request' && !inputs.release
+        run: |
+          npm install --global --ignore-scripts --registry=https://registry.npmjs.org npm@12.1.0
+          cd "$RUNNER_TEMP/npm"
+          for tarball in ./*.tgz; do
+            npm publish "$tarball" --dry-run --offline --tag=latest --registry=https://registry.npmjs.org
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: npm-packages

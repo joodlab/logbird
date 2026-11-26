@@ -34,7 +34,7 @@ test('the parser finds every job of release.yml with its steps', () => {
   );
   assert.deepEqual(
     jobs.map((j) => j.id),
-    ['preflight', 'npm', 'build', 'images', 'release', 'aliases', 'nuget'],
+    ['preflight', 'npm', 'build', 'images', 'release', 'aliases', 'nuget', 'npm-publish'],
   );
   for (const j of jobs) assert.ok(j.reusable || j.steps.length > 0, `${j.id} has steps`);
   const images = jobs.find((j) => j.id === 'images');
@@ -111,4 +111,19 @@ jobs:
 
 test('refuses a workflow in which it finds no jobs', () => {
   assert.match(checkoutOrderViolations('on: push\njobs: {}\n')[0], /no jobs found/);
+});
+
+test('npm publishing follows the Release and has only OIDC and read permissions', () => {
+  const workflow = readFileSync(
+    workflowFiles().find((file) => basename(file) === 'release.yml'),
+    'utf8',
+  ).replaceAll('\r', '');
+  const publish = workflow.match(/^ {2}npm-publish:\n(?:^ {4}.*\n)+/m)?.[0];
+  assert.ok(publish);
+  assert.match(publish, /^ {4}needs: \[preflight, release, aliases\]$/m);
+  assert.match(publish, /^ {4}if: vars\.NPM_PUBLISH_ENABLED == 'true'$/m);
+  assert.match(publish, /^ {4}permissions:\n {6}contents: read\n {6}id-token: write\n {4}steps:$/m);
+  assert.match(publish, /^ {10}persist-credentials: false$/m);
+  assert.doesNotMatch(publish, /NODE_AUTH_TOKEN|NPM_TOKEN|secrets\.|github\.token|\bpack\b/);
+  assert.match(publish, /run: node scripts\/npm-publish\.mjs /);
 });
