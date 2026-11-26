@@ -537,20 +537,25 @@ function sharedArrays(field: string, by: string): SharedArrays | undefined {
   return { join: `ARRAY JOIN arrayZip(${a},${b}) AS facet_changes`, changeRef: (column) => `facet_changes.${column === a ? 1 : 2}` };
 }
 /**
- * How the second facet level selects its parents. Query parameters travel in the URL (ClickHouse refuses large
- * multipart fields too), so the exact values go as before unless they would make the URL large: a change value can be
- * 200 KB. Then they travel as MD5 digests, compared in SQL, and rows are matched back to parents by exact value.
+ * How the second facet level selects its parents. Query parameters travel in the URL, so the exact values go as before
+ * unless their parameter would exceed what ClickHouse accepts: `http_max_field_value_size` (128 KiB by default, the
+ * decoded value) and `http_max_uri_size` (1 MiB, the encoded URL); large multipart fields are refused too. A change
+ * value can be 200 KB. Then the parents travel as MD5 digests, compared in SQL, and rows are matched back by exact value.
  */
-const PARENTS_URL_BUDGET = 256 * 1024;
+const PARENTS_VALUE_BUDGET = 127 * 1024;
+const PARENTS_URL_BUDGET = 512 * 1024;
 /** A string as @clickhouse/client writes it inside an Array(String) parameter: quoted, with these five escapes. */
 const ESCAPES: Record<string, string> = { '\t': '\\t', '\n': '\\n', '\r': '\\r', "'": "\\'", '\\': '\\\\' };
 const paramLiteral = (text: string) => `'${text.replace(/[\t\n\r'\\]/g, (c) => ESCAPES[c] ?? c)}'`;
-/** The size of the `param_<name>` URL entry the driver would send for `texts`, exactly as form-encoded. */
-export function parentParamUrlBytes(name: string, texts: string[]) {
-  return new URLSearchParams({ [`param_${name}`]: `[${texts.map(paramLiteral).join(',')}]` }).toString().length;
+/** The `param_<name>` value the driver would send for `texts` (UTF-8 bytes) and its form-encoded URL entry (bytes). */
+export function parentParamSize(name: string, texts: string[]) {
+  const value = `[${texts.map(paramLiteral).join(',')}]`;
+  return { valueBytes: Buffer.byteLength(value), urlBytes: new URLSearchParams({ [`param_${name}`]: value }).toString().length };
 }
 function parentFilter(texts: string[], expr: string, name: string) {
-  if (parentParamUrlBytes(name, texts) <= PARENTS_URL_BUDGET) return { sql: `${expr} IN {${name}:Array(String)}`, params: { [name]: texts } };
+  const size = parentParamSize(name, texts);
+  if (size.valueBytes <= PARENTS_VALUE_BUDGET && size.urlBytes <= PARENTS_URL_BUDGET)
+    return { sql: `${expr} IN {${name}:Array(String)}`, params: { [name]: texts } };
   const digests = texts.map((t) => createHash('md5').update(t, 'utf8').digest('hex'));
   return { sql: `lower(hex(MD5(${expr}))) IN {${name}Digests:Array(String)}`, params: { [`${name}Digests`]: digests } };
 }

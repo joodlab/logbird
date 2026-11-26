@@ -90,6 +90,10 @@ A value matches its stored text, exactly and case-sensitively:
 | absent (no `before` or no `after`) | empty text (the same as an empty string) | `changes.before:""` |
 | an array or object | compact JSON text | `changes.after:"[\"a\",\"b\"]"` |
 
+Queries match only that text: `null` and the text "null", or an absent value and an empty string, match the same
+terms. A returned change also carries `beforeKind` and `afterKind` (`absent`, `null`, `string`, `number`, `boolean`,
+`json`), which tell them apart when reading; those kinds are not query fields.
+
 `changes.before:*` and `changes.after:*` mean some change has a non-empty value on that side. Up to 256 changes per
 event are indexed. Facets on these fields count elements, not events: an event with two changes to the same value
 counts twice. A two-level facet over two of them (`field=changes.field&by=changes.after`) pairs each field with its

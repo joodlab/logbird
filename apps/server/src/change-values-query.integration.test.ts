@@ -246,16 +246,16 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       return (r.body.data as { id: string }[]).map((e) => e.id).sort();
     };
 
-    // The stored text forms the values match (what the docs promise), read back through detail.
+    // The stored text forms the values match (what the docs promise), read back through detail with their kinds.
     const c4 = await get(reader.secret, '/events/c4');
     expect(c4.status).toBe(200);
     expect(c4.body.event.changes).toEqual([
-      { field: 'price', before: '10', after: '12.5' },
-      { field: 'note', before: 'null', after: '' },
-      { field: 'flag', before: 'false', after: 'true' },
-      { field: 'tags', before: '["a"]', after: '["a","b"]' },
-      { field: 'meta', before: '', after: '{"k":1}' },
-      { field: 'big', before: '', after: '12345678901234567890' },
+      { field: 'price', before: '10', after: '12.5', beforeKind: 'number', afterKind: 'number' },
+      { field: 'note', before: 'null', after: '', beforeKind: 'null', afterKind: 'absent' },
+      { field: 'flag', before: 'false', after: 'true', beforeKind: 'boolean', afterKind: 'boolean' },
+      { field: 'tags', before: '["a"]', after: '["a","b"]', beforeKind: 'json', afterKind: 'json' },
+      { field: 'meta', before: '', after: '{"k":1}', beforeKind: 'absent', afterKind: 'json' },
+      { field: 'big', before: '', after: '12345678901234567890', beforeKind: 'absent', afterKind: 'number' },
     ]);
 
     const PROBES: { q: string; rows: string[] }[] = [
@@ -352,7 +352,7 @@ it('change values and the impersonator name are query fields; unknown changes.* 
       const pairs = Object.fromEntries(
         facetResponseSchema.parse(r.body).values.map((v) => [v.value.slice(0, 6), v.groups?.map((g) => [g.value, g.count])]),
       );
-      expect(pairs).toEqual({ 'long:x': [['body', 1]], long2: [['notes', 1]] });
+      expect(pairs).toEqual({ 'long:x': [['body', 1]], 'long2:': [['notes', 1]] });
     }
     // Many medium-length parents (about 90 KB of them) at the second level, masked and unmasked.
     for (const bearer of [reader.secret, masked3.secret]) {
@@ -397,6 +397,21 @@ it('change values and the impersonator name are query fields; unknown changes.* 
     for (const q of ['impersonator.name:"rita@example.invalid"', 'impersonator.name:rita*', 'impersonator.name:/.*@.*/'])
       expect(await ids(masked.secret, q), q).toEqual([]);
     expect(await ids(plain.secret, 'impersonator.name:/.*@.*/')).toEqual(['i2']);
+    // The mask's case rule (#396) holds next to the new field: impersonator.name is a column, but any other spelling is
+    // an attribute lookup on a masked path (a literal copy of the name) and is refused under the mask, at any case.
+    for (const path of [
+      `/events?${new URLSearchParams({ q: 'Impersonator.name:x', from })}`,
+      `/events?${new URLSearchParams({ q: 'attr.IMPERSONATOR.NAME:*', from })}`,
+      `/events?${new URLSearchParams({ q: 'attr.impersonator.name:x', from })}`,
+      `/facets?${new URLSearchParams({ field: 'attr.Impersonator.Name', from })}`,
+      `/facets?${new URLSearchParams({ field: 'action', by: 'attributes.impersonator.NAME', from })}`,
+    ]) {
+      const r = await get(masked.secret, path);
+      expect(r.status, path).toBe(422);
+      expect(r.body.error, path).toMatchObject({ code: 'invalid_query', details: { reason: 'not_allowed' } });
+      // Unmasked, the same spellings are ordinary attribute lookups.
+      expect((await get(plain.secret, path)).status, `unmasked ${path}`).toBe(200);
+    }
     const pseudonym = maskedEmail(projectId, 'rita@example.invalid', fieldMaskKey(env.BETTER_AUTH_SECRET), 'impersonator');
     const names = await get(masked.secret, `/facets?${new URLSearchParams({ field: 'impersonator.name', from })}`);
     expect(names.status, names.text).toBe(200);

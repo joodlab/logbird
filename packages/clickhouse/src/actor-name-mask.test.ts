@@ -12,7 +12,7 @@ import {
 } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { compileMaskedQuery } from './field-mask';
-import { facets, parentParamUrlBytes, searchEvents } from './queries';
+import { facets, parentParamSize, searchEvents } from './queries';
 import { compileQuery } from './query';
 
 // #333: under the actor_email mask, a reader cannot obtain the actor's address from the actor's own fields (email,
@@ -283,18 +283,24 @@ describe('facets under the actor_email mask', () => {
     );
   });
 
-  it('measures the parent parameter exactly as the driver form-encodes it', () => {
-    // Apostrophes are escaped (\\') and percent-encoded (%5C%27): six bytes each. Spaces become '+': one byte each.
-    expect(parentParamUrlBytes('facetValues', ["'".repeat(1000)])).toBe('param_facetValues='.length + 3 + 3 + 1000 * 6 + 3 + 3);
-    expect(parentParamUrlBytes('facetValues', [' '.repeat(1000)])).toBe('param_facetValues='.length + 3 + 3 + 1000 + 3 + 3);
+  it('measures the parent parameter exactly as the driver writes and form-encodes it', () => {
+    // An apostrophe is written \\' (two bytes) and form-encoded %5C%27 (six); a space stays one byte and becomes '+'.
+    expect(parentParamSize('facetValues', ["'".repeat(1000)])).toEqual({
+      valueBytes: 2 + 2 + 2000,
+      urlBytes: 'param_facetValues='.length + 3 + 3 + 6000 + 3 + 3,
+    });
+    expect(parentParamSize('facetValues', [' '.repeat(1000)])).toEqual({
+      valueBytes: 2 + 2 + 1000,
+      urlBytes: 'param_facetValues='.length + 3 + 3 + 1000 + 3 + 3,
+    });
   });
 
-  it('sends apostrophe-heavy parents as digests and space-heavy ones as exact values around the 256 KB budget', async () => {
-    const quotes = "'".repeat(180_000);
-    const spaces = ' '.repeat(200_000);
+  it('keeps parents exact up to the 127 KiB value budget and sends larger ones as digests', async () => {
     for (const [value, digests] of [
-      [quotes, true],
-      [spaces, false],
+      ['x'.repeat(120_000), false],
+      [' '.repeat(120_000), false],
+      ["'".repeat(70_000), true],
+      ['x'.repeat(140_000), true],
     ] as const) {
       const plain = client([[{ value, label: value, count: 1, total: 1 }], []]);
       await facets(plain.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 });
