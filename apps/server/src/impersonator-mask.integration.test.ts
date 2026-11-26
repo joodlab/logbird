@@ -267,6 +267,16 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         actor,
         impersonator: { id: 'sup_case3', name: 'Case Support', EMAIL: { work: 'nadia.work@example.invalid' } },
       },
+      // An empty exact email beside a populated variant, and a name holding another address: the name rule (TS events and
+      // SQL facet labels alike) judges against the populated variant, so the name shows that address's pseudonym.
+      {
+        id: 'qa-imp-18',
+        occurredAt: ts(18),
+        action: 'article.updated',
+        tenant,
+        actor,
+        impersonator: { id: 'sup_shadow', name: 'Shadow <nadia.other@example.invalid>', email: '', Email: 'Nadia.Shadow@example.invalid' },
+      },
     ];
     const ingested = await app.request('/v1/events', {
       method: 'POST',
@@ -340,6 +350,7 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       sup_case1: 'Case Support',
       sup_case2: 'Case Support',
       sup_case3: 'Case Support',
+      sup_shadow: imp('nadia.shadow@example.invalid'),
       '': '',
     };
     // Expected two-level facets, computed from the fixture: value -> { count, groups: { group -> count } }.
@@ -406,6 +417,10 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       'qa-imp-15': { name: 'Case Support', attributes: { 'impersonator.Email': imp('nadia.case@example.invalid') } },
       'qa-imp-16': { name: 'Case Support', attributes: { 'Impersonator.email': imp('nadia.top@example.invalid') } },
       'qa-imp-17': { name: 'Case Support', attributes: {} },
+      'qa-imp-18': {
+        name: imp('nadia.shadow@example.invalid'),
+        attributes: { 'impersonator.email': '', 'impersonator.Email': imp('nadia.shadow@example.invalid') },
+      },
     };
     type Event = { id: string; impersonator: { id: string; name: string } | null; attributes: Record<string, string> };
     const impersonatorOf = (e: Event) => ({
@@ -435,7 +450,7 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       { q: '_exists_:"impersonator.email.omar.desk@example.invalid"', rows: ['qa-imp-6'] },
       { q: 'attr.impersonator.name:Rita*', rows: ['qa-imp-1'] },
       { q: 'attr.impersonator.name.en:*', rows: ['qa-imp-3'] },
-      { q: 'impersonator.Email:*', rows: ['qa-imp-15'] },
+      { q: 'impersonator.Email:*', rows: ['qa-imp-15', 'qa-imp-18'] },
       { q: 'attr.Impersonator.email:nadia*', rows: ['qa-imp-16'] },
       { q: 'impersonator.EMAIL.work:/.*@.*/', rows: ['qa-imp-17'] },
       { q: 'NOT impersonator.Email:x AND impersonator:sup_case1', rows: ['qa-imp-15'] },

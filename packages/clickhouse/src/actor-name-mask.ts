@@ -69,16 +69,18 @@ const ACTOR: Party = { name: 'actor_name', email: 'actor_email' };
 /** The impersonator's name column and the attribute ingest keeps their email in (`impersonator` stores id and name only). */
 export const IMPERSONATOR_EMAIL_ATTRIBUTE = 'impersonator.email';
 /**
- * The impersonator's email in SQL: the attribute `impersonator.email`, or else the first attribute whose key is that
- * path in another ASCII case (`impersonator.Email`), like `impersonatorEmailOf` in TypeScript.
+ * The impersonator's email in SQL: the attribute `impersonator.email` when it is non-empty, else the first non-empty
+ * attribute whose key is that path in another ASCII case (`impersonator.Email`), like `impersonatorEmailOf`. An empty
+ * key never shadows a populated variant, so the name rule always judges against an address when there is one.
  */
-const IMPERSONATOR_EMAIL_SQL = `if(mapContains(attributes,'${IMPERSONATOR_EMAIL_ATTRIBUTE}'),attributes['${IMPERSONATOR_EMAIL_ATTRIBUTE}'],arrayElement(mapValues(attributes),indexOf(arrayMap(k -> lower(k),mapKeys(attributes)),'${IMPERSONATOR_EMAIL_ATTRIBUTE}')))`;
+const IMPERSONATOR_EMAIL_SQL = `if(attributes['${IMPERSONATOR_EMAIL_ATTRIBUTE}']!='',attributes['${IMPERSONATOR_EMAIL_ATTRIBUTE}'],arrayFirst(v -> v != '',arrayFilter((v, k) -> lower(k) = '${IMPERSONATOR_EMAIL_ATTRIBUTE}',mapValues(attributes),mapKeys(attributes))))`;
 const IMPERSONATOR: Party = { name: 'impersonator_name', email: IMPERSONATOR_EMAIL_SQL };
-/** The impersonator's email in an event's attributes: the exact key, else the first key equal to it in ASCII case. */
+/** The impersonator's email in an event's attributes: the exact key if non-empty, else the first non-empty ASCII-case variant. */
 export function impersonatorEmailOf(attributes: Record<string, string>) {
-  if (Object.hasOwn(attributes, IMPERSONATOR_EMAIL_ATTRIBUTE)) return attributes[IMPERSONATOR_EMAIL_ATTRIBUTE] ?? '';
+  const exact = attributes[IMPERSONATOR_EMAIL_ATTRIBUTE];
+  if (exact) return exact;
   for (const [key, value] of Object.entries(attributes))
-    if (key.replace(/[A-Z]/g, (c) => c.toLowerCase()) === IMPERSONATOR_EMAIL_ATTRIBUTE) return value;
+    if (value && key.replace(/[A-Z]/g, (c) => c.toLowerCase()) === IMPERSONATOR_EMAIL_ATTRIBUTE) return value;
   return '';
 }
 

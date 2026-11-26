@@ -168,6 +168,18 @@ describe('masks', () => {
     const turkish = { ...variants, attributes: { 'impersonator.emaİl': 'x' } } as unknown as AuditEvent;
     expect(maskEvent(turkish, ['actor_email']).attributes['impersonator.emaİl']).toBe('x');
   });
+  it('judges the impersonator name against the first non-empty email spelling, never an empty one', () => {
+    const shadowed = {
+      ...event,
+      impersonator: { id: 'sup_1', name: 'rita@example.invalid' },
+      attributes: { 'impersonator.email': '', 'IMPERSONATOR.EMAIL': '', 'impersonator.Email': 'Rita@example.invalid' },
+    } as unknown as AuditEvent;
+    const masked = maskEvent(shadowed, ['actor_email']);
+    // The name hashes the populated variant, so name and email pseudonyms are equal whatever the name holds.
+    expect(masked.impersonator?.name).toBe(masked.attributes['impersonator.Email']);
+    const other = { ...shadowed, impersonator: { id: 'sup_1', name: 'someone@else.invalid' } } as unknown as AuditEvent;
+    expect(maskEvent(other, ['actor_email']).impersonator?.name).toBe(masked.attributes['impersonator.Email']);
+  });
   it('derives pseudonyms from a pinned HMAC input per role', () => {
     // An independent vector: HMAC-SHA256 over the documented input, so an unkeyed or re-keyed change fails here.
     const key = Buffer.alloc(32, 9);
