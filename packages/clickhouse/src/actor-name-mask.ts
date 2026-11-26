@@ -68,7 +68,19 @@ type Party = { name: string; email: string };
 const ACTOR: Party = { name: 'actor_name', email: 'actor_email' };
 /** The impersonator's name column and the attribute ingest keeps their email in (`impersonator` stores id and name only). */
 export const IMPERSONATOR_EMAIL_ATTRIBUTE = 'impersonator.email';
-const IMPERSONATOR: Party = { name: 'impersonator_name', email: `attributes['${IMPERSONATOR_EMAIL_ATTRIBUTE}']` };
+/**
+ * The impersonator's email in SQL: the attribute `impersonator.email`, or else the first attribute whose key is that
+ * path in another ASCII case (`impersonator.Email`), like `impersonatorEmailOf` in TypeScript.
+ */
+const IMPERSONATOR_EMAIL_SQL = `if(mapContains(attributes,'${IMPERSONATOR_EMAIL_ATTRIBUTE}'),attributes['${IMPERSONATOR_EMAIL_ATTRIBUTE}'],arrayElement(mapValues(attributes),indexOf(arrayMap(k -> lower(k),mapKeys(attributes)),'${IMPERSONATOR_EMAIL_ATTRIBUTE}')))`;
+const IMPERSONATOR: Party = { name: 'impersonator_name', email: IMPERSONATOR_EMAIL_SQL };
+/** The impersonator's email in an event's attributes: the exact key, else the first key equal to it in ASCII case. */
+export function impersonatorEmailOf(attributes: Record<string, string>) {
+  if (Object.hasOwn(attributes, IMPERSONATOR_EMAIL_ATTRIBUTE)) return attributes[IMPERSONATOR_EMAIL_ATTRIBUTE] ?? '';
+  for (const [key, value] of Object.entries(attributes))
+    if (key.replace(/[A-Z]/g, (c) => c.toLowerCase()) === IMPERSONATOR_EMAIL_ATTRIBUTE) return value;
+  return '';
+}
 
 function partySql({ name, email }: Party) {
   const N = sqlNormalized(name);

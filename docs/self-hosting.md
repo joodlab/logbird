@@ -1207,8 +1207,10 @@ pending deliveries go with it), then create a new one with the corrected filter.
 The new endpoint has a new signing secret, so update the receiver, and its
 cursor starts at creation, so events that arrived while the old one was held
 are not delivered, and the deleted endpoint's pending deliveries (including any
-queued before the hold) are gone. Before deleting, note the held endpoint's
-cursor time (the last arrival it scanned). To fill the gap, export with the
+queued before the hold) are gone. Before deleting, note the earlier of the held
+endpoint's cursor time (the last arrival it scanned) and the arrival time
+(`receivedAt`) of its oldest delivery that is still pending or failed, so an
+event queued but never received is covered. To fill the gap, export with the
 same masked scope, the replacement filter plus `receivedAt:>=<that time>`, and a
 `from` wide enough to include events that occurred earlier but arrived late
 (export ranges select by occurrence time), then skip events the receiver has

@@ -4,7 +4,7 @@ import {
   ACTOR_NAME_MASK_PARAMS,
   actorNameIsSensitive,
   actorNamePseudonymInput,
-  IMPERSONATOR_EMAIL_ATTRIBUTE,
+  impersonatorEmailOf,
   maskActorNameInFilter,
   maskedEmail,
 } from './actor-name-mask';
@@ -41,7 +41,7 @@ export function maskEvent(event: AuditEvent, mask: Masks, secret?: Buffer): Audi
     // ingest keeps as an attribute. Read before the attributes below are pseudonymized. Their pseudonyms are keyed by
     // role, so they never equal an actor's (maskedEmail).
     if (masked.impersonator) {
-      const email = event.attributes[IMPERSONATOR_EMAIL_ATTRIBUTE] ?? '';
+      const email = impersonatorEmailOf(event.attributes);
       const { name } = masked.impersonator;
       if (actorNameIsSensitive(name, email))
         masked.impersonator = {

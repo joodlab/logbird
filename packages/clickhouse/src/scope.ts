@@ -43,11 +43,13 @@ export const MASKED_COLUMNS: Record<NonNullable<ReadScope['mask']>[number], stri
 };
 /**
  * Attribute paths a mask removes (an event may carry them as literal dotted keys), each with every path below it: a
- * literal key whose value is an object is flattened into child attributes (`"actor.name": {"en": ...}`).
+ * literal key whose value is an object is flattened into child attributes (`"actor.name": {"en": ...}`). Every
+ * masked path matches attribute keys case-insensitively in ASCII (`impersonator.Email`, `Context.IP`): ingest keeps
+ * a key's case, and a privacy mask must not depend on the producer's spelling. Paths here are written in lower case.
  */
 export const MASKED_ATTRIBUTES: Record<NonNullable<ReadScope['mask']>[number], string[]> = {
   ip: ['context.ip'],
-  user_agent: ['context.userAgent'],
+  user_agent: ['context.useragent'],
   // Literal dotted copies of the masked fields (a top-level `"impersonator.name": ...` key is stored as an attribute):
   // the name rule cannot judge them against their email, so they go, like `actor.email`.
   actor_email: ['actor.email', 'actor.name', 'impersonator.name'],
@@ -63,13 +65,18 @@ export const PSEUDONYMIZED_ATTRIBUTES: Record<NonNullable<ReadScope['mask']>[num
   user_agent: [],
   actor_email: ['impersonator.email'],
 };
-/** Whether `mask` pseudonymizes attribute `key`. */
+/** ASCII lower case only (A-Z), the same as ClickHouse `lower`: Unicode case tables differ between the runtimes. */
+export const asciiLower = (text: string) => text.replace(/[A-Z]/g, (c) => c.toLowerCase());
+/** Whether `mask` pseudonymizes attribute `key` (the path itself, in any ASCII case). */
 export const pseudonymizedAttribute = (mask: ReadScope['mask'], key: string) =>
-  Boolean(mask?.some((preset) => PSEUDONYMIZED_ATTRIBUTES[preset].includes(key)));
-/** Whether `mask` removes attribute `key` because it lies below a pseudonymized path. */
+  Boolean(mask?.some((preset) => PSEUDONYMIZED_ATTRIBUTES[preset].includes(asciiLower(key))));
+/** Whether `mask` removes attribute `key` because it lies below a pseudonymized path (in any ASCII case). */
 export const belowPseudonymizedAttribute = (mask: ReadScope['mask'], key: string) =>
-  Boolean(mask?.some((preset) => PSEUDONYMIZED_ATTRIBUTES[preset].some((path) => key.startsWith(`${path}.`))));
-const atOrBelow = (key: string, path: string) => key === path || key.startsWith(`${path}.`);
+  Boolean(mask?.some((preset) => PSEUDONYMIZED_ATTRIBUTES[preset].some((path) => asciiLower(key).startsWith(`${path}.`))));
+const atOrBelow = (key: string, path: string) => {
+  const k = asciiLower(key);
+  return k === path || k.startsWith(`${path}.`);
+};
 /** Whether `mask` removes attribute `key`: a masked path, a path below one, or a path below a pseudonymized one. */
 export const removedAttribute = (mask: ReadScope['mask'], key: string) =>
   Boolean(mask?.some((preset) => MASKED_ATTRIBUTES[preset].some((path) => atOrBelow(key, path)))) || belowPseudonymizedAttribute(mask, key);

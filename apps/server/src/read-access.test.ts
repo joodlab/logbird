@@ -143,6 +143,31 @@ describe('masks', () => {
     } as unknown as AuditEvent;
     expect(maskEvent(children, ['actor_email', 'ip']).attributes).toEqual({ 'actor.nameplate': 'kept' });
   });
+  it('matches every masked attribute path in any ASCII case', () => {
+    const variants = {
+      ...event,
+      impersonator: { id: 'sup_1', name: 'Rita Support' },
+      attributes: {
+        'impersonator.Email': 'Rita@example.invalid',
+        'Impersonator.email': 'rita.alt@example.invalid',
+        'impersonator.EMAIL.work': 'rita.work@example.invalid',
+        'Actor.Email': 'lina@example.invalid',
+        'IMPERSONATOR.NAME': 'rita@example.invalid',
+        'Context.IP': '203.0.113.9',
+        'context.UserAgent.raw': 'UA/2',
+        'metadata.plan': 'pro',
+      },
+    } as unknown as AuditEvent;
+    const masked = maskEvent(variants, ['actor_email', 'ip', 'user_agent']);
+    // The path itself in another case is pseudonymized; paths below it and other masked paths are removed.
+    expect(Object.keys(masked.attributes).sort()).toEqual(['Impersonator.email', 'impersonator.Email', 'metadata.plan']);
+    expect(masked.attributes['impersonator.Email']).toMatch(/^masked:[0-9a-f]{24}$/);
+    expect(masked.attributes['Impersonator.email']).toMatch(/^masked:[0-9a-f]{24}$/);
+    expect(JSON.stringify(masked)).not.toMatch(/example\.invalid|203\.0\.113\.9|UA\/2/);
+    // Non-ASCII letters are not folded (only A-Z): the runtimes' Unicode case tables differ.
+    const turkish = { ...variants, attributes: { 'impersonator.emaİl': 'x' } } as unknown as AuditEvent;
+    expect(maskEvent(turkish, ['actor_email']).attributes['impersonator.emaİl']).toBe('x');
+  });
   it('derives pseudonyms from a pinned HMAC input per role', () => {
     // An independent vector: HMAC-SHA256 over the documented input, so an unkeyed or re-keyed change fails here.
     const key = Buffer.alloc(32, 9);
