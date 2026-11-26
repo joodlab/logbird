@@ -444,6 +444,11 @@ history, keep read keys server-side and authorize tenant and target on every
 request, including cursor requests. A search filter alone is not authorization.
 See [framework integrations](integrations.md).
 
+## Read the history back
+
+To rebuild a record's complete history from what you send (time window, paging, who did it, what changed, causation,
+cuts and late arrivals), follow [Read a record's whole history back](reading-history.md).
+
 ## Show customers their own audit trail
 
 To show each business or website only its own events, keep one `read` key on your server and mint short-lived
