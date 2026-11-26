@@ -4,23 +4,27 @@ This guide shows how to rebuild a complete change history from Logbird with a re
 who did it, what changed each time, and what caused what. Follow it top to bottom. Each section states a rule and
 shows the call that applies it. The checklist at the end lists what to confirm before you call a history complete.
 
-Every call below was run against a local Logbird server with a fictional fixture: an article `art_100` ("Spring
-guide") in tenant `biz_atlas`, edited by a writer, an editor and a support agent, published by a background job that
-failed once. The `curl` outputs of sections 1 to 9 show the fixture before the two late events of section 10 arrived;
-the script and SDK runs came later and include them. The outputs are trimmed with [`jq`](https://jqlang.org/). The fixed dates in the examples reproduce the fixture: for your own project, carry
-your own window, tenant and record through each call.
+## What you need
 
-You need the server's public origin and a read key (`lb_read_…`). The examples need a server with `GET /v1/project`
-and, for the SDK recipes, an SDK with `readHistoryHorizon` (TypeScript) or `GetHistoryHorizonAsync` (.NET). Keep read
-keys on servers: a project read key reads the whole project.
+- **A read key** (`lb_read_…`) for the project, or a tenant-scoped key or viewer token for one customer's history.
+  Keep read keys on servers: a project read key reads the whole project.
+- **The base URL** of your Logbird server: its public origin, for example `https://audit.example.com`.
+- **How far back history reaches:** `GET /v1/project` answers with the project's retention policy and the oldest
+  event your key can find (section 1). Start every whole-history read there.
+- For the recipes: `bash`, `curl` and `jq` for the shell examples, `@logbird/sdk/read` (with `readHistoryHorizon`) for
+  TypeScript, and `LogbirdReadClient` (with `GetHistoryHorizonAsync`) from the `Logbird` package for .NET.
 
 ```sh
 export LOGBIRD_URL=https://audit.example.com
 export LOGBIRD_READ_KEY=lb_read_...
 ```
 
-The shell examples use `bash`, `curl` and `jq`. The TypeScript recipes use `@logbird/sdk/read` and the .NET recipes
-use `LogbirdReadClient` from the `Logbird` package.
+Every call below was run against a local Logbird server with a fictional fixture: an article `art_100` ("Spring
+guide") in tenant `biz_atlas`, edited by a writer, an editor and a support agent, published by a background job that
+failed once. The `curl` outputs of sections 1 to 9 show the fixture before the two late events of section 10 arrived;
+the script and SDK runs came later and include them. The outputs are trimmed with [`jq`](https://jqlang.org/). The
+fixed dates in the examples reproduce the fixture: for your own project, carry your own window, tenant and record
+through each call.
 
 ## 1. One record's history
 
@@ -45,14 +49,18 @@ curl -s -G "$LOGBIRD_URL/v1/events" -H "Authorization: Bearer $LOGBIRD_READ_KEY"
 Add `tenant:biz_atlas` to read one customer's record; a tenant-scoped key adds that condition for you (section 12).
 Add `env:<name>` too when environments of one project reuse the same tenant and record ids.
 
-**Writing selectors.** Build selectors from variables with the SDKs (`trailQuery` in TypeScript, `EventSearch.ForTrail`
+### Writing selectors
+
+Build selectors from variables with the SDKs (`trailQuery` in TypeScript, `EventSearch.ForTrail`
 in .NET), which quote and escape every value. In a raw query, the first unescaped colon after `record:` ends the type:
 `record:order:archived:A1` is type `order` and id `archived:A1`, and type `order:archived` is written
 `record:order\:archived:A1`. Quote a value that holds spaces or query punctuation, and escape a literal `*` as `\*`
 in any value (`tenant:team\*`): an unescaped trailing `*` is a prefix wildcard, even inside quotes. The
 [query language](query-language.md) has the full rules.
 
-**Where to start.** `GET /v1/project` tells you how far back your key can read: the project's retention policy, and
+### Where to start: the history horizon
+
+`GET /v1/project` tells you how far back your key can read: the project's retention policy, and
 `oldestEventAt`, the timestamp of the oldest event your key can find through search (within its scope), or null.
 
 ```sh
@@ -70,7 +78,9 @@ does not prove that nothing happened: retention deletes, for good, events dated 
 run (hourly, and right after the window is shortened), and raising `retentionDays` brings nothing back. It can also
 move back, when an event dated before it arrives later: read it again before each whole-history read.
 
-**The first page.** `order=asc` reads oldest first (the default is newest first). A page holds at most 200 events
+### The first page
+
+`order=asc` reads oldest first (the default is newest first). A page holds at most 200 events
 (`limit`, default 50).
 
 ```sh
@@ -96,7 +106,9 @@ curl -s -G "$LOGBIRD_URL/v1/events" -H "Authorization: Bearer $LOGBIRD_READ_KEY"
 - `range` is the window the server applied. Send it back as `from` and `to` on every later page: a cursor carries no
   window, so a page sent without bounds would get a new default window.
 
-**Every page.** This script reads the whole history into `history.tsv`, oldest first. It exits non-zero, with a
+### Every page
+
+This script reads the whole history into `history.tsv`, oldest first. It exits non-zero, with a
 message, unless every page answered, stated the same window and the last one said `nextCursor: null`:
 
 ```bash
@@ -144,7 +156,7 @@ Saved as `read-history.sh` and run with `bash read-history.sh` (this run came af
 late events):
 
 ```text
-Complete for {"from":"2026-11-16T09:00:00.000Z","to":"2026-11-28T01:25:13.000Z"}: 11 events.
+Complete for {"from":"2026-11-16T09:00:00.000Z","to":"2026-11-28T01:39:13.000Z"}: 11 events.
 2026-11-16T09:00:00.000Z  evt_0100_created        article.created      success
 2026-11-17T10:15:00.000Z  evt_0200_retitled       article.updated      success
 2026-11-18T14:00:00.000Z  evt_0300_job_failed     job.failed           failure
@@ -162,7 +174,9 @@ A failed page (a 429 rate limit, a 503 during maintenance, an expired key) stops
 `Stopped: the history in history.tsv is incomplete.` and a non-zero exit. Read again later; never use the partial file
 as a history.
 
-**TypeScript.** `readHistoryHorizon` gives the horizon and `iterateAuditTrail` reads every page. The iterator sends the
+### TypeScript
+
+`readHistoryHorizon` gives the horizon and `iterateAuditTrail` reads every page. The iterator sends the
 first page's window with every later page and, on servers that report `range`, checks that each page reports it and
 that every event lies in it. It fails the pass (`read_window_unverified` or `read_invalid_response`) rather than
 return a short history, and yields an id stored at two positions once.
@@ -221,7 +235,9 @@ else console.log(detail.parents.map((parent) => parent.id), detail.childCount, d
 [ 'evt_0300_schedule' ] 1 4
 ```
 
-**.NET.** `SearchAllAsync` sends the search you pass on every page, so give it both `From` and `To`. It does not drop
+### .NET
+
+`SearchAllAsync` sends the search you pass on every page, so give it both `From` and `To`. It does not drop
 an id stored at two positions: keep a set of ids, as below.
 
 ```csharp
@@ -288,7 +304,7 @@ curl -s -G "$LOGBIRD_URL/v1/events" -H "Authorization: Bearer $LOGBIRD_READ_KEY"
 ```
 
 ```json
-{"events":0,"total":0,"totalExact":true,"range":{"from":"2026-11-25T00:52:27.729Z","to":"2026-11-26T00:52:27.729Z"}}
+{"events":0,"total":0,"totalExact":true,"range":{"from":"2026-11-25T01:37:34.599Z","to":"2026-11-26T01:37:34.599Z"}}
 ```
 
 `totalExact: true` here means "exactly 0 in that day", not "this record has no history". Compare `range` with the
@@ -366,9 +382,9 @@ curl -s "$LOGBIRD_URL/v1/events/evt_0400_published" -H "Authorization: Bearer $L
 ```
 
 ```json
-{"actor":{"type":"user","id":"usr_writer","name":"Sami Writer","email":"masked:e4c0a34a97711837a5e7f9bc"},
+{"actor":{"type":"user","id":"usr_writer","name":"Sami Writer","email":"masked:4d1a9ea51d099a88dca322e7"},
  "impersonator":{"id":"usr_support","name":"Rita Support"},
- "email":"masked:9f251f9488ecc440aad80555","ip":"","userAgent":""}
+ "email":"masked:6987a4e4b47d12f4463cf3e4","ip":"","userAgent":""}
 ```
 
 An actor or impersonator name that carries an address (contains `@`, equals the email, or is very long) also reads
@@ -405,12 +421,16 @@ curl -s "$LOGBIRD_URL/v1/events/evt_0600_values" -H "Authorization: Bearer $LOGB
 - Events stored before Logbird recorded kinds have no `beforeKind` or `afterKind`. Their text cannot tell absent from
   an empty string, or `null` from the text "null". For those, read the original document.
 
-**Which record a change belongs to.** `changes` belongs to the event, not to one of its targets. A record's history
+### Which record a change belongs to
+
+`changes` belongs to the event, not to one of its targets. A record's history
 lists the events that named the record; when an event names several records (a refund that targets a payment and a
 booking), its `changes` carry no record of their own. Apply a change to a record only when your event schema says
 which record it describes (one record per event, or field names that say so).
 
-**The original document.** With an unmasked key, the detail route returns `payload`: the stored event document with
+### The original document
+
+With an unmasked key, the detail route returns `payload`: the stored event document with
 its original JSON value types (not the HTTP request's formatting or batch wrapper).
 
 ```sh
@@ -423,7 +443,9 @@ curl -s "$LOGBIRD_URL/v1/events/evt_0600_values" -H "Authorization: Bearer $LOGB
 
 Under any mask, `payload` is null.
 
-**Continuity.** For one field of one record, each successful event's `before` should equal the previous one's `after`
+### Continuity
+
+For one field of one record, each successful event's `before` should equal the previous one's `after`
 (same text and kind), once you have attributed changes to the record and ordered ties by cause. Where it does not, an
 event is outside your window or scope, was cut (section 9), or the producer did not send that change. Logbird does not
 check this for you.
@@ -470,7 +492,7 @@ failed attempt, the publication and the job's completion, 4 events), `q=job:job_
 events, and `q=job:job_41 attempt:>1 tenant:biz_atlas` only its retries (2 events). Quote and escape ids as in
 section 1.
 
-## 7. Refused and failed attempts
+## 7. Outcomes: refused, failed and partial attempts
 
 **Rule.** `outcome` is what the producer reported. Logbird recommends `success`, `failure` (tried and failed), `denied`
 (refused before trying), `partial` and `unknown`, accepts other text, and stores `success` when none was sent. Keep
@@ -513,7 +535,9 @@ JavaScript's shortest spelling when that keeps its exact decimal value (`12.50` 
 digits sent (`12345678901234567890`), so search the stored text, not a number your language rounded. See the
 [query language](query-language.md#change-values-and-the-impersonator-name) for every kind.
 
-**Field and value are matched independently.** `changes.field:status changes.after:PUBLISHED` means "some change is to
+### Field and value are matched independently
+
+`changes.field:status changes.after:PUBLISHED` means "some change is to
 `status`, and some change ends at `PUBLISHED`", not necessarily the same change. In the fixture, the retitling changed
 `title` and `wordCount`, and only `wordCount` became 1350, yet this matches it:
 
@@ -530,7 +554,9 @@ curl -s -G "$LOGBIRD_URL/v1/events" -H "Authorization: Bearer $LOGBIRD_READ_KEY"
 
 Use these fields to find candidates, then read each match's `changes` to see which field took which value.
 
-**Unknown keys are refused, not empty.** A misspelled or invented `changes` key answers 422 instead of a silent 0:
+### Unknown keys are refused, not empty
+
+A misspelled or invented `changes` key answers 422 instead of a silent 0:
 
 ```sh
 curl -s -G "$LOGBIRD_URL/v1/events" -H "Authorization: Bearer $LOGBIRD_READ_KEY" \
@@ -603,7 +629,9 @@ The rest of the pass returned only the two events after its position:
 {"page2":["evt_0600_values","evt_0800_bulk"],"nextCursor":null}
 ```
 
-**Incremental reads.** Keep the history you hold (here `seen.tsv`, the script's output with `receivedAt` in column 5).
+### Incremental reads
+
+Keep the history you hold (here `seen.tsv`, the script's output with `receivedAt` in column 5).
 To look for late arrivals, run the same complete pass again with `receivedAt:>=` a time well before the latest
 `receivedAt` you hold, and keep every event whose id you do not have yet, whatever its receipt time. Receipt times
 are not a strict sequence: events share a millisecond, and an event recovered after a storage failure keeps its
@@ -611,6 +639,7 @@ original receipt time. Each run reads the horizon and a new `to` again, so it al
 first `from` or after your first `to`. Add the new events to what you hold only after the pass completed.
 
 ```bash
+set -euo pipefail # a failed pass stops here, before anything is added to seen.tsv
 # The latest receipt time in the history you already hold, minus a generous overlap (here ten minutes; GNU date).
 LAST=$(cut -f5 seen.tsv | sort | tail -1)
 SINCE=$(date -u -d "$LAST - 10 minutes" +%Y-%m-%dT%H:%M:%S.000Z)
@@ -625,14 +654,16 @@ cat new.tsv >>seen.tsv
 In the fixture, a second event dated 2026-11-19 arrived after `seen.tsv` was written:
 
 ```text
-Complete for {"from":"2026-11-16T09:00:00.000Z","to":"2026-11-28T01:20:24.000Z"}: 11 events.
-2026-11-19T12:00:00.000Z  evt_1100_late_summary  article.updated  success  2026-11-26T01:20:15.809Z
+Complete for {"from":"2026-11-16T09:00:00.000Z","to":"2026-11-28T01:38:20.000Z"}: 11 events.
+2026-11-19T12:00:00.000Z  evt_1100_late_summary  article.updated  success  2026-11-26T01:38:00.462Z
 ```
 
 Use absolute times in `q`: a relative time (`receivedAt:>now-1h`) is read against each request's clock. Report a
 history kept this way as complete up to your last pass, as far as receipt times allow.
 
-**One-shot reconstructions.** An export reads with one fixed clock: it holds every matching event whose stored receipt
+### One-shot reconstructions
+
+An export reads with one fixed clock: it holds every matching event whose stored receipt
 time is at or before the moment the export started, in `timestamp`, then `id` order. This keeps the file only if it is
 the export you asked for:
 
@@ -659,7 +690,9 @@ If any step fails, `history.jsonl` is not written: discard `history.jsonl.part` 
 never proves a file complete. See [event exports](exports.md) for the formats (`csv`, `jsonl`, and `jsonl-evidence`
 with the original documents) and the exact membership rule.
 
-**Retries never appear twice.** An exact retry of an event (same string id, same content) is accepted without storing
+### Retries never appear twice
+
+An exact retry of an event (same string id, same content) is accepted without storing
 it again. The fixture's creation event was sent twice, and the history holds it once.
 
 ## 11. Sets of records
@@ -709,7 +742,8 @@ changes what each event shows:
 
 - `ip` and `user_agent` empty `context.ip` and `context.userAgent`.
 - `actor_email` shows the actor's email, the impersonator's email and any address-carrying actor or impersonator name
-  as `masked:<24 hex>` pseudonyms, stable within the project.
+  as `masked:<24 hex>` pseudonyms, stable within the project. Masked attribute paths match keys in any ASCII letter
+  case (`impersonator.Email` is masked like `impersonator.email`).
 - Any mask sets the detail's `payload` to null and refuses the `jsonl-evidence` export (422 `masked_export`). A masked
   reader therefore relies on `beforeKind` and `afterKind` for value types (section 5), and cannot read the parts of a
   cut event that were not indexed (section 9).
@@ -745,19 +779,20 @@ See [scoped read access](scoped-read-access.md) for the full rules.
 
 ## Before you call a history complete
 
+- [ ] The window I asked for is the window the server applied (`range`), and every later page was sent with the first
+      page's `range`.
+- [ ] I followed `nextCursor` until it was null, and every page answered 200.
+- [ ] `from` is at or before `oldestEventAt`, read from `GET /v1/project` just before this read, and `to` is more than
+      a day after now.
 - [ ] The selector is `record:<type>:<id>`, built by the SDK or escaped, with `tenant:<id>` (or a tenant-scoped key)
       if ids can repeat across tenants, and `env:` if environments share ids.
-- [ ] `from` is at or before `oldestEventAt`, read from `GET /v1/project` just before this read, and `to` is more
-      than a day after now.
-- [ ] Every page answered 200, stated the window you meant, and was sent with the first page's `range`; the last
-      page said `nextCursor: null`.
-- [ ] You did not read `total` or `totalExact` as "the whole history": they cover the window only.
-- [ ] No id appears twice, or you resolved it.
+- [ ] I did not read `total` or `totalExact` as "the whole history": they cover the window only.
+- [ ] No id appears twice, or I resolved it.
 - [ ] Same-millisecond events are ordered by `parentEventId`, not by their position.
 - [ ] Actor, impersonator, executor (with `jobId` and `attempt`) and tenant are shown apart, by id.
 - [ ] Values are read with `beforeKind` and `afterKind`; events without kinds are checked against `payload`.
 - [ ] `[redacted]` is shown as "changed, value hidden", not as a value.
-- [ ] Changes are applied to the record only where your schema says they describe it.
+- [ ] Changes are applied to the record only where my event schema says they describe it.
 - [ ] Only changes the producer reports as done are applied; other outcomes stay in the history.
 - [ ] Searches by value were confirmed by reading each match's `changes` (field and value match independently).
 - [ ] Events cut past the 64th target were looked for outside the record selector, or the history says it covers
