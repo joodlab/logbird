@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ACTOR_NAME_IS_SENSITIVE_SQL,
@@ -11,7 +12,7 @@ import {
 } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { compileMaskedQuery } from './field-mask';
-import { facets, searchEvents } from './queries';
+import { facets, parentParamSize, searchEvents } from './queries';
 import { compileQuery } from './query';
 
 // #333: under the actor_email mask, a reader cannot obtain the actor's address from the actor's own fields (email,
@@ -167,6 +168,11 @@ describe('the filter rewrite', () => {
     const rest = sql.replace(IMP, 'S').replace(DEFINED, 'A');
     expect(rest.match(/\bimpersonator_name\b/g)?.length).toBe(rest.match(/,'',impersonator_name\)/g)?.length);
     expect(IMPERSONATOR_NAME_IS_SENSITIVE_SQL).toContain("attributes['impersonator.email']");
+    // The impersonator.name query field compiles to that column, so a masked filter on it gets the rewrite.
+    const masked = compileMaskedQuery('impersonator.name:"rita@example.invalid"', ['actor_email']);
+    expect(masked.sql).toContain(IMP);
+    expect(masked.sql.replace(IMP, 'S')).toMatch(/if\(S,'',impersonator_name\) = \{q0:String\}/);
+    expect(compileMaskedQuery('impersonator.name:x', ['ip']).sql).not.toContain('impersonator_name_carries');
     // A filter that never reads the impersonator's name gets no impersonator test.
     expect(maskActorNameInFilter(compileQuery('actor.name:x').sql)).not.toContain('impersonator');
   });
@@ -275,6 +281,55 @@ describe('facets under the actor_email mask', () => {
     expect(second?.query).toContain(
       "ORDER BY value,masked,count DESC,sipHash64Keyed(({orderKey0:UInt64},{orderKey1:UInt64}),concat(toString(gmasked),'|',grp)) LIMIT",
     );
+  });
+
+  it('measures the parent parameter exactly as the driver writes and form-encodes it', () => {
+    // An apostrophe is written \\' (two bytes) and form-encoded %5C%27 (six); a space stays one byte and becomes '+'.
+    expect(parentParamSize('facetValues', ["'".repeat(1000)])).toEqual({
+      valueBytes: 2 + 2 + 2000,
+      urlBytes: 'param_facetValues='.length + 3 + 3 + 6000 + 3 + 3,
+    });
+    expect(parentParamSize('facetValues', [' '.repeat(1000)])).toEqual({
+      valueBytes: 2 + 2 + 1000,
+      urlBytes: 'param_facetValues='.length + 3 + 3 + 1000 + 3 + 3,
+    });
+  });
+
+  it('keeps parents exact up to the 127 KiB value budget and sends larger ones as digests', async () => {
+    for (const [value, digests] of [
+      ['x'.repeat(120_000), false],
+      [' '.repeat(120_000), false],
+      ["'".repeat(70_000), true],
+      ['x'.repeat(140_000), true],
+    ] as const) {
+      const plain = client([[{ value, label: value, count: 1, total: 1 }], []]);
+      await facets(plain.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 });
+      const params = calls(plain.query)[1]?.query_params ?? {};
+      expect(Object.keys(params).includes('facetValuesDigests'), `${value.length} ${value[0]}`).toBe(digests);
+    }
+  });
+
+  it('keeps exact second-level parents in the URL unless they are large, then selects them by digest', async () => {
+    const md5 = (text: string) => createHash('md5').update(text, 'utf8').digest('hex');
+    const medium = `x${'y'.repeat(2000)}`;
+    const large = `z${'w'.repeat(300 * 1024)}`;
+    // Masked path: a 2 KB parent stays an exact value; a 300 KB one travels as its digest.
+    const small = client([[{ value: medium, masked: 0, labf: 0, labt: medium, count: 1, total: 1 }], []]);
+    await facets(small.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 }, scope, undefined, key);
+    expect(calls(small.query)[1]?.query_params.facetKeys).toEqual([`0|${medium}`]);
+    const big = client([[{ value: large, masked: 0, labf: 0, labt: large, count: 1, total: 1 }], []]);
+    await facets(big.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 }, scope, undefined, key);
+    const [, bigSecond] = calls(big.query);
+    expect(bigSecond?.query_params.facetKeysDigests).toEqual([md5(`0|${large}`)]);
+    expect(bigSecond?.query).toContain("lower(hex(MD5(concat(toString(masked),'|',value)))) IN {facetKeysDigests:Array(String)}");
+    // Unmasked path.
+    const plain = client([[{ value: large, label: large, count: 1, total: 1 }], []]);
+    await facets(plain.ch, 'proj_1', { ...range, field: 'changes.after', by: 'changes.field', limit: 10 });
+    const [, plainSecond] = calls(plain.query);
+    expect(plainSecond?.query).toContain('lower(hex(MD5(value))) IN {facetValuesDigests:Array(String)}');
+    expect(plainSecond?.query_params.facetValuesDigests).toEqual([md5(large)]);
+    // Two change levels share one zipped expansion of just the two columns they read.
+    expect(plainSecond?.query).toContain('ARRAY JOIN arrayZip(changes_after,changes_fields) AS facet_changes');
   });
 
   it('never interprets text by its content: a producer string that looks masked stays as it is', async () => {

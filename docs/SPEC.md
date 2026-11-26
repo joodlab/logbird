@@ -683,7 +683,9 @@ a OR b, (a OR b) c                OR and parentheses; implicit AND binds more ti
                                   max 4096 UTF-8 bytes, 64 terms, 16 nesting levels
 ```
 Parser lives in `packages/clickhouse/src/query` → parameterized SQL (never string-concatenate user input).
-Unknown `field:` prefixes are treated as `attr.<field>`. Ship unit tests for the parser.
+Unknown `field:` prefixes are treated as `attr.<field>`, except a `changes` key that is not `changes.field`,
+`changes.before` or `changes.after` (in any letter case), which is refused (422 `invalid_query`, `unknown_field`):
+the `changes` list is never stored as attributes. Ship unit tests for the parser.
 
 #### 5.1.1 Query language v2 (2026-11-05)
 Additive; every v0 query keeps its meaning. Field catalog (keys, aliases, types, columns): `QUERY_FIELDS` in
@@ -702,7 +704,7 @@ a AND b,  NOT a                   explicit AND / NOT keywords (upper-case), same
 ```
 Attribute values are strings; with comparisons/ranges they are read as numbers
 (`toFloat64OrNull(attributes[k])`), or as dates when the bound is a date. Rows whose value does not convert never
-match. Array fields (`target`, `target.type`, `target.name`, `changes.field`) match when any element matches.
+match. Array fields (`target`, `target.type`, `target.name`, `changes.field`, `changes.before`, `changes.after`) match when any element matches; any other `changes.*` key is refused (422 `invalid_query`, `unknown_field`).
 `record:<type>:<id>` checks a single target for both fields, splitting the value on its first unescaped colon. See [record selector escaping](query-language.md#query-language-langquery-default).
 
 Errors: HTTP 422 `invalid_query`, `details` = `QueryErrorDetails` (`lang`, `reason`, `start`/`end` UTF-16 offsets,
