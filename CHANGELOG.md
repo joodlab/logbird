@@ -7,7 +7,7 @@
 ### Highlights
 
 - The console shows recorded field changes in record, actor and tenant histories. Queries can search change values (`changes.before`, `changes.after`) and the support person's name (`impersonator.name`), and Logbird keeps the JSON kind of each change value.
-- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trail reads must name their window, and `iterateAuditTrail` reads every page of one.
+- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trail reads must name their window, and `iterateAuditTrail` reads every page of one. A new guide, [Read a record's whole history back](docs/reading-history.md), shows how to put these together.
 - The TypeScript SDK redacts common secret keys by default, accounts for every event through `flush()` and `shutdown()`, and refuses redirects. The GitHub Release attaches the TypeScript packages as tarballs with a `SHA256SUMS` file.
 
 ### Changes
@@ -92,6 +92,15 @@ a retention run it answers 503, like search. The TypeScript SDK adds
 `readHistoryHorizon(options)` and the .NET read client
 `GetHistoryHorizonAsync()`; against a server older than 0.4.0 they fail with
 `read_http_error` (status 404) and `LogbirdApiException` (`not_found`). (#411)
+
+**Reading a history back.** The new guide
+[Read a record's whole history back](docs/reading-history.md) shows how to
+rebuild a record's change history with a read key (when each action happened,
+who did it, what changed and what caused what), with recipes for `curl`, the
+TypeScript SDK and the .NET read client and a checklist to confirm before you
+call a history complete. It is linked from the README, the API reference for
+`GET /v1/events`, the query language, concepts, the backend guide and the SDK
+README. (#414)
 
 **Ingest cuts and limits.** Ingest indexes at most 64 targets and 256 changes
 per event, and cuts a change field name to 256 UTF-16 code units (measured after
