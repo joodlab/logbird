@@ -413,8 +413,9 @@ oldest event the key or viewer token can find through search (within its scope),
 project's `RetentionDays` policy. For a whole-history search, use it as `From` and set `To` at least a day after now:
 an event can be dated up to one day after it was received, and without `To` the window ends at the server clock.
 `OldestEventAt` describes what is stored now: an empty history before it does not prove that nothing happened, since
-retention deletes, for good, events dated more than `RetentionDays` before each run. A server without the route answers
-404 (`LogbirdApiException`, code `not_found`).
+retention deletes, for good, events dated more than `RetentionDays` before each run. It can also move back: an event
+dated before it can arrive later, and a search from the earlier value misses it, so read the horizon again before each
+whole-history search. A server without the route answers 404 (`LogbirdApiException`, code `not_found`).
 
 Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
 cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. For an export, the limit covers only
