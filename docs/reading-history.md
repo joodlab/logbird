@@ -71,12 +71,13 @@ curl -s "$LOGBIRD_URL/v1/project" -H "Authorization: Bearer $LOGBIRD_READ_KEY"
 {"retentionDays":90,"oldestEventAt":"2026-11-16T09:00:00.000Z"}
 ```
 
-Use `oldestEventAt` as `from`, and an exclusive `to` more than a day after now (the examples use two days): an event
-can be dated up to one day after Logbird received it, and without `to` the window ends at the server clock.
-`oldestEventAt` describes what is stored now. Nothing older is stored for your key, but an empty history before it
-does not prove that nothing happened: retention deletes, for good, events dated more than `retentionDays` before each
-run (hourly, and right after the window is shortened), and raising `retentionDays` brings nothing back. It can also
-move back, when an event dated before it arrives later: read it again before each whole-history read.
+Use `oldestEventAt` as `from`, and the end of the searchable range, `2299-12-31T23:59:59.999Z`, as `to` (`to` is exclusive).
+An event can be dated up to one day after the server received it, so a `to` computed from your own clock can miss
+events, and without `to` the window ends at the server clock. `oldestEventAt` describes what is stored now. Nothing
+older is stored for your key, but an empty history before it does not prove that nothing happened: `retentionDays` is
+the project's configured policy, retention runs (hourly, and right after the policy is shortened) delete older events
+for good, and raising `retentionDays` brings nothing back. It can also move back, when an event dated before it
+arrives later: read it again before each whole-history read.
 
 ### The first page
 
@@ -124,7 +125,7 @@ AUTH="Authorization: Bearer $LOGBIRD_READ_KEY"
 HORIZON=$(curl -sSf "$LOGBIRD_URL/v1/project" -H "$AUTH")
 FROM=$(jq -er 'if has("oldestEventAt") then .oldestEventAt // "none" else error("no horizon") end' <<<"$HORIZON")
 if [ "$FROM" = none ]; then echo 'This key can find no events.' >&2; : >"$OUT"; exit 0; fi
-TO=$(date -u -d '+2 days' +%Y-%m-%dT%H:%M:%S.000Z) # macOS: date -u -v+2d +%Y-%m-%dT%H:%M:%S.000Z
+TO=2299-12-31T23:59:59.999Z # the end of the searchable range (exclusive), not a time from this machine's clock
 
 : >"$OUT"
 RANGE='' CURSOR=''
@@ -156,7 +157,7 @@ Saved as `read-history.sh` and run with `bash read-history.sh` (this run came af
 late events):
 
 ```text
-Complete for {"from":"2026-11-16T09:00:00.000Z","to":"2026-11-28T01:39:13.000Z"}: 11 events.
+Complete for {"from":"2026-11-16T09:00:00.000Z","to":"2299-12-31T23:59:59.999Z"}: 11 events.
 2026-11-16T09:00:00.000Z  evt_0100_created        article.created      success
 2026-11-17T10:15:00.000Z  evt_0200_retitled       article.updated      success
 2026-11-18T14:00:00.000Z  evt_0300_job_failed     job.failed           failure
@@ -207,8 +208,8 @@ if (horizon.oldestEventAt) {
   const trail = {
     target: { type: 'article', id: 'art_100' },
     tenant: 'biz_atlas',
-    // `to` is exclusive and an event can be dated up to a day ahead: end the window two days from now.
-    range: { from: horizon.oldestEventAt, to: new Date(Date.now() + 2 * 86_400_000) },
+    // The end of the searchable range (exclusive): a `to` from this machine's clock could miss events dated ahead.
+    range: { from: horizon.oldestEventAt, to: '2299-12-31T23:59:59.999Z' },
     order: 'asc' as const,
   };
   for await (const event of iterateAuditTrail(reader, trail)) {
@@ -263,8 +264,8 @@ if (horizon.OldestEventAt is { } oldest)
         targetId: "art_100",
         tenantId: "biz_atlas",
         from: DateTimeOffset.Parse(oldest, CultureInfo.InvariantCulture),
-        // To is exclusive and an event can be dated up to a day ahead: end the window two days from now.
-        to: DateTimeOffset.UtcNow.AddDays(2)) with { Order = SortOrder.Ascending };
+        // The end of the searchable range (exclusive): a To from this machine's clock could miss events dated ahead.
+        to: DateTimeOffset.Parse("2299-12-31T23:59:59.999Z", CultureInfo.InvariantCulture)) with { Order = SortOrder.Ascending };
     var seen = new HashSet<string>();
     await foreach (var e in reader.SearchAllAsync(trail))
     {
@@ -473,7 +474,7 @@ curl -s "$LOGBIRD_URL/v1/events/evt_0400_published" -H "Authorization: Bearer $L
   events. For one customer's history, read detail with that tenant's scoped key, or check the tenant of each event.
 
 List the children with `parent:` and the tenant, over a window that covers them (a child can be dated up to a day
-after now). Page through them like the record history (with the script, `Q='parent:evt_0300_schedule tenant:biz_atlas'`).
+after the server received it, so end the window at `2299-12-31T23:59:59.999Z` when you do not know their dates). Page through them like the record history (with the script, `Q='parent:evt_0300_schedule tenant:biz_atlas'`).
 
 ```sh
 curl -s -G "$LOGBIRD_URL/v1/events" -H "Authorization: Bearer $LOGBIRD_READ_KEY" \
@@ -635,8 +636,8 @@ Keep the history you hold (here `seen.tsv`, the script's output with `receivedAt
 To look for late arrivals, run the same complete pass again with `receivedAt:>=` a time well before the latest
 `receivedAt` you hold, and keep every event whose id you do not have yet, whatever its receipt time. Receipt times
 are not a strict sequence: events share a millisecond, and an event recovered after a storage failure keeps its
-original receipt time. Each run reads the horizon and a new `to` again, so it also covers events dated before your
-first `from` or after your first `to`. Add the new events to what you hold only after the pass completed.
+original receipt time. Each run reads the horizon again and ends at the end of the searchable range, so it also covers
+events dated before your first `from`. Add the new events to what you hold only after the pass completed.
 
 ```bash
 set -euo pipefail # a failed pass stops here, before anything is added to seen.tsv
@@ -654,7 +655,7 @@ cat new.tsv >>seen.tsv
 In the fixture, a second event dated 2026-11-19 arrived after `seen.tsv` was written:
 
 ```text
-Complete for {"from":"2026-11-16T09:00:00.000Z","to":"2026-11-28T01:38:20.000Z"}: 11 events.
+Complete for {"from":"2026-11-16T09:00:00.000Z","to":"2299-12-31T23:59:59.999Z"}: 11 events.
 2026-11-19T12:00:00.000Z  evt_1100_late_summary  article.updated  success  2026-11-26T01:38:00.462Z
 ```
 
@@ -782,8 +783,8 @@ See [scoped read access](scoped-read-access.md) for the full rules.
 - [ ] The window I asked for is the window the server applied (`range`), and every later page was sent with the first
       page's `range`.
 - [ ] I followed `nextCursor` until it was null, and every page answered 200.
-- [ ] `from` is at or before `oldestEventAt`, read from `GET /v1/project` just before this read, and `to` is more than
-      a day after now.
+- [ ] `from` is at or before `oldestEventAt`, read from `GET /v1/project` just before this read, and `to` is the end
+      of the searchable range (`2299-12-31T23:59:59.999Z`), not a time from my own clock.
 - [ ] The selector is `record:<type>:<id>`, built by the SDK or escaped, with `tenant:<id>` (or a tenant-scoped key)
       if ids can repeat across tenants, and `env:` if environments share ids.
 - [ ] I did not read `total` or `totalExact` as "the whole history": they cover the window only.
