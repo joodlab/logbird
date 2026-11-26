@@ -290,6 +290,14 @@ below for older Trailmark installations.
 See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
 for signal handling; its live acceptance is pending in #77.
 
+### Change value kinds on upgrade
+
+The normal migrate step adds two event columns for change value kinds using a metadata-only
+`ALTER TABLE … ADD COLUMN`. It leaves existing data parts in place. Earlier writers can keep
+using the migrated table. Kinds are unknown for events written by an earlier server, so reads
+omit the kind properties for those events. The new API checks for the columns before listening
+and reports a startup error if it cannot read them.
+
 ### Webhook delivery on upgrade
 
 When upgrading from a release without webhook delivery, stop all servers running the previous version before

@@ -92,7 +92,7 @@ The console uses React and TanStack Start. Shared contracts define the API, Pris
 
 ## Documentation
 
-- [Concepts and event envelope](docs/concepts.md) · [Query language](docs/query-language.md)
+- [Concepts and event envelope](docs/concepts.md) · [Query language](docs/query-language.md) · [Limits](docs/limits.md)
 - [SDK](packages/sdk/README.md) · [Backend integration](docs/integrating-a-backend.md) · [Framework integrations](docs/integrations.md) · [Examples](examples)
 - [Self-hosting](docs/self-hosting.md) · [Coolify](docs/coolify.md) · [Releases and upgrades](docs/releases.md)
 - [Security policy](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md)

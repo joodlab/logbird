@@ -658,17 +658,16 @@ the unresolved indices or remaining unsettled events, each with byte-identical
 JSON, id and occurredAt, to make progress. The next response's indices refer to
 that smaller request. There is no virtual partition-tree charge.
 
-After complete `ingest_pending` or `ingest_unavailable` 503 details, the SDK's next
-attempt within the same send resends only unsettled events. It serializes each
-event once per send and builds subset bodies from those cached strings, remapping
-response indices to original batch positions for acceptance, drop-once reporting
-and final requeue. Incomplete or malformed details keep the previous body unchanged.
+The TypeScript SDK validates 2xx and partial 503 acknowledgements. It credits
+each accepted id once per occurrence and settles each rejected position once.
+The next attempt resends unsettled events using the JSON saved at capture, including
+the original id and timestamp. An invalid acknowledgement leaves the batch unresolved.
 The SDK always sends `Logbird-Retry: subset`. Attempts settling at least one event and
 shrinking the body do not consume `maxRetries`; total attempts remain bounded by batch
 length plus retries and five minutes per send. The time limit requeues only unsettled
 events. After `beforeSend`, missing, blank or non-string ids (numbers included) get a fresh
-uuidv7, as the server would mint; valid string ids stay unchanged. The SDK reports individually rejected rows through `onDrop`
-once per send; unchecked healthy rows stay retryable while this header is preserved.
+uuidv7, as the server would mint. Hono preserves the id already returned by `audit()`.
+The SDK reports each individually rejected row through `onDrop` once.
 If the retry budget is exhausted, `onError` reports it and only unsettled events
 are requeued for a later `flush()`.
 Older SDK versions retain identical-body retries and use the terminal 202 fallback.

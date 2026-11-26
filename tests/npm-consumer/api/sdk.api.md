@@ -7,6 +7,20 @@
 // @public (undocumented)
 export const DEFAULT_SECRET_KEYS: RegExp;
 
+// @public (undocumented)
+export interface DropDetails {
+    // (undocumented)
+    code?: IngestRejectionCode;
+    mayBeStored: boolean;
+    // (undocumented)
+    reason: DropReason;
+    // (undocumented)
+    status?: number;
+}
+
+// @public (undocumented)
+export type DropReason = 'queue_full' | 'rejected' | 'http_error' | 'too_large' | 'input_too_large' | 'input_too_deep' | 'invalid' | 'before_send_failed' | 'redaction_failed' | 'filtered' | 'diagnostic_reentry' | 'shutdown';
+
 // @public
 export type EntityId = string | number;
 
@@ -95,18 +109,51 @@ export function generateWebhookSecret(): string;
 export const IDENTIFIER_FIELDS: readonly string[];
 
 // @public (undocumented)
+export type IngestRejectionCode = 'invalid_event' | 'invalid_event_id' | 'duplicate_id_conflict' | 'stored_event_unreadable' | 'unverified_after_parse_failure';
+
+// @public (undocumented)
 export class Logbird {
     constructor(options: LogbirdOptions);
     // (undocumented)
     get dropped(): number;
     // (undocumented)
+    get droppedByReason(): Readonly<Partial<Record<DropReason, number>>>;
+    // (undocumented)
+    get failedNotifications(): number;
+    // (undocumented)
     flush(): Promise<void>;
+    // (undocumented)
+    get possiblyStoredDropsByReason(): Readonly<Partial<Record<DropReason, number>>>;
     // (undocumented)
     get queueSize(): number;
     // (undocumented)
     shutdown(): Promise<void>;
     // (undocumented)
-    track(event: EventInput): void;
+    get skippedNotifications(): number;
+    // (undocumented)
+    track(event: EventInput, options?: TrackOptions): void;
+}
+
+// @public
+export class LogbirdError extends Error {
+    constructor(code: LogbirdErrorCode, details?: LogbirdErrorDetails);
+    // (undocumented)
+    readonly code: LogbirdErrorCode;
+    // (undocumented)
+    readonly count?: number;
+    // (undocumented)
+    readonly status?: number;
+}
+
+// @public (undocumented)
+export type LogbirdErrorCode = 'options_invalid' | 'credentials_required' | 'client_closed' | 'before_send_failed' | 'event_invalid' | 'input_too_large' | 'input_too_deep' | 'event_too_large' | 'events_rejected' | 'ingest_http_error' | 'ingest_redirect' | 'ingest_unacknowledged' | 'ingest_request_failed' | 'ingest_requests_outstanding' | 'ingest_timeout' | 'shutdown_timeout' | 'response_too_large' | 'response_invalid' | 'read_server_only' | 'read_request_failed' | 'read_requests_outstanding' | 'read_http_error' | 'read_redirect' | 'read_invalid_response' | 'read_timeout' | 'capture_failed' | 'capture_incompatible_client' | 'capture_server_only' | 'capture_resolver_failed' | 'redaction_failed' | 'redaction_identifier_invalid' | 'redaction_options_invalid' | 'redaction_identifier_rule';
+
+// @public (undocumented)
+export interface LogbirdErrorDetails {
+    // (undocumented)
+    count?: number;
+    // (undocumented)
+    status?: number;
 }
 
 // @public (undocumented)
@@ -132,20 +179,38 @@ export interface LogbirdOptions {
     // (undocumented)
     maxRetries?: number;
     // (undocumented)
-    onDrop?: (event: EventInput) => void;
+    onDrop?: (event: EventInput, details: Readonly<DropDetails>) => void;
     // (undocumented)
-    onError?: (error: Error) => void;
+    onError?: (error: LogbirdError) => void;
+    // (undocumented)
+    onWarning?: (warning: Readonly<LogbirdWarning>) => void;
+    redaction?: false | RedactionOptions;
+    shutdownTimeoutMs?: number;
+}
+
+// @public (undocumented)
+export interface LogbirdWarning {
+    // (undocumented)
+    code: 'party_id_normalization';
+    // (undocumented)
+    field: 'actor.id' | 'impersonator.id' | 'executor.id' | 'tenant.id' | 'targets' | `targets[${number}].id` | `targets[${number}].type`;
 }
 
 // @public
 export const MAX_WEBHOOK_SIGNATURES = 10;
 
 // @public
-export function redact(options?: {
-    keys?: RegExp;
+export function redact(options?: RedactionOptions): (event: EventInput) => EventInput;
+
+// @public (undocumented)
+export interface RedactionOptions {
+    addKeys?: string[];
     changeFields?: RegExp;
+    keepPaths?: string[];
+    keys?: RegExp;
+    paths?: string[];
     replacement?: string;
-}): (event: EventInput) => EventInput;
+}
 
 // @public
 export function signWebhook(input: SignWebhookOptions): Promise<string>;
@@ -157,6 +222,11 @@ export interface SignWebhookOptions {
     // (undocumented)
     secrets: readonly string[];
     timestamp: number;
+}
+
+// @public (undocumented)
+export interface TrackOptions {
+    preserveId?: boolean;
 }
 
 // @public (undocumented)

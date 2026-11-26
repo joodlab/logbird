@@ -48,8 +48,10 @@ export interface CaptureOptions<C> {
     impersonator?: Resolver<C, EventInput['impersonator']>;
     // (undocumented)
     ip?: Resolver<C, string | undefined>;
+    // Warning: (ae-forgotten-export) The symbol "LogbirdError" needs to be exported by the entry point integration.d.mts
+    //
     // (undocumented)
-    onError?: (error: Error) => void;
+    onError?: (error: LogbirdError) => void;
     // (undocumented)
     operationId?: Resolver<C, string | undefined>;
     // (undocumented)
@@ -89,13 +91,13 @@ export interface JobAuditOptions {
         attemptsMade?: number;
     };
     // (undocumented)
-    onError?: (error: Error) => void;
+    onError?: CaptureOptions<unknown>['onError'];
     // (undocumented)
     tenant?: EventInput['tenant'];
 }
 
 // @public (undocumented)
-export function report(onError: CaptureOptions<unknown>['onError'], error: unknown): void;
+export function report(onError: CaptureOptions<unknown>['onError'], error: unknown, client?: Logbird, refusedAction?: string): void;
 
 // @public
 export type Resolver<C, T> = (context: C) => T | Promise<T>;

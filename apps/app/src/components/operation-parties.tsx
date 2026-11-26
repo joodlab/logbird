@@ -1,4 +1,5 @@
 import type { AuditEvent } from '@logbird/contracts';
+import { Fragment } from 'react';
 import { EntityLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
 import { NotRecorded, UnlinkedParty } from '@/components/not-recorded';
@@ -9,6 +10,7 @@ import { formatNumber } from '@/lib/format';
 const SHOWN_ACTORS = 4;
 
 type Actor = NonNullable<AuditEvent['actor']>;
+type Executor = NonNullable<AuditEvent['executor']>;
 type Impersonator = NonNullable<AuditEvent['impersonator']>;
 /** Who caused a step: the actor, and the support agent acting as them when the step was impersonated. */
 type Cause = { actor: Actor | null; agent: Impersonator | null };
@@ -45,23 +47,35 @@ function ActorValue({ actor, projectId }: { actor: Actor; projectId: string }) {
  */
 export function OperationParties({ events, projectId }: { events: readonly AuditEvent[]; projectId: string }) {
   const causes = distinctCauses(events);
-  const executors = distinctParties(events.map((e) => e.executor));
+  // A worker can use the same id across jobs that have different recorded names.
+  const executors = new Map<string, Executor>();
+  for (const { executor } of events) {
+    if (executor && (executor.id || executor.type || executor.name)) {
+      executors.set(JSON.stringify([partyKey(executor), executor.name || executor.type]), executor);
+    }
+  }
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-sm" data-testid="operation-parties">
       <span className="flex min-w-0 max-w-full flex-wrap items-center gap-2" data-testid="operation-actors">
         <span className="text-muted-foreground text-xs">Caused by</span>
         {causes.length === 0 ? <NotRecorded /> : null}
-        {causes.slice(0, SHOWN_ACTORS).map(({ actor, agent }) => {
+        {causes.slice(0, SHOWN_ACTORS).map(({ actor, agent }, index) => {
           const key = JSON.stringify([actor ? partyKey(actor) : '', agent?.id ?? '']);
-          if (!agent) return actor ? <ActorValue actor={actor} key={key} projectId={projectId} /> : null;
           return (
-            <span className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5" key={key}>
-              <SupportAgentLink agentId={agent.id} className="font-medium text-support-foreground hover:underline" projectId={projectId}>
-                <bdi>{agent.name || agent.id}</bdi>
-              </SupportAgentLink>
-              <span className="text-muted-foreground text-xs">acting as</span>
-              {actor ? <ActorValue actor={actor} projectId={projectId} /> : <span className="text-muted-foreground">an unknown customer</span>}
-            </span>
+            <Fragment key={key}>
+              {index > 0 ? <span className="text-muted-foreground">·</span> : null}
+              <span className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+                {agent ? (
+                  <>
+                    <SupportAgentLink agentId={agent.id} className="font-medium text-support-foreground hover:underline" projectId={projectId}>
+                      <bdi>{agent.name || agent.id}</bdi>
+                    </SupportAgentLink>
+                    <span className="text-muted-foreground text-xs">acting as</span>
+                  </>
+                ) : null}
+                {actor ? <ActorValue actor={actor} projectId={projectId} /> : <span className="text-muted-foreground">an unknown customer</span>}
+              </span>
+            </Fragment>
           );
         })}
         {causes.length > SHOWN_ACTORS ? (
@@ -70,12 +84,12 @@ export function OperationParties({ events, projectId }: { events: readonly Audit
       </span>
       <span className="flex min-w-0 max-w-full flex-wrap items-center gap-2" data-testid="operation-executors">
         <span className="text-muted-foreground text-xs">Performed by</span>
-        {executors.length === 0 ? <NotRecorded /> : null}
-        {executors.map((x) =>
+        {executors.size === 0 ? <NotRecorded /> : null}
+        {[...executors].map(([key, x]) =>
           x.id ? (
-            <EntityLink id={x.id} key={partyKey(x)} kind="executor" meta={x.type} name={x.name} projectId={projectId} type={x.type} />
+            <EntityLink id={x.id} key={key} kind="executor" meta={x.type} name={x.name} projectId={projectId} type={x.type} />
           ) : (
-            <UnlinkedParty key={partyKey(x)} party={x} />
+            <UnlinkedParty key={key} party={x} />
           ),
         )}
       </span>

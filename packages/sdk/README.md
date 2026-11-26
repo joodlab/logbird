@@ -1,17 +1,43 @@
 # @logbird/sdk
 
-Dependency-free capture for Node 22+ and modern browsers with Fetch and Web Crypto.
+Dependency-free capture for Node 20+ and modern browsers with Fetch and Web Crypto.
 The structural `EventInput` type is copied from contracts so publishing does not
 require a private workspace package. Keep envelope additions synchronized with contracts.
 
-`@logbird/sdk` is not published on npm yet; `pnpm add @logbird/sdk` returns 404.
-Use `packages/sdk` from source: inside this repository run
-`pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'`, or link a sibling
-checkout with `pnpm add @logbird/sdk@link:../logbird/packages/sdk`. Run `pnpm install`
-in that Logbird clone before linking from your backend. Source exports are
-TypeScript; use `tsx` or a bundler such as Vite or esbuild. Native Node type stripping
-does not support the SDK's constructor parameter property. See the
-[backend integration guide](../../docs/integrating-a-backend.md#configure-delivery).
+## Install
+
+`@logbird/sdk` is not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases)
+attaches it as `logbird-sdk-X.Y.Z.tgz` (built JavaScript and type declarations) with a
+`SHA256SUMS` file. Download both, verify, and install the file. The commands are one
+chain, so a failed download or a checksum that does not match stops it before the install
+(on macOS, use `shasum -a 256 --check` for `sha256sum --check`; with npm, `npm install` for
+`pnpm add`):
+
+```sh
+version=X.Y.Z
+base="https://github.com/joodlab/logbird/releases/download/v$version"
+mkdir -p vendor/logbird && cd vendor/logbird &&
+  curl -fsSLO "$base/SHA256SUMS" && curl -fsSLO "$base/logbird-sdk-$version.tgz" &&
+  grep " logbird-sdk-$version.tgz\$" SHA256SUMS | sha256sum --check &&
+  cd ../.. && pnpm add "./vendor/logbird/logbird-sdk-$version.tgz"
+```
+
+Commit `vendor/logbird/` and the lockfile; the lockfile pins the tarball's SHA-512 integrity.
+You can also depend on the Release URL directly:
+`pnpm add https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`,
+or the same with `npm install` (npm 12 first needs `allow-remote=root` in the project's
+`.npmrc`). With `@logbird/hono` as well, an override makes it use the same SDK tarball: see
+[Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk)
+for that recipe for pnpm and npm. `@logbird/vue`, `@logbird/nuxt` (which also depends on `@logbird/vue`) and
+`@logbird/tanstack-start` are attached to the same release and type-checked from those tarballs, but there is
+no tested install recipe for them yet.
+
+Requirements: Node 20 or later (`engines.node` `>=20`), or a runtime with Fetch and Web
+Crypto. ES modules only (no CommonJS build); the declarations are checked with TypeScript
+6 and 7 under `moduleResolution` `nodenext` and `bundler`. A source
+checkout of this repository is for contributors ([CONTRIBUTING.md](https://github.com/joodlab/logbird/blob/master/CONTRIBUTING.md)).
+
+## Capture
 
 ```ts
 import { Logbird } from '@logbird/sdk';
@@ -28,10 +54,37 @@ await audit.shutdown();
 
 `track(event): void` never throws, even when `onError` throws. It snapshots the
 event, assigns UUIDv7 and a timestamp when absent, and batches by rows, bytes and
-time. `flush(): Promise<void>` drains the queue; `shutdown(): Promise<void>` closes
-capture and drains. Defaults: 100 rows, 1000 ms, 5 retries. Events over 256 KB are
-reported through `onError`; requests stay below 5 MB and 1000 rows. Timers are
-unreferenced on Node; applications must call shutdown to ensure exit delivery.
+time. `flush(): Promise<void>` covers events queued or already sending at the
+call, including a call made during shutdown. It settles independently of later
+captures and rejects with unresolved events retained for retry. Await the adapter's `audit.pending()` first to include
+pending preparation in a direct flush. `shutdown(): Promise<void>` closes capture
+and drains under one `shutdownTimeoutMs` budget (default 10,000 ms, 0 to stop
+immediately). The budget includes pending integration context resolution, an active
+batch, retries and the queued tail.
+If delivery fails or takes too long, shutdown reports each remaining event as a
+`shutdown` drop and rejects. Always await shutdown in the host's lifecycle.
+
+Pass plain JSON data with own enumerable fields to `track()`. Call `flush()`
+and `shutdown()` from the host lifecycle outside `beforeSend`, `onDrop` and
+`onError`. An event still inside `beforeSend` when shutdown starts can be
+refused and counted as a `shutdown` drop.
+
+The defaults are 100 rows, a 1000 ms batching interval and 5 retries. Requests
+stay below 5 MB and 1000 rows, with a 256 KiB per-event limit. Each request has
+up to 30 seconds and each batch send has up to five minutes. On Node, batching
+and background request and backoff timers are unreferenced. An explicit flush
+or shutdown keeps the active delivery timers referenced while it waits.
+
+Ingest and read requests use manual redirect handling. Configure the endpoint
+as the serving origin. A redirect produces a status-only error. Ingest
+acknowledgements are limited to 4 MiB and read pages to 64 MiB. The SDK cancels
+unused or oversized bodies. An unreadable or oversized acknowledgement leaves
+the covered events eligible for retry. Reads validate the returned event shape
+and have a 30-second deadline. Before each dispatch, a fetch transport with
+four pending cancellations or abandoned reads refuses the new read until cleanup
+completes. Callers control read concurrency. Simultaneous aborts of reads already
+dispatched can put more than four operations into cleanup.
+
 Do not ship private ingest keys in a public browser bundle.
 
 `endpoint` is the public origin that serves the console, the same value as the server's `APP_URL`.
@@ -39,9 +92,10 @@ It forwards `/v1` to the API, which stays on a private listener (never expose `:
 reference is at `<origin>/docs` and the OpenAPI document at `<origin>/openapi.json`.
 
 429, 5xx and network failures retry the same serialized batch with exponential
-backoff and jitter (numeric Retry-After supported). A terminal failure leaves the
-batch queued and rejects flush/shutdown. Background flush reports through onError;
-an explicit later flush retries the retained batch. The queue is memory-only;
+backoff and jitter (numeric Retry-After supported). Missing acknowledgements
+are retried too. After retry exhaustion, flush rejects and retains unresolved
+events. Background flush reports through `onError`. An explicit later flush
+retries the retained batch. The queue is memory-only;
 crashes before server acknowledgement can lose pending events. The server arbitrates immutable ids; exact retries do not repeat ClickHouse rollups.
 
 Carry the initiating actor and operation ID through job data:
@@ -60,19 +114,53 @@ audit.track({ action: 'guest.updated', actor,
 // Scheduled work uses actor: { type: 'system', id: 'crm-scheduler' }.
 ```
 
+Send change values as their JSON types. Use `10` for a number and `null` for an explicit
+null. Omit `before` when creating a field or `after` when removing it. Reads include
+`beforeKind` and `afterKind` when the server recorded them.
+
 Do not log raw SDK error objects, events, headers or credentials. Use safe diagnostic messages as above.
+
+## What search can find
+
+Logbird stores each event exactly as sent, up to the 256 KB event limit (event detail returns
+it unless a field mask hides it, and the `jsonl-evidence` export carries it), and indexes it
+for search with caps. The known fields are columns
+cut to a length in UTF-16 code units (`action` 200, ids 256, names 512, `description` 4,096), with the
+first 64 `targets` and 256 `changes`. Every other field (`metadata.*`, other top-level
+fields, extra keys on the actor, executor, tenant, context or a target) becomes an attribute
+searched by its dotted path, such as `metadata.plan:pro`: flattened to six path segments
+(arrays and deeper objects as JSON text), at most 256 from your fields per event, each text value's first 2 KB.
+A field past a cap is not searchable but stays in the stored event. So an event whose
+`metadata` holds `importer` and a 300-key `settings` object indexes `metadata.importer` and
+the first 255 settings keys; the other 45 are only in event detail and the `jsonl-evidence` export. The
+[backend guide](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#what-search-can-find)
+lists every cap.
 
 ## Outage backpressure
 
-The SDK retains at most `maxQueueSize` queued events (default 10,000), plus one in-flight
+The SDK retains at most `maxQueueSize` queued or preparing events (default 10,000), plus one in-flight
 batch (at most `batchSize`, default 100). Each event is capped at 256 KiB; this is an event
 count limit, not a byte budget. Size the queue for your payloads and memory budget.
 `dropPolicy: 'oldest'` (default) keeps recent events; `'newest'` preserves queued history.
-`onDrop(event)` reports each overflow discard and `client.dropped` counts them;
-`client.queueSize` reports queued events. Exceptions from diagnostic callbacks never escape
-`track`. Failed batches re-enter the same bounded queue with the same drop policy.
-`track` is best effort; `flush` and `shutdown` reject on delivery failure so callers must
-handle them. Call shutdown in the host lifecycle and await it before exiting.
+`client.dropped` counts every drop, and `client.droppedByReason` gives the counts
+by reason. `onDrop(event, details)` receives `details.reason`, `mayBeStored`, and
+the approved rejection code or HTTP status when available. Queued drops carry
+the full serialized event snapshot. Local refusals before enqueue carry only
+bounded id and action fields. Keep these snapshots out of operational logs.
+If `mayBeStored` is true and you replay from an outbox, reuse the original id and
+content, including the original timestamp.
+`client.possiblyStoredDropsByReason` counts uncertain drops even when a notification
+could not be delivered. Pending resolver captures reserve queue capacity. A
+reservation that is already preparing cannot be displaced by a newer capture.
+
+`client.queueSize` reports queued events. Failed batches re-enter the same bounded
+queue with the same drop policy. Diagnostic callbacks run after queue mutations.
+The SDK observes rejected callback promises and counts failures in
+`client.failedNotifications`. It skips new notifications when 1024 are outstanding
+or 1024 have already been posted in the same event loop turn and counts those
+in `client.skippedNotifications`. Capture attempted synchronously inside a client
+diagnostic callback is counted as `diagnostic_reentry`. Flush and shutdown allow scheduled
+callbacks to start before settling. Callers own any asynchronous work in their callbacks.
 
 ```ts
 const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
@@ -105,19 +193,19 @@ receive time minus 3650 days through plus 24 hours. Only `action` is required, s
 epoch **seconds** — numbers below 1e11 —, or outside that window) never drops the event: it is stored at receive time,
 the original value is kept in `attributes['logbird.occurredAt.rejected']` and the payload, and the response lists it
 in `warnings[]` with the reason. Events without an `action` are per-event `rejected[]` entries; valid siblings are
-durably inserted. SDK partial rejections invoke `onDrop` for rejected indices and `onError` with reasons. Permanent
+durably inserted. SDK partial rejections invoke `onDrop` once per rejected position with its code when recognized
+and `onError` with the rejection count. Permanent
 HTTP errors (except 429) drop the batch and report; transient failures retain it for retry.
 
 ## Host context options (0.2)
 
 ```ts
-import { Logbird, redact } from '@logbird/sdk';
+import { Logbird } from '@logbird/sdk';
 const client = new Logbird({
   endpoint: process.env.LOGBIRD_ENDPOINT,
   apiKey: process.env.LOGBIRD_INGEST_KEY,
   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY),
   defaults: { environment: 'staging' },
-  beforeSend: redact(),
   onError: () => console.warn('Audit delivery failed'),
 });
 client.track({ action: 'record.updated', metadata: { token: 'never stored' } });
@@ -128,49 +216,135 @@ An unset key requires `enabled: false`. Disabled clients require neither endpoin
 track does nothing and flush/shutdown resolve immediately. Enabled clients require both.
 Defaults are shallow merged under events; context and metadata merge one level deep.
 Explicit undefined values override defaults. beforeSend runs after defaults and id/time
-stamping, before serialization and size checks. Returning null/undefined silently filters;
-a throwing hook fails closed and reports onError. Neither counts as an overflow drop.
+stamping. Redaction runs next, followed by the 256 KiB check on the resulting JSON.
+Returning null/undefined records a `filtered` drop. A throwing hook records a
+`before_send_failed` drop and reports through `onError`.
 
-`redact({ keys?, changeFields?, replacement? })` deep copies the event, redacts matching
-object-key values throughout objects/arrays, retaining the keys, and replaces present
-before/after values of matching change fields. Default replacement is `[redacted]`.
-Keys match as substrings (the default also redacts `tokenCount` and `secretary`; anchor
-your own pattern, `/^token$/`, to match whole keys). Identity is never redacted: the
-top-level `id` and `action`, and `IDENTIFIER_FIELDS` (the actor's type and id, the
-impersonator's and tenant's id, the executor's type, id, jobId and attempt, and each
-target's type and id). A pattern matching a party's own key (`actor`, `impersonator`,
-`executor`, `tenant` or `targets`), or a target's index, redacts that party's other
-fields, such as its name and email, and keeps its identifier fields; a party object is
-never replaced as a whole (a party that is not an object, such as a string `actor`, is
-replaced like any other value). A change's values are replaced when its `field` is a string the
-change pattern matches. The .NET SDK redacts by the same rules, checked against one shared
-fixture: with `DEFAULT_SECRET_KEYS` both redact exactly the same keys. A pattern of your
-own runs on each platform's engine, which differ at the edges (in .NET `$` also matches
-before a final line feed, and flags such as `i` fold case differently), so keep a pattern
-you share between the SDKs to plain alternatives and anchors. `redact()` is exact for JSON
-data, which is what `EventInput` types (plain objects, arrays, primitives, and `toJSON`
-values such as `Date` without side effects on other parts of the event); getters or
-`toJSON` with such side effects are outside that contract. A change whose `field` is a
-getter, an inherited or non-enumerable property, or a value (an object or a function) with a
-`toJSON` has its `before` and `after` redacted, whatever the pattern; any other non-string
-`field`, or none, is not matched.
-`DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
-cookies, credentials and private keys. Add email/phone patterns for your PII policy;
-the default secret pattern does not cover all PII. Supplying `keys` replaces the default pattern; combine them to retain secret protection. `changeFields` defaults to the resulting `keys` pattern. Hooks compose:
+Before copying input or invoking `beforeSend`, the SDK checks a 1 MiB lower
+bound of its JSON size and a depth of 1,000 levels within metadata and each
+change value. The lower bound counts one
+byte per UTF-16 code unit of keys and values, plus JSON framing and literals.
+The guard is an approximation. A few hundred bytes of SDK-added framing can
+affect results near the limit, and TypeScript and .NET also estimate numeric
+values differently.
+An event outside those limits is reported as `input_too_large` or
+`input_too_deep`, even if redaction would have reduced the output. Supply
+ordinary JSON data and convert accessor-backed values to plain data at capture.
+The final 256 KiB cap measures the actual serialized UTF-8 bytes. A redaction
+result that exceeds this output limit is reported as `too_large`.
+
+`onWarning` receives a `party_id_normalization` code and the field name when
+party identifiers or target types may be indexed differently because of
+whitespace, length or lone surrogates, or when there are more than 64 targets.
+The SDK sends the values as supplied. The server decides whether to accept
+the event.
+
+`LogbirdError` supports a stable `code` and safe numeric `status` and `count`
+fields when applicable. Use these fields for operational logs. The SDK reports
+approved rejection codes through `onDrop` and leaves its event snapshot
+available for recovery. A read cancelled before dispatch rejects with the
+caller's abort reason. Cancellation after dispatch uses a standard `AbortError`
+with a fixed message.
+
+## Redaction
+
+Every event passes through client redaction, including events from framework
+adapters, `createAudit`, and BullMQ's `jobAudit`. The SDK applies the rules to the
+value returned by `beforeSend` and checks the size of the redacted JSON. It
+reports preparation, redaction and size failures through `onError` and counts
+them by reason. A redaction failure is `redaction_failed`. These refusals supply
+only bounded action and event ID fields to `onDrop` with `mayBeStored: false`.
+
+Redaction is on by default. `DEFAULT_SECRET_KEYS` matches passwords, secrets,
+tokens, OTPs, API keys, authorization, cookies, credentials and private keys.
+Pass `redaction: false` to disable client redaction. Use these options to set
+your policy.
+
+| Option | Behavior |
+| --- | --- |
+| `keys` | A regular expression that replaces the default pattern. It matches any part of a key at any depth unless you anchor it, as in `/^token$/`. The default also matches keys such as `tokenCount` and `secretary`. |
+| `addKeys` | Extra literal substrings checked separately from `keys`. ASCII letter case is ignored. Non-ASCII characters match exactly, and characters such as `.` are literal. |
+| `changeFields` | A regular expression for the `field` name of a change. This rule replaces its present `before` and `after` values and keeps the field name. Omit it to use `keys` and `addKeys` for matching change fields. |
+| `replacement` | A string that replaces each matched value. The console recognises the default `[redacted]` in change values and displays “value redacted”. Custom replacement strings appear as recorded. |
+| `paths` | Exact locations to redact regardless of their key. |
+| `keepPaths` | Exact locations exempt from the key match at that node. Descendants still get checked. |
+
+After protecting the identifier fields, the SDK applies these rules in order.
+
+1. An explicit `paths` match forces redaction.
+2. A matching change field forces redaction of its present `before` and `after` values.
+3. A whole-party match redacts the party's non-identifier fields. For example,
+   `keys: /actor/` redacts the staff email even with `keepPaths: ['actor.email']`.
+4. A `keepPaths` match exempts the node from its own key match. For example,
+   keeping `actor` prevents `/actor/` from triggering whole-party redaction.
+5. The `keys` and `addKeys` rules redact matching keys and indices.
+
+Paths start at the event root. Each dot separates a case-sensitive segment.
+A segment of `*` matches exactly one object key or array index.
+For example, `targets.*.name` addresses every target's display name and
+`changes.0.after.email` addresses an object within the first change.
+Use `\.`, `\*` or `\\` in a path to match a literal dot, star or backslash.
+Double the backslashes in a JavaScript string, as in `'metadata.guest\\.email'` for
+the key `guest.email`. Paths match existing JSON locations. They support
+one-segment wildcards only and do not match value contents or select changes
+by field name. Invalid paths throw during setup with code `redaction_options_invalid`.
+
+The SDK preserves top-level `id` and `action` and the party identifiers listed in
+`IDENTIFIER_FIELDS`. It reports rules that directly match identifiers once via
+`onError` when the client is constructed. An identifier that serializes to a
+JSON object or array causes the event to be refused. Matching an entire `actor`,
+`impersonator`, `executor`, `tenant`, or target object redacts all its other
+fields while preserving its identifiers. Matching `targets` applies that rule
+to every target. Malformed scalar party values can be replaced in full.
+
+This configuration keeps staff names and email addresses, redacts default secrets
+throughout the event, and masks guest personal data in metadata and changes.
 
 ```ts
-import { DEFAULT_SECRET_KEYS, redact } from '@logbird/sdk';
-
-const keys = new RegExp(DEFAULT_SECRET_KEYS.source + '|email|phone', 'i');
-const hide = redact({ keys });
-const beforeSend = event => event.action === 'health.checked' ? null : hide(event);
+const client = new Logbird({
+  endpoint,
+  apiKey,
+  redaction: {
+    addKeys: ['email', 'phone', 'notes', 'name'],
+    keepPaths: ['actor.name', 'actor.email', 'impersonator.name', 'impersonator.email'],
+  },
+});
+client.track({
+  action: 'guest.updated',
+  actor: { id: 'staff_42', name: 'Fictional Operator', email: 'staff@example.invalid' },
+  metadata: { guest: { email: 'guest@example.invalid', phone: '555-0100', notes: 'Fictional note' } },
+  changes: [{ field: 'guest.email', after: 'guest@example.invalid' }],
+});
 ```
+
+The added names apply to every event location and to change field names, with the
+four staff identity exemptions shown here. Filter outgoing data at the source as
+well, especially personal data in free text or under other key names.
+
+The exported `redact(options)` helper uses the same rules to produce a redacted
+copy and still works as a `beforeSend` hook. Client rules run on the hook result,
+so a value already replaced by the hook cannot be recovered by a client
+exemption. For hooks that must remain the sole redaction policy, set
+`redaction: false`. Redaction operates on the JSON representation, including
+values returned by `toJSON`. Supply plain data and serialization methods without
+side effects. If a change field comes from a getter, an inherited or
+non-enumerable property, a boxed string, a bigint, or a value with a `toJSON`
+method, the SDK redacts its change values.
+
+The default rules and literal `addKeys` matching use the same ASCII case rules
+in both SDKs. Custom `keys` and `changeFields` run on each platform's regex engine
+and agree where the engines interpret the pattern the same way. For example,
+`^label$` matches a key ending in a line feed in .NET, where `$` also matches
+before a final line feed. JavaScript requires the actual end for this pattern.
+For a strict end anchor in a shared expression, use a pattern such as
+`^label(?![\s\S])` (equivalent to `^label\z` in .NET). Prefer `addKeys` whenever
+a literal substring is enough.
 
 ## Standard Webhooks
 
 `signWebhook`, `verifyWebhook`, `generateWebhookSecret` and
 `WebhookVerificationError` are exported from `@logbird/sdk`. Signing and verification
-are async and use Web Crypto HMAC-SHA256, which Node 22+, browsers and edge runtimes
+are async and use Web Crypto HMAC-SHA256, which Node 20+, browsers and edge runtimes
 all provide, so there are no runtime dependencies. Verification computes one HMAC of
 the body per secret and compares it with each claimed signature (at most 10) in
 constant time.
@@ -294,7 +468,7 @@ ids across separate `track()` calls, resend identical content, including `occurr
 and `executor.attempt`; a new call otherwise gets a fresh timestamp. A different
 event with the same id is rejected with `duplicate_id_conflict: ...`; the original
 is kept. Send a correction with a new id and `context.parentEventId` pointing to it.
-The SDK calls `onDrop` for that event and `onError` with the reason.
+The SDK calls `onDrop` with the approved rejection code and gives `onError` a count.
 
 `503 ingest_pending` and `503 ingest_unavailable` mean retry unsettled events,
 honoring `Retry-After`. Healthy siblings commit before a pending response and remain
@@ -305,12 +479,15 @@ parse failure, the server checks every named row alone as a canary. A written
 canary is accepted and the rest of that attempt uses bisection; a failed canary permits
 exact-row rejection and prefix writes. All share the original isolation budgets
 (about three statements per bad row).
-The SDK retries with the identical previous body unless complete 503 details settle
-events; then it resends only unsettled events within the same send. It serializes
-each event once per send and reuses that exact JSON (including id and occurredAt)
+The SDK validates the acknowledgement envelope, credits each accepted id once
+per occurrence and settles each rejected position once. It retries only the
+remaining events with their cached JSON (including id and occurredAt)
 in every subset body. Response indices are mapped back to the original events,
-so rejections call `onDrop` once per send. Incomplete or malformed details keep
-the previous body unchanged. After its retry budget, only unsettled events stay
+so rejections call `onDrop` once per event. Incomplete 503 details keep the
+previous retry body, and valid rejections are still reported. A partial 2xx
+can settle unambiguous accepted rows. The SDK refuses
+to dispatch when four transport operations are still outstanding after cancellation.
+After its retry budget, only unsettled events stay
 queued and `flush()` rejects. The SDK always sends `Logbird-Retry: subset`. About
 five leading bad rows fit per attempt under the server's byte budget; subset retries
 converge. An attempt settling events and shrinking the body does not consume

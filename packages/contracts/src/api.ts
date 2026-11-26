@@ -27,13 +27,42 @@ export const workspaceSchema = z.object({ id: z.string(), name: z.string(), slug
  * With `lang=sql`, `q` is a ClickHouse WHERE expression (see ./query.ts). Invalid queries answer 422
  * `invalid_query` with `details: QueryErrorDetails`.
  */
+/** Without `from`, a read covers this much time before `to` (24 hours). */
+export const DEFAULT_RANGE_MS = 86_400_000;
 export const rangeQuerySchema = z.object({
-  from: z.string().optional(), // ISO; default now-24h
+  from: z.string().optional(), // ISO; default to − 24h
   to: z.string().optional(), // ISO; default now
   q: z.string().max(4096).optional().meta({ example: 'action:document.updated' }),
   lang: queryLangSchema.optional(), // absent = 'query'
 });
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
+/**
+ * The time window a read applied, so a reader can tell a short history from a short window. Same form and same rule
+ * as the request's `from` and `to`: `from` inclusive, `to` exclusive, on `timestamp`, as ISO 8601 UTC with milliseconds.
+ */
+const appliedInstant = z.iso.datetime({ precision: 3 });
+export const appliedRangeSchema = z
+  .object({
+    from: appliedInstant.meta({
+      description:
+        "Inclusive start the server applied (ISO 8601 UTC, milliseconds): the request's `from`, or `to` minus 24 hours when `from` was absent, never before 1900-01-01T00:00:00.000Z.",
+      example: '2026-11-01T00:00:00.000Z',
+    }),
+    to: appliedInstant.meta({
+      description:
+        "Exclusive end the server applied (ISO 8601 UTC, milliseconds): the request's `to`, or the server clock when `to` was absent, never after 2299-12-31T23:59:59.999Z.",
+      example: '2026-12-01T00:00:00.000Z',
+    }),
+  })
+  .refine((range) => range.from < range.to, 'The range must start before it ends.')
+  .meta({
+    description:
+      'The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than this field.',
+  });
+export type AppliedRange = z.infer<typeof appliedRangeSchema>;
+/** `GET /v1/export` states the applied window in headers (a CSV or JSONL stream has no envelope for a field). */
+export const RANGE_FROM_HEADER = 'X-Logbird-Range-From';
+export const RANGE_TO_HEADER = 'X-Logbird-Range-To';
 
 export const EXPORT_SCHEMA_VERSION = 1 as const;
 export const EXPORT_ID_HEADER = 'X-Logbird-Export-Id';
@@ -64,18 +93,70 @@ export const searchQuerySchema = rangeQuerySchema.extend({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   order: z.enum(['desc', 'asc']).default('desc'),
 });
-export const publicSearchQuerySchema = searchQuerySchema.extend({ lang: z.literal('query').optional() });
+/** `lang` on /v1: only the query language (SQL mode is console-only). */
+const publicLang = z
+  .literal('query')
+  .optional()
+  .meta({ description: 'Only `query` (the default). `lang=sql` is console-only and answers 422 invalid_query.' });
+const STORED_TIMESTAMP =
+  "the stored `timestamp`: the event's occurredAt, or the time Logbird received it when occurredAt was absent or unusable (an unusable value is usually noted, cut to 256 characters, in `attributes['logbird.occurredAt.rejected']`; the event detail's `payload` keeps what was sent)";
+/** The time window and filter of the /v1 reads, described for OpenAPI (the console routes keep the bare schema). */
+const publicWindow = {
+  from: z
+    .string()
+    .optional()
+    .meta({
+      description: `Start of the time window, inclusive, on ${STORED_TIMESTAMP}. Send an ISO 8601 date-time in UTC (Z) or with an offset, read to the millisecond: a date-time without an offset is read in the server's time zone, and a date alone is midnight UTC. The server parses it with JavaScript's Date, so other spellings that Date accepts are read too; they are not portable. Default: \`to\` minus 24 hours. A bound outside what the store holds is moved onto its limit: \`from\` no earlier than 1900-01-01T00:00:00.000Z, \`to\` no later than 2299-12-31T23:59:59.999Z (exclusive, so an event at exactly that last millisecond cannot be read). The window applied is returned as \`range\` (export: the X-Logbird-Range-From and X-Logbird-Range-To headers).`,
+      example: '2026-11-01T00:00:00.000Z',
+    }),
+  to: z.string().optional().meta({
+    description:
+      'End of the time window, exclusive. Same format as `from`. Default: the server clock when the request is read. `from` must be before `to` (422 invalid_query otherwise).',
+    example: '2026-12-01T00:00:00.000Z',
+  }),
+  q: z.string().max(4096).optional().meta({
+    description:
+      'Filter in the Logbird query language (docs/query-language.md), at most 4096 UTF-8 bytes. It narrows the time window and never widens it: a time term (such as `receivedAt:>…`) applies inside the window. A relative time (such as `receivedAt:>now-1h`) is read against the clock of each request.',
+    example: 'action:document.updated',
+  }),
+  lang: publicLang,
+};
+export const publicSearchQuerySchema = searchQuerySchema.extend({
+  ...publicWindow,
+  cursor: z.string().optional().meta({
+    description:
+      "The `nextCursor` of the previous page (opaque). The next page starts after that page's last event in the sort order. Send the same `q`, `order`, `from` and `to` with it: a cursor carries no window, so without `from` and `to` each page computes its own default window. To keep the same window and filter on every page, send the first page's `range` back as `from` and `to`, and use absolute times in `q`; the pages still see events stored or removed while you page. A cursor this server issues works only for the project and reader scope that received it (422 validation_error otherwise).",
+  }),
+  limit: z.coerce.number().int().min(1).max(200).default(50).meta({ description: 'Events per page, 1 to 200 (default 50).' }),
+  order: z.enum(['desc', 'asc']).default('desc').meta({
+    description:
+      '`desc` (default) is newest first, `asc` oldest first. Events sort by `timestamp`, then by event `id` in the same direction. Events in the same millisecond are ordered by id, not by cause: read causation from `context.parentEventId`.',
+  }),
+});
 /** `GET /v1/export`: the console schema without SQL mode (`lang=sql` is console-only). */
-export const publicExportQuerySchema = exportQuerySchema.extend({ lang: z.literal('query').optional() });
+export const publicExportQuerySchema = exportQuerySchema.extend({
+  ...publicWindow,
+  format: exportFormatSchema.meta({
+    description:
+      '`csv`, `jsonl` (one event per line) or `jsonl-evidence` (each event with its original payload; 422 masked_export for a masked scope).',
+  }),
+});
 export type SearchQuery = z.infer<typeof searchQuerySchema>;
 
 export const searchResponseSchema = z.object({
-  data: z.array(eventSchema),
-  nextCursor: z.string().nullable(),
+  data: z.array(eventSchema).meta({ description: 'This page of events, in the requested `order`.' }),
+  nextCursor: z.string().nullable().meta({ description: 'Send as `cursor` for the next page; null on the last page.' }),
   /** Number of matches in range. When `totalExact` is false it is a lower bound (capped at 10,001, or the count did not finish). */
-  total: z.number().int(),
+  total: z.number().int().meta({
+    description: 'Matching events in the whole window (every page, not only this one). A lower bound when `totalExact` is false.',
+  }),
   /** False when `total` is a lower bound. Absent from older servers: treat as exact below 10,001. */
-  totalExact: z.boolean().optional(),
+  totalExact: z.boolean().optional().meta({
+    description:
+      'False when `total` is a lower bound because the server could not establish an exact count: the count stops at 10,001, failed, did not finish within its 1 second budget, or saw fewer events than this page proves. Exact means exact for `range`: events outside the window are not counted. Absent from older servers: treat as exact below 10,001.',
+  }),
+  /** The window applied (absent from older servers). */
+  range: appliedRangeSchema.optional(),
   tookMs: z.number(),
 });
 export type SearchResponse = z.infer<typeof searchResponseSchema>;
@@ -141,11 +222,19 @@ export const facetFieldSchema = z.union([
     .meta({ description: '`attr.<path>` or `attributes.<path>`; the path after the prefix is at most 4096 characters.' }),
 ]);
 export const facetQuerySchema = rangeQuerySchema.extend({
-  field: facetFieldSchema.meta({ example: 'attr.metadata.missing' }),
-  limit: z.coerce.number().int().min(1).max(100).default(10),
+  field: facetFieldSchema.meta({
+    description: 'The field to count: a stored field, or an attribute as `attr.<path>` (array-valued attributes count each element).',
+    example: 'attr.metadata.missing',
+  }),
+  limit: z.coerce.number().int().min(1).max(100).default(10).meta({
+    description:
+      'Values returned, 1 to 100 (default 10), most frequent first. Counts cover the events in the time window (`range`) that match `q`; `otherCount` counts what the listed values leave out.',
+  }),
   /** Optional second level (#140): the top `byLimit` values of `by` within each returned value of `field`. */
-  by: facetFieldSchema.optional().meta({ example: 'tenant' }),
-  byLimit: z.coerce.number().int().min(1).max(20).default(5),
+  by: facetFieldSchema
+    .optional()
+    .meta({ description: 'Optional second field: the top `byLimit` values of `by` within each returned value of `field`.', example: 'tenant' }),
+  byLimit: z.coerce.number().int().min(1).max(20).default(5).meta({ description: 'Second-level values per value of `field`, 1 to 20 (default 5).' }),
 });
 const facetValueSchema = z.object({ value: z.string(), label: z.string(), count: z.number().int() });
 export const facetResponseSchema = z.object({
@@ -160,6 +249,8 @@ export const facetResponseSchema = z.object({
     }),
   ),
   otherCount: z.number().int(),
+  /** The window applied (absent from older servers). */
+  range: appliedRangeSchema.optional(),
 });
 export type FacetResponse = z.infer<typeof facetResponseSchema>;
 /** `GET /v1/facets`: the console schema without SQL mode (`lang=sql` is console-only). */
@@ -170,7 +261,7 @@ export type FacetResponse = z.infer<typeof facetResponseSchema>;
 export const RECENT_PROBLEM_OUTCOMES = ['failure', 'denied'] as const;
 export const RECENT_PROBLEM_SEVERITY = 'critical';
 
-export const publicFacetQuerySchema = facetQuerySchema.extend({ lang: z.literal('query').optional() });
+export const publicFacetQuerySchema = facetQuerySchema.extend(publicWindow);
 
 /* ------------------------------------------------------------------ */
 /* Overview dashboard                                                  */

@@ -47,6 +47,8 @@ app.use('/api/sessions/*', rateLimit);
 const EXPOSED_HEADERS = [
   'X-Logbird-Export-Id',
   'X-Logbird-Export-Schema',
+  'X-Logbird-Range-From',
+  'X-Logbird-Range-To',
   'X-Request-Id',
   'RateLimit-Limit',
   'RateLimit-Remaining',

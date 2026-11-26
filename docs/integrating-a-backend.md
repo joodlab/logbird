@@ -19,36 +19,126 @@ LOGBIRD_INGEST_KEY=<project ingest key>
 `LOGBIRD_ENDPOINT` is your public Logbird origin without `/v1/events`. This application
 variable is passed to `endpoint`; the SDK does not read it automatically.
 
-`@logbird/sdk` is not published on npm yet: `pnpm add @logbird/sdk` returns 404.
-Use the source package at `packages/sdk`. Inside this repository, add it to a
-workspace app with:
+### Install the SDK
+
+The TypeScript packages are not on npm yet, so `pnpm add @logbird/sdk` finds nothing.
+Each GitHub Release attaches them instead: `logbird-sdk-X.Y.Z.tgz`, `logbird-hono-X.Y.Z.tgz`,
+`logbird-vue-X.Y.Z.tgz`, `logbird-nuxt-X.Y.Z.tgz` and `logbird-tanstack-start-X.Y.Z.tgz`,
+built JavaScript with type declarations, packed exactly as a publish to npm would pack them, plus a
+`SHA256SUMS` file. Install an exact version from those files. (Releases made before the
+tarballs were attached have none; use a later one.)
+
+Requirements, as the packages' manifests state them:
+
+- Node 20 or later (`engines.node` is `>=20` for `@logbird/sdk`, `@logbird/hono` and
+  `@logbird/vue`; `@logbird/nuxt` needs `^20.19.0 || >=22.12.0` and
+  `@logbird/tanstack-start` `>=22.12.0`).
+- ES modules only: `import` the packages; there is no CommonJS build.
+- TypeScript: the declarations of `@logbird/sdk` and `@logbird/hono` are checked with
+  TypeScript 6 and 7 under `strict` and `skipLibCheck: false`, with `moduleResolution`
+  `nodenext` and `bundler`. `@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start`
+  are checked with TypeScript 6 and 7 under `bundler` resolution with `skipLibCheck: true`
+  (Nuxt projects resolve that way).
+- `@logbird/hono`: hono 4.12.3 or later in 4.x (its peer dependency).
+
+**1. Download and verify.** From your project root, with the version you want:
 
 ```sh
-pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'
+version=X.Y.Z
+base="https://github.com/joodlab/logbird/releases/download/v$version"
+mkdir -p vendor/logbird && cd vendor/logbird &&
+  curl -fsSLO "$base/SHA256SUMS" &&
+  curl -fsSLO "$base/logbird-sdk-$version.tgz" &&
+  curl -fsSLO "$base/logbird-hono-$version.tgz" &&
+  grep " logbird-sdk-$version.tgz\$" SHA256SUMS | sha256sum --check &&
+  grep " logbird-hono-$version.tgz\$" SHA256SUMS | sha256sum --check &&
+  cd ../..
 ```
 
-For a backend outside the workspace, clone Logbird beside it. Run `pnpm install`
-in the Logbird clone first so the linked source can resolve its dependencies. Then
-run this command from your backend project:
+Without the Hono integration, leave out its two lines: one `curl` and one
+`grep … | sha256sum --check` line per tarball. On macOS, use `shasum -a 256 --check` for `sha256sum --check`. Each
+tarball must print `OK`. The chain stops at a failed download, a mismatch, or a tarball
+that `SHA256SUMS` does not list (`sha256sum` refuses an empty check), and you must not
+install from that folder until it passes. Commit `vendor/logbird/` with your project: the
+build then installs the same bytes every time and never depends on GitHub being reachable.
 
-```sh
-pnpm add @logbird/sdk@link:../logbird/packages/sdk
+**2. Depend on the files.** `@logbird/hono` (like every integration) depends on
+`@logbird/sdk` at exactly its own version, which no registry serves yet. An override
+points that dependency at the same tarball, so your code and the integration share one SDK.
+In `package.json`, next to your application's own `hono` (4.12.3 or later in 4.x; the
+install check uses exactly this manifest with hono 4.13.21):
+
+```json
+{
+  "dependencies": {
+    "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz",
+    "@logbird/hono": "file:vendor/logbird/logbird-hono-X.Y.Z.tgz",
+    "hono": "4.13.21"
+  }
+}
 ```
 
-The source exports TypeScript; use `tsx` (for example, `pnpm exec tsx server.ts`)
-or a bundler such as Vite or esbuild. Native Node type stripping cannot handle the
-SDK's constructor parameter property.
-See the [SDK README](../packages/sdk/README.md) for its runtime requirements.
+With **pnpm**, put the override in `pnpm-workspace.yaml` next to `package.json` (create the
+file if you have none; in a pnpm workspace, use the root one with a path from the root).
+pnpm 10 and 12 both read it there; pnpm 12 ignores a `pnpm.overrides` field in `package.json`.
+
+```yaml
+overrides:
+  '@logbird/sdk': file:vendor/logbird/logbird-sdk-X.Y.Z.tgz
+```
+
+With **npm**, add it to `package.json`:
+
+```json
+{
+  "overrides": {
+    "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz"
+  }
+}
+```
+
+With the SDK alone you need no override: `pnpm add ./vendor/logbird/logbird-sdk-X.Y.Z.tgz`
+(or `npm install …`) writes the `file:` dependency for you.
+
+`@logbird/vue`, `@logbird/nuxt` and `@logbird/tanstack-start` are attached to the same release (each
+depends on `@logbird/sdk` at exactly its version, and `@logbird/nuxt` on `@logbird/vue` too). No check installs
+them on their own yet (they are type-checked from the release tarballs, installed side by side), so this guide gives
+no install recipe for them.
+
+**3. Install and commit the lockfile.** Run `pnpm install` or `npm install`. The lockfile
+records each tarball with its SHA-512 integrity (`integrity: sha512-…`), and later installs
+with `pnpm install --frozen-lockfile` or `npm ci` refuse a tarball whose bytes differ
+(`ERR_PNPM_TARBALL_INTEGRITY`, `EINTEGRITY`). To tie that value to the verified download,
+`openssl dgst -sha512 -binary vendor/logbird/logbird-sdk-X.Y.Z.tgz | openssl base64 -A`
+prints what follows `sha512-`.
+
+To upgrade, download and verify the new version, change the version in the file names
+(dependencies and overrides), delete the old tarballs and install again.
+
+Pointing the dependencies and overrides straight at the Release URLs
+(`https://github.com/joodlab/logbird/releases/download/vX.Y.Z/logbird-sdk-X.Y.Z.tgz`)
+also works with pnpm 10 and with npm, where npm 12 needs `allow-remote=root` in the
+project's `.npmrc` (it refuses URL dependencies by default). With an integration, pnpm 12
+refuses it (`ERR_PNPM_EXOTIC_SUBDEP`: the override makes the integration's SDK a
+sub-dependency resolved from a URL), and turning its `blockExoticSubdeps` protection off is
+not worth it. For `@logbird/sdk` alone (a direct dependency, no override) pnpm 12 accepts
+the URL: `pnpm add <URL>`, or `npm install <URL>` with `allow-remote=root`. The lockfile
+then pins the tarball's integrity just the same. The downloaded files work with every one
+of them and keep builds independent of GitHub being reachable.
+
+A source checkout of this repository is for contributing to Logbird
+([CONTRIBUTING.md](../CONTRIBUTING.md)), not for installing it in an application.
 
 ```ts
-import { DEFAULT_SECRET_KEYS, Logbird, redact } from '@logbird/sdk';
+import { Logbird } from '@logbird/sdk';
 
 const audit = new Logbird({
   endpoint: process.env.LOGBIRD_ENDPOINT!,
   apiKey: process.env.LOGBIRD_INGEST_KEY!,
-  beforeSend: redact({
-    keys: new RegExp(DEFAULT_SECRET_KEYS.source + '|email|phone', 'i'),
-  }),
+  redaction: {
+    addKeys: ['email', 'phone', 'notes', 'name'],
+    keepPaths: ['actor.name', 'actor.email', 'impersonator.name', 'impersonator.email'],
+  },
   maxQueueSize: 1000,
   onError: () => console.warn('Audit delivery failed'),
   onDrop: () => console.warn('Audit event dropped'),
@@ -75,17 +165,64 @@ SDK error objects that may contain sensitive details.
 
 Copy only allowlisted fields. Avoid request bodies, session objects, customer
 messages and full database rows. Prefer IDs over personal information.
-`redact()` deep copies the event and replaces matching object-key values and
-matching change fields' `before`/`after` values with `[redacted]`; keys remain.
-Keys match as substrings. Identifier fields (party ids and types, an executor's
-job id and attempt, each target's type and id) are never redacted; a pattern that
-matches a party's own key, such as `actor`, redacts its name, email and other
-fields and keeps its identifiers. The .NET SDK follows the same rules.
-Supplying `keys` replaces `DEFAULT_SECRET_KEYS`, so combine the patterns as above
-to retain default secret protection while adding personal-data fields.
-`changeFields` defaults to that same combined pattern. Inspect the stored raw
-payload as well as attributes.
-See [SDK redaction options](../packages/sdk/README.md#host-context-options-02).
+The client redacts common secret keys by default, after `beforeSend` and
+before checking the size of the outgoing JSON. The configuration above also
+redacts keys containing `email`, `phone`, `notes`, or `name` wherever they occur,
+while keeping the staff names and emails at the four listed paths. A change
+whose `field` is `guest.email` has its present `before` and `after` values replaced
+and keeps the field name. The extra key names are literal substrings that ignore
+ASCII case. Use `paths` to redact a specific location such as
+`metadata.guest.contact` regardless of its key. An exemption applies at its exact path.
+Inspect the stored raw payload as well as indexed attributes.
+See [SDK redaction options](../packages/sdk/README.md#redaction).
+
+### What search can find
+
+Logbird keeps each event twice: the event exactly as sent (the stored payload, which event
+detail returns unless a field mask hides it, and which the complete `jsonl-evidence` export
+carries; CSV and normalized JSONL exports carry the indexed fields) and a search index built
+from it. Search, filters and facets read the index, which has caps (lengths count UTF-16
+code units, so a character outside the Basic Multilingual Plane, such as most emoji, counts
+as two):
+
+- **Known fields** are indexed columns, each cut to a length: `action` 200 characters,
+  `description` 4,096, `source` 128, `environment` 64, `outcome` and `severity` 32; the
+  ids of the actor, impersonator, executor, tenant, targets and `context` 256; names and
+  the actor's email 512; types 64; `context.ip` 64 and `context.userAgent` 1,024.
+- **Targets and changes:** the first 64 `targets` and the first 256 `changes` (a change's
+  `field`, up to 256, and its `before` and `after`; other keys on a change entry are not indexed).
+- **Every other field is an attribute**, found by its dotted path (`metadata.plan:pro`):
+  `metadata` and any other top-level field you add, extra keys on `actor`, `impersonator`,
+  `executor`, `tenant` and `context` (`actor.department`), and extra keys on a target
+  (`targets.0.status`). Objects are flattened up to six path segments; an array, or an
+  object deeper than that, is indexed as its JSON text. An event indexes at most 256
+  attributes from your fields, taken in this order: your top-level fields in the order they
+  appear, then the extra party and context keys, then the extra target keys (Logbird may add
+  its own `logbird.occurredAt.rejected` beyond them). A text value keeps its first 2 KB
+  (2,048 bytes); a number is indexed whole or, if its exact spelling is longer than 2,044
+  characters, not at all (see [numbers and ids](#numbers-and-ids)).
+
+Anything past a cap is not searchable, but it is not lost: the stored payload keeps the
+whole event (up to the 256 KB event limit; a larger event is rejected and the SDK reports
+it through `onError`). For example:
+
+```ts
+audit.track({
+  action: 'settings.imported',
+  targets: [{ type: 'workspace', id: 'ws_7' }],
+  metadata: {
+    importer: 'nightly-feed', // attribute 1: metadata.importer:nightly-feed
+    settings: importedSettings, // 300 keys: attributes 2 to 256 are its first 255
+  },
+});
+```
+
+`metadata.importer:nightly-feed` finds the event, and so does `metadata.settings.locale:fr`
+when `locale` is among the first 255 settings keys. The last 45 keys are past the cap:
+searching for them finds nothing, while event detail and the `jsonl-evidence` export still
+show all 300. Put
+what people will search for in short fields of their own, or record one event per record
+changed with the record as a target, rather than deep in a long object or list.
 
 ### Numbers and ids
 
@@ -241,7 +378,11 @@ rejected on its own and the rest of the batch is stored; an otherwise valid even
 `invalid_event: event exceeds 256 KB` (a missing `action` or an unsafe `id` is reported
 first); more than 1000 events or more than 5 MB refuses the whole request with
 `413 payload_too_large`. Inspect even a 202 response:
-`rejected` lists individual failures and `warnings` reports normalization.
+`rejected` lists individual failures and `warnings` reports normalization, including
+one entry per cut of a stored event: `targets_truncated` when fewer targets are indexed than were sent (more than 64,
+or a numeric id too long to index), `changes_truncated` for more than 256 changes, and `change_fields_truncated` when,
+among the first 256 changes, a field name is longer than 256 UTF-16 code units after trimming. The event is stored
+whole; later entries add nothing to the index. See [limits](limits.md).
 Definite native storage parse failures are isolated into `invalid_event` rejections
 with zero-based indices and code-first reasons. Healthy siblings remain accepted;
 the server checks every named row alone as a canary, then inserts the parse-proven

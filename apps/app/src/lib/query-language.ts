@@ -675,6 +675,20 @@ export function fieldTerms(q: string, topLevelOnly = false): QueryToken[] {
   return fields;
 }
 
+/** Fields in the outer conjunction, including inside parenthesized conjunctions. */
+export function conjunctiveFieldTerms(q: string): QueryToken[] {
+  const fields: QueryToken[] = [];
+  function visit(expression: QueryExpression) {
+    if (expression.length !== 1) return;
+    for (const { atom } of expression[0] ?? []) {
+      if (atom.kind === 'field') fields.push(fieldToken(q, atom, atom.start, false));
+      else if (atom.kind === 'group') visit(atom.expression);
+    }
+  }
+  visit(editableExpression(q) ?? []);
+  return fields;
+}
+
 /** Only plain `field:value` / `field:"value"` terms count as a facet value being selected. */
 const isSimple = (t: QueryToken) => t.valueKind === 'plain' || t.valueKind === 'quoted';
 

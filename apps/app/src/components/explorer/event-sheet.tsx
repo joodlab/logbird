@@ -25,6 +25,7 @@ import {
   CogIcon,
   FilterIcon,
   GitBranchIcon,
+  InfoIcon,
   LinkIcon,
   SearchXIcon,
   TerminalIcon,
@@ -39,6 +40,7 @@ import { NotRecorded } from '@/components/not-recorded';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries';
+import { CHANGE_VALUE_WRAP, changeFieldLabel } from '@/lib/change-values';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import {
   actorAttributeHint,
@@ -52,10 +54,12 @@ import {
   unlinkedPartyLabel,
 } from '@/lib/events';
 import { formatDuration, formatNumber, formatTimeMs } from '@/lib/format';
+import { ingestCuts } from '@/lib/ingest-cuts';
 import { andQuery, formatTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
 import { useConsoleZone } from '@/lib/time-zone';
+import { ChangeValue } from './change-value';
 
 interface EventSheetProps {
   projectId?: string;
@@ -164,6 +168,16 @@ function Section({ title, children, actions, className }: { title: string; child
       </div>
       {children}
     </section>
+  );
+}
+
+/** What ingest cut from the indexed copy: plain text under the section title, pointing to the raw payload. */
+function CutNote({ children }: { children: ReactNode }) {
+  return (
+    <p className="flex items-start gap-1.5 text-muted-foreground text-xs" role="note">
+      <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
   );
 }
 
@@ -424,7 +438,7 @@ function ClampedTitle({ text }: { text: string }) {
           facts below stay reachable on a phone. */}
       <div className={cn('w-full', open && 'max-h-[40svh] overflow-y-auto')}>
         <SheetTitle
-          className={cn('font-semibold text-[17px] leading-snug tracking-tight [overflow-wrap:anywhere]', !open && 'line-clamp-3')}
+          className={cn(CHANGE_VALUE_WRAP, 'whitespace-break-spaces font-semibold text-[17px] leading-snug tracking-tight', !open && 'line-clamp-3')}
           dir="auto"
           ref={ref}
         >
@@ -615,6 +629,8 @@ function EventDetailBody({
   const ctx = e.context;
   const caused = useChildren(detail, { updatedAt: detailUpdatedAt, fetching: detailFetching }, e, projectId);
   const depth = detail?.parents.length ?? 0;
+  // Shown only when the raw payload below shows the payload (no error) and it confirms the counts.
+  const cuts = ingestCuts(e, detailError ? undefined : detail?.payload);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -779,14 +795,32 @@ function EventDetailBody({
           ) : null}
         </Section>
 
-        {e.targets.length > 0 ? (
-          <Section title={`Targets · ${e.targets.length}`}>
+        {e.targets.length > 0 || cuts.targets ? (
+          <Section title={cuts.targets ? `Targets · ${cuts.targets.indexed} of ${cuts.targets.sent}` : `Targets · ${e.targets.length}`}>
+            {cuts.targets ? (
+              <CutNote>
+                {formatNumber(cuts.targets.indexed)} of {formatNumber(cuts.targets.sent)} targets indexed: only those find this event by record. The
+                raw payload below has all {formatNumber(cuts.targets.sent)}.
+              </CutNote>
+            ) : null}
             <TargetList key={e.id} onFilter={onFilter} projectId={projectId} targets={e.targets} />
           </Section>
         ) : null}
 
-        {e.changes.length > 0 ? (
-          <Section title={`Changes · ${e.changes.length}`}>
+        {e.changes.length > 0 || cuts.changes ? (
+          <Section title={cuts.changes ? `Changes · ${cuts.changes.indexed} of ${cuts.changes.sent}` : `Changes · ${e.changes.length}`}>
+            {cuts.changes ? (
+              <CutNote>
+                {formatNumber(cuts.changes.indexed)} of {formatNumber(cuts.changes.sent)} changes indexed and shown here; the raw payload below has
+                them all.
+              </CutNote>
+            ) : null}
+            {cuts.changeFields ? (
+              <CutNote>
+                {cuts.changeFields === 1 ? '1 field name is' : `${formatNumber(cuts.changeFields)} field names are`} cut to at most 256 characters
+                here; the raw payload below has {cuts.changeFields === 1 ? 'it' : 'them'} whole.
+              </CutNote>
+            ) : null}
             <div className="overflow-hidden rounded-lg border">
               <table className="w-full table-fixed text-[13px]">
                 <thead className="bg-muted/40 text-[11px] text-muted-foreground">
@@ -797,36 +831,18 @@ function EventDetailBody({
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {e.changes.map((c) => {
-                    const redacted = c.before === '[redacted]' || c.after === '[redacted]';
-                    return (
-                      <tr key={c.field}>
-                        <td className="px-3 py-2 align-top font-mono text-[12px] [overflow-wrap:anywhere]">{c.field}</td>
-                        <td className="px-3 py-2 align-top">
-                          <span
-                            className={cn(
-                              'font-mono text-[12px] [overflow-wrap:anywhere]',
-                              redacted ? 'text-muted-foreground italic' : 'text-diff-remove line-through decoration-diff-remove/40',
-                            )}
-                            dir="auto"
-                          >
-                            {c.before || <span className="text-muted-foreground no-underline">∅</span>}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <span
-                            className={cn(
-                              'font-mono text-[12px] [overflow-wrap:anywhere]',
-                              redacted ? 'text-muted-foreground italic' : 'text-diff-add',
-                            )}
-                            dir="auto"
-                          >
-                            {c.after || <span className="text-muted-foreground">∅</span>}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {e.changes.map((c, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: the event's change list is positional and can repeat field names
+                    <tr key={`${index}:${c.field}`}>
+                      <td className="px-3 py-2 align-top font-mono text-[12px] [overflow-wrap:anywhere]">{changeFieldLabel(c.field)}</td>
+                      <td className="px-3 py-2 align-top">
+                        <ChangeValue before kind={c.beforeKind} text={c.before} />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <ChangeValue kind={c.afterKind} text={c.after} />
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
