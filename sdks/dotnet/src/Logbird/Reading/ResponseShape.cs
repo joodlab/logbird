@@ -24,6 +24,7 @@ internal static class ResponseShape
         => type == typeof(EventPage) ? Page
             : type == typeof(EventDetail) ? Detail
             : type == typeof(FacetResult) ? Facets
+            : type == typeof(HistoryHorizon) ? Horizon
             : null;
 
     internal static bool Page(JsonElement page)
@@ -42,6 +43,13 @@ internal static class ResponseShape
             && ArrayOf(detail, "parents", Event)
             && Number(detail, "childCount")
             && Number(detail, "operationSize");
+
+    /// <summary>The history horizon: a positive whole number of days, and the oldest visible event as an instant or null.</summary>
+    internal static bool Horizon(JsonElement horizon)
+        => horizon.ValueKind == JsonValueKind.Object
+            && horizon.TryGetProperty("retentionDays", out var days) && days.ValueKind == JsonValueKind.Number && days.TryGetInt32(out var whole) && whole > 0
+            && horizon.TryGetProperty("oldestEventAt", out var oldest)
+            && (oldest.ValueKind == JsonValueKind.Null || Instant(horizon, "oldestEventAt", out _));
 
     internal static bool Facets(JsonElement facets)
         => facets.ValueKind == JsonValueKind.Object

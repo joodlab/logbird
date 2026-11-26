@@ -60,6 +60,30 @@ export const appliedRangeSchema = z
       'The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than 0.4.0.',
   });
 export type AppliedRange = z.infer<typeof appliedRangeSchema>;
+/**
+ * `GET /v1/project`: how far back the caller's history reaches. `oldestEventAt` is the `timestamp` of the first event a
+ * search in `order=asc` over the widest window returns to the same caller (within its scope for a scoped key or viewer
+ * token), or null when search finds none. `retentionDays` is the project's configured policy, the same for every reader.
+ * Together they let a reader say that events before `oldestEventAt` are not stored, rather than that nothing happened.
+ */
+export const historyHorizonSchema = z
+  .object({
+    retentionDays: z.number().int().positive().meta({
+      description:
+        "The project's configured retention policy in days, the same for every reader of the project. Retention runs (hourly, and right after the policy is shortened) delete older events for good. It is a policy, not a bound on what a search returns: between runs, older events can still be stored and found.",
+      example: 90,
+    }),
+    oldestEventAt: appliedInstant.nullable().meta({
+      description:
+        'The `timestamp` of the oldest event this caller can find through search (ISO 8601 UTC, milliseconds): the first event of an `order=asc` search over the widest window, or null when that search finds none. It describes what is stored now: retention or deletion may have removed older events, raising `retentionDays` brings none back, and it can move back as well as forward (an event can arrive dated in the past).',
+      example: '2026-08-28T09:15:02.481Z',
+    }),
+  })
+  .meta({
+    description:
+      'How far back the caller can read. To read a whole history, search from `oldestEventAt` to `to` 2299-12-31T23:59:59.999Z, the end of the searchable range (an event can be dated up to one day after the server received it, so a `to` from your own clock can miss events), and do not take an empty answer before `oldestEventAt` as proof that nothing happened.',
+  });
+export type HistoryHorizon = z.infer<typeof historyHorizonSchema>;
 /** `GET /v1/export` states the applied window in headers (a CSV or JSONL stream has no envelope for a field). */
 export const RANGE_FROM_HEADER = 'X-Logbird-Range-From';
 export const RANGE_TO_HEADER = 'X-Logbird-Range-To';
