@@ -715,22 +715,24 @@ const isCount = (value: unknown) => Number.isSafeInteger(value) && (value as num
 /** How far back a reader's history reaches, from `GET /v1/project`. */
 export interface HistoryHorizon {
   /**
-   * The project's retention window in days. Retention deletes, for good, every event dated more than this many days
-   * before it runs (hourly, and right after the window is shortened).
+   * The project's retention policy in days, the same for every reader of the project. Each retention run (hourly, and
+   * right after the window is shortened) deletes for good the events dated more than this many days before the run;
+   * between runs older events can still be stored and found.
    */
   retentionDays: number;
   /**
-   * The `timestamp` of the oldest stored event this key or token can see (within its scope), or null when it sees none.
-   * Nothing older is stored for this reader; whether older events existed cannot be told from the store.
+   * The `timestamp` of the oldest event this key or token can find through search (within its scope), or null when it
+   * finds none. It describes what is stored now, not what ever existed, and can move back as well as forward.
    */
   oldestEventAt: string | null;
 }
 
 /**
- * How far back the reader's history reaches: the project's retention window and the oldest event the key or viewer
- * token can see, within its scope. Use `oldestEventAt` as the `from` of a whole-history read
- * (`iterateAuditTrail(options, { ..., range: { from: horizon.oldestEventAt } })`), and do not take an empty history before
- * it as proof that nothing happened. The request goes through the same bounded read as `readAuditTrail` and fails with
+ * How far back the reader's history reaches: the project's retention policy and the oldest event the key or viewer
+ * token can find through search, within its scope. For a whole-history read, use `oldestEventAt` as `from` and a `to` at
+ * least a day after now, since an event can be dated up to one day after it was received
+ * (`range: { from: horizon.oldestEventAt, to: new Date(Date.now() + 2 * 86_400_000) }`), and do not take an empty history
+ * before it as proof that nothing happened. The request goes through the same bounded read as `readAuditTrail` and fails with
  * the same LogbirdError codes; a server without this route answers `read_http_error` with status 404.
  */
 export async function readHistoryHorizon(options: ReadOptions, signal?: AbortSignal): Promise<HistoryHorizon> {
@@ -748,6 +750,7 @@ export async function readHistoryHorizon(options: ReadOptions, signal?: AbortSig
     if (
       !isObject(horizon) ||
       Array.isArray(horizon) ||
+      !Object.hasOwn(horizon, 'retentionDays') ||
       !Number.isSafeInteger(horizon.retentionDays) ||
       (horizon.retentionDays as number) < 1 ||
       !Object.hasOwn(horizon, 'oldestEventAt') ||

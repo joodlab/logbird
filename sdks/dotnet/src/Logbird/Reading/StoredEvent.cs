@@ -189,16 +189,17 @@ public sealed class EventDetail
 public sealed class HistoryHorizon
 {
     /// <summary>
-    /// The project's retention window in days. Retention deletes, for good, every event dated more than this many days
-    /// before it runs (hourly, and right after the window is shortened).
+    /// The project's retention policy in days, the same for every reader of the project. Each retention run (hourly, and
+    /// right after the window is shortened) deletes for good the events dated more than this many days before the run;
+    /// between runs older events can still be stored and found.
     /// </summary>
     [JsonRequired]
     public int RetentionDays { get; init; }
 
     /// <summary>
-    /// The timestamp of the oldest stored event this key or viewer token can see (within its scope), as ISO 8601 UTC text
-    /// with milliseconds exactly as the server sent it, or <see langword="null"/> when it sees none. Nothing older is stored
-    /// for this reader; whether older events existed cannot be told from the store.
+    /// The timestamp of the oldest event this key or viewer token can find through search (within its scope), as ISO 8601
+    /// UTC text with milliseconds exactly as the server sent it, or <see langword="null"/> when it finds none. It describes
+    /// what is stored now, not what ever existed, and can move back as well as forward.
     /// </summary>
     public string? OldestEventAt { get; init; }
 }

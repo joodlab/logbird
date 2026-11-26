@@ -68,7 +68,7 @@ const READ_ROUTE_TEXT = {
   facets:
     'Counts of the most frequent values of `field` (optionally split `by` a second field) among the events in one time window that match `q`. Same window rules as search: without `from` it is at most the 24 hours before `to` (the store limits, 1900-01-01T00:00:00.000Z to 2299-12-31T23:59:59.999Z, can shorten it), and the response states the window it applied as `range`. Values are ordered by count, most frequent first.',
   project:
-    "How far back this caller's history reaches: the project's `retentionDays` and `oldestEventAt`, the `timestamp` of the oldest stored event the caller can see (for a scoped key or viewer token, within its scope; null when it sees none). It is exactly the first event a search with `order=asc` over the widest window would return, so it reveals nothing the caller could not already find. Retention moves this horizon: it deletes for good every event dated more than `retentionDays` before the time it runs (hourly, and right after the window is shortened), so `oldestEventAt` moves forward as time passes, and can briefly lie before now minus `retentionDays` until the next run. Raising `retentionDays` keeps more from then on but restores nothing. An empty search before `oldestEventAt` therefore does not prove nothing happened then. To read a whole history, use `oldestEventAt` as the search's `from`.",
+    "How far back this caller's history reaches. `oldestEventAt` is the `timestamp` of the oldest event this caller can find through search: the first event that an `order=asc` search over the widest window (`from` 1900-01-01T00:00:00.000Z, `to` 2299-12-31T23:59:59.999Z, exclusive) returns to the same caller, within its scope for a scoped key or viewer token, or null when that search finds none. It describes what is stored now, not what ever existed: an empty history before it does not prove that nothing happened then. `retentionDays` is the project's retention policy, the same for every reader of the project, and the one value here that a scoped caller could not already find. Each retention run (hourly, and right after the window is shortened) deletes for good the events dated more than that many days before the run. Between runs, older events can still be stored and found, for example one that arrived dated in the past, so `oldestEventAt` can lie before now minus `retentionDays`, and it can move back as well as forward. Raising `retentionDays` restores nothing. To read a whole history, search from `oldestEventAt` to a `to` later than any stored event: an event can be dated up to one day after it was received, so use a `to` at least a day after now.",
   export:
     'Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers at most the 24 hours before `to` (the store limits, 1900-01-01T00:00:00.000Z to 2299-12-31T23:59:59.999Z, can shorten it). An answer that streams rows carries the X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers: the window applied. Membership is fixed by the export clock: an event is in the file only if its stored receipt time is at or before the moment the export started (docs/exports.md states the exact guarantee).',
 };
@@ -249,6 +249,8 @@ export const publicRoutes = new Hono<AppEnv>()
   )
   .get(
     '/project',
+    // Hono answers HEAD through this GET handler, and the maintenance fence (projectRead) checks GET only: refuse HEAD.
+    noHeadExport,
     requireReader(),
     publicRateLimits.authenticated('read'),
     publicQueryLanguage,
@@ -257,12 +259,12 @@ export const publicRoutes = new Hono<AppEnv>()
     async (c) => {
       const project = c.get('project');
       const { scope } = c.get('reader');
-      return c.json(
-        s.historyHorizonSchema.parse({
-          retentionDays: project.retentionDays,
-          oldestEventAt: await ch.oldestVisibleEvent(readerClient(scope), project.id, scope),
-        }),
-      );
+      // The policy is read fresh: viewer-token authentication caches the key's project for up to 30 seconds.
+      const [policy, oldestEventAt] = await Promise.all([
+        prisma.project.findUnique({ where: { id: project.id }, select: { retentionDays: true } }),
+        ch.oldestVisibleEvent(readerClient(scope), project.id, scope),
+      ]);
+      return c.json(s.historyHorizonSchema.parse({ retentionDays: found(policy).retentionDays, oldestEventAt }));
     },
   )
   .get(

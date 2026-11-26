@@ -61,26 +61,27 @@ export const appliedRangeSchema = z
   });
 export type AppliedRange = z.infer<typeof appliedRangeSchema>;
 /**
- * `GET /v1/project`: how far back the caller's history can reach, so a reader can tell "nothing happened before X" from
+ * `GET /v1/project`: how far back the caller's history reaches, so a reader can tell "nothing happened before X" from
  * "older events are no longer stored". `oldestEventAt` is the `timestamp` of the first event a search in `order=asc` over
- * the widest window would return to the same caller: within its scope for a scoped key or viewer token.
+ * the widest window returns to the same caller: within its scope for a scoped key or viewer token. `retentionDays` is the
+ * project's policy, the same for every reader of the project.
  */
 export const historyHorizonSchema = z
   .object({
     retentionDays: z.number().int().positive().meta({
       description:
-        "The project's retention window in days. Retention deletes, for good, every event whose `timestamp` is more than this many days before the time it runs: hourly, and right after the window is shortened. A search with `from` earlier than that can find nothing older.",
+        "The project's retention policy in days, the same for every reader of the project. Each retention run (hourly, and right after the window is shortened) deletes for good the events dated more than this many days before the run. Between runs, older events can still be stored and found, so this is not a bound on what a search returns.",
       example: 90,
     }),
     oldestEventAt: appliedInstant.nullable().meta({
       description:
-        'The `timestamp` of the oldest stored event this caller can see (ISO 8601 UTC, milliseconds), or null when it can see none. Nothing older is stored for this caller. Whether older events existed cannot be told from the store: retention may have removed them, and raising `retentionDays` does not bring them back. It can lie before now minus `retentionDays` until the next retention run.',
+        'The `timestamp` of the oldest event this caller can find through search (ISO 8601 UTC, milliseconds): the first event of an `order=asc` search over the widest window, or null when that search finds none. It describes what is stored now: retention or deletion may have removed older events, raising `retentionDays` brings none back, and it can move back as well as forward (an event can arrive dated in the past).',
       example: '2026-08-28T09:15:02.481Z',
     }),
   })
   .meta({
     description:
-      'How far back the caller can read. Use `oldestEventAt` (or now minus `retentionDays`) as the `from` of a whole-history read, and do not read an empty answer before it as proof that nothing happened.',
+      'How far back the caller can read. To read a whole history, search from `oldestEventAt` to a `to` at least a day after now (an event can be dated up to one day after it was received), and do not take an empty answer before `oldestEventAt` as proof that nothing happened.',
   });
 export type HistoryHorizon = z.infer<typeof historyHorizonSchema>;
 /** `GET /v1/export` states the applied window in headers (a CSV or JSONL stream has no envelope for a field). */

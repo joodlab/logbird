@@ -218,19 +218,22 @@ window that covers them), how many share its operation, and its original `payloa
 `null` for a 404. It uses the same bounded read and `LogbirdError` codes; where a runtime has no `JSON.rawJSON`, a
 payload holding a number a double cannot keep fails with `read_inexact_number` instead of being rounded.
 
-`readHistoryHorizon(options)` returns how far back the key's history reaches: the project's `retentionDays` and
-`oldestEventAt`, the timestamp of the oldest stored event the key or viewer token can see (within its scope), or null
-when it sees none. Use `oldestEventAt` as the `from` of a whole-history pass. Nothing older is stored for that reader,
-and an empty history before it does not prove that nothing happened: retention deletes, for good, every event dated
-more than `retentionDays` before it runs. It uses the same bounded read and `LogbirdError` codes; a server without the
-route answers `read_http_error` with status 404.
+`readHistoryHorizon(options)` returns how far back the key's history reaches: `oldestEventAt`, the timestamp of the
+oldest event the key or viewer token can find through search (within its scope), or null when it finds none, and the
+project's `retentionDays` policy. For a whole-history pass, read from `oldestEventAt` to a `to` at least a day after
+now (an event can be dated up to one day after it was received, and without `to` the window ends at the server clock).
+`oldestEventAt` describes what is stored now: an empty history before it does not prove that nothing happened, since
+retention deletes, for good, events dated more than `retentionDays` before each run. It uses the same bounded read and
+`LogbirdError` codes; a server without the route answers `read_http_error` with status 404.
 
 ```ts
 import { iterateAuditTrail, readHistoryHorizon } from '@logbird/sdk/read';
 
 const horizon = await readHistoryHorizon(options); // { retentionDays, oldestEventAt }
-if (horizon.oldestEventAt)
-  for await (const event of iterateAuditTrail(options, { ...trail, range: { from: horizon.oldestEventAt }, order: 'asc' })) render(event);
+if (horizon.oldestEventAt) {
+  const range = { from: horizon.oldestEventAt, to: new Date(Date.now() + 2 * 86_400_000) };
+  for await (const event of iterateAuditTrail(options, { ...trail, range, order: 'asc' })) render(event);
+}
 ```
 
 `trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or

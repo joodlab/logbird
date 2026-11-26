@@ -17456,14 +17456,14 @@
     },
     "/v1/project": {
       "get": {
-        "description": "How far back this caller's history reaches: the project's `retentionDays` and `oldestEventAt`, the `timestamp` of the oldest stored event the caller can see (for a scoped key or viewer token, within its scope; null when it sees none). It is exactly the first event a search with `order=asc` over the widest window would return, so it reveals nothing the caller could not already find. Retention moves this horizon: it deletes for good every event dated more than `retentionDays` before the time it runs (hourly, and right after the window is shortened), so `oldestEventAt` moves forward as time passes, and can briefly lie before now minus `retentionDays` until the next run. Raising `retentionDays` keeps more from then on but restores nothing. An empty search before `oldestEventAt` therefore does not prove nothing happened then. To read a whole history, use `oldestEventAt` as the search's `from`.",
+        "description": "How far back this caller's history reaches. `oldestEventAt` is the `timestamp` of the oldest event this caller can find through search: the first event that an `order=asc` search over the widest window (`from` 1900-01-01T00:00:00.000Z, `to` 2299-12-31T23:59:59.999Z, exclusive) returns to the same caller, within its scope for a scoped key or viewer token, or null when that search finds none. It describes what is stored now, not what ever existed: an empty history before it does not prove that nothing happened then. `retentionDays` is the project's retention policy, the same for every reader of the project, and the one value here that a scoped caller could not already find. Each retention run (hourly, and right after the window is shortened) deletes for good the events dated more than that many days before the run. Between runs, older events can still be stored and found, for example one that arrived dated in the past, so `oldestEventAt` can lie before now minus `retentionDays`, and it can move back as well as forward. Raising `retentionDays` restores nothing. To read a whole history, search from `oldestEventAt` to a `to` later than any stored event: an event can be dated up to one day after it was received, so use a `to` at least a day after now.",
         "operationId": "public_history_horizon",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "How far back the caller can read. Use `oldestEventAt` (or now minus `retentionDays`) as the `from` of a whole-history read, and do not read an empty answer before it as proof that nothing happened.",
+                  "description": "How far back the caller can read. To read a whole history, search from `oldestEventAt` to a `to` at least a day after now (an event can be dated up to one day after it was received), and do not take an empty answer before `oldestEventAt` as proof that nothing happened.",
                   "properties": {
                     "oldestEventAt": {
                       "anyOf": [
@@ -17476,11 +17476,11 @@
                           "type": "null"
                         }
                       ],
-                      "description": "The `timestamp` of the oldest stored event this caller can see (ISO 8601 UTC, milliseconds), or null when it can see none. Nothing older is stored for this caller. Whether older events existed cannot be told from the store: retention may have removed them, and raising `retentionDays` does not bring them back. It can lie before now minus `retentionDays` until the next retention run.",
+                      "description": "The `timestamp` of the oldest event this caller can find through search (ISO 8601 UTC, milliseconds): the first event of an `order=asc` search over the widest window, or null when that search finds none. It describes what is stored now: retention or deletion may have removed older events, raising `retentionDays` brings none back, and it can move back as well as forward (an event can arrive dated in the past).",
                       "example": "2026-08-28T09:15:02.481Z"
                     },
                     "retentionDays": {
-                      "description": "The project's retention window in days. Retention deletes, for good, every event whose `timestamp` is more than this many days before the time it runs: hourly, and right after the window is shortened. A search with `from` earlier than that can find nothing older.",
+                      "description": "The project's retention policy in days, the same for every reader of the project. Each retention run (hourly, and right after the window is shortened) deletes for good the events dated more than this many days before the run. Between runs, older events can still be stored and found, so this is not a bound on what a search returns.",
                       "example": 90,
                       "exclusiveMinimum": 0,
                       "maximum": 9007199254740991,

@@ -408,11 +408,13 @@ EventDetail? detail = await reader.GetEventAsync(eventId);   // null when it doe
 HistoryHorizon horizon = await reader.GetHistoryHorizonAsync(); // retention days and the oldest event this key can see
 ```
 
-`GetHistoryHorizonAsync` tells you how far back the key's history reaches: the project's `RetentionDays`, and
-`OldestEventAt`, the timestamp of the oldest stored event the key or viewer token can see (within its scope), or `null`
-when it sees none. Use it as the `From` of a whole-history search. Nothing older is stored for that reader, and an
-empty history before it does not prove that nothing happened: retention deletes, for good, every event dated more than
-`RetentionDays` before it runs. A server without the route answers 404 (`LogbirdApiException`, code `not_found`).
+`GetHistoryHorizonAsync` tells you how far back the key's history reaches: `OldestEventAt`, the timestamp of the
+oldest event the key or viewer token can find through search (within its scope), or `null` when it finds none, and the
+project's `RetentionDays` policy. For a whole-history search, use it as `From` and set `To` at least a day after now:
+an event can be dated up to one day after it was received, and without `To` the window ends at the server clock.
+`OldestEventAt` describes what is stored now: an empty history before it does not prove that nothing happened, since
+retention deletes, for good, events dated more than `RetentionDays` before each run. A server without the route answers
+404 (`LogbirdApiException`, code `not_found`).
 
 Each HTTP request ends within `LogbirdReadOptions.Timeout` (30 seconds), even if a custom HTTP handler ignores
 cancellation; past it the call throws `LogbirdApiException` with code `unreachable`. For an export, the limit covers only
