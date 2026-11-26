@@ -493,7 +493,8 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
   by an origin on the minting key's `embedOrigins` (other browser origins: 403 `origin_not_allowed`); 401s are
   readable by any origin. Keys never get CORS.
 - **Masks:** `ip`, `user_agent` (emptied), `actor_email` (`masked:<hmac>` per project, HKDF info
-  `logbird-field-mask-v1`). Any mask nulls the detail payload and refuses `jsonl-evidence` (422 `masked_export`); a
+  `logbird-field-mask-v1`; covers the actor's email, the impersonator's email attribute `impersonator.email` (paths
+  below it are removed), and an actor or impersonator name that carries an address). Any mask nulls the detail payload and refuses `jsonl-evidence` (422 `masked_export`); a
   masked scope can't filter or facet on masked columns (422 `invalid_query`, reason `not_allowed`).
 - **Limits:** token reads also count per minting key and tenant (`VIEWER_READ_RATE_LIMIT_PER_MINUTE`, 300); minting per
   key (`VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE`, 600).

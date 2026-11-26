@@ -32,7 +32,7 @@ export const MASK_LABEL: Record<ScopeMask, string> = { ip: 'IP address', user_ag
 export const MASK_HINT: Record<ScopeMask, string> = {
   ip: 'context.ip is emptied',
   user_agent: 'context.userAgent is emptied',
-  actor_email: 'actor.email becomes a stable hash',
+  actor_email: 'actor and impersonator emails become stable hashes',
 };
 
 /** Expiry choices. The console sends an absolute instant computed when the form is submitted. */

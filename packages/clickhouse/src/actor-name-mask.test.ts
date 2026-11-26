@@ -4,8 +4,10 @@ import {
   actorNameIsSensitive,
   actorNamePseudonymInput,
   facetOrderParams,
+  IMPERSONATOR_NAME_IS_SENSITIVE_SQL,
   maskActorNameInFilter,
   maskedEmail,
+  maskedFacetText,
 } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { compileMaskedQuery } from './field-mask';
@@ -23,6 +25,9 @@ describe('the name rule shared by events and SQL', () => {
     ['alice @ example.com', 'alice@example.com', true],
     // Round 2: a name that carries an address in any form, with or without a matching email.
     ['Ada <ada@example.org>', 'ada@example.org', true],
+    // Compatibility forms of '@' (NFKC maps both to '@'): fullwidth and small commercial at.
+    ['Rita\uFF20example.invalid', 'rita@example.invalid', true],
+    ['rita\uFE6Bexample.invalid', '', true],
     ['contact@acme.example', '', true],
     ['Bob (bob at example)', 'bob@example.com', false],
     ['bob@other.example', 'alice@example.com', true],
@@ -40,13 +45,18 @@ describe('the name rule shared by events and SQL', () => {
     [510, false],
     [511, true],
     [512, true],
-  ])('a name of %i UTF-16 units that is a prefix of the address is the address: %s', (units, expected) => {
+  ])('a name of %i UTF-16 units (cut at the cap from 511 on) is treated as an address: %s', (units, expected) => {
     const email = 'alice@example.com';
     const name = `alice${' '.repeat(units - 5)}`;
     expect(name.length).toBe(units);
     expect(actorNameIsSensitive(name, email)).toBe(expected);
-    // A prefix that is not the address's start never counts, at any length.
-    expect(actorNameIsSensitive(`bob${' '.repeat(units - 3)}`, email)).toBe(false);
+    // A capped name counts whatever it ends with, with or without an email: the cut can fall inside an address and
+    // leave only its local part ("... rita.long" from "... rita.long@example.org").
+    expect(actorNameIsSensitive(`bob${' '.repeat(units - 3)}`, email)).toBe(expected);
+    const label = `Support ${'-'.repeat(units - 17)}rita.long`;
+    expect(label.length).toBe(units);
+    expect(actorNameIsSensitive(label, '')).toBe(expected);
+    expect(actorNameIsSensitive(label, 'rita.long@example.org')).toBe(expected);
   });
 });
 
@@ -55,10 +65,26 @@ describe('the pseudonym a sensitive name shows', () => {
     ['ada@example.org', 'ada@example.org', 'ada@example.org'],
     ['Ada <ada@example.org>', 'ada@example.org', 'ada@example.org'],
     ['contact@acme.example', '', 'contact@acme.example'],
-    ['bob@other.example', 'alice@example.com', 'bob@other.example'],
+    // Whenever there is an email, the name hashes the email: whether the name holds that address or another one never
+    // shows as equal or different pseudonyms.
+    ['bob@other.example', 'alice@example.com', 'alice@example.com'],
+    ['Support <old@example.org>', 'new@example.org', 'new@example.org'],
     ['ada@example.org', `ada${' '.repeat(509)}`, `ada${' '.repeat(509)}`],
+    // A capped name that normalises to nothing (zero-width spaces) still gets a pseudonym, of the name as stored.
+    ['\u200B'.repeat(511), '', '\u200B'.repeat(511)],
+    // A whitespace-only stored email is still the email (the attribute's own pseudonym hashes it too).
+    ['ada@example.org', ' ', ' '],
   ])('%j with email %j hashes %j', (name, email, input) => {
     expect(actorNamePseudonymInput(name, email)).toBe(input);
+  });
+
+  it('never shows a flagged facet text under a flag it does not know', () => {
+    const key = Buffer.alloc(32, 3);
+    expect(maskedFacetText('p', 0, 'Bob', key)).toBe('Bob');
+    expect(maskedFacetText('p', 1, 'a@b.example', key)).toBe(maskedEmail('p', 'a@b.example', key));
+    expect(maskedFacetText('p', '2', 'a@b.example', key)).toBe(maskedEmail('p', 'a@b.example', key, 'impersonator'));
+    for (const flag of [3, -1, '', ' ', '01', '1.0', 'x', [0], ['0'], null, true] as unknown as (number | string)[])
+      expect(() => maskedFacetText('p', flag, 'a@b.example', key), JSON.stringify(flag)).toThrow(/Unknown masked facet flag/);
   });
 });
 
@@ -66,10 +92,41 @@ describe('the shared masked-filter compilation (webhook discovery and recheck co
   it('rewrites actor.name and free text for the actor_email mask, with its parameters, and still refuses actor.email', () => {
     for (const q of ['actor.name:"ada@example.org"', 'ada@example.org']) {
       const compiled = compileMaskedQuery(q, ['actor_email']);
-      expect(compiled.sql, q).toContain("position(lowerUTF8(replaceRegexpAll(actor_name,{actorMaskSpaces:String},'')),'@')>0");
-      expect(compiled.params).toMatchObject({ actorMaskSpaces: expect.any(String), actorMaskAstral: expect.any(String) });
+      expect(compiled.sql, q).toContain("match(lowerUTF8(replaceRegexpAll(actor_name,{actorMaskSpaces:String},'')),{actorMaskAt:String})");
+      expect(compiled.params).toMatchObject({
+        actorMaskSpaces: expect.any(String),
+        actorMaskAstral: expect.any(String),
+        actorMaskAt: expect.any(String),
+      });
     }
     expect(() => compileMaskedQuery('actor.email:"ada@example.org"', ['actor_email'])).toThrow(/masked/);
+    // The impersonator's email attribute, the path below it, in every spelling and form, is refused under actor_email.
+    for (const q of [
+      'impersonator.email:"rita@example.invalid"',
+      'attr.impersonator.email:rita*',
+      'attributes.impersonator.email:/.*@.*/',
+      '_exists_:impersonator.email',
+      'impersonator.email:*',
+      'NOT impersonator.email:x',
+      'impersonator.email:(a OR b)',
+      'impersonator.email.work:x',
+      'attr.impersonator.name:x',
+      'attr.impersonator.name.en:*',
+      'attr.actor.name.en:x',
+      'attr.actor.email.work:x',
+      // ASCII case variants of every masked path.
+      'impersonator.Email:*',
+      'attr.Impersonator.email:x',
+      '_exists_:IMPERSONATOR.EMAIL',
+      'impersonator.EMAIL.work:/.*/',
+      'NOT Actor.Email:x',
+      'attr.IMPERSONATOR.NAME:x',
+      'action:x OR impersonator.email:>2',
+    ])
+      expect(() => compileMaskedQuery(q, ['actor_email']), q).toThrow(/masked/);
+    // A sibling path is not the email; other masks do not hide it.
+    expect(() => compileMaskedQuery('impersonator.emailVerified:true', ['actor_email'])).not.toThrow();
+    expect(() => compileMaskedQuery('impersonator.email:x', ['ip'])).not.toThrow();
     // Other masks and no mask compile as before.
     expect(compileMaskedQuery('actor.name:"x"', ['ip']).sql).not.toContain('actorMaskSpaces');
     expect(compileMaskedQuery('actor.name:"x"', undefined).sql).not.toContain('actorMaskSpaces');
@@ -100,6 +157,18 @@ describe('the filter rewrite', () => {
       );
       expect(sql.split(DEFINED).length, q).toBe(2);
     }
+  });
+
+  it("reads an empty impersonator name wherever it carries the impersonator's address, defining that test once", () => {
+    const IMP = `(${IMPERSONATOR_NAME_IS_SENSITIVE_SQL} AS __lb_impersonator_name_carries_address)`;
+    const sql = maskActorNameInFilter("impersonator_name = {q0:String} OR startsWith(impersonator_name, {q1:String}) OR actor_name = ''");
+    expect(sql.split(IMP).length).toBe(2);
+    expect(sql.split(DEFINED).length).toBe(2);
+    const rest = sql.replace(IMP, 'S').replace(DEFINED, 'A');
+    expect(rest.match(/\bimpersonator_name\b/g)?.length).toBe(rest.match(/,'',impersonator_name\)/g)?.length);
+    expect(IMPERSONATOR_NAME_IS_SENSITIVE_SQL).toContain("attributes['impersonator.email']");
+    // A filter that never reads the impersonator's name gets no impersonator test.
+    expect(maskActorNameInFilter(compileQuery('actor.name:x').sql)).not.toContain('impersonator');
   });
 
   it('fails closed on a free-text form it does not recognise', () => {
@@ -159,6 +228,53 @@ describe('facets under the actor_email mask', () => {
     expect(second?.query).toContain('tupleElement(lab,2) labt');
     expect(first?.query).toContain('GROUP BY value,masked');
     expect(second?.query_params.facetKeys).toEqual(['0|usr_1', '0|usr_2']);
+  });
+
+  it("labels an impersonator by the name rule judged against the impersonator's email, at both levels", async () => {
+    const { ch, query } = client([
+      [{ value: 'sup_1', masked: 0, labf: 2, labt: 'rita@example.invalid', count: 2, total: 2 }],
+      [{ value: 'sup_1', masked: 0, grp: 'sup_1', gmasked: 0, labf: 2, labt: 'rita@example.invalid', count: 2, total: 2 }],
+    ]);
+    const result = await facets(ch, 'proj_1', { ...range, field: 'impersonator', by: 'impersonator', limit: 10 }, scope, undefined, key);
+    // Flag 2: the impersonator's role-keyed pseudonym, never the actor's.
+    const pseudonym = maskedEmail('proj_1', 'rita@example.invalid', key, 'impersonator');
+    expect(pseudonym).not.toBe(maskedEmail('proj_1', 'rita@example.invalid', key));
+    expect(result.values.map((v) => [v.value, v.label])).toEqual([['sup_1', pseudonym]]);
+    expect(result.values[0]?.groups?.map((g) => [g.value, g.label])).toEqual([['sup_1', pseudonym]]);
+    const [first, second] = calls(query);
+    for (const sql of [first?.query, second?.query]) {
+      expect(sql).toContain(IMPERSONATOR_NAME_IS_SENSITIVE_SQL);
+      expect(sql).not.toMatch(/argMaxIf\(tuple\(0,impersonator_name\)/);
+    }
+  });
+
+  it('refuses a second-level row whose parent flag is malformed instead of joining it to bucket 0', async () => {
+    const { ch } = client([
+      [{ value: 'usr_1', masked: 0, labf: 0, labt: 'Bob', count: 1, total: 1 }],
+      [{ value: 'usr_1', masked: '', grp: 'Bob', gmasked: 0, labf: 0, labt: 'Bob', count: 1, total: 1 }],
+    ]);
+    await expect(facets(ch, 'proj_1', { ...range, field: 'actor', by: 'actor.name', limit: 10 }, scope, undefined, key)).rejects.toThrow(
+      /Unknown masked facet flag/,
+    );
+  });
+
+  it('refuses a malformed second-level row even when it matches no returned parent', async () => {
+    const { ch } = client([
+      [{ value: 'usr_1', masked: 0, labf: 0, labt: 'Bob', count: 1, total: 1 }],
+      [{ value: 'usr_9', masked: 0, grp: 'x', gmasked: 'bad', labf: 0, labt: 'x', count: 1, total: 1 }],
+    ]);
+    await expect(facets(ch, 'proj_1', { ...range, field: 'actor', by: 'actor.name', limit: 10 }, scope, undefined, key)).rejects.toThrow(
+      /Unknown masked facet flag/,
+    );
+  });
+
+  it('orders tied second-level groups by the keyed hash too', async () => {
+    const { ch, query } = client([[{ value: 'usr_1', masked: 0, labf: 0, labt: 'Bob', count: 2, total: 2 }], []]);
+    await facets(ch, 'proj_1', { ...range, field: 'actor', by: 'impersonator', limit: 10, byLimit: 1 }, scope, undefined, key);
+    const [, second] = calls(query);
+    expect(second?.query).toContain(
+      "ORDER BY value,masked,count DESC,sipHash64Keyed(({orderKey0:UInt64},{orderKey1:UInt64}),concat(toString(gmasked),'|',grp)) LIMIT",
+    );
   });
 
   it('never interprets text by its content: a producer string that looks masked stays as it is', async () => {

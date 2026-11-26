@@ -80,30 +80,63 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   project. Where that matters, don't give that reader the actor fields at all. Keying pseudonyms per read key or scope
   is tracked in #370.
 - It also hides an actor **name that carries an address**: lower-cased with all whitespace removed, the name contains
-  `@`, equals the email, or (cut at its 512-character cap) is a prefix of it. That covers a producer that used the
-  address as the display name, put it inside the name (`Ada <ada@example.org>`), or sent an address only as the name.
+  `@` (or its fullwidth or small compatibility forms `＠` and `﹫`), or equals the email, or the name is 511 UTF-16 code units or longer (names are stored cut at 512, or 511 when a
+  surrogate pair straddles the cut; the cut can fall inside an address and drop its `@`, so a name that may have been
+  cut always counts). That covers a producer that used the address as the display name, put
+  it inside the name (`Ada <ada@example.org>`), or sent an address only as the name.
   Events, facets (values, groups and labels), filters and masked webhook filters treat such a name the same way:
-  - It shows as a pseudonym (the email's own when the name contains it).
+  - It shows as a pseudonym: the email's own whenever there is an email (so the pair never shows whether the name
+    holds that address or another one), otherwise one of the name.
   - Filters read it as an empty name. An `actor.name` filter for the address, a prefix of it or a wildcard never
     matches it, but a filter that an empty name satisfies does (for example `NOT actor.name:"x"`, or a regex that
     accepts an empty string).
   - Free text matches such an event only through its other text.
   - A pseudonym can't be inverted, so `actor.name:"masked:…"` matches only a name a producer literally sent as that
     text. Filter by actor id instead.
+- `actor_email` also covers the **impersonator** (`impersonator`, the support person acting as the actor). Ingest keeps
+  the impersonator's id and name as fields, and an `email` sent with them as the attribute `impersonator.email` (an
+  object there becomes paths below it, such as `impersonator.email.work`). Under the mask:
+  - `attributes["impersonator.email"]` shows as `masked:<24 hex>`, stable per project like the actor's, but keyed by
+    role: the two roles hash disjoint inputs, so an impersonator's pseudonym can't be compared directly with the actor
+    pseudonym of the same address, and impersonator addresses seen in clear before the mask covered them don't reveal
+    actor pseudonyms. Within each role, pseudonyms stay linkable as described above: a reader who learns the actor
+    pseudonym of an address (for example by causing an actor event with it) can still recognise it in actor results.
+  - Paths below it are removed from the event: their keys are producer text and can be an address themselves.
+  - Literal dotted copies of the names (a top-level `"impersonator.name"` or `"actor.name"` key, which ingest keeps
+    as an attribute, and flattens into child attributes when its value is an object) are removed too, with every
+    path below them, and filters and facets on them are refused: the name rule can't judge them. The same holds for
+    paths below every other masked attribute path (`actor.email.work`, `context.ip.v4`).
+  - The impersonator's name follows the actor name rule above, judged against `impersonator.email`: a name that
+    carries an address shows as a pseudonym, in events and in facet labels (`impersonator`, at both levels).
+  - Filters on `impersonator.email` or a path below it, and facets on them (`field=attr.impersonator.email`; a facet
+    field without the `attr.` or `attributes.` prefix is not an attribute facet and answers 422 `validation_error`),
+    are refused like `actor.email` (see the last item).
+  - This holds for search results, event detail (the event and its parents), facets, CSV and JSONL exports, viewer
+    tokens minted with the mask, and webhook bodies and filters of masked endpoints. Free text never searches the
+    impersonator's fields, masked or not.
 - Under `actor_email`, if an id's earliest `(received_at, timestamp)` pair holds more than one distinct stored payload
   (legacy data), detail answers 404 and parent traversal stops at that id: choosing between them would read the hidden
   fields. Identical copies, and an earliest version that is unique, are served as usual.
-- The mask covers the actor's own email and name. Addresses a producer writes into other fields (descriptions, target
-  names, attributes) are not masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
+- Every masked attribute path matches attribute keys in any ASCII letter case: `impersonator.Email`,
+  `Impersonator.email` and `impersonator.EMAIL.work` are treated exactly like `impersonator.email` and the paths below
+  it, and `Context.IP` or `Actor.Email` like `context.ip` and `actor.email`, in events, filters, facets, exports and
+  webhooks. Only A to Z are folded (letters outside ASCII are compared as sent).
+- The mask covers the actor's and the impersonator's email and name. Addresses a producer writes into other fields
+  (descriptions, executor, tenant or target names, ids, or other attributes such as `actor.contactEmail`) are not
+  masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
   addresses out of those fields when scoped readers must not see them.
+- The name rule recognises an address by its `@` (and the compatibility forms above), by equality with the email,
+  or by length. A name that spells an address another way (`rita&#64;example.org`, `rita%40example.org`,
+  `rita at example dot org`) is not recognised and shows as sent. Send display names, not encoded addresses.
 - Case-insensitive matching follows the Unicode case tables of the server's Node.js runtime and of ClickHouse. A test
   pins their agreement for the examples it lists (ASCII, Latin-1, Greek, Cyrillic, Turkish and German). Case pairs
   added in Unicode 17 can differ between them (#365).
 - **Any mask also drops the original payload:** detail returns `payload: null`, and `jsonl-evidence` exports answer
   422 `masked_export`.
 - A masked scope can't filter or facet on a masked field or on the matching attribute paths (`context.ip`,
-  `context.userAgent`, `actor.email`) (422 `invalid_query`, reason `not_allowed`), because the answer would reveal the
-  hidden value.
+  `context.userAgent`, `actor.email`, and for `actor_email` also `actor.name` and `impersonator.name` as attributes,
+  and `impersonator.email` and the paths below it) (422
+  `invalid_query`, reason `not_allowed`), because the answer would reveal the hidden value.
 
 ## Keys
 

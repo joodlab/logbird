@@ -34,13 +34,13 @@ import {
 } from '@logbird/contracts';
 import type { z } from 'zod';
 import {
-  ACTOR_NAME_IS_SENSITIVE_SQL,
   ACTOR_NAME_MASK_PARAMS,
+  facetFlag,
   facetOrderParams,
   facetOrderSql,
-  MASKED_ACTOR_NAME_TEXT_SQL,
+  MASKED_NAME_COLUMNS,
   maskActorNameInFilter,
-  maskedEmail,
+  maskedFacetText,
 } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
@@ -542,8 +542,10 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     expr = `arrayJoin(${expr})`;
     label = expr;
   } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) {
-    label = maskName && field === 'actor' ? MASKED_ACTOR_NAME_TEXT_SQL : `${field}_name`;
-    if (maskName && field === 'actor') labelFlag = ACTOR_NAME_IS_SENSITIVE_SQL;
+    // Under the mask, the actor's and the impersonator's labels follow the name rule (#333).
+    const masked = maskName ? MASKED_NAME_COLUMNS[`${field}_name`] : undefined;
+    label = masked?.text ?? `${field}_name`;
+    if (masked) labelFlag = masked.flag;
   } else if (!col) {
     // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
     // other element types keep their JSON text. An empty array contributes no group.
@@ -558,10 +560,11 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     label = expr;
   }
   // Under the actor_email mask a name that is the address leaves SQL as the lower-cased address plus its flag (#333).
-  if (maskName && col === 'actor_name') {
-    expr = MASKED_ACTOR_NAME_TEXT_SQL;
+  const maskedName = maskName && col ? MASKED_NAME_COLUMNS[col] : undefined;
+  if (maskedName) {
+    expr = maskedName.text;
     label = expr;
-    flag = ACTOR_NAME_IS_SENSITIVE_SQL;
+    flag = maskedName.flag;
     labelFlag = flag;
   }
   return { expr, label, flag, labelFlag, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };
@@ -642,9 +645,13 @@ async function maskedFacets(
   key: Buffer,
 ): Promise<FacetResponse> {
   const params = { ...ACTOR_NAME_MASK_PARAMS, ...facetOrderParams(key, p) };
-  const show = (flag: number | string, text: string) => (Number(flag) ? maskedEmail(p, text, key) : text);
+  const show = (flag: number | string, text: string) => maskedFacetText(p, flag, text, key);
   // The selected label leaves SQL as two scalar columns (never a tuple, whose JSON shape depends on server settings).
-  const label = (flag: number | string, text: string, shown: string) => (text ? show(flag, text) : shown);
+  // The flag is checked even for an empty label, so a malformed flag never passes unseen.
+  const label = (flag: number | string, text: string, shown: string) => {
+    const masked = show(flag, text);
+    return text ? masked : shown;
+  };
   const w = await where(ch, p, q, compiled, scope);
   const one = facetLevel(q.field, 1, false, true);
   type Row = { value: string; masked: number; labf: number; labt: string; count: number; total: number };
@@ -653,7 +660,8 @@ async function maskedFacets(
     `SELECT ${one.expr} value,${one.flag} masked,tupleElement(argMaxIf(tuple(${one.labelFlag},${one.label}),received_at,${one.label}!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value,masked ORDER BY count DESC,${facetOrderSql('masked', 'value')} LIMIT {facetLimit:UInt32}`,
     { ...w.params, ...one.params, ...params, facetLimit: q.limit },
   );
-  const keyOf = (flag: number | string, text: string) => `${Number(flag)}|${text}`;
+  // Group keys use the strictly checked flag, at both levels: a malformed flag throws instead of joining bucket 0.
+  const keyOf = (flag: number | string, text: string) => `${facetFlag(flag)}|${text}`;
   const values = rows.map((r) => {
     const value = show(r.masked, r.value);
     return {
@@ -682,6 +690,9 @@ async function maskedFacets(
     `SELECT value,masked,grp,gmasked,tupleElement(argMaxIf(tuple(glf,glabel),received_at,glabel!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE concat(toString(masked),'|',value) IN {facetKeys:Array(String)} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
     { ...w.params, ...one.params, ...two.params, ...params, facetKeys: values.map((v) => v.key), byLimit: q.byLimit ?? 5 },
   );
+  // Every flag of every second-level row is checked before rows are matched to parents, so a malformed row fails the
+  // request even when it would match no parent.
+  for (const g of groups) for (const flag of [g.masked, g.gmasked, g.labf]) facetFlag(flag);
   for (const v of values) {
     const mine = groups.filter((g) => keyOf(g.masked, g.value) === v.key);
     v.groups = mine.map((g) => {
