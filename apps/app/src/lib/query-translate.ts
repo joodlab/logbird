@@ -7,6 +7,7 @@
  */
 import {
   decodeRecordPair,
+  isUnknownChangesKey,
   parseQueryExpression,
   QUERY_DIALECT_PREFIX,
   type QueryAtom,
@@ -26,6 +27,8 @@ const QUOTED_VALUE = /^"(?:[^"\\]|\\[\s\S])*"$/;
 type Target = { ref: string; type: 'string' | 'number' | 'date' | 'array' } | { ref: string; type: 'attr'; key: string };
 
 function targetFor(field: string): Target | null {
+  // A changes.* key the server refuses (it can never match) has no SQL form either: the switch keeps the query.
+  if (isUnknownChangesKey(field)) return null;
   const core = /^(attr|attributes)\./.test(field) ? undefined : coreField(field);
   if (core) return core.type === 'text' || core.type === 'record' || !core.column ? null : { ref: core.column, type: core.type };
   const key = sqlString(attributeKey(field));

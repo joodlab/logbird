@@ -1,9 +1,16 @@
 import { hkdfSync } from 'node:crypto';
 import type { AuditEvent, ReadScope } from '@logbird/contracts';
-import { ACTOR_NAME_MASK_PARAMS, actorNameIsSensitive, actorNamePseudonymInput, maskActorNameInFilter, maskedEmail } from './actor-name-mask';
+import {
+  ACTOR_NAME_MASK_PARAMS,
+  actorNameIsSensitive,
+  actorNamePseudonymInput,
+  impersonatorEmailOf,
+  maskActorNameInFilter,
+  maskedEmail,
+} from './actor-name-mask';
 import { facetColumn } from './queries';
 import { type CompileOptions, compileQuery, QueryError } from './query';
-import { MASKED_ATTRIBUTES, MASKED_COLUMNS } from './scope';
+import { MASKED_COLUMNS, maskedAttribute, pseudonymizedAttribute, removedAttribute } from './scope';
 
 type Masks = ReadScope['mask'];
 
@@ -30,8 +37,24 @@ export function maskEvent(event: AuditEvent, mask: Masks, secret?: Buffer): Audi
         name: sensitive ? maskedEmail(event.projectId, actorNamePseudonymInput(name, email), secret) : name,
       };
     }
+    // The impersonator (support acting as the actor): the same rule for their name, judged against their email, which
+    // ingest keeps as an attribute. Read before the attributes below are pseudonymized. Their pseudonyms are keyed by
+    // role, so they never equal an actor's (maskedEmail).
+    if (masked.impersonator) {
+      const email = impersonatorEmailOf(event.attributes);
+      const { name } = masked.impersonator;
+      if (actorNameIsSensitive(name, email))
+        masked.impersonator = {
+          ...masked.impersonator,
+          name: maskedEmail(event.projectId, actorNamePseudonymInput(name, email), secret, 'impersonator'),
+        };
+    }
+    // The email shows as its pseudonym; paths below it are dropped whole, since their keys are producer text.
+    for (const [key, value] of Object.entries(masked.attributes))
+      if (pseudonymizedAttribute(mask, key)) masked.attributes[key] = maskedEmail(event.projectId, value, secret, 'impersonator');
   }
-  for (const preset of mask) for (const key of MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];
+  // Masked attribute paths and everything below them go (below `impersonator.email` too: those keys are producer text).
+  for (const key of Object.keys(masked.attributes)) if (removedAttribute(mask, key)) delete masked.attributes[key];
   return masked;
 }
 
@@ -50,9 +73,8 @@ export function compileMaskedQuery(q: string, mask: Masks, clock?: number, optio
   const compiled = compileQuery(q, clock, options);
   if (!mask?.length) return compiled;
   if (mask.some((preset) => new RegExp(`\\b${MASKED_COLUMNS[preset]}\\b`).test(compiled.sql))) maskedFieldError(0, q.length);
-  const hiddenPaths = mask.flatMap((preset) => MASKED_ATTRIBUTES[preset]);
   for (const [, key] of compiled.sql.matchAll(/(?:attributes\[|mapContains\(attributes,)\{(q\d+):String\}/g))
-    if (key && hiddenPaths.includes(String(compiled.params[key]))) maskedFieldError(0, q.length);
+    if (key && maskedAttribute(mask, String(compiled.params[key]))) maskedFieldError(0, q.length);
   // After the checks above (the rewrite itself reads actor_email): a filter cannot select on a name that carries the
   // address, wherever it runs (webhook discovery and its send-time recheck compile here too) (#333).
   if (mask.includes('actor_email')) return { sql: maskActorNameInFilter(compiled.sql), params: { ...compiled.params, ...ACTOR_NAME_MASK_PARAMS } };
@@ -63,11 +85,10 @@ export function assertNotMasked(scope: Pick<ReadScope, 'mask'> | null, input: { 
   if (!scope?.mask?.length) return;
   if (input.q) compileMaskedQuery(input.q, scope.mask);
   const hidden = scope.mask.map((preset) => MASKED_COLUMNS[preset]);
-  const hiddenPaths = scope.mask.flatMap((preset) => MASKED_ATTRIBUTES[preset]);
   for (const field of [input.field, input.by]) {
     if (!field) continue;
     const column = facetColumn(field);
     if (column && hidden.includes(column)) maskedFieldError(null, null);
-    if (!column && hiddenPaths.includes(field.replace(/^(attr|attributes)\./, ''))) maskedFieldError(null, null);
+    if (!column && maskedAttribute(scope.mask, field.replace(/^(attr|attributes)\./, ''))) maskedFieldError(null, null);
   }
 }

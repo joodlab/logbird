@@ -2,6 +2,7 @@
  * The syntax hint row under the query bar: one line saying what the token under the caret expects, in the
  * spirit of Datadog's search hints. Pure (no React) so it is cheap to compute on every keystroke.
  */
+import { isUnknownChangesKey } from '@logbird/contracts';
 import { attributeKey, coreField, sqlColumn, sqlSignature } from '@/lib/query-catalog';
 import type { QueryCompletion } from '@/lib/query-language';
 import type { QueryFix } from '@/lib/query-lint';
@@ -38,6 +39,21 @@ export function queryHint(context: QueryCompletion, draft: string, caret: number
       tone: 'warn',
     };
   }
+  // A refused changes.* key: whatever the value syntax (plain, range or regex), the term is refused, so say that first.
+  if ((context.kind === 'value' || context.kind === 'range' || context.kind === 'regex') && isUnknownChangesKey(context.field))
+    return {
+      label: `${context.field} · not a field`,
+      parts: [
+        'Use ',
+        c('changes.field'),
+        ', ',
+        c('changes.before'),
+        ' or ',
+        c('changes.after'),
+        ' · a literal attribute is ',
+        c(`attr.${context.field}`),
+      ],
+    };
   switch (context.kind) {
     case 'key': {
       if (!draft.trim()) {

@@ -279,6 +279,12 @@ describe('predicates', () => {
 });
 
 describe('translateQueryToSql', () => {
+  it('has no SQL form for a changes key the server refuses, so the switch keeps the query', () => {
+    for (const q of ['changes.to:PUBLISHED', 'NOT changes.to:PUBLISHED', '_exists_:changes.new', 'Changes.field:status'])
+      expect(translateQueryToSql(q), q).toBeNull();
+    expect(translateQueryToSql('changes.after:PUBLISHED')).toBe("has(changes_after, 'PUBLISHED')");
+    expect(translateQueryToSql('attr.changes.to:x')).toBe("(mapContains(attributes, 'changes.to') AND attributes['changes.to'] = 'x')");
+  });
   it('translates simple terms', () => {
     expect(translateQueryToSql('')).toBe('');
     expect(translateQueryToSql('outcome:failure -env:staging')).toBe("outcome = 'failure' AND NOT environment = 'staging'");

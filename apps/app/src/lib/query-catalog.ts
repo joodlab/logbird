@@ -4,6 +4,7 @@
  */
 import {
   QUERY_FIELDS as CONTRACT_FIELDS,
+  isUnknownChangesKey,
   type QueryFieldInfo,
   type QueryFieldType,
   SQL_ALLOWED_COLUMNS,
@@ -33,6 +34,7 @@ const PRESENTATION: Record<string, Pick<QueryKeySpec, 'example' | 'presence' | '
     presenceShortcut: true,
     description: 'Support user acting as the actor',
   },
+  'impersonator.name': { example: 'impersonator.name:"Rita Support"' },
   tenant: { example: 'tenant:biz_7', presence: 'Any tenant (events with a tenant)', description: 'Customer account (tenant id)' },
   'tenant.name': { example: 'tenant.name:"Azure Hotels"' },
   executor: { example: 'executor:crm-worker', presence: 'Any executor (events with an executor)' },
@@ -53,6 +55,8 @@ const PRESENTATION: Record<string, Pick<QueryKeySpec, 'example' | 'presence' | '
   trace: { example: 'trace:4bf92f…', presence: 'Events with a trace id' },
   id: { example: 'id:01J…' },
   'changes.field': { example: 'changes.field:status' },
+  'changes.before': { example: 'changes.before:DRAFT', description: 'A value before a change (any changed field)' },
+  'changes.after': { example: 'changes.after:PUBLISHED', description: 'A value after a change (any changed field)' },
   conformance: { example: 'conformance:<50' },
   occurredAt: { example: 'occurredAt:>2026-11-01' },
   receivedAt: { example: 'receivedAt:[2026-11-01 TO 2026-11-03]' },
@@ -99,7 +103,9 @@ export function attributeKey(key: string): string {
 export function attributeQueryKey(attr: string): string {
   // A key the query language would read as something else gets the explicit `attr.` prefix: a core field, an empty
   // key, a key that itself starts with `attr.`/`attributes.` (the prefix is stripped once), or `_exists_`.
-  return coreField(attr) || attr === '' || attr === '_exists_' || /^(attr|attributes)\./.test(attr) ? `attr.${attr}` : attr;
+  return coreField(attr) || attr === '' || attr === '_exists_' || /^(attr|attributes)\./.test(attr) || isUnknownChangesKey(attr)
+    ? `attr.${attr}`
+    : attr;
 }
 
 export const TYPE_BADGE: Record<QueryFieldType | 'map' | 'fn' | 'kw' | 'attr', string> = {
