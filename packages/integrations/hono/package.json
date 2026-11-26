@@ -44,12 +44,12 @@
     "hono": "^4.12.3"
   },
   "devDependencies": {
-    "hono": "4.13.5",
+    "hono": "4.13.21",
     "@logbird/tsconfig": "workspace:*",
     "@logbird/contracts": "workspace:*",
-    "@types/node": "22.20.1",
+    "@types/node": "26.6.6",
     "typescript": "7.0.2",
-    "vitest": "4.1.11",
-    "tsdown": "0.22.14"
+    "vitest": "5.1.1",
+    "tsdown": "0.23.7"
   }
 }
