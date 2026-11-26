@@ -81,7 +81,7 @@ export const historyHorizonSchema = z
   })
   .meta({
     description:
-      'How far back the caller can read. To read a whole history, search from `oldestEventAt` to a `to` at least a day after now (an event can be dated up to one day after it was received), and do not take an empty answer before `oldestEventAt` as proof that nothing happened.',
+      'How far back the caller can read. To read a whole history, search from `oldestEventAt` to a `to` more than a day after now (an event can be dated up to one day after it was received), and do not take an empty answer before `oldestEventAt` as proof that nothing happened.',
   });
 export type HistoryHorizon = z.infer<typeof historyHorizonSchema>;
 /** `GET /v1/export` states the applied window in headers (a CSV or JSONL stream has no envelope for a field). */
