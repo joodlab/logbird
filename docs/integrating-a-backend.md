@@ -149,6 +149,28 @@ Validate required configuration at startup. To disable capture deliberately in
 development, pass `enabled: false`. Never log keys, request headers, raw events or
 SDK error objects that may contain sensitive details.
 
+#### pnpm 11 workspaces
+
+Verify the tarball as above, then commit it under the package that uses it, for example
+`apps/api/vendor/logbird/`. Use `file:vendor/logbird/logbird-sdk-X.Y.Z.tgz` in that package's
+`package.json` and commit the workspace lockfile. In a full checkout, a path to a tarball
+at the workspace root also works. If your build prunes the workspace before installing,
+the tarball must still be present at the path in the lockfile. Keeping it inside the app
+lets it travel with the app. Omitting a root-level tarball makes the frozen install fail with `ENOENT`.
+
+For `@logbird/sdk` alone, pnpm 11.8.0 wrote SHA-512 integrity and passed `pnpm install --frozen-lockfile`
+in our small workspace with both `pnpm install --lockfile-only` from the root and
+`pnpm --filter <package> add <Release URL>`. A pnpm 11 workspace reported a missing hash
+after root resolution and unrelated peer changes after a filtered add. We could not reproduce
+the missing hash in the small fixture. Review the full lockfile diff after a filtered add.
+When a URL entry lacks integrity, pnpm refuses the frozen install and prints this error.
+
+```text
+[ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
+```
+
+Publishing to the npm registry would remove the need for either tarball recipe. It is planned and still pending.
+
 ## Model the event
 
 | Field | Meaning | Example |

@@ -4,6 +4,7 @@
 // this repository. From the repository root:
 //
 //   node tests/npm-release-install/run.mjs --packages=<folder> [--manager=pnpm|npm] [--source=file|url] [--shape=sdk|hono]
+//   node tests/npm-release-install/run.mjs --packages=<folder> --workspace
 //
 // <folder> holds the release asset set (scripts/npm-release-assets.mjs pack writes it). Without the filters it runs every
 // combination. Shapes: `sdk` installs @logbird/sdk alone (no override); `hono` installs @logbird/sdk and @logbird/hono
@@ -28,11 +29,12 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { parseSums, SUMS, tarballName, verifyAssets } from '../../scripts/npm-release-assets.mjs';
 
@@ -89,6 +91,8 @@ const pick = (name, all) => {
 const managers = pick('manager', ['pnpm', 'npm']);
 const sources = pick('source', ['file', 'url']);
 const shapes = pick('shape', ['sdk', 'hono']);
+const workspaceOnly = args.includes('--workspace');
+if (workspaceOnly && ['manager', 'source', 'shape'].some(option)) throw new Error('--workspace runs the pnpm 11 workspace cases without filters');
 
 // Through cmd (pnpm and npm are .cmd shims on Windows), an argument with a space or metacharacter must be quoted.
 // A % is refused outright: cmd expands %VAR% even inside quotes, and no quoting prevents it.
@@ -195,10 +199,126 @@ server.listen(0, '127.0.0.1');
 await once(server, 'listening');
 const releaseUrl = `http://127.0.0.1:${server.address().port}${downloadPath}`;
 
+async function checkPnpmWorkspace(work) {
+  const { packageManager } = JSON.parse(readFileSync(join(here, 'pnpm11', 'package.json'), 'utf8'));
+  const workspaceVersion = (await run('pnpm', ['--version'], work, { capture: true })).trim();
+  check(packageManager === `pnpm@${workspaceVersion}`, `workspace check uses the pinned ${packageManager}`);
+  const appPath = 'packages/app';
+  const app = { name: 'fixture-app', private: true };
+  const writeManifest = (dir, manifest) => writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  const url = `${releaseUrl}${sdkFile}`;
+  const expectedIntegrity = integrity(served.get(sdkFile));
+  const cases = [
+    { name: 'app-file', specifier: `file:vendor/logbird/${sdkFile}`, assetDir: appPath },
+    { name: 'root-file', specifier: `file:../../vendor/logbird/${sdkFile}`, assetDir: '.' },
+    { name: 'workspace-url', specifier: url },
+    { name: 'filtered-url', specifier: url },
+  ];
+  const passed = [];
+  for (const { name, specifier, assetDir } of cases) {
+    console.log(`\n== pnpm ${workspaceVersion} workspace: ${name}`);
+    const dir = join(work, name);
+    const appDir = join(dir, appPath);
+    const siblingDir = join(dir, 'packages', 'sibling');
+    mkdirSync(appDir, { recursive: true });
+    mkdirSync(siblingDir);
+    writeManifest(dir, { name: 'release-workspace', private: true, packageManager });
+    writeManifest(appDir, app);
+    writeManifest(siblingDir, { name: 'fixture-sibling', private: true });
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+    const lockfile = join(dir, 'pnpm-lock.yaml');
+    const resolveLockfile = ['install', '--lockfile-only', '--no-frozen-lockfile', '--store-dir', join(work, `${name}-resolve-store`)];
+    await run('pnpm', resolveLockfile, dir);
+
+    if (assetDir) {
+      const vendor = join(dir, assetDir, 'vendor', 'logbird');
+      mkdirSync(vendor, { recursive: true });
+      for (const file of [sdkFile, SUMS]) {
+        const response = await fetch(`${releaseUrl}${file}`);
+        check(response.ok, `downloaded ${file} from the Release URL (after its redirect)`);
+        writeFileSync(join(vendor, file), Buffer.from(await response.arrayBuffer()));
+      }
+      const sums = parseSums(readFileSync(join(vendor, SUMS), 'utf8'));
+      const digest = createHash('sha256')
+        .update(readFileSync(join(vendor, sdkFile)))
+        .digest('hex');
+      check(digest === sums.get(sdkFile), `${sdkFile} matches ${SUMS}`);
+    }
+    if (name === 'filtered-url') {
+      const before = requests;
+      await run('pnpm', ['--filter', app.name, 'add', url, '--store-dir', join(work, `${name}-add-store`)], dir);
+      check(requests > before, 'filtered add downloaded the SDK tarball');
+    } else {
+      writeManifest(appDir, { ...app, dependencies: { '@logbird/sdk': specifier } });
+      await run('pnpm', resolveLockfile, dir);
+    }
+    const manifest = JSON.parse(readFileSync(join(appDir, 'package.json'), 'utf8'));
+    check(manifest.dependencies['@logbird/sdk'] === specifier, 'the app manifest uses the requested SDK specifier');
+    const lock = readFileSync(lockfile, 'utf8');
+    const resolutions = [...lock.matchAll(/^ {4}resolution: \{([^}]+)\}$/gm)].map(([, value]) => value);
+    const lockedTarball = assetDir ? `file:${assetDir === '.' ? '' : `${assetDir}/`}vendor/logbird/${sdkFile}` : url;
+    check(
+      resolutions.length === 1 && resolutions[0] === `integrity: ${expectedIntegrity}, tarball: ${lockedTarball}`,
+      'the lockfile resolves only the SDK tarball, with its expected path and SHA-512 integrity',
+    );
+    const frozen = (suffix) => ['install', '--frozen-lockfile', '--store-dir', join(work, `${name}-${suffix}-store`)];
+    const removeModules = () => {
+      for (const project of [dir, appDir, siblingDir]) rmSync(join(project, 'node_modules'), { recursive: true, force: true });
+    };
+    removeModules();
+    const before = requests;
+    await run('pnpm', frozen('frozen'), dir);
+    check(
+      assetDir ? requests === before : requests > before,
+      assetDir ? 'frozen install used the local tarball' : 'frozen install fetched the release tarball again',
+    );
+    check(existsSync(join(appDir, 'node_modules', '@logbird', 'sdk', 'package.json')), 'the app has an installed SDK');
+    check(readFileSync(lockfile, 'utf8') === lock, 'the frozen install left the lockfile unchanged');
+
+    if (name === 'workspace-url') {
+      // Whole-workspace resolution preserved integrity in this fixture. Inject its absence to check pnpm's refusal.
+      writeFileSync(lockfile, lock.replace(`integrity: ${expectedIntegrity}, `, ''));
+      removeModules();
+      const refused = await attempt('pnpm', frozen('missing-integrity'), dir);
+      const error = `[ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@${url}": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.`;
+      check(
+        refused.status !== 0 && stripVTControlCharacters(refused.output).includes(error),
+        'frozen install refused the URL after removing its integrity',
+      );
+    }
+
+    if (assetDir) {
+      // Copy the root metadata and what lives under the app, without the sibling or root-level vendor directory.
+      const pruned = join(work, `${name}-pruned`);
+      mkdirSync(join(pruned, appPath), { recursive: true });
+      for (const file of ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml']) copyFileSync(join(dir, file), join(pruned, file));
+      copyFileSync(join(appDir, 'package.json'), join(pruned, appPath, 'package.json'));
+      if (assetDir === appPath) {
+        cpSync(join(appDir, 'vendor'), join(pruned, appPath, 'vendor'), { recursive: true });
+        await run('pnpm', frozen('pruned'), pruned);
+        check(
+          existsSync(join(pruned, appPath, 'node_modules', '@logbird', 'sdk', 'package.json')),
+          'the app-local tarball installs in the pruned workspace',
+        );
+        check(readFileSync(join(pruned, 'pnpm-lock.yaml'), 'utf8') === lock, 'the pruned install left the lockfile unchanged');
+      } else {
+        const refused = await attempt('pnpm', frozen('pruned'), pruned);
+        check(
+          refused.status !== 0 && refused.output.includes('[ENOENT]') && refused.output.includes(sdkFile),
+          'frozen install refused the pruned workspace without its root tarball',
+        );
+      }
+    }
+    passed.push(`pnpm ${workspaceVersion} workspace: ${name}`);
+  }
+  return passed;
+}
+
 const work = mkdtempSync(join(tmpdir(), 'logbird-release-install-'));
 const passed = [];
 try {
-  for (const shapeName of shapes) {
+  if (workspaceOnly) passed.push(...(await checkPnpmWorkspace(work)));
+  for (const shapeName of workspaceOnly ? [] : shapes) {
     const shape = SHAPES[shapeName];
     for (const manager of managers) {
       for (const source of sources) {

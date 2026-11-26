@@ -37,6 +37,25 @@ Crypto. ES modules only (no CommonJS build); the declarations are checked with T
 6 and 7 under `moduleResolution` `nodenext` and `bundler`. A source
 checkout of this repository is for contributors ([CONTRIBUTING.md](https://github.com/joodlab/logbird/blob/master/CONTRIBUTING.md)).
 
+### pnpm 11 workspaces
+
+Run the download and verification from the package that uses the SDK. Commit its
+`vendor/logbird/` directory and the workspace lockfile. Use
+`file:vendor/logbird/logbird-sdk-X.Y.Z.tgz` in that package's `package.json`.
+A root-level tarball also works when the build keeps it. A pruned build that omits it fails with `ENOENT`.
+
+In a small pnpm 11.8.0 workspace, both `pnpm install --lockfile-only` from the root and
+`pnpm --filter <package> add <Release URL>` wrote the hash and passed a frozen reinstall.
+A pnpm 11 workspace reported a missing hash after root resolution and unrelated peer changes
+after a filtered add. Review the full lockfile diff after a filtered add. A frozen install
+with a missing hash prints this error.
+
+```text
+[ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.
+```
+
+Publishing to the npm registry would remove the need for either tarball recipe. It is planned and still pending.
+
 ## Capture
 
 ```ts

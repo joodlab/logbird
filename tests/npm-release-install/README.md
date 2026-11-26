@@ -35,13 +35,33 @@ packages are exact (hono and `@types/node` as `tests/npm-consumer` pins them, Ty
 dependency, `undici-types`, is pinned by an override at the version `tests/npm-consumer/package-lock.json` locks. That
 pin belongs to the test application, not to the documented recipe.
 
+## pnpm 11 workspaces
+
+`--workspace` runs a separate SDK-only check against the pnpm version pinned in `pnpm11/package.json`.
+Each case starts with a root, two packages and a shared lockfile. The SDK has no registry dependencies.
+With default pnpm settings, all four cases must record the released tarball's SHA-512 integrity and
+pass a frozen reinstall with an empty store:
+
+| Source | How the SDK enters the workspace |
+| --- | --- |
+| `file:` inside the app | Verify the download, set the app's dependency and resolve from the root |
+| `file:` at the root | Verify the download, set the app's relative dependency and resolve from the root |
+| URL, whole workspace | Set the app's dependency and run `pnpm install --lockfile-only` from the root |
+| URL, filtered add | Run `pnpm --filter fixture-app add <URL>` from the root |
+
+Neither URL case drops integrity in the small fixture. The check removes it from the whole-workspace
+URL lockfile and verifies that a frozen install fails with `ERR_PNPM_MISSING_TARBALL_INTEGRITY`.
+It also copies the workspace metadata and app into a fresh directory to model pruning. The app-local
+tarball passes there, and a missing root tarball fails with `ENOENT`.
+
 ```sh
 node scripts/npm-release-assets.mjs pack .tmp/npm                 # build, pack, check, SHA256SUMS
 node tests/npm-release-install/run.mjs --packages=.tmp/npm         # pnpm and npm on PATH, every shape and source
 node tests/npm-release-install/run.mjs --packages=.tmp/npm --shape=sdk --manager=npm --source=url
+node tests/npm-release-install/run.mjs --packages=.tmp/npm --workspace  # pnpm 11.8.0 on PATH
 ```
 
 It uses the network for the application's registry packages, never for the Logbird packages. CI
 (`.github/workflows/npm-tarballs.yml`) runs it with pnpm 10.30.3 and npm 10 on Node 22.18.0, with npm 12.1.0 on Node
-24.22.3, and with pnpm 12.6.0 on Node 24.22.3 (pinned by `pnpm12/package.json`), on pull requests, master pushes and
-release tags.
+24.22.3, with pnpm 11.8.0 on Node 24.22.3 (pinned by `pnpm11/package.json`), and with pnpm 12.6.0 on Node 24.22.3
+(pinned by `pnpm12/package.json`), on pull requests, master pushes and release tags.
