@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
-import { publishAssets } from './npm-publish.mjs';
+import { latestIsNewer, publishAssets } from './npm-publish.mjs';
 import { writeSums } from './npm-release-assets.mjs';
 
 const version = '1.2.3';
@@ -23,7 +23,7 @@ test('publishes SDK first, then adapters, all with latest', async (t) => {
   await publishAssets(
     fixture(t),
     version,
-    () => undefined,
+    () => ({}),
     (path, tag) => published.push([basename(path), tag]),
   );
   assert.deepEqual(
@@ -38,7 +38,7 @@ test('skips a matching SDK on a retry and completes the adapters', async (t) => 
   await publishAssets(
     fixture(t),
     version,
-    (name) => (name === '@logbird/sdk' ? sdkIntegrity : undefined),
+    (name) => (name === '@logbird/sdk' ? { integrity: sdkIntegrity, latest: version } : {}),
     (path) => published.push(basename(path)),
   );
   assert.deepEqual(published, files.slice(1));
@@ -50,7 +50,7 @@ test('stops publishing at a version with different integrity', async (t) => {
     publishAssets(
       fixture(t),
       version,
-      (name) => (name === '@logbird/hono' ? 'sha512-different' : undefined),
+      (name) => (name === '@logbird/hono' ? { integrity: 'sha512-different', latest: version } : {}),
       (path) => published.push(basename(path)),
     ),
     /@logbird\/hono@1\.2\.3 already exists on npm with different integrity/,
@@ -64,4 +64,27 @@ test('checks all tarballs before publishing and refuses prerelease versions', as
   const unexpected = () => assert.fail('must stop before contacting npm');
   await assert.rejects(publishAssets(folder, version, unexpected, unexpected), /does not match/);
   await assert.rejects(publishAssets(folder, '1.2.3-rc.1', unexpected, unexpected), /expected a release version X.Y.Z/);
+});
+
+test('a re-run of an older release leaves latest on the newer version', async (t) => {
+  const published = [];
+  const latest = { '@logbird/hono': '1.2.4', '@logbird/vue': '1.3.0', '@logbird/nuxt': '1.2.2', '@logbird/tanstack-start': '0.0.0-stage' };
+  await publishAssets(
+    fixture(t),
+    version,
+    (name) => ({ latest: latest[name] }),
+    (path, tag) => published.push([basename(path), tag]),
+  );
+  assert.deepEqual(
+    published,
+    files.map((file, index) => [file, index === 1 || index === 2 ? 'backfill' : 'latest']),
+  );
+});
+
+test('compares release versions as numbers and refuses a latest it cannot read', () => {
+  assert.equal(latestIsNewer('1.10.0', '1.9.9'), true);
+  assert.equal(latestIsNewer('2.0.0', '10.0.0'), false);
+  assert.equal(latestIsNewer('1.2.3', '1.2.3'), false);
+  assert.equal(latestIsNewer('1.2.3-rc.1', '1.2.3'), false);
+  assert.throws(() => latestIsNewer('next', '1.2.3'), /not a version this job can compare/);
 });

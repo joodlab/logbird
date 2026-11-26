@@ -257,7 +257,9 @@ use "Re-run failed jobs" within that time):
   network issue, then re-run the failed npm publish job. It downloads the
   attached tarballs again and skips each version whose registry integrity
   matches. This recovery uses the published Release assets and still works after
-  the workflow artifacts expire. If a version exists with different bytes,
+  the workflow artifacts expire. If a newer release reached npm in the meantime,
+  the re-run publishes what is missing under the `backfill` dist-tag and leaves
+  `latest` alone. If a version exists with different bytes,
   stop and investigate the discrepancy. If the intended tarball still needs
   publishing, cut a new release version. npm versions cannot be reused.
 - **For the image, Release and alias jobs more than seven days later**, the digest, receipt and npm artifacts are gone and a
@@ -292,7 +294,10 @@ With `NPM_PUBLISH_ENABLED` set to `true`, the release also publishes them to npm
 After the GitHub Release and image aliases succeed, the publish job downloads
 the attached files and verifies all five against `SHA256SUMS`. It publishes the
 SDK first, then the four adapters. Release preflight accepts stable `vX.Y.Z`
-tags only, so every package uses npm's `latest` dist-tag. The job uses Node
+tags only, so a package takes npm's `latest` dist-tag. The one exception is a
+re-run of an older release after a newer one is on npm: a missing package of
+the older version is published under the `backfill` dist-tag, and `latest`
+stays on the newer version. The job uses Node
 24.22.3 and npm 12.1.0 on a GitHub-hosted runner. npm uses GitHub Actions OIDC and
 automatically adds provenance for these public packages from this public repo.
 

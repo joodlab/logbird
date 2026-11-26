@@ -6,13 +6,26 @@ import { PACKAGES, SUMS, tarballName, verifyAssets } from './npm-release-assets.
 
 const registry = 'https://registry.npmjs.org';
 
-async function registryIntegrity(name, version) {
-  const response = await fetch(`${registry}/${encodeURIComponent(name)}/${version}`);
-  if (response.status === 404) return;
-  if (!response.ok) throw new Error(`npm lookup for ${name}@${version} returned HTTP ${response.status}`);
-  const { dist } = await response.json();
-  if (!dist?.integrity) throw new Error(`npm returned no integrity for ${name}@${version}`);
-  return dist.integrity;
+/** What npm holds for a package: the integrity of `version` if it is published, and the version `latest` points at. */
+async function registryState(name, version) {
+  const response = await fetch(`${registry}/${encodeURIComponent(name)}`, { headers: { accept: 'application/vnd.npm.install-v1+json' } });
+  if (response.status === 404) return {};
+  if (!response.ok) throw new Error(`npm lookup for ${name} returned HTTP ${response.status}`);
+  const packument = await response.json();
+  const published = packument.versions?.[version];
+  if (published && !published.dist?.integrity) throw new Error(`npm returned no integrity for ${name}@${version}`);
+  return { integrity: published?.dist.integrity, latest: packument['dist-tags']?.latest };
+}
+
+/** True when `latest` is a later release than `version` (X.Y.Z compared as numbers; a suffix on `latest` is ignored). */
+export function latestIsNewer(latest, version) {
+  const core = /^(\d+)\.(\d+)\.(\d+)/.exec(latest);
+  if (!core) throw new Error(`npm's latest dist-tag points at ${JSON.stringify(latest)}, which is not a version this job can compare`);
+  const wanted = version.split('.').map(Number);
+  for (const [index, part] of core.slice(1).map(Number).entries()) {
+    if (part !== wanted[index]) return part > wanted[index];
+  }
+  return false;
 }
 
 export async function publishAssets(folder, version, lookup, publish) {
@@ -20,13 +33,16 @@ export async function publishAssets(folder, version, lookup, publish) {
   for (const [index, { name }] of PACKAGES.entries()) {
     const { path } = assets[index];
     const integrity = `sha512-${createHash('sha512').update(readFileSync(path)).digest('base64')}`;
-    const existing = await lookup(name, version);
+    const { integrity: existing, latest } = await lookup(name, version);
     if (existing === integrity) {
       console.log(`Skipping ${name}@${version}: npm already has the same tarball integrity`);
       continue;
     }
     if (existing !== undefined) throw new Error(`${name}@${version} already exists on npm with different integrity`);
-    await publish(path, 'latest');
+    // A re-run of an older release must not move `latest` back from a newer one that has already been published.
+    const backfill = latest !== undefined && latestIsNewer(latest, version);
+    if (backfill) console.log(`::notice::${name}@${version} is published under the backfill tag: latest stays at ${latest}`);
+    await publish(path, backfill ? 'backfill' : 'latest');
   }
 }
 
@@ -44,7 +60,7 @@ async function main(folder, version) {
     if (!response.ok) throw new Error(`Release download for ${file} returned HTTP ${response.status}`);
     writeFileSync(join(folder, file), Buffer.from(await response.arrayBuffer()));
   }
-  await publishAssets(folder, version, registryIntegrity, (path, tag) => {
+  await publishAssets(folder, version, registryState, (path, tag) => {
     execFileSync('npm', ['publish', resolve(path), `--tag=${tag}`, `--registry=${registry}`], { stdio: 'inherit' });
   });
 }
