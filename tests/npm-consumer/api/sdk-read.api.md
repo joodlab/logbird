@@ -90,7 +90,20 @@ export interface AuditEvent {
 export type ChangeValueKind = 'absent' | 'null' | 'string' | 'number' | 'boolean' | 'json';
 
 // @public
+export interface EventDetail {
+    childCount: number;
+    // (undocumented)
+    event: AuditEvent;
+    operationSize: number;
+    parents: AuditEvent[];
+    payload: unknown;
+}
+
+// @public
 export function isTrailQueryError(error: unknown): error is TrailQueryError;
+
+// @public
+export function iterateAuditTrail(options: ReadOptions, trail: WholeTrailQuery, signal?: AbortSignal): AsyncGenerator<AuditEvent, void, undefined>;
 
 // @public
 export class LogbirdError extends Error {
@@ -104,7 +117,7 @@ export class LogbirdError extends Error {
 }
 
 // @public (undocumented)
-export type LogbirdErrorCode = 'options_invalid' | 'credentials_required' | 'client_closed' | 'before_send_failed' | 'event_invalid' | 'input_too_large' | 'input_too_deep' | 'event_too_large' | 'events_rejected' | 'ingest_http_error' | 'ingest_redirect' | 'ingest_unacknowledged' | 'ingest_request_failed' | 'ingest_requests_outstanding' | 'ingest_timeout' | 'shutdown_timeout' | 'response_too_large' | 'response_invalid' | 'read_server_only' | 'read_request_failed' | 'read_requests_outstanding' | 'read_http_error' | 'read_redirect' | 'read_invalid_response' | 'read_timeout' | 'capture_failed' | 'capture_incompatible_client' | 'capture_server_only' | 'capture_resolver_failed' | 'redaction_failed' | 'redaction_identifier_invalid' | 'redaction_options_invalid' | 'redaction_identifier_rule';
+export type LogbirdErrorCode = 'options_invalid' | 'credentials_required' | 'client_closed' | 'before_send_failed' | 'event_invalid' | 'input_too_large' | 'input_too_deep' | 'event_too_large' | 'events_rejected' | 'ingest_http_error' | 'ingest_redirect' | 'ingest_unacknowledged' | 'ingest_request_failed' | 'ingest_requests_outstanding' | 'ingest_timeout' | 'shutdown_timeout' | 'response_too_large' | 'response_invalid' | 'read_server_only' | 'read_request_failed' | 'read_requests_outstanding' | 'read_http_error' | 'read_redirect' | 'read_invalid_response' | 'read_timeout' | 'read_window_unverified' | 'read_inexact_number' | 'capture_failed' | 'capture_incompatible_client' | 'capture_server_only' | 'capture_resolver_failed' | 'redaction_failed' | 'redaction_identifier_invalid' | 'redaction_options_invalid' | 'redaction_identifier_rule';
 
 // @public (undocumented)
 export interface LogbirdErrorDetails {
@@ -116,6 +129,9 @@ export interface LogbirdErrorDetails {
 
 // @public
 export type RangeBound = string | Date | number;
+
+// @public
+export function readAuditEvent(options: ReadOptions, id: string, signal?: AbortSignal): Promise<EventDetail | null>;
 
 // @public
 export function readAuditTrail(options: ReadOptions, query: SearchInput, signal?: AbortSignal): Promise<SearchResponse>;
@@ -178,26 +194,33 @@ export interface SearchResponse {
 export type SearchSnapshot = Readonly<Partial<SearchQuery>>;
 
 // @public
+export const SERVER_DEFAULT_RANGE = "server-default";
+
+// @public (undocumented)
+export type ServerDefaultRange = typeof SERVER_DEFAULT_RANGE;
+
+// @public
 export function snapshotSearchQuery(query: SearchInput, where?: string): SearchSnapshot;
 
 // @public
-export function snapshotTrail(input: TrailQuery, where?: string): TrailSnapshot;
+export function snapshotTrail(input: TrailInput, where?: string): TrailSnapshot;
 
-// @public (undocumented)
-export interface TrailQuery {
+// @public
+export interface TrailInput {
     // (undocumented)
     actor?: string;
     // (undocumented)
     cursor?: string;
     // (undocumented)
     limit?: number;
+    order?: 'asc' | 'desc';
     // (undocumented)
     q?: string;
     // (undocumented)
     range?: {
         from?: RangeBound;
         to?: RangeBound;
-    };
+    } | ServerDefaultRange;
     // (undocumented)
     target?: {
         type?: string;
@@ -206,6 +229,14 @@ export interface TrailQuery {
     // (undocumented)
     tenant?: string;
 }
+
+// @public
+export type TrailQuery = Omit<TrailInput, 'range'> & {
+    range: {
+        from: RangeBound;
+        to?: RangeBound;
+    } | ServerDefaultRange;
+};
 
 // @public
 export function trailQuery(input: TrailQuery): Partial<SearchQuery>;
@@ -229,10 +260,19 @@ export type TrailSnapshot = Readonly<{
     range?: Readonly<{
         from?: string;
         to?: string;
-    }>;
+    }> | ServerDefaultRange;
+    order?: 'asc' | 'desc';
     limit?: number;
     cursor?: string;
 }>;
+
+// @public
+export type WholeTrailQuery = Omit<TrailQuery, 'range'> & {
+    range: {
+        from: RangeBound;
+        to?: RangeBound;
+    };
+};
 
 // (No @packageDocumentation comment for this package)
 

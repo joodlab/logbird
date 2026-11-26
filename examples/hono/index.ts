@@ -16,7 +16,12 @@ app.onError(async (_error, c) => {
   return c.json({ error: 'Audit history unavailable. Please retry.' }, 502);
 });
 app.get('/history', async (c) =>
-  c.json(await readAuditTrail({ endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' }, trailQuery({ target: { id: 'demo-record' } }))),
+  c.json(
+    await readAuditTrail(
+      { endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' },
+      trailQuery({ target: { id: 'demo-record' }, range: { from: new Date(Date.now() - 30 * 86_400_000) } }),
+    ),
+  ),
 );
 const server = serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 4730), hostname: '127.0.0.1' });
 for (const signal of ['SIGINT', 'SIGTERM'] as const)

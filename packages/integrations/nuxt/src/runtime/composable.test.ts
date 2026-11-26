@@ -28,8 +28,8 @@ const page = (ids: string[], nextCursor: string | null = null) => ({ data: ids.m
 
 it('sends the documented empty trail to its own route, and throws on a selector without a value', async () => {
   calls.length = 0;
-  const empty = run(() => useAuditTrail({}));
-  const missing = run(() => useAuditTrail({ tenant: undefined }));
+  const empty = run(() => useAuditTrail({ range: 'server-default' }));
+  const missing = run(() => useAuditTrail({ tenant: undefined, range: 'server-default' }));
   await settle();
   expect(calls).toHaveLength(1);
   expect(calls[0]?.url).toBe('/api/_logbird/events');
@@ -37,6 +37,20 @@ it('sends the documented empty trail to its own route, and throws on a selector 
   expect(missing.trail.error.value?.message).toMatch(/`tenant` was given but is empty/);
   empty.stop();
   missing.stop();
+});
+
+it('needs a trail with a selector to name its window; the empty trail leaves it to the route, with the order', async () => {
+  calls.length = 0;
+  const none = run(() => useAuditTrail({ tenant: 'acme' }));
+  const toOnly = run(() => useAuditTrail({ tenant: 'acme', range: { to: '2026-11-02T00:00:00.000Z' } }));
+  const asc = run(() => useAuditTrail({ range: { from: '2026-11-01T00:00:00.000Z' }, order: 'asc' }));
+  await settle();
+  expect(none.trail.error.value?.message).toMatch(/a trail needs a `range`/);
+  expect(toOnly.trail.error.value?.message).toMatch(/`range` has no `from`/);
+  expect(calls.map((c) => c.query)).toEqual([{ from: '2026-11-01T00:00:00.000Z', order: 'asc' }]);
+  none.stop();
+  toOnly.stop();
+  asc.stop();
 });
 
 it('passes the boundary: Date bounds become ISO strings and a wrong-typed value is refused before any request', async () => {
@@ -58,7 +72,7 @@ it('drops rows, cursor and the read in flight when the session changes', async (
     return calls.length === 1 ? page(['a-1'], 'a-next') : page(['b-1']);
   };
   const session = ref('user-a');
-  const { trail, stop } = run(() => useAuditTrail(() => ({ session: session.value })));
+  const { trail, stop } = run(() => useAuditTrail(() => ({ session: session.value, range: 'server-default' as const })));
   await settle();
   expect(trail.data.value.map((e) => e.id)).toEqual(['a-1']);
   void trail.loadMore();

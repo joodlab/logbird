@@ -24,6 +24,8 @@ export type LogbirdErrorCode =
   | 'read_redirect'
   | 'read_invalid_response'
   | 'read_timeout'
+  | 'read_window_unverified'
+  | 'read_inexact_number'
   | 'capture_failed'
   | 'capture_incompatible_client'
   | 'capture_server_only'
@@ -59,6 +61,8 @@ const messages: Record<LogbirdErrorCode, string> = {
   read_redirect: 'Logbird read redirect refused',
   read_invalid_response: 'Invalid Logbird read response',
   read_timeout: 'Logbird read request timed out',
+  read_window_unverified: 'Logbird read could not keep the window it was asked for',
+  read_inexact_number: 'Logbird read holds a number this runtime cannot keep exactly',
   capture_failed: 'Logbird capture failed',
   capture_incompatible_client: 'The supplied Logbird client cannot prepare integration captures',
   capture_server_only: 'Logbird ingest is server-only',

@@ -167,13 +167,64 @@ const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
   dropPolicy: 'oldest', onDrop: () => metrics.increment('audit.dropped') });
 ```
 
+A trail always names its time window. `range: { from }` reads from `from` (inclusive) to `to` (exclusive; now when
+absent), on the event's timestamp. Without `from` the server reads only the 24 hours before `to`, and a short history
+would look complete, so `trailQuery` throws a `TrailQueryError` for a trail without `range` or without `range.from`.
+To read that default window on purpose, pass `range: SERVER_DEFAULT_RANGE`. Every page states the window the server
+applied as `page.range` (absent from servers older than that field). `order: 'asc'` reads oldest first (default
+`desc`); events in the same millisecond are ordered by id, not by cause, so read causation from
+`context.parentEventId`.
+
+```ts
+import { iterateAuditTrail, readAuditEvent, readAuditTrail, trailQuery } from '@logbird/sdk/read';
+
+// A tenant-scoped read key: detail and its parents stay inside the tenant too (a project-wide key's detail can
+// include another tenant's parent).
+const options = { endpoint, readKey: tenantScopedReadKey };
+const trail = { target: { type: 'booking', id: 'bk_1042' }, tenant: 'biz_7', range: { from: '2026-01-01T00:00:00Z' } };
+const page = await readAuditTrail(options, trailQuery({ ...trail, order: 'asc' })); // one page; page.range is the window
+for await (const event of iterateAuditTrail(options, { ...trail, order: 'asc' })) render(event); // every page
+const first = page.data[0];
+const detail = first ? await readAuditEvent(options, first.id) : null; // parents, childCount, payload; null when unknown
+```
+
+### Reading a whole trail
+
+Use `https` for any endpoint that leaves a trusted network: the read key is sent as a bearer header.
+
+The console's record page shows a record's history; `iterateAuditTrail` with that record as `target: { type, id }` (a
+`record:` selector) and an explicit `range` is its programmatic equivalent, and the `range` each page reports is the
+window the server applied.
+
+`iterateAuditTrail(options, trail)` needs `range: { from }` with `Z` or an offset (or `Date`s); `to` is optional. It reads
+the trail and options once, when called, and every page through the same bounded read as `readAuditTrail`. **A pass
+that completes** has yielded, once each, every event the server returned for the window the first page reported, which
+must be the window asked for (the server may only move a bound onto its store limits, 1900 to 2299): every later page
+is sent with that window and must report it, every yielded event lies in it, and the pass ends only when a page reports
+no next cursor. A page that fails any of these checks fails the pass with a `LogbirdError` (`read_window_unverified`
+or `read_invalid_response`) before any of its events is yielded, so a pass never yields a row twice or from outside the
+window, and never stops early without an error. Against a server that does not report its window, a trail without
+`to` fails before yielding anything. **It does not guarantee** a snapshot: each page is read when it is requested, so an
+event stored during the pass with a timestamp behind your position (or before `from`) is not returned, and a relative
+time in `q` (`receivedAt:>now-1h`) moves with each request. To pick up late arrivals, read again later over a window
+that covers when they can have occurred, with `receivedAt:>=` in `q` starting well before the last `receivedAt` you saw
+(receipt times are not a strict sequence), and skip ids you already have. Breaking out of the loop stops the pass before
+its next request. To drop repeats, a pass keeps every id it has yielded (roughly 100 bytes per event), so its memory grows with the
+trail: split a very large window into several passes.
+
+`readAuditEvent(options, id)` returns one event with its nearest ancestors (`parents`, furthest first), how many events
+name it as their parent (`childCount`; list them with `parent:` and the id quoted by the query language rules, over a
+window that covers them), how many share its operation, and its original `payload` (null under a field mask), or
+`null` for a 404. It uses the same bounded read and `LogbirdError` codes; where a runtime has no `JSON.rawJSON`, a
+payload holding a number a double cannot keep fails with `read_inexact_number` instead of being rounded.
+
 `trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or
 query, and a selector key passed without a value (say `tenant: undefined`) is an error, not an absent filter. A `q` must
 parse as one complete Logbird query on its own; it is ANDed with the selectors.
 `trailQuery` and `readAuditTrail` first copy their input into a frozen snapshot of strings and numbers, reading each
 property once (getters, inherited and non-enumerable properties included), and throw a `TrailQueryError` (a `TypeError`;
 test with `isTrailQueryError`) for a value of the wrong type. Selectors, `q` and `cursor` are strings; a range bound is
-a `Date`, whole epoch milliseconds or an ISO 8601 string (checked by the server); a `range` needs at least one bound;
+a `Date`, whole epoch milliseconds or an ISO 8601 string (checked by the server); a trail's `range` needs `from`;
 `limit` is an integer or its decimal digits; the options, `target`, `range` and query are plain objects or class
 instances whose fields are named properties. Containers that keep entries elsewhere are refused: anything with an
 iterator, or with a method named `get`, `getTime`, `getReader` or `then` (arrays, `Map`s, `URLSearchParams`, `Headers`,

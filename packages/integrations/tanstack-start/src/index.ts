@@ -3,7 +3,7 @@ import { createMiddleware, type FunctionMiddlewareAfterServer, type RequestMiddl
 import { getRequest } from '@tanstack/react-start/server';
 
 export type { Audit } from '@logbird/sdk/integration';
-export { readAuditTrail, trailQuery } from '@logbird/sdk/read';
+export { iterateAuditTrail, readAuditEvent, readAuditTrail, SERVER_DEFAULT_RANGE, trailQuery } from '@logbird/sdk/read';
 
 // Named through @tanstack/react-start, which the application depends on, so the published declarations never point at
 // TanStack's internal packages. The `{}` is TanStack's own "no extra register" type argument, written in place so the
