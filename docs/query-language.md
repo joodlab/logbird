@@ -91,9 +91,11 @@ event are indexed. Facets on these fields count elements, not events: an event w
 counts twice. A two-level facet over two of them (`field=changes.field&by=changes.after`) pairs each field with its
 own values.
 
-The three fields are checked independently, like `target` and `target.type`: `changes.field:status
-changes.after:PUBLISHED` also matches an event where `status` changed to something else while another field became
-`PUBLISHED`. To be sure a specific field took a value, open the matching events and read their `changes`.
+The three fields are checked independently, like `target` and `target.type`. There is no query yet for "a given field
+changed to a given value". For example, to find when `status` became `PUBLISHED` you write
+`changes.field:status changes.after:PUBLISHED`, and that also matches an event where `status` changed from `DRAFT`
+to `REVIEW` while another field (say `label`) became `PUBLISHED`. Open the matching events and read their `changes`
+to be sure which field took the value. A paired selector is tracked in #410.
 
 Any other `changes` key (`changes.to`, `changes.value`, `changes` alone, or any of these in another letter case such
 as `Changes.field`) is refused with 422 `invalid_query`, reason `unknown_field`: the `changes` list is never stored
@@ -114,7 +116,7 @@ of `impersonator`. Other `impersonator.*` keys are attribute lookups, because in
 the impersonator as an attribute (`impersonator.email`, `impersonator.type`); a misspelled key such as
 `impersonator.nmae` therefore matches only events that carry that attribute. An impersonator sent with a name and
 no id is stored by name only: `impersonator.name` finds the event, but the event shows no impersonator (events show
-one only when it has an id). Under a scope with the
+one only when it has an id; tracked in #409). Under a scope with the
 `actor_email` mask, a name that carries an address reads as an empty name, as for `actor.name`
 ([scoped read access](scoped-read-access.md#masks)).
 
