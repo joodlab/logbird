@@ -2,18 +2,20 @@
 
 ## Unreleased
 
-## 0.4.0
+## 0.4.1
 
 ### Highlights
 
 - The console shows recorded field changes in record, actor and tenant histories. Queries can search change values (`changes.before`, `changes.after`) and the support person's name (`impersonator.name`), and Logbird keeps the JSON kind of each change value.
-- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trails built with `trailQuery` must name their window, and `iterateAuditTrail` reads every page of one. A new guide, [Read a record's whole history back](https://github.com/joodlab/logbird/blob/v0.4.0/docs/reading-history.md), shows how to put these together.
+- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trails built with `trailQuery` must name their window, and `iterateAuditTrail` reads every page of one. A new guide, [Read a record's whole history back](https://github.com/joodlab/logbird/blob/v0.4.1/docs/reading-history.md), shows how to put these together.
 - The TypeScript SDK redacts common secret keys by default, accounts for every event through `flush()` and `shutdown()`, and refuses redirects. The GitHub Release attaches the TypeScript packages as tarballs with a `SHA256SUMS` file.
 
 ### Changes
 
-This is a minor release because callers must act on several changes. Read
-[Breaking changes in 0.4.0](#breaking-changes-in-040) before you upgrade.
+0.4.0 was tagged but never published, because a step of the release workflow
+failed; use 0.4.1, which contains the same changes and the workflow fix. This is
+a minor release because callers must act on several changes. Read
+[Breaking changes in 0.4.1](#breaking-changes-in-041) before you upgrade.
 
 **Change history in the console.** Record, actor and tenant histories show the
 first two recorded field changes of each event, and a count opens the full
@@ -37,7 +39,7 @@ parent links. Live rows follow arrival order. Follow-ups are tracked in #407.
 (`absent`, `null`, `string`, `number`, `boolean`, `json`). Event reads, JSONL
 exports, the CSV `changes` cell and webhook bodies return them as optional
 `beforeKind` and `afterKind`. The `before` and `after` text, the CSV headers
-and the export schema version are unchanged. Events stored before 0.4.0, or by
+and the export schema version are unchanged. Events stored before 0.4.1, or by
 an older server during the upgrade, have no kinds, so they cannot tell `null`
 from the text "null", or an absent value from an empty string. Send numbers as
 numbers and explicit nulls as `null`, omit `before` when a field is created and
@@ -95,7 +97,7 @@ prefixes match few or none of its tenant's events the route reads those events
 until the first match, within the same budget as a scoped search (#408). During
 a retention run it answers 503, like search. The TypeScript SDK adds
 `readHistoryHorizon(options)` and the .NET read client
-`GetHistoryHorizonAsync()`; against a server older than 0.4.0 they fail with
+`GetHistoryHorizonAsync()`; against a server older than 0.4.1 they fail with
 `read_http_error` (status 404) and `LogbirdApiException` (`not_found`). (#411)
 
 **Reading a history back.** The new guide
@@ -114,10 +116,10 @@ stored payload keeps everything sent; only the indexed copy is cut. Ingest now
 says so: the answer has one coded warning per kind of cut
 (`targets_truncated`, `changes_truncated`, `change_fields_truncated`) with
 counts only, and the event carries `logbird.truncated.targets`,
-`logbird.truncated.changes` or `logbird.truncated.changeFields`. From 0.4.0 on,
+`logbird.truncated.changes` or `logbird.truncated.changeFields`. From 0.4.1 on,
 only Logbird writes those attributes: a producer value under
 `logbird.truncated` is left out of the indexed attributes, and the payload keeps
-it. Events stored before 0.4.0, or by an older server during the upgrade, carry
+it. Events stored before 0.4.1, or by an older server during the upgrade, carry
 no Logbird count even when they were cut, and may hold a producer's own value
 under these keys, so `attr.logbird.truncated.targets:*` can find such an event
 too; compare the counts with the payload's `targets` and `changes`. An accepted
@@ -171,12 +173,12 @@ codes. The SDK does not surface the server's ingest warnings yet.
 **.NET SDK.** `RedactionOptions.AddPaths` and `KeepPaths` use the TypeScript
 path syntax and precedence. Invalid paths throw when the client is constructed,
 naming the option and entry index. The read client adds `EventPage.Range` and
-`FacetResult.Range` (`EventRange`, `null` from servers older than 0.4.0),
+`FacetResult.Range` (`EventRange`, `null` from servers older than 0.4.1),
 `StoredChange.BeforeKind` and `AfterKind`, and the facet fields
 `changes.before`, `changes.after`, `impersonator.name` and `impersonator.id`.
 `ExportAsync` does not expose the range headers. (#397, #398, #401, #404)
 
-**Release packages.** Each GitHub Release, starting with 0.4.0, attaches the
+**Release packages.** Each GitHub Release, starting with 0.4.1, attaches the
 TypeScript packages built at its own version: `logbird-sdk-X.Y.Z.tgz`,
 `logbird-hono-X.Y.Z.tgz`, `logbird-vue-X.Y.Z.tgz`, `logbird-nuxt-X.Y.Z.tgz`,
 `logbird-tanstack-start-X.Y.Z.tgz` and `SHA256SUMS`. Install them as described
@@ -186,7 +188,7 @@ exists for them yet. The console's install snippet still shows the
 source-checkout command. The `0.4` and `latest` image tags now move only after
 the GitHub Release exists, and never back to an older release. (#395)
 
-### Breaking changes in 0.4.0
+### Breaking changes in 0.4.1
 
 Each item says what changed, who is affected and what to change.
 
@@ -328,7 +330,7 @@ Each item says what changed, who is affected and what to change.
     `readAuditTrail(options, { q, from })`.
   - `iterateAuditTrail` does not accept `SERVER_DEFAULT_RANGE`: pass
     `range: { from }` with `Z` or an offset (or a `Date`). Against a server
-    older than 0.4.0, which does not report its window, also pass `to`.
+    older than 0.4.1, which does not report its window, also pass `to`.
   - Nuxt `useAuditTrail`: a trail with a selector needs `range.from` (or
     `SERVER_DEFAULT_RANGE`). An empty trail, `useAuditTrail({})`, still works;
     its window is the `authorize()` hook's choice. Build the hook's query with
@@ -345,7 +347,7 @@ Each item says what changed, who is affected and what to change.
   facet `q`, export and suggestions; as a facet `field` or `by` such a key gets
   422 `validation_error`. A saved view with such a key shows the error when
   opened. A webhook endpoint whose stored filter has one is held, and create
-  and edit refuse it. Before 0.4.0 such a key read an attribute of that literal
+  and edit refuse it. Before 0.4.1 such a key read an attribute of that literal
   name, so it matched events that carry a top-level dotted key such as
   `"changes.to"`, and nothing otherwise. Affected: saved views, webhook filters
   and API callers with such a term. Before upgrading, prefix the whole
@@ -415,7 +417,7 @@ Each item says what changed, who is affected and what to change.
 ### Self-hoster actions
 
 Follow [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups) to
-stop writers and take matched backups. Pin `LOGBIRD_VERSION=0.4.0` after the
+stop writers and take matched backups. Pin `LOGBIRD_VERSION=0.4.1` after the
 images publish. Run the migrate service before starting the new API and worker.
 
 - **ClickHouse migration `012_change_value_kinds.sql`** adds the
@@ -429,7 +431,7 @@ images publish. Run the migrate service before starting the new API and worker.
 - Upgrade every API and worker replica together, or drain the old ones, before
   relying on the impersonator mask: older replicas return and send the
   impersonator's email in clear to masked readers. Before rolling back to a
-  release before 0.4.0, follow the rollback steps in
+  release before 0.4.1, follow the rollback steps in
   [webhook endpoint settings](docs/self-hosting.md#webhook-endpoint-settings),
   which now include viewer tokens.
 - Before upgrading, review saved views and webhook filters for the query
@@ -441,7 +443,7 @@ images publish. Run the migrate service before starting the new API and worker.
   mask now covers: they are held after the upgrade. Before deleting one, note
   its replay boundary, then replace it, both as the webhook settings describe.
 - If a producer sends its own attributes under `logbird.truncated`, move them
-  to another key and update their queries; 0.4.0 no longer indexes them.
+  to another key and update their queries; 0.4.1 no longer indexes them.
 - If you follow the `0.4` or `latest` image tags, they now move only after the
   GitHub Release exists. Pin exact versions or digests for controlled upgrades.
 
@@ -450,12 +452,12 @@ images publish. Run the migrate service before starting the new API and worker.
 - Neither SDK is on npm or nuget.org yet. Install the TypeScript packages from
   the GitHub Release tarballs as described in
   [Install the SDK](docs/integrating-a-backend.md#install-the-sdk); releases
-  before 0.4.0 have no tarballs. `@logbird/sdk`, `@logbird/hono` and
+  before 0.4.1 have no tarballs. `@logbird/sdk`, `@logbird/hono` and
   `@logbird/vue` need Node 20 or later, `@logbird/nuxt` `^20.19.0 || >=22.12.0`
   and `@logbird/tanstack-start` `>=22.12.0`; all are ES modules only. Build the
   .NET SDK from source as the [.NET guide](docs/sdk-dotnet.md#1-install)
   describes.
-- Work through the [breaking changes](#breaking-changes-in-040) for the
+- Work through the [breaking changes](#breaking-changes-in-041) for the
   TypeScript SDK and integrations before upgrading them.
 - Send change values as their JSON types so kinds are recorded.
 
@@ -478,6 +480,12 @@ images publish. Run the migrate service before starting the new API and worker.
   only, and does not recognise encoded addresses.
 - Edge cases in TypeScript SDK delivery and transport are tracked in #399, and
   console history follow-ups in #407.
+
+## 0.4.0
+
+Tagged on 26 November 2026 but never published: the release workflow stopped
+before any image tag or GitHub Release was created. Use 0.4.1, which contains the
+same changes.
 
 ## 0.3.0
 

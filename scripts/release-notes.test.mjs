@@ -826,6 +826,16 @@ test('a tag whose release never completed is not a baseline for the next release
     assert.equal(previousTag(head, git, new Set(['v0.1.1', 'v0.1.2'])), undefined);
     git('tag', 'v0.1.3');
     assert.equal(previousTag(head, git), 'v0.1.1');
+    // v0.4.0 was tagged but its release run failed before anything was published: v0.4.1's notes start at v0.3.0.
+    addCommit('feat: fourth');
+    git('tag', 'v0.3.0');
+    addCommit('feat!: fifth');
+    git('tag', 'v0.4.0');
+    addCommit('ci: sixth');
+    const next = git('rev-parse', 'HEAD');
+    assert.ok(unpublishedTags.has('v0.4.0'));
+    assert.equal(previousTag(next, git), 'v0.3.0');
+    assert.equal(previousTag(next, git, new Set(['v0.1.2'])), 'v0.4.0');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
