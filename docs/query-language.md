@@ -91,8 +91,10 @@ A value matches its stored text, exactly and case-sensitively:
 | an array or object | compact JSON text | `changes.after:"[\"a\",\"b\"]"` |
 
 Queries match only that text: `null` and the text "null", or an absent value and an empty string, match the same
-terms. A returned change also carries `beforeKind` and `afterKind` (`absent`, `null`, `string`, `number`, `boolean`,
-`json`), which tell them apart when reading; those kinds are not query fields.
+terms. A returned change may also carry `beforeKind` and `afterKind` (`absent`, `null`, `string`, `number`,
+`boolean`, `json`), which tell them apart when reading; those kinds are not query fields. Both are optional: they
+are absent on events stored before value kinds existed, and such events cannot tell `null` from the text "null"
+(or an absent value from an empty string).
 
 `changes.before:*` and `changes.after:*` mean some change has a non-empty value on that side. Up to 256 changes per
 event are indexed. Facets on these fields count elements, not events: an event with two changes to the same value
@@ -108,7 +110,8 @@ to be sure which field took the value. A paired selector is tracked in #410.
 Any other `changes` key (`changes.to`, `changes.value`, `changes` alone, or any of these in another letter case such
 as `Changes.field`) is refused with 422 `invalid_query`, reason `unknown_field`: the `changes` list is never stored
 as attributes, so such a key could never match. Use `attr.changes.<x>` to look up a custom attribute with that name
-(an event can carry one as a literal top-level dotted key).
+(an event can carry one as a literal top-level dotted key). As a facet `field` or `by` (`/v1/facets?field=changes.to`)
+such a key is refused earlier, by the request schema, with 422 `validation_error` instead.
 
 Core fields always win over a literal attribute of the same name: `changes.before`, `changes.after`,
 `impersonator.name` and `impersonator.id` read the event's columns, so an attribute literally named `changes.after`
