@@ -190,6 +190,9 @@ const detail = first ? await readAuditEvent(options, first.id) : null; // parent
 
 ### Reading a whole trail
 
+The [reading guide](https://github.com/joodlab/logbird/blob/master/docs/reading-history.md) shows how to rebuild a
+record's complete history step by step, with these helpers and with plain HTTP.
+
 Use `https` for any endpoint that leaves a trusted network: the read key is sent as a bearer header.
 
 The console's record page shows a record's history; `iterateAuditTrail` with that record as `target: { type, id }` (a
