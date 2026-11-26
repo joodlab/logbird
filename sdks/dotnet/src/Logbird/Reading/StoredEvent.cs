@@ -98,6 +98,12 @@ public sealed class StoredEvent
 /// </remarks>
 public sealed record StoredChange(string Field, string Before, string After)
 {
+    /// <summary>The original before kind: absent, null, string, number, boolean, or json. Null when unknown.</summary>
+    public string? BeforeKind { get; init; }
+
+    /// <summary>The original after kind: absent, null, string, number, boolean, or json. Null when unknown.</summary>
+    public string? AfterKind { get; init; }
+
     /// <summary>
     /// <c>ToString()</c> lists no values (not even the field name), so writing this object as text cannot leak anything. A structured logger that serializes its properties still sees them.
     /// </summary>
@@ -132,8 +138,28 @@ public sealed class EventPage
     /// </summary>
     public bool? TotalExact { get; init; }
 
+    /// <summary>
+    /// The time window the server applied, or <see langword="null"/> when the server does not say (older servers).
+    /// Without <see cref="EventSearch.From"/> the server reads at most the 24 hours before the end, so compare this with
+    /// the window you meant before you treat a page as a complete history.
+    /// </summary>
+    public EventRange? Range { get; init; }
+
     /// <summary>How long the query took on the server, in milliseconds.</summary>
     public double TookMs { get; init; }
+}
+
+/// <summary>
+/// The time window a read applied: events whose timestamp is at or after <see cref="From"/> and before
+/// <see cref="To"/>, as ISO 8601 UTC text with milliseconds, exactly as the server sent it.
+/// </summary>
+public sealed class EventRange
+{
+    /// <summary>The inclusive start: the requested start, or the end minus 24 hours when none was given, never before 1900-01-01.</summary>
+    public string From { get; init; } = string.Empty;
+
+    /// <summary>The exclusive end: the requested end, or the server clock when none was given, never after 2299-12-31T23:59:59.999Z.</summary>
+    public string To { get; init; } = string.Empty;
 }
 
 /// <summary>One event with its raw payload and causation context.</summary>

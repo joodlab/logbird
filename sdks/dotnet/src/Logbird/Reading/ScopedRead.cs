@@ -383,6 +383,9 @@ public sealed class FacetResult
 
     /// <summary>How many events have a value not listed.</summary>
     public long OtherCount { get; init; }
+
+    /// <summary>The time window the counts cover, or <see langword="null"/> when the server does not say (older servers).</summary>
+    public EventRange? Range { get; init; }
 }
 
 /// <summary>One value of a facet.</summary>

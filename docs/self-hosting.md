@@ -290,6 +290,14 @@ below for older Trailmark installations.
 See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
 for signal handling; its live acceptance is pending in #77.
 
+### Change value kinds on upgrade
+
+The normal migrate step adds two event columns for change value kinds using a metadata-only
+`ALTER TABLE … ADD COLUMN`. It leaves existing data parts in place. Earlier writers can keep
+using the migrated table. Kinds are unknown for events written by an earlier server, so reads
+omit the kind properties for those events. The new API checks for the columns before listening
+and reports a startup error if it cannot read them.
+
 ### Webhook delivery on upgrade
 
 When upgrading from a release without webhook delivery, stop all servers running the previous version before
@@ -1199,8 +1207,10 @@ pending deliveries go with it), then create a new one with the corrected filter.
 The new endpoint has a new signing secret, so update the receiver, and its
 cursor starts at creation, so events that arrived while the old one was held
 are not delivered, and the deleted endpoint's pending deliveries (including any
-queued before the hold) are gone. Before deleting, note the held endpoint's
-cursor time (the last arrival it scanned). To fill the gap, export with the
+queued before the hold) are gone. Before deleting, note the earlier of the held
+endpoint's cursor time (the last arrival it scanned) and the arrival time
+(`receivedAt`) of its oldest delivery that is still pending or failed, so an
+event queued but never received is covered. To fill the gap, export with the
 same masked scope, the replacement filter plus `receivedAt:>=<that time>`, and a
 `from` wide enough to include events that occurred earlier but arrived late
 (export ranges select by occurrence time), then skip events the receiver has

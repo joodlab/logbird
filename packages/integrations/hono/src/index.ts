@@ -1,3 +1,4 @@
+import { LogbirdError } from '@logbird/sdk';
 import { type Audit, type CaptureOptions, createAudit, report, shutdown } from '@logbird/sdk/integration';
 import type { Context, MiddlewareHandler } from 'hono';
 
@@ -15,15 +16,20 @@ export function logbird(options: LogbirdOptions): MiddlewareHandler<{ Variables:
     try {
       await next();
     } finally {
+      let action: string | undefined;
       try {
         const auto = options.autoTrack;
-        if (auto && (auto.methods ?? ['POST', 'PUT', 'PATCH', 'DELETE']).includes(c.req.method) && !auto.skip?.(c))
-          audit(`http.${c.req.method.toLowerCase()}`, {
-            outcome: c.error || c.res.status >= 400 ? 'failure' : 'success',
-            metadata: { path: c.req.path, status: c.res.status },
-          });
-      } catch (error) {
-        report(options.onError, error);
+        if (auto && (auto.methods ?? ['POST', 'PUT', 'PATCH', 'DELETE']).includes(c.req.method)) {
+          action = `http.${c.req.method.toLowerCase()}`;
+          if (!auto.skip?.(c)) {
+            audit(action, {
+              outcome: c.error || c.res.status >= 400 ? 'failure' : 'success',
+              metadata: { path: c.req.path, status: c.res.status },
+            });
+          }
+        }
+      } catch {
+        report(options.onError, new LogbirdError('capture_failed'), options.client, action);
       }
       // Hono throws when no execution context exists on Node.
       let execution: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
@@ -37,7 +43,7 @@ export function logbird(options: LogbirdOptions): MiddlewareHandler<{ Variables:
           audit
             .pending()
             .then(() => options.client.flush())
-            .catch((error) => report(options.onError, error)),
+            .catch((error) => report(options.onError, error, options.client)),
         );
     }
   };

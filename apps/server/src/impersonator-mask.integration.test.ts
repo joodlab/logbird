@@ -241,6 +241,42 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         actor,
         impersonator: { id: 'sup_small', name: 'Solo\uFE6Bexample.invalid' },
       },
+      // ASCII case variants of the email path: ingest keeps key case, and the mask must not depend on it.
+      {
+        id: 'qa-imp-15',
+        occurredAt: ts(15),
+        action: 'article.updated',
+        tenant,
+        actor,
+        impersonator: { id: 'sup_case1', name: 'Case Support', Email: 'nadia.case@example.invalid' },
+      },
+      {
+        id: 'qa-imp-16',
+        occurredAt: ts(16),
+        action: 'article.updated',
+        tenant,
+        actor,
+        impersonator: { id: 'sup_case2', name: 'Case Support' },
+        'Impersonator.email': 'nadia.top@example.invalid',
+      },
+      {
+        id: 'qa-imp-17',
+        occurredAt: ts(17),
+        action: 'article.updated',
+        tenant,
+        actor,
+        impersonator: { id: 'sup_case3', name: 'Case Support', EMAIL: { work: 'nadia.work@example.invalid' } },
+      },
+      // An empty exact email beside a populated variant, and a name holding another address: the name rule (TS events and
+      // SQL facet labels alike) judges against the populated variant, so the name shows that address's pseudonym.
+      {
+        id: 'qa-imp-18',
+        occurredAt: ts(18),
+        action: 'article.updated',
+        tenant,
+        actor,
+        impersonator: { id: 'sup_shadow', name: 'Shadow <nadia.other@example.invalid>', email: '', Email: 'Nadia.Shadow@example.invalid' },
+      },
     ];
     const ingested = await app.request('/v1/events', {
       method: 'POST',
@@ -311,6 +347,10 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       sup_zw: p.zw,
       sup_fw: p.rita,
       sup_small: p.small,
+      sup_case1: 'Case Support',
+      sup_case2: 'Case Support',
+      sup_case3: 'Case Support',
+      sup_shadow: imp('nadia.shadow@example.invalid'),
       '': '',
     };
     // Expected two-level facets, computed from the fixture: value -> { count, groups: { group -> count } }.
@@ -374,11 +414,19 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       'qa-imp-12': { name: p.zw, attributes: {} },
       'qa-imp-13': { name: p.rita, attributes: { 'impersonator.email': p.rita } },
       'qa-imp-14': { name: p.small, attributes: {} },
+      'qa-imp-15': { name: 'Case Support', attributes: { 'impersonator.Email': imp('nadia.case@example.invalid') } },
+      'qa-imp-16': { name: 'Case Support', attributes: { 'Impersonator.email': imp('nadia.top@example.invalid') } },
+      'qa-imp-17': { name: 'Case Support', attributes: {} },
+      'qa-imp-18': {
+        name: imp('nadia.shadow@example.invalid'),
+        attributes: { 'impersonator.email': '', 'impersonator.Email': imp('nadia.shadow@example.invalid') },
+      },
     };
     type Event = { id: string; impersonator: { id: string; name: string } | null; attributes: Record<string, string> };
     const impersonatorOf = (e: Event) => ({
       name: e.impersonator?.name,
-      attributes: Object.fromEntries(Object.entries(e.attributes).filter(([k]) => k.startsWith('impersonator.email'))),
+      // In any ASCII case: the variants (impersonator.Email, Impersonator.email) are the same path to the mask.
+      attributes: Object.fromEntries(Object.entries(e.attributes).filter(([k]) => k.toLowerCase().startsWith('impersonator.email'))),
     });
 
     // Contrast: the unmasked scoped key sees every address, and every refused probe below selects its rows without the mask.
@@ -402,6 +450,10 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
       { q: '_exists_:"impersonator.email.omar.desk@example.invalid"', rows: ['qa-imp-6'] },
       { q: 'attr.impersonator.name:Rita*', rows: ['qa-imp-1'] },
       { q: 'attr.impersonator.name.en:*', rows: ['qa-imp-3'] },
+      { q: 'impersonator.Email:*', rows: ['qa-imp-15', 'qa-imp-18'] },
+      { q: 'attr.Impersonator.email:nadia*', rows: ['qa-imp-16'] },
+      { q: 'impersonator.EMAIL.work:/.*@.*/', rows: ['qa-imp-17'] },
+      { q: 'NOT impersonator.Email:x AND impersonator:sup_case1', rows: ['qa-imp-15'] },
     ];
     for (const { q, rows } of REFUSED_FILTERS) expect(await ids(unmasked.secret, q), `unmasked ${q}`).toEqual(rows);
     expect((await facets(unmasked.secret, { field: 'attr.impersonator.email' })).text).toMatch(ADDRESS);
@@ -528,6 +580,9 @@ it("a masked reader cannot get the impersonator's address out of any read, expor
         // A range (attribute ranges are numeric or dates, so it cannot select an address even unmasked; still refused).
         `/events?${new URLSearchParams({ q: 'impersonator.email:[0 TO 9]', from })}`,
         `/facets?${new URLSearchParams({ field: 'attr.impersonator.email', from })}`,
+        `/facets?${new URLSearchParams({ field: 'attr.impersonator.Email', from })}`,
+        `/facets?${new URLSearchParams({ field: 'action', by: 'attributes.IMPERSONATOR.EMAIL.work', from })}`,
+        `/events?${new URLSearchParams({ q: '_exists_:IMPERSONATOR.EMAIL', from })}`,
         `/facets?${new URLSearchParams({ field: 'attributes.impersonator.email.work', from })}`,
         `/facets?${new URLSearchParams({ field: 'impersonator', by: 'attr.impersonator.email', from })}`,
       ];

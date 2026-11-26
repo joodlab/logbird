@@ -9,13 +9,43 @@
     library lacks;
   - 4.12.3 and later pass.
 - Install `@logbird/sdk` too: your code imports the `Logbird` client from it.
+- ES modules only; the declarations are checked with TypeScript 6 and 7.
+
+## Install
+
+Not on npm yet. Each [GitHub Release](https://github.com/joodlab/logbird/releases) attaches
+`logbird-hono-X.Y.Z.tgz` and `logbird-sdk-X.Y.Z.tgz` with a `SHA256SUMS` file. Download both
+into `vendor/logbird/`, verify both against `SHA256SUMS` (stop if either does not print `OK`),
+depend on both files, and override `@logbird/sdk` to the same SDK tarball (this package
+depends on the SDK at exactly its own version, which no registry serves yet):
+
+```jsonc
+// package.json
+"dependencies": {
+  "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz",
+  "@logbird/hono": "file:vendor/logbird/logbird-hono-X.Y.Z.tgz",
+  "hono": "4.13.21" // your application's hono: 4.12.3 or later in 4.x
+}
+// npm: "overrides": { "@logbird/sdk": "file:vendor/logbird/logbird-sdk-X.Y.Z.tgz" } in package.json
+// pnpm: overrides: { '@logbird/sdk': file:vendor/logbird/logbird-sdk-X.Y.Z.tgz } in pnpm-workspace.yaml
+```
+
+The full recipe, with the download commands and the lockfile check, is in
+[Install the SDK](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#install-the-sdk).
+
+## Usage
 
 ```ts
 import { Hono } from 'hono';
-import { Logbird } from '@logbird/sdk';
+import { Logbird, type LogbirdError } from '@logbird/sdk';
 import { logbird, type AuditVariables } from '@logbird/hono';
-const client = new Logbird({ endpoint: (process.env.LOGBIRD_ENDPOINT)!, apiKey: (process.env.LOGBIRD_INGEST_KEY)!, onError: console.error });
-const capture = logbird({ client, actor: c => ({ type: 'user', id: 'resolved-session-user' }), tenant: c => ({ id: 'resolved-session-tenant' }), autoTrack: {} });
+const reportAudit = ({ code, status, count }: LogbirdError) => console.error('Logbird audit', { code, status, count });
+const client = new Logbird({
+  endpoint: process.env.LOGBIRD_ENDPOINT!,
+  apiKey: process.env.LOGBIRD_INGEST_KEY!,
+  onError: reportAudit,
+});
+const capture = logbird({ client, actor: c => ({ type: 'user', id: 'resolved-session-user' }), tenant: c => ({ id: 'resolved-session-tenant' }), autoTrack: {}, onError: reportAudit });
 const app = new Hono<{ Variables: AuditVariables }>();
 app.use(capture);
 app.post('/records', c => { c.var.audit('record.created', { targets: [{ type: 'record', id: '123' }] }); return c.json({ ok: true }); });
@@ -58,7 +88,14 @@ app.post('/records', async (c, next) => {
 
 Resolvers run for each audit call; automatic tracking after the route also sees the guard's
 identity. Explicit event actor/tenant/executor/context.ip skip the corresponding resolver.
-Failures omit only the failing field and report onError. audit returns the event id immediately;
-use `await c.var.audit.carrier({ parentEventId: eventId })` to propagate into worker data.
-Edge waitUntil drains pending context resolution before flushing; Node hosts await
-capture.shutdown(). See the [SDK options and worker guide](../../sdk/README.md).
+Failures omit only the failing field and report `capture_resolver_failed` through `onError`.
+Log the error's `code` and any numeric `status` or `count`. `audit()` returns the event ID
+immediately. Use `await c.var.audit.carrier({ parentEventId: eventId })` to propagate it into worker data.
+Edge `waitUntil` drains pending context resolution before flushing. Both
+`audit.pending()` and the edge wait include `audit.carrier()` resolvers. Carrier
+resolution is host work outside the SDK's `maxQueueSize` limit. Node hosts
+await `capture.shutdown()`, which includes pending capture resolution in the
+same budget as queued and in-flight delivery. Handle a rejected shutdown promise as a
+delivery failure. Blank event ids get a UUID. The id returned by `audit()`
+is preserved in the event sent even when `beforeSend` returns a different id.
+See the [SDK options and worker guide](../../sdk/README.md).

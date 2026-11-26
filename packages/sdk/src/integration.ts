@@ -1,3 +1,6 @@
+import { getCaptureQueue } from './capture-queue';
+import { LogbirdError, safeDiagnostic } from './errors';
+import { checkEventBounds } from './event-bounds';
 import { type EventInput, type Logbird, uuidv7 } from './index';
 export interface AuditCarrier {
   operationId: string;
@@ -45,27 +48,19 @@ export interface CaptureOptions<C> {
    * events are recorded and searched under, and can make unrelated requests look like one.
    */
   useRequestIdHeader?: boolean;
-  onError?: (error: Error) => void;
+  onError?: (error: LogbirdError) => void;
 }
-const pending = new WeakMap<object, Set<Promise<unknown>>>();
-function tasks(owner: object) {
-  let set = pending.get(owner);
-  if (!set) {
-    set = new Set();
-    pending.set(owner, set);
+export function report(onError: CaptureOptions<unknown>['onError'], error: unknown, client?: Logbird, refusedAction?: string): void {
+  if (client) {
+    const queue = getCaptureQueue(client);
+    if (refusedAction !== undefined) queue.refuse({ action: refusedAction });
+    queue.notify(onError, error);
+    return;
   }
-  return set;
-}
-async function drain(owner: object): Promise<void> {
-  const set = tasks(owner);
-  while (set.size) await Promise.allSettled([...set]);
-}
-export function report(onError: CaptureOptions<unknown>['onError'], error: unknown): void {
-  try {
-    onError?.(error instanceof Error ? error : new Error(String(error)));
-  } catch {
-    /* diagnostics are best effort */
-  }
+  if (onError)
+    void Promise.resolve()
+      .then(() => onError(safeDiagnostic(error, 'capture_failed')))
+      .catch(() => undefined);
 }
 /**
  * Captures the request's correlation once and returns the request-scoped `audit` function. The operation and request
@@ -74,7 +69,7 @@ export function report(onError: CaptureOptions<unknown>['onError'], error: unkno
  * `trace:` search should be read that way; an ingress that must not trust it should strip or overwrite the header.
  */
 export async function createAudit<C>(options: CaptureOptions<C>, context: C, request: Request): Promise<Audit> {
-  if (typeof window !== 'undefined') throw new Error('Logbird ingest is server-only');
+  if (typeof window !== 'undefined') throw new LogbirdError('capture_server_only');
   // A correlation id is used whole or not at all (#206): cutting two long ids to 256 characters could make them one.
   // Longer than 256 means ignored, with the usual generated fallback, as in the ASP.NET Core integration.
   const header = (name: string) => {
@@ -98,12 +93,12 @@ export async function createAudit<C>(options: CaptureOptions<C>, context: C, req
   });
 }
 function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput): Audit {
+  const queue = getCaptureQueue(options.client);
   const local = new Set<Promise<unknown>>();
   function register<T>(promise: Promise<T>): Promise<T> {
-    const sets = [local, tasks(options), tasks(options.client)];
-    for (const set of sets) set.add(promise);
+    local.add(promise);
     const remove = () => {
-      for (const set of sets) set.delete(promise);
+      local.delete(promise);
     };
     void promise.then(remove, remove);
     return promise;
@@ -125,37 +120,55 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
           const value = await resolver(context);
           // Missing correlation resolvers retain the request's stable fallback.
           if (value !== undefined || (field !== 'requestId' && field !== 'operationId')) target[field] = value;
-        } catch (error) {
+        } catch {
           delete target[field];
-          report(options.onError, error);
+          queue.notify(options.onError, new LogbirdError('capture_resolver_failed'));
         }
       }),
     );
     return merged;
   }
   const audit = ((action: string, event: Partial<EventInput> = {}) => {
-    const id = event.id ?? uuidv7();
-    const occurredAt = event.occurredAt ?? new Date().toISOString();
-    register(
-      resolve({ ...event, action, id, occurredAt })
-        .then((resolved) => {
-          try {
-            options.client.track(resolved);
-          } catch (error) {
-            report(options.onError, error);
-          }
-        })
-        .catch((error) => report(options.onError, error)),
+    let supplied: unknown;
+    let invalidId = false;
+    try {
+      supplied = event.id;
+    } catch {
+      invalidId = true;
+    }
+    const id = typeof supplied === 'string' && supplied.trim() ? supplied : uuidv7();
+    const timestamp = new Date().toISOString();
+    const task = queue.defer(
+      { action, id },
+      async () => {
+        if (invalidId) throw new LogbirdError('capture_failed');
+        checkEventBounds(event, action.length);
+        checkEventBounds(supplied);
+        const fields = Object.fromEntries(
+          Object.keys(event)
+            .filter((key) => key !== 'id')
+            .map((key) => [key, event[key]]),
+        );
+        const occurredAt = fields.occurredAt;
+        return resolve({
+          ...fields,
+          action,
+          id,
+          occurredAt: typeof occurredAt === 'string' || typeof occurredAt === 'number' ? occurredAt : timestamp,
+        });
+      },
+      (error) => queue.notify(options.onError, error),
     );
+    if (task) register(task);
     return id;
   }) as Audit;
   audit.pending = async () => {
     while (local.size) await Promise.allSettled([...local]);
   };
-  audit.carrier = (partial = {}) => {
-    const { actor, impersonator, tenant, ...correlation } = partial;
-    return register(
-      resolve(
+  const prepareCarrier = async (partial: Partial<AuditCarrier>) => {
+    try {
+      const { actor, impersonator, tenant, ...correlation } = partial;
+      const event = await resolve(
         {
           ...('actor' in partial ? { actor } : {}),
           ...('impersonator' in partial ? { impersonator } : {}),
@@ -163,22 +176,23 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
           context: correlation,
         },
         true,
-      ).then(
-        (event) =>
-          JSON.parse(
-            JSON.stringify({
-              operationId: event.context?.operationId ?? envelope.context?.operationId,
-              requestId: event.context?.requestId,
-              traceId: event.context?.traceId,
-              parentEventId: event.context?.parentEventId,
-              actor: event.actor,
-              impersonator: event.impersonator,
-              tenant: event.tenant,
-            }),
-          ) as AuditCarrier,
-      ),
-    );
+      );
+      return JSON.parse(
+        JSON.stringify({
+          operationId: event.context?.operationId ?? envelope.context?.operationId,
+          requestId: event.context?.requestId,
+          traceId: event.context?.traceId,
+          parentEventId: event.context?.parentEventId,
+          actor: event.actor,
+          impersonator: event.impersonator,
+          tenant: event.tenant,
+        }),
+      ) as AuditCarrier;
+    } catch {
+      throw new LogbirdError('capture_failed');
+    }
   };
+  audit.carrier = (partial = {}) => register(prepareCarrier(partial));
   return audit;
 }
 export interface JobAuditOptions {
@@ -189,7 +203,7 @@ export interface JobAuditOptions {
   actor?: EventInput['actor'];
   impersonator?: EventInput['impersonator'];
   tenant?: EventInput['tenant'];
-  onError?: (error: Error) => void;
+  onError?: CaptureOptions<unknown>['onError'];
 }
 export function jobAudit(options: JobAuditOptions): Audit {
   const { job, carrier, executor } = options;
@@ -214,7 +228,8 @@ export function jobAudit(options: JobAuditOptions): Audit {
   });
 }
 export async function shutdown(options: Pick<CaptureOptions<unknown>, 'client' | 'onError'>): Promise<void> {
-  await drain(options);
-  await drain(options.client);
-  await options.client.shutdown().catch((error) => report(options.onError, error));
+  await options.client.shutdown().catch((error) => {
+    report(options.onError, error, options.client);
+    throw error;
+  });
 }

@@ -117,9 +117,13 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 - Under `actor_email`, if an id's earliest `(received_at, timestamp)` pair holds more than one distinct stored payload
   (legacy data), detail answers 404 and parent traversal stops at that id: choosing between them would read the hidden
   fields. Identical copies, and an earliest version that is unique, are served as usual.
+- Every masked attribute path matches attribute keys in any ASCII letter case: `impersonator.Email`,
+  `Impersonator.email` and `impersonator.EMAIL.work` are treated exactly like `impersonator.email` and the paths below
+  it, and `Context.IP` or `Actor.Email` like `context.ip` and `actor.email`, in events, filters, facets, exports and
+  webhooks. Only A to Z are folded (letters outside ASCII are compared as sent).
 - The mask covers the actor's and the impersonator's email and name. Addresses a producer writes into other fields
-  (descriptions, executor, tenant or target names, ids, or other attributes such as `actor.contactEmail` or
-  `impersonator.Email`) are not masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
+  (descriptions, executor, tenant or target names, ids, or other attributes such as `actor.contactEmail`) are not
+  masked. The masks are fixed presets (`ip`, `user_agent`, `actor_email`), so keep
   addresses out of those fields when scoped readers must not see them.
 - The name rule recognises an address by its `@` (and the compatibility forms above), by equality with the email,
   or by length. A name that spells an address another way (`rita&#64;example.org`, `rita%40example.org`,
@@ -227,7 +231,8 @@ See [security](security.md#viewer-tokens) for the token format and secret deriva
 ## Limits
 
 - One tenant per scope.
-- A target scope matches any indexed target of an event. Events stored by releases that indexed only the first 64
-  targets are matched on those 64 only.
+- A target scope matches an indexed target of an event. Every release indexes at most the first 64 targets of an
+  event (see [limits](limits.md)), so a target scope on a record named only after them does not see that event. Such
+  an event stored by this release or later carries `logbird.truncated.targets` with the number of targets sent.
 - Field masks are presets (`ip`, `user_agent`, `actor_email`), not arbitrary paths.
 - Revoking a key reaches its viewer tokens within 30 seconds.

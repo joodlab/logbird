@@ -156,12 +156,20 @@ Logbird.EventPage.Events.get -> System.Collections.Generic.IReadOnlyList<Logbird
 Logbird.EventPage.Events.init -> void
 Logbird.EventPage.NextCursor.get -> string?
 Logbird.EventPage.NextCursor.init -> void
+Logbird.EventPage.Range.get -> Logbird.EventRange?
+Logbird.EventPage.Range.init -> void
 Logbird.EventPage.TookMs.get -> double
 Logbird.EventPage.TookMs.init -> void
 Logbird.EventPage.Total.get -> long
 Logbird.EventPage.Total.init -> void
 Logbird.EventPage.TotalExact.get -> bool?
 Logbird.EventPage.TotalExact.init -> void
+Logbird.EventRange
+Logbird.EventRange.EventRange() -> void
+Logbird.EventRange.From.get -> string!
+Logbird.EventRange.From.init -> void
+Logbird.EventRange.To.get -> string!
+Logbird.EventRange.To.init -> void
 Logbird.EventSearch
 Logbird.EventSearch.<Clone>$() -> Logbird.EventSearch!
 Logbird.EventSearch.Cursor.get -> string?
@@ -222,6 +230,8 @@ Logbird.FacetResult.Field.get -> string!
 Logbird.FacetResult.Field.init -> void
 Logbird.FacetResult.OtherCount.get -> long
 Logbird.FacetResult.OtherCount.init -> void
+Logbird.FacetResult.Range.get -> Logbird.EventRange?
+Logbird.FacetResult.Range.init -> void
 Logbird.FacetResult.Values.get -> System.Collections.Generic.IReadOnlyList<Logbird.FacetValue!>!
 Logbird.FacetResult.Values.init -> void
 Logbird.FacetValue
@@ -338,12 +348,16 @@ Logbird.QueueFullBehavior.DropOldest = 0 -> Logbird.QueueFullBehavior
 Logbird.RedactionOptions
 Logbird.RedactionOptions.AddedKeys.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Logbird.RedactionOptions.AddKeys(params string![]! names) -> Logbird.RedactionOptions!
+Logbird.RedactionOptions.AddPaths(params string![]! paths) -> Logbird.RedactionOptions!
 Logbird.RedactionOptions.ChangeFields.get -> System.Text.RegularExpressions.Regex?
 Logbird.RedactionOptions.ChangeFields.set -> void
 Logbird.RedactionOptions.Enabled.get -> bool
 Logbird.RedactionOptions.Enabled.set -> void
+Logbird.RedactionOptions.KeepPaths(params string![]! paths) -> Logbird.RedactionOptions!
+Logbird.RedactionOptions.KeptPaths.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Logbird.RedactionOptions.Keys.get -> System.Text.RegularExpressions.Regex!
 Logbird.RedactionOptions.Keys.set -> void
+Logbird.RedactionOptions.Paths.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Logbird.RedactionOptions.RedactionOptions() -> void
 Logbird.RedactionOptions.Replacement.get -> string!
 Logbird.RedactionOptions.Replacement.set -> void
@@ -357,8 +371,12 @@ Logbird.StoredChange
 Logbird.StoredChange.<Clone>$() -> Logbird.StoredChange!
 Logbird.StoredChange.After.get -> string!
 Logbird.StoredChange.After.init -> void
+Logbird.StoredChange.AfterKind.get -> string?
+Logbird.StoredChange.AfterKind.init -> void
 Logbird.StoredChange.Before.get -> string!
 Logbird.StoredChange.Before.init -> void
+Logbird.StoredChange.BeforeKind.get -> string?
+Logbird.StoredChange.BeforeKind.init -> void
 Logbird.StoredChange.Deconstruct(out string! Field, out string! Before, out string! After) -> void
 Logbird.StoredChange.Equals(Logbird.StoredChange? other) -> bool
 Logbird.StoredChange.Field.get -> string!

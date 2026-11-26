@@ -25,12 +25,13 @@ import { ActionName } from '@/components/action-name';
 import { JobHint, SupportMarker } from '@/components/impersonation';
 import { TimeColumnHeader } from '@/components/time-zone-control';
 import { Timestamp } from '@/components/timestamp';
-import { eventSentence } from '@/lib/events';
+import { eventSentence, personLabel } from '@/lib/events';
 import { formatNumber, localDayKey, timestampNeedsYear } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { useConsoleZone } from '@/lib/time-zone';
+import { ChangeSummary, changeSummaryLabel } from './change-summary';
 import { EVENT_COLUMNS } from './columns';
-import { anchorShift, eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
+import { anchorShift, eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor, sentenceNamesActor } from './row-navigation';
 
 const features = tableFeatures({ columnVisibilityFeature });
 const helper = createColumnHelper<typeof features, AuditEvent>();
@@ -64,6 +65,8 @@ export interface EventsTableHandle {
 
 interface EventsTableProps {
   rows: AuditEvent[];
+  showChanges?: boolean;
+  onChangeField?: (field: string) => void;
   columns: string[];
   selectedId?: string;
   onSelect: (event: AuditEvent) => void;
@@ -123,11 +126,13 @@ interface EventsTableProps {
  * In-row controls (a link inside a cell) must follow this contract, because the row's `onClick` opens the event and has
  * no target guard: give them `tabIndex={-1}` (the row is the tab stop; screen readers reach them through the row's
  * cells) and stop click and key propagation (`event.stopPropagation()`) so activating one does not also open the row or
- * move the cursor. Their keys never reach the row's grid keys, and focusing one moves the cursor to — and so keeps
- * mounted — the row that owns it. Anything they convey belongs in `rowLabel` too.
+ * move the cursor. History change controls are tabbable on the cursor row so a reader can filter, expand or inspect its
+ * changes. Focusing a control moves the cursor to its row and keeps it mounted. The row label includes the change preview.
  */
 export function EventsTable({
   rows,
+  showChanges = false,
+  onChangeField,
   columns,
   selectedId,
   onSelect,
@@ -245,10 +250,14 @@ export function EventsTable({
   );
 
   const virtualizer = useVirtualizer({
+    // Measured history rows use the virtualizer's key anchor to keep a scrolled view stable on live prepends.
+    anchorTo: showChanges && !replaced && (scrollRef.current?.scrollTop ?? 0) > 0 ? 'end' : 'start',
     count,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => rowHeight,
-    overscan: 12,
+    estimateSize: (index) => rowHeight + (showChanges ? Math.min(rows[index]?.changes.length ?? 0, 2) * 18 : 0),
+    getItemKey: useCallback((index: number) => (showChanges ? (rows[index]?.id ?? index) : index), [rows, showChanges]),
+    // Taller history rows cover the same scroll distance with fewer mounted rows.
+    overscan: showChanges ? 8 : 12,
     rangeExtractor,
     scrollMargin: headerHeight,
     scrollPaddingStart: headerHeight,
@@ -312,7 +321,7 @@ export function EventsTable({
     if (rows.length > 0) committedKey.current = resultKey;
     const el = scrollRef.current;
     if (!el) return;
-    if (added > 0 && (el.scrollTop > 0 || focusInside.current)) {
+    if (!showChanges && added > 0 && (el.scrollTop > 0 || focusInside.current)) {
       const focused = focusInside.current && cursorKey ? before.findIndex((r) => r.id === cursorKey) : -1;
       const anchor = focused >= 0 ? focused : Math.floor(el.scrollTop / rowHeight);
       el.scrollTop += anchorShift(before, rows, anchor, added) * rowHeight;
@@ -329,7 +338,7 @@ export function EventsTable({
     if (!reset) return;
     pendingFocus.current = null;
     if (focusInside.current) rowElement(0)?.focus({ preventScroll: true });
-  }, [rows, rowHeight, replaced, reset, cursorKey, tabStop, rowElement, resultKey]);
+  }, [rows, rowHeight, replaced, reset, cursorKey, tabStop, rowElement, resultKey, showChanges]);
 
   const focusRow = useCallback(
     (index: number) => {
@@ -467,16 +476,24 @@ export function EventsTable({
               const e = row.original;
               const selected = e.id === selectedId;
               const isCursor = Boolean(cursorKey) && item.index === tabStop;
+              const label = rowLabel(e);
+              const mobileSentence = isMobile ? eventSentence(e) : '';
+              const actor = isMobile && showChanges ? personLabel(e.actor) : '';
+              const showActor = actor && !sentenceNamesActor(e, mobileSentence, actor);
+              const summary =
+                showChanges && e.changes.length ? (
+                  <ChangeSummary changes={e.changes} onField={onChangeField} onOpen={() => onSelect(e)} tabIndex={item.index === tabStop ? 0 : -1} />
+                ) : null;
               return (
                 <div
-                  aria-label={rowLabel(e)}
+                  aria-label={summary ? `${label}. Changes: ${changeSummaryLabel(e.changes)}` : label}
                   aria-rowindex={item.index + (isMobile ? 1 : 2)}
                   className={cn(
                     'absolute inset-x-0 cursor-pointer border-b border-border/60 px-2 text-[13px] outline-none focus-visible:outline-hidden transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:forced-colors:-outline-offset-2',
                     selected && 'bg-brand/[0.08] hover:bg-brand/[0.1]',
                     isCursor && !selected && 'bg-muted/60',
                     freshIds?.has(e.id) && 'tm-row-new',
-                    isMobile ? 'flex flex-col justify-center gap-1 py-2' : 'grid items-center',
+                    isMobile ? 'flex min-h-16 flex-col justify-center gap-1 py-2' : 'grid min-h-9 items-center',
                   )}
                   data-event-id={e.id}
                   data-index={item.index}
@@ -485,9 +502,10 @@ export function EventsTable({
                   // Also when a control inside the row takes focus: the row then stays mounted with it.
                   onFocus={() => setCursor(e.id)}
                   onKeyDown={(ev) => onRowKeyDown(ev, item.index, e)}
+                  ref={showChanges ? virtualizer.measureElement : undefined}
                   role="row"
                   style={{
-                    height: item.size,
+                    height: showChanges ? undefined : item.size,
                     transform: `translateY(${item.start - headerHeight}px)`,
                     gridTemplateColumns: isMobile ? undefined : template,
                   }}
@@ -499,9 +517,10 @@ export function EventsTable({
                     <div className="flex min-w-0 flex-col gap-1" role="gridcell">
                       <span className="flex min-w-0 items-center gap-2">
                         <OutcomeDot outcome={e.outcome} />
-                        <span className="truncate" dir="auto">
-                          {eventSentence(e)}
+                        <span className="overflow-hidden text-ellipsis [text-wrap-mode:nowrap] [white-space-collapse:preserve-spaces]" dir="auto">
+                          {mobileSentence}
                         </span>
+                        {showActor ? <bdi className="max-w-[45%] shrink-0 truncate text-muted-foreground text-xs">· {actor}</bdi> : null}
                       </span>
                       <span className="flex min-w-0 items-center gap-2 ps-4 text-muted-foreground text-xs">
                         <Timestamp className="shrink-0" iso={e.timestamp} />
@@ -509,11 +528,20 @@ export function EventsTable({
                         <JobHint compact event={e} />
                         <ActionName action={e.action} className="min-w-0 text-[11px]" />
                       </span>
+                      {summary ? <div className="ps-4">{summary}</div> : null}
                     </div>
                   ) : (
                     row.getVisibleCells().map((cell) => (
-                      <div className="flex min-w-0 items-center overflow-hidden px-2" key={cell.id} role="gridcell">
+                      <div
+                        className={cn(
+                          'flex min-w-0 overflow-hidden px-2',
+                          summary && cell.column.id === 'description' ? 'flex-col gap-1 py-1.5' : 'items-center',
+                        )}
+                        key={cell.id}
+                        role="gridcell"
+                      >
                         <table.FlexRender cell={cell} />
+                        {cell.column.id === 'description' ? summary : null}
                       </div>
                     ))
                   )}

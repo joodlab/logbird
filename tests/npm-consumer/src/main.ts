@@ -6,10 +6,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { type AuditVariables, logbird } from '@logbird/hono';
 import {
+  type DropDetails,
   type EventInput,
   generateWebhookSecret,
   IDENTIFIER_FIELDS,
   Logbird,
+  LogbirdError,
+  type LogbirdWarning,
+  type RedactionOptions,
   redact,
   signWebhook,
   verifyWebhook,
@@ -36,7 +40,7 @@ const STORED = {
   tenant: { id: 't1', name: '' },
   source: null,
   targets: [{ type: 'invoice', id: 'inv_1', name: 'INV-1' }],
-  changes: [{ field: 'status', before: 'draft', after: 'sent' }],
+  changes: [{ field: 'status', before: 'draft', after: 'sent', beforeKind: 'string', afterKind: 'string' }],
   context: { operationId: 'op', parentEventId: '', requestId: 'req', traceId: '', ip: '', userAgent: '' },
   attributes: { 'metadata.plan': 'pro' },
   conformance: 77.8,
@@ -89,38 +93,54 @@ function expect(condition: boolean, what: string): void {
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 try {
-  // 1. The client queues, redacts through beforeSend, sends one batch and reads the acknowledgement.
-  const drops: EventInput[] = [];
+  // 1. The client queues, redacts through its configured policy, sends one batch and reads the acknowledgement.
+  const drops: { event: EventInput; details: Readonly<DropDetails> }[] = [];
   const errors: Error[] = [];
+  const redaction: RedactionOptions = {
+    addKeys: ['email', 'phone'],
+    paths: ['metadata.customerNotes'],
+    keepPaths: ['actor.email'],
+    replacement: 'hidden',
+  };
   const client = new Logbird({
     endpoint,
     apiKey: 'lb_ingest_fictional',
     flushIntervalMs: 60_000,
-    beforeSend: redact(),
-    onDrop: (event) => drops.push(event),
+    redaction,
+    beforeSend: (event) => (event.action === 'invoice.sent' ? { ...event, id: 'hook-replacement' } : event),
+    shutdownTimeoutMs: 1000,
+    onDrop: (event, details) => drops.push({ event, details }),
     onError: (error) => errors.push(error),
   });
   client.track({
     action: 'invoice.updated',
-    actor: { type: 'user', id: 'u1', name: 'Fictional User' },
+    actor: { type: 'user', id: 'u1', name: 'Fictional User', email: 'staff@example.invalid' },
     tenant: { id: 't1' },
     targets: [{ type: 'invoice', id: 'inv_1' }],
-    changes: [{ field: 'status', before: 'draft', after: 'sent' }],
-    metadata: { plan: 'pro', token: 'fictional-secret' },
+    changes: [{ field: 'guest.phone', after: '555-0100' }],
+    metadata: { plan: 'pro', token: 'fictional-secret', workEmail: 'guest@example.invalid', customerNotes: 'fictional notes' },
   });
   await client.flush();
-  const sent = received.at(-1) as { action: string; actor: { id: string }; metadata: Record<string, unknown> } | undefined;
+  const sent = received.at(-1) as EventInput | undefined;
   expect(received.length === 1 && sent?.action === 'invoice.updated', 'one event sent');
-  expect(sent?.actor.id === 'u1', 'the actor id to be sent');
-  expect(sent?.metadata.plan === 'pro' && sent?.metadata.token === '[redacted]', 'metadata.token redacted, plan kept');
+  expect(sent?.actor?.id === 'u1' && sent.actor.email === 'staff@example.invalid', 'staff identity kept');
+  expect(sent?.metadata?.plan === 'pro' && sent.metadata.token === 'hidden', 'default secret redacted, plan kept');
+  expect(sent?.metadata?.workEmail === 'hidden' && sent.metadata.customerNotes === 'hidden', 'added key and explicit path redacted');
+  expect(sent?.changes?.[0]?.field === 'guest.phone' && sent.changes[0].after === 'hidden', 'change value redacted, field kept');
   expect(drops.length === 0 && errors.length === 0, `no drop and no error (drops ${drops.length}, errors ${errors.length})`);
-  pass('Logbird track and flush: serialized, redacted by beforeSend, acknowledged');
+  pass('Logbird track and flush: client policy applied, acknowledged');
 
   // 1b. The acknowledgement is read: in one batch, the event ingest refuses is dropped and reported, the other kept.
   client.track({ action: 'stand-in.reject', actor: { type: 'user', id: 'u1' } });
   client.track({ action: 'invoice.kept', actor: { type: 'user', id: 'u1' } });
   await client.flush();
-  expect(drops.length === 1 && drops[0]?.action === 'stand-in.reject', `the refused event, and only it, dropped (drops ${drops.length})`);
+  expect(drops.length === 1 && drops[0]?.event.action === 'stand-in.reject', `the refused event, and only it, dropped (drops ${drops.length})`);
+  const drop = drops[0]?.details;
+  expect(drop?.reason === 'rejected' && drop.code === 'invalid_event' && !drop.mayBeStored, 'the drop has a safe rejection code');
+  expect(
+    client.droppedByReason.rejected === 1 && client.possiblyStoredDropsByReason.rejected === undefined && client.skippedNotifications === 0,
+    'the drop was counted with its storage certainty',
+  );
   expect(errors.length === 1 && /rejected/.test(errors[0]?.message ?? ''), 'the rejection reported to onError');
   expect(received.at(-1)?.action === 'invoice.kept' && !received.some((event) => event.action === 'stand-in.reject'), 'the other event delivered');
   drops.length = 0;
@@ -129,25 +149,36 @@ try {
 
   // 2. The Hono middleware fills the request context; an inbound x-request-id is ignored by default (#321).
   const app = new Hono<{ Variables: AuditVariables }>();
-  app.use(logbird({ client, actor: () => ({ type: 'user', id: 'u2' }), tenant: () => ({ id: 't2' }) }));
-  app.post('/invoices/:id', (c) => {
-    c.get('audit')('invoice.sent', { targets: [{ type: 'invoice', id: c.req.param('id') }] });
-    return c.text('ok');
-  });
+  const capture = logbird({ client, actor: () => ({ type: 'user', id: 'u2' }), tenant: () => ({ id: 't2' }) });
+  app.use(capture);
+  app.post('/invoices/:id', (c) =>
+    c.text(
+      c.get('audit')('invoice.sent', {
+        id: '   ',
+        targets: [{ type: 'invoice', id: c.req.param('id') }],
+        metadata: { customerNotes: 'fictional notes' },
+      }),
+    ),
+  );
   const response = await app.request('/invoices/inv_9', { method: 'POST', headers: { 'x-request-id': 'req_from_client' } });
   expect(response.status === 200, `the route to answer 200, not ${response.status}`);
+  const auditId = await response.text();
   await client.flush();
   const viaHono = received.at(-1) as
     | {
+        id: string;
         action: string;
         actor: { id: string };
         tenant: { id: string };
         targets: { id: string }[];
+        metadata: { customerNotes: string };
         context: { requestId: string; operationId: string };
       }
     | undefined;
   expect(viaHono?.action === 'invoice.sent' && viaHono.targets[0]?.id === 'inv_9', 'the route event with its target');
+  expect(uuid.test(auditId) && viaHono?.id === auditId, 'audit returns the id sent after the hook');
   expect(viaHono?.actor.id === 'u2' && viaHono.tenant.id === 't2', 'the resolved actor and tenant');
+  expect(viaHono?.metadata.customerNotes === 'hidden', 'the Hono event obeys the configured path');
   expect(
     uuid.test(viaHono?.context.requestId ?? '') && uuid.test(viaHono?.context.operationId ?? ''),
     'generated request and operation ids, not the inbound header',
@@ -176,12 +207,13 @@ try {
   const direct = received.at(-1) as { action: string; context: { requestId: string } } | undefined;
   expect(direct?.action === 'direct.capture' && direct.context.requestId === 'req_trusted', 'the opted-in header to be used');
   pass('createAudit: useRequestIdHeader takes the inbound header');
-  await client.shutdown();
+  await capture.shutdown();
 
   // 4. A trail read: trailQuery builds the query, readAuditTrail sends it and reads the page; no selector throws.
   const page = await readAuditTrail({ endpoint, readKey: 'lb_read_fictional' }, trailQuery({ target: { type: 'invoice', id: 'inv_1' } }));
   const stored = page.data[0];
   expect(page.total === 1 && stored?.actor?.id === 'u1' && stored.changes[0]?.after === 'sent', 'the stored event read back');
+  expect(stored?.changes[0]?.afterKind === 'string', 'the stored change kind read back');
   expect((searches.at(-1)?.searchParams.get('q') ?? '').includes('inv_1'), 'the trail query to name the target');
   let threw = false;
   try {
@@ -215,6 +247,36 @@ try {
   expect(redacted.actor?.name === '[redacted]' && redacted.actor?.email === '[redacted]', 'the rest of the actor redacted');
   expect(IDENTIFIER_FIELDS.includes('actor.id'), 'IDENTIFIER_FIELDS to list actor.id');
   pass('redact: a matching party key keeps its identifier fields');
+
+  const warnings: Readonly<LogbirdWarning>[] = [];
+  const warningClient = new Logbird({ endpoint, apiKey: 'lb_ingest_fictional', onWarning: (warning) => warnings.push(warning) });
+  const partyId = 'fictional-\ud800';
+  warningClient.track({ action: 'fixture.warning', actor: { id: partyId } });
+  await warningClient.shutdown();
+  const warning = warnings[0];
+  const warningEvent = received.at(-1) as EventInput | undefined;
+  expect(warnings.length === 1 && warning?.code === 'party_id_normalization' && warning.field === 'actor.id', 'a field-only party warning');
+  expect(warningEvent?.actor?.id === partyId, 'party identifier preserved on the wire');
+  pass('Logbird warning: the indexed field is identified and the input stays intact');
+
+  let safeReadError = false;
+  try {
+    await readAuditTrail(
+      {
+        endpoint,
+        readKey: 'lb_read_fictional',
+        fetch: async (_url, init) => {
+          expect(init?.redirect === 'manual', 'the read request to refuse redirects');
+          return new Response('fictional response marker');
+        },
+      },
+      { q: 'timestamp:*' },
+    );
+  } catch (error) {
+    safeReadError = error instanceof LogbirdError && error.code === 'read_invalid_response' && !error.message.includes('fictional');
+  }
+  expect(safeReadError, 'a malformed read is classified without echoing the body');
+  pass('read diagnostics: manual redirects and stable malformed-response code');
 
   console.log(`npm consumer: all ${checks} checks passed`);
 } catch (error) {

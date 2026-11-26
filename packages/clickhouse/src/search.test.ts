@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { ClickHouseClient } from './client';
 import { normalizeEvent } from './normalize';
-import { getEvent, hasExpiredEvents, searchEvents } from './queries';
+import { getEvent, hasExpiredEvents, searchEvents, timeRange } from './queries';
 
 const from = '2026-11-07T10:00:00.000Z',
   to = '2026-11-07T11:00:00.000Z';
@@ -53,7 +53,7 @@ it.each(['asc', 'desc'] as const)('applies the %s cursor inside the narrow selec
   expect(page.nextCursor).toBeNull();
   expect(page.data.map((e) => e.id)).toEqual(['b']);
   const sql = rowCall().query;
-  expect(sql).toContain(`AND (timestamp,event_id) ${order === 'asc' ? '>' : '<'} ({cursorTs:DateTime64(3)},{cursorId:String}) ORDER BY`);
+  expect(sql).toContain(`AND (timestamp,event_id) ${order === 'asc' ? '>' : '<'} ({cursorTs:DateTime64(3, 'UTC')},{cursorId:String}) ORDER BY`);
   expect(sql.indexOf('{cursorTs:')).toBeGreaterThan(sql.indexOf(' IN (SELECT timestamp'));
   expect(rowCall().query_params).toMatchObject({ cursorTs: '2026-11-07 10:01:00.000', cursorId });
   const countSql = countCall().query;
@@ -198,4 +198,41 @@ it('#180: binds every new cursor to its project, keeps legacy two-part cursors f
     [at, ''], // empty id
   ])
     await expect(page('qa-cursor-a', Buffer.from(JSON.stringify(bad)).toString('base64url')), JSON.stringify(bad)).rejects.toThrow('Invalid cursor');
+});
+it('states the window its rows and count used, explicit or by default, from one clock', async () => {
+  const explicit = client([], 0);
+  const page = await searchEvents(explicit.ch, 'qa-narrow-search', { from: '2026-11-07T12:00:00+02:00', to, order: 'desc', limit: 5 });
+  expect(page.range).toEqual({ from, to });
+  // Parameters reach ClickHouse as DateTime64 text: the same instants.
+  const sent = (r: { from: string; to: string }) => ({ from: r.from.replace('T', ' ').slice(0, -1), to: r.to.replace('T', ' ').slice(0, -1) });
+  for (const call of [explicit.rowCall(), explicit.countCall()]) expect(call.query_params).toMatchObject(sent({ from, to }));
+  vi.useFakeTimers({ now: Date.parse('2026-11-08T09:30:00.123Z'), toFake: ['Date'] });
+  try {
+    const fallback = client([], 0);
+    const window = await searchEvents(fallback.ch, 'qa-narrow-search', { order: 'desc', limit: 5 });
+    expect(window.range).toEqual({ from: '2026-11-07T09:30:00.123Z', to: '2026-11-08T09:30:00.123Z' });
+    for (const call of [fallback.rowCall(), fallback.countCall()]) expect(call.query_params).toMatchObject(sent(window.range));
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it('moves a bound outside what the store holds onto its limit, and states the moved bound', () => {
+  expect(timeRange({ from: '0000-01-01T00:00:00.000Z', to })).toEqual({ from: '1900-01-01T00:00:00.000Z', to });
+  expect(timeRange({ from: '0001-01-01T00:00:00Z', to: '+010000-01-01T00:00:00.000Z' })).toEqual({
+    from: '1900-01-01T00:00:00.000Z',
+    to: '2299-12-31T23:59:59.999Z',
+  });
+  // A window wholly outside the store collapses: refused like any empty window.
+  expect(() => timeRange({ to: '0001-01-01T00:00:00.000Z' })).toThrow('Invalid time range');
+  // An applied window resolves to itself.
+  const applied = timeRange({ from: '1850-06-01', to: '2026-11-07T11:00:00+01:00' });
+  expect(timeRange(applied)).toEqual(applied);
+});
+it('reports an empty previous period for an overview window that starts at the store limit', () => {
+  // overview() skips the previous-period read in this case; the window itself is valid.
+  expect(timeRange({ from: '1900-01-01T00:00:00.000Z', to: '1900-01-02T00:00:00.000Z' })).toEqual({
+    from: '1900-01-01T00:00:00.000Z',
+    to: '1900-01-02T00:00:00.000Z',
+  });
+  expect(() => timeRange({ from: '1899-12-31T00:00:00.000Z', to: '1900-01-01T00:00:00.000Z' })).toThrow('Invalid time range');
 });

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
+  AppliedRange,
   AuditEvent,
   Entity,
   EntityKind,
@@ -22,12 +23,14 @@ import type {
   SearchResponse,
 } from '@logbird/contracts';
 import {
+  DEFAULT_RANGE_MS,
   EXPORT_SCHEMA_VERSION,
   parseJsonExact,
   pickHistogramInterval,
   QUERY_FIELDS,
   RECENT_PROBLEM_OUTCOMES,
   RECENT_PROBLEM_SEVERITY,
+  REQUEST_LIMITS,
 } from '@logbird/contracts';
 import type { z } from 'zod';
 import {
@@ -43,7 +46,7 @@ import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
-import type { EventRow } from './normalize';
+import type { EventRow, StoredEventRow } from './normalize';
 import { columns, compileQuery, QueryError, recordTargetPredicate } from './query';
 import { rollupSql } from './rollup-sql';
 import { CursorError, cursorBinding, scopePredicate } from './scope';
@@ -157,12 +160,24 @@ export async function read<T>(
     await cancellation;
   }
 }
-export function timeRange(q: RangeQuery, now = Date.now()) {
+/**
+ * The half-open window `[from, to)` on `timestamp` a read applies, as ISO 8601 UTC with milliseconds. Resolving an
+ * already resolved window returns it unchanged, so a read resolves once and states exactly the bounds it queried.
+ */
+export function timeRange(q: RangeQuery, now = Date.now()): AppliedRange {
   const to = new Date(q.to ?? now),
-    from = new Date(q.from ?? to.getTime() - 86_400_000);
+    from = new Date(q.from ?? to.getTime() - DEFAULT_RANGE_MS);
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
-  return { from: from.toISOString(), to: to.toISOString() };
+  // A bound past what DateTime64 can hold would reach ClickHouse as calendar text it reads differently (year 0000 as
+  // 1970), so the window applied would differ from the one stated. No stored event lies outside these limits, so a bound
+  // beyond them is moved onto them: the stated window stays the applied one (an event at exactly the last storable millisecond is outside any window, as the docs say).
+  const clamped = { from: clampToStore(from.getTime()), to: clampToStore(to.getTime()) };
+  if (clamped.from >= clamped.to) throw new Error('Invalid time range');
+  return { from: new Date(clamped.from).toISOString(), to: new Date(clamped.to).toISOString() };
 }
+/** What a DateTime64(3) column can hold: 1900-01-01 to 2299-12-31 (UTC). */
+export const STORE_TIME_LIMITS = { min: Date.UTC(1900, 0, 1), max: Date.UTC(2299, 11, 31, 23, 59, 59, 999) } as const;
+const clampToStore = (ms: number) => Math.min(STORE_TIME_LIMITS.max, Math.max(STORE_TIME_LIMITS.min, ms));
 export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: CompiledFilter, scope?: ReadScope | null) {
   const c = compiled ?? (await filter(ch, q));
   const s = scopePredicate(scope);
@@ -173,12 +188,15 @@ export async function where(ch: ClickHouseClient, projectId: string, q: RangeQue
   const userSql = maskName ? maskActorNameInFilter(c.sql) : c.sql;
   // The scope is ANDed outside the user's filter: nothing inside `(c.sql)` can widen it.
   return {
-    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${userSql}) AND (${s.sql})`,
+    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3, 'UTC')} AND timestamp < {to:DateTime64(3, 'UTC')} AND (${userSql}) AND (${s.sql})`,
     params: { project: projectId, ...timeRange(q), ...c.params, ...s.params, ...(maskName ? ACTOR_NAME_MASK_PARAMS : {}) },
   };
 }
 const iso = (s: string) => new Date(s.endsWith('Z') ? s : `${s.replace(' ', 'T')}Z`).toISOString();
-export function toEvent(r: EventRow & { category?: string }): AuditEvent {
+export function toEvent(r: StoredEventRow & { category?: string }): AuditEvent {
+  // Parts written by older servers have empty kind arrays. Never infer a kind from ambiguous text.
+  const beforeKinds = r.changes_before_kind?.length === r.changes_fields.length ? r.changes_before_kind : undefined;
+  const afterKinds = r.changes_after_kind?.length === r.changes_fields.length ? r.changes_after_kind : undefined;
   return {
     id: r.event_id,
     projectId: r.project_id,
@@ -203,7 +221,17 @@ export function toEvent(r: EventRow & { category?: string }): AuditEvent {
     tenant: r.tenant_id ? { id: r.tenant_id, name: r.tenant_name } : null,
     source: r.source || null,
     targets: r.target_ids.map((id, i) => ({ id, type: r.target_types[i] ?? '', name: r.target_names[i] ?? '' })),
-    changes: r.changes_fields.map((field, i) => ({ field, before: r.changes_before[i] ?? '', after: r.changes_after[i] ?? '' })),
+    changes: r.changes_fields.map((field, i) => {
+      const beforeKind = beforeKinds?.[i];
+      const afterKind = afterKinds?.[i];
+      return {
+        field,
+        before: r.changes_before[i] ?? '',
+        after: r.changes_after[i] ?? '',
+        ...(beforeKind === undefined ? {} : { beforeKind }),
+        ...(afterKind === undefined ? {} : { afterKind }),
+      };
+    }),
     context: {
       operationId: r.operation_id,
       parentEventId: r.parent_event_id,
@@ -249,7 +277,7 @@ function cursor(s: string, projectId: string, scope?: ReadScope | null): [string
   throw new CursorError();
 }
 /** Distinct matches up to the 10,001 cap. `exact` is false when capped, past its budget, cancelled or failed. */
-export const COUNT_CAP = 10_001;
+export const COUNT_CAP = REQUEST_LIMITS.countCap;
 /** Wall-clock budget for the count, also for restricted SQL whose CONST profile allows statements 10 seconds. */
 export const COUNT_BUDGET_MS = 1000;
 type CountResult = { n: number; exact: boolean };
@@ -312,14 +340,14 @@ async function searchPage(
   let tail = '';
   const params: Params = { ...w.params, limit: q.limit + 1 };
   if (exportClock) {
-    w.sql += ' AND received_at <= {exportReceivedBefore:DateTime64(3)}';
+    w.sql += ` AND received_at <= {exportReceivedBefore:DateTime64(3, 'UTC')}`;
     params.exportReceivedBefore = exportClock;
   }
   if (q.cursor) {
     const [ts, id] = cursor(q.cursor, projectId, scope);
     params.cursorTs = ts;
     params.cursorId = id;
-    tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3)},{cursorId:String})`;
+    tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3, 'UTC')},{cursorId:String})`;
   }
   const readRows = () =>
     read<EventRow>(
@@ -361,8 +389,11 @@ export async function searchEvents(
   q: SearchQuery,
   compiled?: Awaited<ReturnType<typeof filter>>,
   scope?: ReadScope | null,
-): Promise<SearchResponse> {
-  return (await searchPage(ch, projectId, q, compiled, false, undefined, undefined, scope)).page;
+): Promise<SearchResponse & { range: AppliedRange }> {
+  // One clock for the rows, the count and the stated window.
+  const range = timeRange(q);
+  const { page } = await searchPage(ch, projectId, { ...q, ...range }, compiled, false, undefined, undefined, scope);
+  return { ...page, range };
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null, canonicalClient?: ClickHouseClient) {
   // Oldest receipt first, then timestamp, then a hash of the stored document: a deterministic canonical version even
@@ -421,7 +452,7 @@ export async function getEvent(
   const parents: AuditEvent[] = [],
     seen = new Set([eventId]);
   let parent = row.parent_event_id;
-  while (parent && !seen.has(parent) && parents.length < 100) {
+  while (parent && !seen.has(parent) && parents.length < REQUEST_LIMITS.parentDepth) {
     seen.add(parent);
     // The chain stops at the first parent outside the scope.
     const r = await eventRow(ch, projectId, parent, scope, canonicalClient);
@@ -450,7 +481,7 @@ export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: st
   return (
     await read<EventRow>(
       ch,
-      `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={p:String} AND received_at >= {since:DateTime64(3)} AND (${compiled.sql}) ORDER BY received_at DESC,event_id DESC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+      `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={p:String} AND received_at >= {since:DateTime64(3, 'UTC')} AND (${compiled.sql}) ORDER BY received_at DESC,event_id DESC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
       { p, since: q.since, limit: q.limit, ...compiled.params },
     )
   ).map(toEvent);
@@ -579,14 +610,27 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
 }
 /** The stored column a facet field reads (undefined for attributes). */
 export const facetColumn = (field: string) => (Object.hasOwn(columns, field) ? columns[field] : undefined);
+type FacetInput = Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number };
 export async function facets(
   ch: ClickHouseClient,
   p: string,
-  q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
+  q: FacetInput,
   scope?: ReadScope | null,
   compiled?: CompiledFilter,
   /** The field mask key (`fieldMaskKey`); required when the scope masks `actor_email`. */
   maskKey?: Buffer,
+): Promise<FacetResponse & { range: AppliedRange }> {
+  // Both levels count the same window, and the response states it.
+  const range = timeRange(q);
+  return { ...(await facetCounts(ch, p, { ...q, ...range }, scope, compiled, maskKey)), range };
+}
+async function facetCounts(
+  ch: ClickHouseClient,
+  p: string,
+  q: FacetInput,
+  scope: ReadScope | null | undefined,
+  compiled: CompiledFilter | undefined,
+  maskKey: Buffer | undefined,
 ): Promise<FacetResponse> {
   if (scope?.mask?.includes('actor_email')) {
     if (!maskKey) throw new Error('The actor_email mask requires a field mask key.');
@@ -735,7 +779,10 @@ export async function overview(ch: ClickHouseClient, p: string, q: RangeQuery): 
     hour = new Date(now.getTime() - 3_600_000).toISOString();
   const [m, prev, series, topActions, topActors, topTenants, topExecutors, recentProblems, stats, minutes] = await Promise.all([
     metrics(ch, p, q),
-    metrics(ch, p, { ...q, from: new Date(Date.parse(range.from) - duration).toISOString(), to: range.from }),
+    // The previous period of a window that starts at the store's earliest time holds nothing (and would be empty).
+    Date.parse(range.from) <= STORE_TIME_LIMITS.min
+      ? { events: 0, actors: 0, tenants: 0, failureRate: 0, avgConformance: 0 }
+      : metrics(ch, p, { ...q, from: new Date(Date.parse(range.from) - duration).toISOString(), to: range.from }),
     histogram(ch, p, q),
     top(ch, p, q, 'action', 'action'),
     top(ch, p, q, 'actor_id', 'actor_name', 'actor_type'),
@@ -749,7 +796,7 @@ export async function overview(ch: ClickHouseClient, p: string, q: RangeQuery): 
     projectStats(ch, [p]),
     read<{ ts: string; count: number }>(
       ch,
-      'SELECT bucket ts,sum(events) count FROM events_by_minute WHERE project_id={p:String} AND bucket >= {hour:DateTime64(3)} GROUP BY bucket ORDER BY bucket',
+      `SELECT bucket ts,sum(events) count FROM events_by_minute WHERE project_id={p:String} AND bucket >= {hour:DateTime64(3, 'UTC')} GROUP BY bucket ORDER BY bucket`,
       { p, hour },
     ),
   ]);

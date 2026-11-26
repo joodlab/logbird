@@ -236,6 +236,8 @@ CREATE TABLE events
   changes_fields    Array(String),
   changes_before    Array(String),
   changes_after     Array(String),
+  changes_before_kind Array(Enum8('absent' = 1, 'null' = 2, 'string' = 3, 'number' = 4, 'boolean' = 5, 'json' = 6)),
+  changes_after_kind  Array(Enum8('absent' = 1, 'null' = 2, 'string' = 3, 'number' = 4, 'boolean' = 5, 'json' = 6)),
   operation_id      String,
   parent_event_id   String,
   request_id        String,
@@ -268,6 +270,12 @@ ORDER BY (project_id, timestamp, event_id)
 TTL toDateTime(least(received_at + INTERVAL 3650 DAY, toDateTime64('2106-02-07 06:28:15', 3, 'UTC'))) DELETE   -- hard cap; per-project retention is enforced by the worker
 SETTINGS index_granularity = 8192;
 ```
+
+The two change kind arrays share the order and 256-entry cap of `changes_fields`,
+`changes_before` and `changes_after`. An empty kind array means unknown. Earlier writers
+leave both empty. If the stored payload and indexed values disagree on the kind, the
+affected kind array stays empty.
+The additive migration leaves the text columns, original payload and existing parts in place.
 
 Rollups (materialized views, populated on insert):
 - `events_by_minute` (SummingMergeTree): `project_id, environment, bucket DateTime('UTC') = toStartOfMinute,
@@ -323,6 +331,12 @@ The retention status endpoint exposes ordinary retention failures once the proje
 Recovery never restores expired events. Workspace setup reports `retentionBusy: true` per affected
 project instead of failing the workspace; its progress is a placeholder (0, nextStep null,
 firstEventAt null), not measured emptiness.
+
+Event search, facets and export (on `/v1` and in the console) resolve their time range once (`[from, to)` on
+`timestamp`; `from` defaults to `to` minus 24 hours and `to` to the server clock), bind it as UTC instants, and state
+it: search and facets return `range: { from, to }`, an export that streams rows sets `X-Logbird-Range-From` and
+`X-Logbird-Range-To`. The rows, the count and the stated range use the same bounds. Other console reads (overview,
+histogram, fields, entity profiles) apply the same default but do not state it; live events read by receipt time.
 
 Hot-path rules: always filter `project_id` + time range first; never `FINAL` on search; dedupe in the result
 set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` via a distinct

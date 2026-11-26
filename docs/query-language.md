@@ -1,6 +1,6 @@
 # Query language and SQL expressions
 
-Logbird searches one authorized project within a half-open UTC time range. The default range is the last 24 hours. All query language values and attribute keys are ClickHouse parameters. SQL mode accepts a boolean expression on console endpoints only.
+Logbird searches one authorized project within a half-open UTC time range on the stored `timestamp` (the event's occurredAt, or its receipt time when occurredAt was absent or unusable): `from` inclusive, `to` exclusive. Without `from` the range is the 24 hours before `to`; without `to` it ends at the server clock. Search and facets return the range they applied as `range: { from, to }`, and an export that streams rows as the `X-Logbird-Range-From` and `X-Logbird-Range-To` headers, so a short answer can be told from a short window. Results sort by `timestamp`, then by event id; events in the same millisecond are ordered by id, not by cause (read `context.parentEventId`). All query language values and attribute keys are ClickHouse parameters. SQL mode accepts a boolean expression on console endpoints only.
 
 ## Query language (lang=query, default)
 
@@ -33,6 +33,10 @@ Field names use their exact spelling when bare. `_exists_:attr.tag\*` checks the
 Use `record:<type>:<id>` to filter a record's history. The first unescaped colon separates the type from the id. Within the type, `\:` means a literal colon and `\\` means a literal backslash. Everything after the separator is the literal id. For example, `record:order\:archived:A1` matches type `order:archived` and id `A1`, while `record:order:archived:A1` matches type `order` and id `archived:A1`.
 
 Quote the whole pair if it contains whitespace or grammar punctuation such as parentheses. Query-value escapes apply before record-pair escapes. For example, `record:"order\\:archived:A1"` matches type `order:archived` and id `A1`, and `record:"page:home (west)"` matches id `home (west)`. `record:page:/home/`, `record:page:home*`, and `record:page:home\*` use literal ids.
+
+Add `tenant:<id>` when the same record ID is used by multiple tenants, or `changes.field:<name>` to see events that changed a specific field.
+
+Search orders events by timestamp and breaks ties by event ID. Read causation from `parentEventId`. Within each loaded search page of a record, actor, or tenant history, the console shows same-timestamp children before their parents in its newest-first list. Live updates follow arrival order.
 
 Record pairs support negation and value groups, such as `-record:(page:1 OR site:7)`. `record:*` and `_exists_:record` match events with any target. Use `attr.record` to search a custom attribute named `record`.
 
@@ -162,6 +166,9 @@ These fields also work in webhook filters.
 | occurredAt | timestamp | date | timestamp | none |
 | receivedAt |  | date | received_at | none |
 | description |  | text | description | none |
+
+The `beforeKind` and `afterKind` values on returned changes are read metadata. They have no query
+language fields or SQL-mode identifiers.
 
 ## SQL mode (lang=sql)
 

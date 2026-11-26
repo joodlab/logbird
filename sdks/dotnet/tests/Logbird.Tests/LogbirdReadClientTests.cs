@@ -51,6 +51,18 @@ public class LogbirdReadClientTests
     }
 
     [Fact]
+    public async Task Reads_change_kinds_when_present()
+    {
+        var typed = StoredEventJson.Replace(
+            """{"field":"limit","before":"24","after":"48"}""",
+            """{"field":"limit","before":"","after":"null","beforeKind":"absent","afterKind":"null"}""");
+        var server = new FakeServer().Then(_ => FakeServer.Json(HttpStatusCode.OK, $$"""{"data":[{{typed}}],"nextCursor":null,"total":1,"tookMs":1}"""));
+        using var client = Client(server);
+        var page = await client.SearchAsync();
+        Assert.Equal(new StoredChange("limit", "", "null") { BeforeKind = "absent", AfterKind = "null" }, Assert.Single(page.Events.Single().Changes));
+    }
+
+    [Fact]
     public async Task Gets_one_event_and_returns_null_for_404()
     {
         var server = new FakeServer()

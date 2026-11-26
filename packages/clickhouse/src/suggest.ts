@@ -45,7 +45,7 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
     // every agent who acted a few hours ago.
     const column = f?.column;
     const sparse = column && SPARSE_COLUMNS.has(column) ? ` AND ${column}!=''` : '';
-    sample = `SELECT * FROM events WHERE project_id={project:String} AND timestamp>={from:DateTime64(3)} AND timestamp<{to:DateTime64(3)}${sparse} ORDER BY timestamp DESC,event_id DESC LIMIT 50001`;
+    sample = `SELECT * FROM events WHERE project_id={project:String} AND timestamp>={from:DateTime64(3, 'UTC')} AND timestamp<{to:DateTime64(3, 'UTC')}${sparse} ORDER BY timestamp DESC,event_id DESC LIMIT 50001`;
     const events = `(SELECT * FROM (${sample}) LIMIT 50000)`;
     const value = record
       ? recordValue('target.1', 'target.2')

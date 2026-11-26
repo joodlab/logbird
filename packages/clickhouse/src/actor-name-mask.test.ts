@@ -115,6 +115,13 @@ describe('the shared masked-filter compilation (webhook discovery and recheck co
       'attr.impersonator.name.en:*',
       'attr.actor.name.en:x',
       'attr.actor.email.work:x',
+      // ASCII case variants of every masked path.
+      'impersonator.Email:*',
+      'attr.Impersonator.email:x',
+      '_exists_:IMPERSONATOR.EMAIL',
+      'impersonator.EMAIL.work:/.*/',
+      'NOT Actor.Email:x',
+      'attr.IMPERSONATOR.NAME:x',
       'action:x OR impersonator.email:>2',
     ])
       expect(() => compileMaskedQuery(q, ['actor_email']), q).toThrow(/masked/);
