@@ -410,7 +410,7 @@ HistoryHorizon horizon = await reader.GetHistoryHorizonAsync(); // retention day
 
 `GetHistoryHorizonAsync` tells you how far back the key's history reaches: `OldestEventAt`, the timestamp of the
 oldest event the key or viewer token can find through search (within its scope), or `null` when it finds none, and the
-project's `RetentionDays` policy. For a whole-history search, use it as `From` and set `To` at least a day after now:
+project's `RetentionDays` policy. For a whole-history search, use it as `From` and set `To` more than a day after now:
 an event can be dated up to one day after it was received, and without `To` the window ends at the server clock.
 `OldestEventAt` describes what is stored now: an empty history before it does not prove that nothing happened, since
 retention deletes, for good, events dated more than `RetentionDays` before each run. It can also move back: an event

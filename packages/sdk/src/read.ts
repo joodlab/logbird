@@ -729,8 +729,8 @@ export interface HistoryHorizon {
 
 /**
  * How far back the reader's history reaches: the project's retention policy and the oldest event the key or viewer
- * token can find through search, within its scope. For a whole-history read, use `oldestEventAt` as `from` and a `to` at
- * least a day after now, since an event can be dated up to one day after it was received
+ * token can find through search, within its scope. For a whole-history read, use `oldestEventAt` as `from` and a `to` more than
+ * a day after now, since an event can be dated up to one day after it was received
  * (`range: { from: horizon.oldestEventAt, to: new Date(Date.now() + 2 * 86_400_000) }`), and do not take an empty history
  * before it as proof that nothing happened. The request goes through the same bounded read as `readAuditTrail` and fails with
  * the same LogbirdError codes; a server without this route answers `read_http_error` with status 404.
