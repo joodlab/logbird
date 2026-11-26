@@ -34,7 +34,10 @@ The flags set only the fallback: an id set on the event, then a `requestId` / `o
 precedence; otherwise the header, when its flag is on and its value is at most 256 characters, and a generated UUID last.
 Await `capture.shutdown()` in the host's lifecycle. Never return context.audit to the browser.
 For a history server function, authorize the record then return
-`readAuditTrail({ endpoint, readKey }, trailQuery({ target: { type: 'record', id }, tenant }))`.
-`trailQuery` throws a `TypeError` (and nothing is read) if `id` or `tenant` is passed without a value.
+`readAuditTrail({ endpoint, readKey }, trailQuery({ target: { type: 'record', id }, tenant, range: { from } }))`.
+A trail names its window: `range: { from }` (`to` defaults to now), or `range: SERVER_DEFAULT_RANGE` for the server's
+last 24 hours. `iterateAuditTrail` reads every page of a trail and `readAuditEvent` one event with its parents.
+`trailQuery` throws a `TypeError` (and nothing is read) if `id` or `tenant` is passed without a value, or if the trail
+has no `range.from`.
 Read failures reject normally; they are not disguised as empty history.
 See [design](../../../docs/integrations.md) and [example](../../../examples/tanstack-start).

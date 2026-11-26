@@ -1,5 +1,5 @@
 import { Logbird } from '@logbird/sdk';
-import { trailQuery } from '@logbird/sdk/read';
+import { type TrailQuery, trailQuery } from '@logbird/sdk/read';
 import { createApp, eventHandler, toWebHandler } from 'h3';
 import { expect, it, vi } from 'vitest';
 import { attachAudit } from './capture';
@@ -114,7 +114,7 @@ it('answers an incomplete trail with an error and never reads upstream (#263)', 
   const session: { tenantId?: string } = {};
   for (const authorize of [
     // The forgotten null check: trailQuery throws instead of widening.
-    () => trailQuery({ tenant: session.tenantId }),
+    () => trailQuery({ tenant: session.tenantId } as unknown as TrailQuery),
     // A hand-built query with no selector.
     () => ({ q: '' }),
     () => ({ q: '   ' }),

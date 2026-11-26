@@ -7,14 +7,19 @@
 import { Audit } from '@logbird/sdk/integration';
 import { CaptureOptions } from '@logbird/sdk/integration';
 import { FunctionMiddlewareAfterServer } from '@tanstack/react-start';
+import { iterateAuditTrail } from '@logbird/sdk/read';
+import { readAuditEvent } from '@logbird/sdk/read';
 import { readAuditTrail } from '@logbird/sdk/read';
 import { RequestMiddlewareAfterServer } from '@tanstack/react-start';
+import { SERVER_DEFAULT_RANGE } from '@logbird/sdk/read';
 import { trailQuery } from '@logbird/sdk/read';
 
 export { Audit }
 
 // @public (undocumented)
 export function auditForRequest(options: CaptureOptions<Request>): Promise<Audit>;
+
+export { iterateAuditTrail }
 
 // @public (undocumented)
 export function logbird(options: CaptureOptions<Request>): {
@@ -33,7 +38,11 @@ export type LogbirdRequestMiddleware = RequestMiddlewareAfterServer<{}, undefine
     audit: Audit;
 }>;
 
+export { readAuditEvent }
+
 export { readAuditTrail }
+
+export { SERVER_DEFAULT_RANGE }
 
 export { trailQuery }
 

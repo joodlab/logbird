@@ -15,8 +15,14 @@ const functionMiddleware: LogbirdFunctionMiddleware = capture.functionMiddleware
 export const tanstack = { requestMiddleware, functionMiddleware, shutdown: capture.shutdown, auditForRequest };
 
 // Vue: the composable over an application-provided fetcher.
-const fetcher: AuditFetcher = async () => ({ data: [], nextCursor: null, total: 0, tookMs: 0 });
-const options: AuditTrailOptions = { target: { type: 'invoice', id: 'inv_1' }, fetcher };
+const fetcher: AuditFetcher = async () => ({
+  data: [],
+  nextCursor: null,
+  total: 0,
+  range: { from: '2026-01-01T00:00:00.000Z', to: '2026-01-02T00:00:00.000Z' },
+  tookMs: 0,
+});
+const options: AuditTrailOptions = { target: { type: 'invoice', id: 'inv_1' }, range: { from: '2026-01-01T00:00:00.000Z' }, order: 'asc', fetcher };
 export const vue = () => useAuditTrail(options);
 
 // Nuxt: the module and its option and hook types.

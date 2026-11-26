@@ -17,6 +17,7 @@ import { RendererNode } from 'vue';
 import { SearchInput } from '@logbird/sdk/read';
 import { SearchQuery } from '@logbird/sdk/read';
 import { SearchResponse } from '@logbird/sdk/read';
+import { SERVER_DEFAULT_RANGE } from '@logbird/sdk/read';
 import { ShallowRef } from 'vue';
 import { TrailQuery } from '@logbird/sdk/read';
 import { VNode } from 'vue';
@@ -57,6 +58,8 @@ export interface AuditTrailRequest {
     // (undocumented)
     session?: AuditSession | null;
 }
+
+export { SERVER_DEFAULT_RANGE }
 
 // @public
 export function useAuditTrail(options: MaybeRefOrGetter<AuditTrailOptions>): {

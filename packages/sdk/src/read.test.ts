@@ -1,6 +1,25 @@
 import type { SearchQuery as ContractQuery, SearchResponse as ContractResponse } from '@logbird/contracts';
 import { expect, expectTypeOf, it } from 'vitest';
-import { type SearchQuery, type SearchResponse, trailQuery } from './read';
+import {
+  SERVER_DEFAULT_RANGE,
+  type SearchQuery,
+  type SearchResponse,
+  type TrailInput,
+  type TrailQuery,
+  trailQuery as trailQueryStrict,
+} from './read';
+
+/**
+ * These tests are about selectors and the input boundary, not the window: a trail that names no `range` gets the
+ * explicit default window through its prototype, so getters, Proxies and read counts behave exactly as given.
+ * read-window.test.ts covers the window rule itself.
+ */
+const trailQuery = (input: TrailInput) =>
+  trailQueryStrict(
+    input !== null && typeof input === 'object' && !('range' in input)
+      ? (Object.create(input, { range: { value: SERVER_DEFAULT_RANGE, enumerable: true } }) as TrailQuery)
+      : (input as TrailQuery),
+  );
 
 it('keeps structural read types aligned with public contracts and quotes selectors', () => {
   expectTypeOf<SearchResponse>().toEqualTypeOf<ContractResponse>();

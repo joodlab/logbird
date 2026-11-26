@@ -41,6 +41,8 @@ export default {
     // trailQuery quotes the id for the query language.
     return trailQuery({
       tenant: tenantId,
+      // A trail names its window: a fixed start (one recomputed per request would move between pages); the end is each request's clock.
+      range: { from: '2026-01-01T00:00:00Z' },
       cursor: typeof query.cursor === 'string' ? query.cursor : undefined,
     });
   },

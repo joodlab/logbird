@@ -47,7 +47,10 @@ try {
   expect(typeof received[0]?.id === 'string', 'an event id assigned by the SDK');
   pass('Logbird track and shutdown: delivered and acknowledged');
 
-  const page = await readAuditTrail({ endpoint, readKey: 'fictional-read-key' }, trailQuery({ target: { type: 'invoice', id: 'inv_1' } }));
+  const page = await readAuditTrail(
+    { endpoint, readKey: 'fictional-read-key' },
+    trailQuery({ target: { type: 'invoice', id: 'inv_1' }, range: { from: '2026-01-01T00:00:00.000Z' } }),
+  );
   expect(Array.isArray(page.data) && searches.length === 1 && Boolean(searches[0]?.searchParams.get('q')), 'a read with a query');
   pass('readAuditTrail and trailQuery: page read');
 

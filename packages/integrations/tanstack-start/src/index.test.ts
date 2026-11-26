@@ -1,6 +1,9 @@
 import { Logbird } from '@logbird/sdk';
+import type { TrailQuery } from '@logbird/sdk/read';
 import { expect, it, vi } from 'vitest';
 import { logbird, readAuditTrail, trailQuery } from './index';
+
+const range = { from: '2026-11-01T00:00:00.000Z' };
 
 it('runs the framework request middleware and passes typed audit through next', async () => {
   const fetch = vi.fn(async (_request: unknown, init: RequestInit) => {
@@ -36,12 +39,19 @@ it('answers an incomplete trail with an error and sends no request (#263)', asyn
   const options = { endpoint: 'http://logbird.test', readKey: 'lb_read_fake', fetch };
   const session: { tenantId?: string } = {};
   // The README's helper call, with the tenant id missing: it throws before reading.
-  await expect(async () => readAuditTrail(options, trailQuery({ target: { type: 'record', id: 'r1' }, tenant: session.tenantId }))).rejects.toThrow(
-    TypeError,
+  await expect(async () =>
+    readAuditTrail(options, trailQuery({ target: { type: 'record', id: 'r1' }, tenant: session.tenantId, range })),
+  ).rejects.toThrow(TypeError);
+  await expect(async () => readAuditTrail(options, trailQuery({} as unknown as TrailQuery))).rejects.toThrow(
+    /an empty trail would be the whole project/,
   );
-  await expect(async () => readAuditTrail(options, trailQuery({}))).rejects.toThrow(/an empty trail would be the whole project/);
   expect(fetch).not.toHaveBeenCalled();
   // A complete trail reads normally.
-  await readAuditTrail(options, trailQuery({ target: { type: 'record', id: 'r1' }, tenant: 't1' }));
+  // A trail without a window is incomplete too.
+  await expect(async () =>
+    readAuditTrail(options, trailQuery({ target: { type: 'record', id: 'r1' }, tenant: 't1' } as unknown as TrailQuery)),
+  ).rejects.toThrow(/needs a `range`/);
+  expect(fetch).not.toHaveBeenCalled();
+  await readAuditTrail(options, trailQuery({ target: { type: 'record', id: 'r1' }, tenant: 't1', range }));
   expect(new URL(String(fetch.mock.calls[0]?.[0])).searchParams.get('q')).toBe('record:"record:r1" AND tenant:"t1"');
 });
