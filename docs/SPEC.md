@@ -488,8 +488,8 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
   HMAC-SHA256 with an HKDF key (`logbird-viewer-token-v1`) from `BETTER_AUTH_SECRET`. A token's scope must be within
   the key's (403 `scope_exceeded`). Verification: MAC, `exp`/`iat` with 30 s skew, and the minting key unrevoked,
   unexpired and still containing the scope (key lookup cached ≤ 30 s per process). Tokens work on GET `/v1/events`,
-  `/v1/events/:id`, `/v1/facets`, `/v1/export` only.
-- **CORS:** those four GET routes answer preflights for any origin without credentials; the response is readable only
+  `/v1/events/:id`, `/v1/facets`, `/v1/export`, `/v1/project` only.
+- **CORS:** those five GET routes answer preflights for any origin without credentials; the response is readable only
   by an origin on the minting key's `embedOrigins` (other browser origins: 403 `origin_not_allowed`); 401s are
   readable by any origin. Keys never get CORS.
 - **Masks:** `ip`, `user_agent` (emptied), `actor_email` (`masked:<hmac>` per project, HKDF info

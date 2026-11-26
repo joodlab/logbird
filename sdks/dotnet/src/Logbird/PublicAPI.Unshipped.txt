@@ -246,6 +246,12 @@ Logbird.FacetValue.Label.get -> string!
 Logbird.FacetValue.Label.init -> void
 Logbird.FacetValue.Value.get -> string!
 Logbird.FacetValue.Value.init -> void
+Logbird.HistoryHorizon
+Logbird.HistoryHorizon.HistoryHorizon() -> void
+Logbird.HistoryHorizon.OldestEventAt.get -> string?
+Logbird.HistoryHorizon.OldestEventAt.init -> void
+Logbird.HistoryHorizon.RetentionDays.get -> int
+Logbird.HistoryHorizon.RetentionDays.init -> void
 Logbird.ILogbirdClient
 Logbird.ILogbirdClient.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 Logbird.ILogbirdClient.Stats.get -> Logbird.LogbirdStats
@@ -313,6 +319,7 @@ Logbird.LogbirdReadClient.Dispose() -> void
 Logbird.LogbirdReadClient.ExportAsync(Logbird.ExportQuery! query, System.IO.Stream! destination, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
 Logbird.LogbirdReadClient.FacetsAsync(Logbird.FacetQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.FacetResult!>!
 Logbird.LogbirdReadClient.GetEventAsync(string! eventId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.EventDetail?>!
+Logbird.LogbirdReadClient.GetHistoryHorizonAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.HistoryHorizon!>!
 Logbird.LogbirdReadClient.LogbirdReadClient(Logbird.LogbirdReadOptions! options, System.Net.Http.HttpClient? httpClient = null) -> void
 Logbird.LogbirdReadClient.MintViewerTokenAsync(Logbird.ViewerScope! scope, System.TimeSpan? lifetime = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Logbird.ViewerToken!>!
 Logbird.LogbirdReadClient.SearchAllAsync(Logbird.EventSearch? search = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Logbird.StoredEvent!>!

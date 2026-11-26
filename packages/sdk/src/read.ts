@@ -711,6 +711,55 @@ export async function readAuditEvent(options: ReadOptions, id: string, signal?: 
   return boundedRead<EventDetail | null>(options, url, signal, accept, null, exactJson);
 }
 const isCount = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
+
+/** How far back a reader's history reaches, from `GET /v1/project`. */
+export interface HistoryHorizon {
+  /**
+   * The project's configured retention policy in days, the same for every reader of the project. Retention runs (hourly,
+   * and right after the policy is shortened) delete older events for good. It is a policy, not a bound: between runs older
+   * events can still be stored and found.
+   */
+  retentionDays: number;
+  /**
+   * The `timestamp` of the oldest event this key or token can find through search (within its scope), or null when it
+   * finds none. It describes what is stored now, not what ever existed, and can move back as well as forward.
+   */
+  oldestEventAt: string | null;
+}
+
+/**
+ * How far back the reader's history reaches: the project's retention policy and the oldest event the key or viewer
+ * token can find through search, within its scope. For a whole-history read, use `oldestEventAt` as `from` and the end of
+ * the searchable range as `to` (`range: { from: horizon.oldestEventAt, to: '2299-12-31T23:59:59.999Z' }`): an event can be dated up to
+ * one day after the server received it, so a `to` from your own clock can miss events. Do not take an empty history
+ * before `oldestEventAt` as proof that nothing happened. The request goes through the same bounded read as `readAuditTrail` and fails with
+ * the same LogbirdError codes; a server without this route answers `read_http_error` with status 404.
+ */
+export async function readHistoryHorizon(options: ReadOptions, signal?: AbortSignal): Promise<HistoryHorizon> {
+  signal?.throwIfAborted();
+  if (typeof window !== 'undefined') throw new LogbirdError('read_server_only');
+  let url: URL;
+  try {
+    url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/project`);
+  } catch {
+    signal?.throwIfAborted();
+    throw new LogbirdError('read_request_failed');
+  }
+  return boundedRead(options, url, signal, (value, status) => {
+    const horizon = value as Partial<HistoryHorizon> | null;
+    if (
+      !isObject(horizon) ||
+      Array.isArray(horizon) ||
+      !Object.hasOwn(horizon, 'retentionDays') ||
+      !Number.isSafeInteger(horizon.retentionDays) ||
+      (horizon.retentionDays as number) < 1 ||
+      !Object.hasOwn(horizon, 'oldestEventAt') ||
+      !(horizon.oldestEventAt === null || instant(horizon.oldestEventAt))
+    )
+      throw new LogbirdError('read_invalid_response', { status });
+    return { retentionDays: horizon.retentionDays as number, oldestEventAt: horizon.oldestEventAt ?? null };
+  });
+}
 /** JSON.parse that keeps exact number digits, or refuses where the runtime cannot keep them. */
 function exactJson(text: string): unknown {
   if (!supportsExactJson && holdsInexactNumber(text)) throw new LogbirdError('read_inexact_number');

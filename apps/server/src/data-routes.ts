@@ -67,6 +67,8 @@ const READ_ROUTE_TEXT = {
     "One event by id. No time window applies. Returns the event; its original `payload` (null under any field mask); `parents`, its nearest ancestors through `context.parentEventId`, furthest first, at most 100. The walk also stops at a parent that is not stored or is outside the reader's scope, at a cycle, and under the actor_email mask at a parent with tying stored versions, so the first entry is not necessarily the root. `childCount` is the number of events in scope that name it as their parent, across all stored history: to list them, search `parent:<id>` (quote the id by the query language rules in docs/query-language.md, so a `*` in it is not a wildcard) with `from` and `to` that cover them: a child can be dated up to 24 hours in the future. `operationSize` is the number of events in scope that share its `context.operationId`, itself included, across all stored history (0 without one). 404 not_found when the id is unknown or outside the reader's scope, or, under the actor_email mask, when its own stored versions tie the same way.",
   facets:
     'Counts of the most frequent values of `field` (optionally split `by` a second field) among the events in one time window that match `q`. Same window rules as search: without `from` it is at most the 24 hours before `to` (the store limits, 1900-01-01T00:00:00.000Z to 2299-12-31T23:59:59.999Z, can shorten it), and the response states the window it applied as `range`. Values are ordered by count, most frequent first.',
+  project:
+    "How far back this caller's history reaches. `oldestEventAt` is the `timestamp` of the oldest event this caller can find through search: the first event that an `order=asc` search over the widest window (`from` 1900-01-01T00:00:00.000Z, `to` 2299-12-31T23:59:59.999Z, exclusive) returns to the same caller, within its scope for a scoped key or viewer token, or null when that search finds none. It describes what is stored now, not what ever existed: an empty history before it does not prove that nothing happened then. `retentionDays` is the project's configured retention policy, the same for every reader of the project, and the one value here that a scoped caller could not already find. Retention runs (hourly, and right after the policy is shortened) delete older events for good; the policy is not a bound on what search returns, since older events can still be stored and found between runs (for example one that arrived dated in the past). So `oldestEventAt` can lie before now minus `retentionDays`, and it can move back as well as forward. Raising `retentionDays` restores nothing. To read a whole history, search from `oldestEventAt` to the end of the searchable range, `to` 2299-12-31T23:59:59.999Z (exclusive): an event can be dated up to one day after the server received it, so a `to` computed from your own clock can miss events.",
   export:
     'Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers at most the 24 hours before `to` (the store limits, 1900-01-01T00:00:00.000Z to 2299-12-31T23:59:59.999Z, can shorten it). An answer that streams rows carries the X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers: the window applied. Membership is fixed by the export clock: an event is in the file only if its stored receipt time is at or before the moment the export started (docs/exports.md states the exact guarantee).',
 };
@@ -243,6 +245,26 @@ export const publicRoutes = new Hono<AppEnv>()
       // The mask key lets facets show a name that is the address as the same pseudonym the scope's events carry (#333).
       const key = scope?.mask?.length ? fieldMaskSecret() : undefined;
       return c.json(s.facetResponseSchema.parse(await ch.facets(readerClient(scope), c.get('project').id, input, scope, undefined, key)));
+    },
+  )
+  .get(
+    '/project',
+    // Hono answers HEAD through this GET handler, and the maintenance fence (projectRead) checks GET only: refuse HEAD.
+    noHeadExport,
+    requireReader(),
+    publicRateLimits.authenticated('read'),
+    publicQueryLanguage,
+    projectRead,
+    readDoc('History horizon', READ_ROUTE_TEXT.project, s.historyHorizonSchema),
+    async (c) => {
+      const project = c.get('project');
+      const { scope } = c.get('reader');
+      // The policy is read fresh: viewer-token authentication caches the key's project for up to 30 seconds.
+      const [policy, oldestEventAt] = await Promise.all([
+        prisma.project.findUnique({ where: { id: project.id }, select: { retentionDays: true } }),
+        ch.oldestVisibleEvent(readerClient(scope), project.id, scope),
+      ]);
+      return c.json(s.historyHorizonSchema.parse({ retentionDays: found(policy).retentionDays, oldestEventAt }));
     },
   )
   .get(
