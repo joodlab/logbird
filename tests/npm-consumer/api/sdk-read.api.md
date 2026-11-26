@@ -100,6 +100,12 @@ export interface EventDetail {
 }
 
 // @public
+export interface HistoryHorizon {
+    oldestEventAt: string | null;
+    retentionDays: number;
+}
+
+// @public
 export function isTrailQueryError(error: unknown): error is TrailQueryError;
 
 // @public
@@ -135,6 +141,9 @@ export function readAuditEvent(options: ReadOptions, id: string, signal?: AbortS
 
 // @public
 export function readAuditTrail(options: ReadOptions, query: SearchInput, signal?: AbortSignal): Promise<SearchResponse>;
+
+// @public
+export function readHistoryHorizon(options: ReadOptions, signal?: AbortSignal): Promise<HistoryHorizon>;
 
 // @public (undocumented)
 export interface ReadOptions {

@@ -218,6 +218,21 @@ window that covers them), how many share its operation, and its original `payloa
 `null` for a 404. It uses the same bounded read and `LogbirdError` codes; where a runtime has no `JSON.rawJSON`, a
 payload holding a number a double cannot keep fails with `read_inexact_number` instead of being rounded.
 
+`readHistoryHorizon(options)` returns how far back the key's history reaches: the project's `retentionDays` and
+`oldestEventAt`, the timestamp of the oldest stored event the key or viewer token can see (within its scope), or null
+when it sees none. Use `oldestEventAt` as the `from` of a whole-history pass. Nothing older is stored for that reader,
+and an empty history before it does not prove that nothing happened: retention deletes, for good, every event dated
+more than `retentionDays` before it runs. It uses the same bounded read and `LogbirdError` codes; a server without the
+route answers `read_http_error` with status 404.
+
+```ts
+import { iterateAuditTrail, readHistoryHorizon } from '@logbird/sdk/read';
+
+const horizon = await readHistoryHorizon(options); // { retentionDays, oldestEventAt }
+if (horizon.oldestEventAt)
+  for await (const event of iterateAuditTrail(options, { ...trail, range: { from: horizon.oldestEventAt }, order: 'asc' })) render(event);
+```
+
 `trailQuery` throws a `TypeError` rather than return a project-wide query: a trail needs a target, actor, tenant or
 query, and a selector key passed without a value (say `tenant: undefined`) is an error, not an absent filter. A `q` must
 parse as one complete Logbird query on its own; it is ANDed with the selectors.

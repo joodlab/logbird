@@ -56,14 +56,14 @@ const EXPOSED_HEADERS = [
   'Retry-After',
 ];
 /**
- * Browser access with viewer tokens (#138) to GET /v1/events[/:id], /v1/facets and /v1/export. No cookies are ever
- * used (no Allow-Credentials). The preflight carries no Authorization header, so it is answered for any origin; the
- * actual response is readable only by an origin on the minting key's `embedOrigins` (other origins get 403
+ * Browser access with viewer tokens (#138) to GET /v1/events[/:id], /v1/facets, /v1/export and /v1/project. No cookies
+ * are ever used (no Allow-Credentials). The preflight carries no Authorization header, so it is answered for any origin;
+ * the actual response is readable only by an origin on the minting key's `embedOrigins` (other origins get 403
  * origin_not_allowed from requireReader). A 401 is readable by any origin so an embed can tell it must refresh its
  * token. Read keys never get CORS: they belong on servers.
  */
 const viewerReadPath = (c: Context) =>
-  /^\/v1\/(?:events(?:\/[^/]+)?|facets|export)$/.test(c.req.path) &&
+  /^\/v1\/(?:events(?:\/[^/]+)?|facets|export|project)$/.test(c.req.path) &&
   (c.req.method === 'GET' || (c.req.method === 'OPTIONS' && c.req.header('access-control-request-method') === 'GET'));
 app.use('/v1/*', async (c, next) => {
   const origin = c.req.header('origin');

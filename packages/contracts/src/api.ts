@@ -60,6 +60,29 @@ export const appliedRangeSchema = z
       'The time window this read applied: events with `range.from` <= `timestamp` < `range.to`. Without `from`, the server uses at most the 24 hours before `to`, so compare this with the window you meant. Absent from servers older than this field.',
   });
 export type AppliedRange = z.infer<typeof appliedRangeSchema>;
+/**
+ * `GET /v1/project`: how far back the caller's history can reach, so a reader can tell "nothing happened before X" from
+ * "older events are no longer stored". `oldestEventAt` is the `timestamp` of the first event a search in `order=asc` over
+ * the widest window would return to the same caller: within its scope for a scoped key or viewer token.
+ */
+export const historyHorizonSchema = z
+  .object({
+    retentionDays: z.number().int().positive().meta({
+      description:
+        "The project's retention window in days. Retention deletes, for good, every event whose `timestamp` is more than this many days before the time it runs: hourly, and right after the window is shortened. A search with `from` earlier than that can find nothing older.",
+      example: 90,
+    }),
+    oldestEventAt: appliedInstant.nullable().meta({
+      description:
+        'The `timestamp` of the oldest stored event this caller can see (ISO 8601 UTC, milliseconds), or null when it can see none. Nothing older is stored for this caller. Whether older events existed cannot be told from the store: retention may have removed them, and raising `retentionDays` does not bring them back. It can lie before now minus `retentionDays` until the next retention run.',
+      example: '2026-08-28T09:15:02.481Z',
+    }),
+  })
+  .meta({
+    description:
+      'How far back the caller can read. Use `oldestEventAt` (or now minus `retentionDays`) as the `from` of a whole-history read, and do not read an empty answer before it as proof that nothing happened.',
+  });
+export type HistoryHorizon = z.infer<typeof historyHorizonSchema>;
 /** `GET /v1/export` states the applied window in headers (a CSV or JSONL stream has no envelope for a field). */
 export const RANGE_FROM_HEADER = 'X-Logbird-Range-From';
 export const RANGE_TO_HEADER = 'X-Logbird-Range-To';

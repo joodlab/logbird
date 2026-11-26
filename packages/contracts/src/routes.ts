@@ -120,6 +120,8 @@ export const routes = {
     facets: { method: 'GET', path: '/v1/facets', auth: 'readKeyOrViewerToken' }, // publicFacetQuerySchema → FacetResponse
     /** Streamed csv | jsonl | jsonl-evidence (refused with 422 for masked scopes); audited as export.requested, then export.completed or export.failed. */
     export: { method: 'GET', path: '/v1/export', auth: 'readKeyOrViewerToken' }, // publicExportQuerySchema
+    /** The history horizon (→ HistoryHorizon): retention window and the oldest event the caller can see, in its scope. */
+    project: { method: 'GET', path: '/v1/project', auth: 'readKeyOrViewerToken' },
     /** Mint a short-lived viewer token (viewerTokenRequestSchema → ViewerTokenResponse) with a read or scoped-read key. */
     viewerTokens: { method: 'POST', path: '/v1/viewer-tokens', auth: 'readKey' },
   },

@@ -68,6 +68,7 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 | `GET /v1/events/:id` | An out-of-scope id answers 404 exactly like an id that was never stored. The parent chain stops at the first out-of-scope parent; `childCount` and `operationSize` count in-scope events only. The event's own `context.parentEventId` is kept as recorded (it is the event's content), and following it answers that same 404. |
 | `GET /v1/facets` | Counts over in-scope events only (any query field, or `attr.<path>` / `attributes.<path>`, optional second level `by`). Attribute values are stored as text: a value that is JSON array text (a sent array, or a string that looks like one) counts each element; an array whose stored text was cut at 2048 bytes counts as one value. |
 | `GET /v1/export` | Only in-scope rows, through the same engine, admission limits and audit trail as console exports. |
+| `GET /v1/project` | `oldestEventAt` is the oldest in-scope event (null when the scope has none): the first event an ascending search over the widest window returns to the same caller, so it adds nothing the scope could not already find. `retentionDays` is the project's retention window, the same for every scope. |
 
 ## Masks
 

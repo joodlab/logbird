@@ -2328,6 +2328,172 @@
         ]
       }
     },
+    "/v1/project": {
+      "get": {
+        "description": "How far back this caller's history reaches: the project's `retentionDays` and `oldestEventAt`, the `timestamp` of the oldest stored event the caller can see (for a scoped key or viewer token, within its scope; null when it sees none). It is exactly the first event a search with `order=asc` over the widest window would return, so it reveals nothing the caller could not already find. Retention moves this horizon: it deletes for good every event dated more than `retentionDays` before the time it runs (hourly, and right after the window is shortened), so `oldestEventAt` moves forward as time passes, and can briefly lie before now minus `retentionDays` until the next run. Raising `retentionDays` keeps more from then on but restores nothing. An empty search before `oldestEventAt` therefore does not prove nothing happened then. To read a whole history, use `oldestEventAt` as the search's `from`.",
+        "operationId": "public_history_horizon",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "How far back the caller can read. Use `oldestEventAt` (or now minus `retentionDays`) as the `from` of a whole-history read, and do not read an empty answer before it as proof that nothing happened.",
+                  "properties": {
+                    "oldestEventAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The `timestamp` of the oldest stored event this caller can see (ISO 8601 UTC, milliseconds), or null when it can see none. Nothing older is stored for this caller. Whether older events existed cannot be told from the store: retention may have removed them, and raising `retentionDays` does not bring them back. It can lie before now minus `retentionDays` until the next retention run.",
+                      "example": "2026-08-28T09:15:02.481Z"
+                    },
+                    "retentionDays": {
+                      "description": "The project's retention window in days. Retention deletes, for good, every event whose `timestamp` is more than this many days before the time it runs: hourly, and right after the window is shortened. A search with `from` earlier than that can find nothing older.",
+                      "example": 90,
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "retentionDays",
+                    "oldestEventAt"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "History horizon",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "a request budget is exhausted (the project bucket; for viewer tokens the minting key + tenant bucket; for minting the per-key bucket) or the peer authentication-failure budget is. Public limits fail open if Redis is unavailable.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before retrying; budget headers apply only after authentication",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request failed"
+          }
+        },
+        "security": [
+          {
+            "readKey": []
+          },
+          {
+            "viewerToken": []
+          }
+        ],
+        "summary": "History horizon",
+        "tags": [
+          "public/v1"
+        ]
+      }
+    },
     "/v1/viewer-tokens": {
       "post": {
         "operationId": "public_mint_viewer_token",

@@ -78,6 +78,32 @@ public class LogbirdReadClientTests
     }
 
     [Fact]
+    public async Task Reads_the_history_horizon_and_refuses_an_answer_that_is_not_one()
+    {
+        var server = new FakeServer()
+            .Then(_ => FakeServer.Json(HttpStatusCode.OK, """{"retentionDays":90,"oldestEventAt":"2026-08-28T09:15:02.481Z"}"""))
+            .Then(_ => FakeServer.Json(HttpStatusCode.OK, """{"retentionDays":7,"oldestEventAt":null}"""))
+            .Then(_ => FakeServer.Json(HttpStatusCode.OK, """{"retentionDays":90}"""))
+            .Then(_ => FakeServer.Json(HttpStatusCode.OK, """{"retentionDays":0,"oldestEventAt":null}"""))
+            .Then(_ => FakeServer.Json(HttpStatusCode.OK, """{"retentionDays":90,"oldestEventAt":"2026-08-28"}"""))
+            .ThenStatus(HttpStatusCode.NotFound, """{"error":{"code":"not_found","message":"Not found"}}""");
+        using var client = Client(server);
+        var horizon = await client.GetHistoryHorizonAsync();
+        Assert.Equal(90, horizon.RetentionDays);
+        Assert.Equal("2026-08-28T09:15:02.481Z", horizon.OldestEventAt);
+        Assert.Equal("https://audit.example.invalid/v1/project", server.Requests.First().Request.RequestUri!.AbsoluteUri);
+        Assert.Null((await client.GetHistoryHorizonAsync()).OldestEventAt);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Equal("invalid_response", (await Assert.ThrowsAsync<LogbirdApiException>(() => client.GetHistoryHorizonAsync())).Code);
+        }
+
+        var old = await Assert.ThrowsAsync<LogbirdApiException>(() => client.GetHistoryHorizonAsync());
+        Assert.Equal(HttpStatusCode.NotFound, old.StatusCode);
+        Assert.Equal("not_found", old.Code);
+    }
+
+    [Fact]
     public async Task Errors_carry_the_logbird_code()
     {
         var server = new FakeServer().ThenStatus((HttpStatusCode)429, """{"error":{"code":"rate_limited","message":"Too many requests"}}""");

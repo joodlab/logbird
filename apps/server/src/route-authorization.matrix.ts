@@ -61,6 +61,7 @@ export const consoleMatrix = [
   // #138/#140: read or scoped-read keys and viewer tokens; minting takes a read key only (scope enforced in-route).
   ['GET', '/v1/facets', 'read-key'],
   ['GET', '/v1/export', 'read-key'],
+  ['GET', '/v1/project', 'read-key'],
   ['POST', '/v1/viewer-tokens', 'read-key'],
 ] as const;
 

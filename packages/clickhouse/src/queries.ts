@@ -1301,6 +1301,20 @@ export async function rebuildProjectRollups(client: ClickHouseClient, p: string,
   }
 }
 
+/**
+ * The `timestamp` of the oldest stored event a reader can see, or null when it sees none (`GET /v1/project`). It is the
+ * first event a search in ascending order over the widest window returns to the same reader: the same predicate
+ * (`where`, with the scope ANDed outside), so it states nothing that reader could not already find. The events table is
+ * sorted by (project_id, timestamp, event_id): with the project fixed, ClickHouse reads it in that order and stops at the
+ * first row that passes the scope, skipping granules whose tenant and target indexes rule them out.
+ */
+export async function oldestVisibleEvent(ch: ClickHouseClient, projectId: string, scope?: ReadScope | null) {
+  const widest = { from: new Date(STORE_TIME_LIMITS.min).toISOString(), to: new Date(STORE_TIME_LIMITS.max).toISOString() };
+  const w = await where(ch, projectId, widest, undefined, scope);
+  const rows = await read<{ timestamp: string }>(ch, `SELECT timestamp FROM events WHERE ${w.sql} ORDER BY timestamp ASC LIMIT 1`, w.params);
+  return rows[0] ? iso(rows[0].timestamp) : null;
+}
+
 /** Read-only retention preview, scoped to the authorized project. */
 export async function retentionStats(ch: ClickHouseClient, p: string, days?: number) {
   const rows = await read<{ oldest: string | null; n: string }>(

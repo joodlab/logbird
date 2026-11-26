@@ -67,6 +67,8 @@ const READ_ROUTE_TEXT = {
     "One event by id. No time window applies. Returns the event; its original `payload` (null under any field mask); `parents`, its nearest ancestors through `context.parentEventId`, furthest first, at most 100. The walk also stops at a parent that is not stored or is outside the reader's scope, at a cycle, and under the actor_email mask at a parent with tying stored versions, so the first entry is not necessarily the root. `childCount` is the number of events in scope that name it as their parent, across all stored history: to list them, search `parent:<id>` (quote the id by the query language rules in docs/query-language.md, so a `*` in it is not a wildcard) with `from` and `to` that cover them: a child can be dated up to 24 hours in the future. `operationSize` is the number of events in scope that share its `context.operationId`, itself included, across all stored history (0 without one). 404 not_found when the id is unknown or outside the reader's scope, or, under the actor_email mask, when its own stored versions tie the same way.",
   facets:
     'Counts of the most frequent values of `field` (optionally split `by` a second field) among the events in one time window that match `q`. Same window rules as search: without `from` it is at most the 24 hours before `to` (the store limits, 1900-01-01T00:00:00.000Z to 2299-12-31T23:59:59.999Z, can shorten it), and the response states the window it applied as `range`. Values are ordered by count, most frequent first.',
+  project:
+    "How far back this caller's history reaches: the project's `retentionDays` and `oldestEventAt`, the `timestamp` of the oldest stored event the caller can see (for a scoped key or viewer token, within its scope; null when it sees none). It is exactly the first event a search with `order=asc` over the widest window would return, so it reveals nothing the caller could not already find. Retention moves this horizon: it deletes for good every event dated more than `retentionDays` before the time it runs (hourly, and right after the window is shortened), so `oldestEventAt` moves forward as time passes, and can briefly lie before now minus `retentionDays` until the next run. Raising `retentionDays` keeps more from then on but restores nothing. An empty search before `oldestEventAt` therefore does not prove nothing happened then. To read a whole history, use `oldestEventAt` as the search's `from`.",
   export:
     'Every event in one time window that matches `q`, streamed oldest first (`timestamp`, then event `id`), as CSV, JSONL or original-payload JSONL. Same window rules as search: without `from` the export covers at most the 24 hours before `to` (the store limits, 1900-01-01T00:00:00.000Z to 2299-12-31T23:59:59.999Z, can shorten it). An answer that streams rows carries the X-Logbird-Range-From (inclusive) and X-Logbird-Range-To (exclusive) headers: the window applied. Membership is fixed by the export clock: an event is in the file only if its stored receipt time is at or before the moment the export started (docs/exports.md states the exact guarantee).',
 };
@@ -243,6 +245,24 @@ export const publicRoutes = new Hono<AppEnv>()
       // The mask key lets facets show a name that is the address as the same pseudonym the scope's events carry (#333).
       const key = scope?.mask?.length ? fieldMaskSecret() : undefined;
       return c.json(s.facetResponseSchema.parse(await ch.facets(readerClient(scope), c.get('project').id, input, scope, undefined, key)));
+    },
+  )
+  .get(
+    '/project',
+    requireReader(),
+    publicRateLimits.authenticated('read'),
+    publicQueryLanguage,
+    projectRead,
+    readDoc('History horizon', READ_ROUTE_TEXT.project, s.historyHorizonSchema),
+    async (c) => {
+      const project = c.get('project');
+      const { scope } = c.get('reader');
+      return c.json(
+        s.historyHorizonSchema.parse({
+          retentionDays: project.retentionDays,
+          oldestEventAt: await ch.oldestVisibleEvent(readerClient(scope), project.id, scope),
+        }),
+      );
     },
   )
   .get(

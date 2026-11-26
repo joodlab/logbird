@@ -185,11 +185,30 @@ public sealed class EventDetail
     public long OperationSize { get; init; }
 }
 
+/// <summary>How far back a reader's history reaches, from <c>GET /v1/project</c>.</summary>
+public sealed class HistoryHorizon
+{
+    /// <summary>
+    /// The project's retention window in days. Retention deletes, for good, every event dated more than this many days
+    /// before it runs (hourly, and right after the window is shortened).
+    /// </summary>
+    [JsonRequired]
+    public int RetentionDays { get; init; }
+
+    /// <summary>
+    /// The timestamp of the oldest stored event this key or viewer token can see (within its scope), as ISO 8601 UTC text
+    /// with milliseconds exactly as the server sent it, or <see langword="null"/> when it sees none. Nothing older is stored
+    /// for this reader; whether older events existed cannot be told from the store.
+    /// </summary>
+    public string? OldestEventAt { get; init; }
+}
+
 // A stored payload may nest as deep as the SDK sends (1,000 levels in metadata) inside the detail envelope, beyond the
 // reader's default of 64.
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, MaxDepth = ReadDepth.Max)]
 [JsonSerializable(typeof(EventPage))]
 [JsonSerializable(typeof(EventDetail))]
+[JsonSerializable(typeof(HistoryHorizon))]
 internal sealed partial class ReadJsonContext : JsonSerializerContext
 {
 }

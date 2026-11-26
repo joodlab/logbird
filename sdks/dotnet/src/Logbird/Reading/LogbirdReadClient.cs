@@ -81,6 +81,7 @@ public sealed class LogbirdReadClient : IDisposable
     private readonly string _viewerTokensUrl;
     private readonly string _facetsUrl;
     private readonly string _exportUrl;
+    private readonly string _projectUrl;
     private Lazy<Task<ServerVersion?>>? _serverVersion;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
@@ -129,6 +130,7 @@ public sealed class LogbirdReadClient : IDisposable
         _viewerTokensUrl = Endpoints.Append(endpoint, "/v1/viewer-tokens").AbsoluteUri;
         _facetsUrl = Endpoints.Append(endpoint, "/v1/facets").AbsoluteUri;
         _exportUrl = Endpoints.Append(endpoint, "/v1/export").AbsoluteUri;
+        _projectUrl = Endpoints.Append(endpoint, "/v1/project").AbsoluteUri;
         _authorization = new AuthenticationHeaderValue("Bearer", options.ReadKey);
         _timeout = options.Timeout;
         _ownsHttp = httpClient is null;
@@ -741,6 +743,21 @@ public sealed class LogbirdReadClient : IDisposable
         }
         return GetAsync(_eventsUrl + "/" + Uri.EscapeDataString(eventId), ReadJsonContext.Default.EventDetail, cancellationToken, notFoundIsNull: true);
     }
+
+    /// <summary>
+    /// Reads how far back this reader's history reaches (<c>GET /v1/project</c>): the project's retention window and the
+    /// oldest event the key or viewer token can see, within its scope. Use <see cref="HistoryHorizon.OldestEventAt"/> as the
+    /// <see cref="EventSearch.From"/> of a whole-history read, and do not take an empty history before it as proof that
+    /// nothing happened.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="LogbirdApiException">
+    /// The server answered an error (a server without this route answers 404 with code <c>not_found</c>), could not be
+    /// reached in time (<c>unreachable</c>), or answered something this SDK cannot read (<c>invalid_response</c>).
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public async Task<HistoryHorizon> GetHistoryHorizonAsync(CancellationToken cancellationToken = default)
+        => (await GetAsync(_projectUrl, ReadJsonContext.Default.HistoryHorizon, cancellationToken).ConfigureAwait(false))!;
 
     /// <inheritdoc />
     public void Dispose()
