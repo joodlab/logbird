@@ -28,7 +28,7 @@ Send events through HTTP or the TypeScript SDK. Search who did what, inspect bef
 Requires Docker Engine with Docker Compose and an SMTP provider for sign-in codes. The release ships `ghcr.io/joodlab/logbird-{app,server,worker,migrate}:0.4.0`.
 
 ```sh
-git clone https://github.com/joodlab/logbird.git
+git clone --branch v0.4.0 https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure APP_URL and SMTP in .env before starting.

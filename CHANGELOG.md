@@ -7,7 +7,7 @@
 ### Highlights
 
 - The console shows recorded field changes in record, actor and tenant histories. Queries can search change values (`changes.before`, `changes.after`) and the support person's name (`impersonator.name`), and Logbird keeps the JSON kind of each change value.
-- Every search, facet and export says which time window it read. TypeScript trail reads must name their window, and `iterateAuditTrail` reads every page of one.
+- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trail reads must name their window, and `iterateAuditTrail` reads every page of one.
 - The TypeScript SDK redacts common secret keys by default, accounts for every event through `flush()` and `shutdown()`, and refuses redirects. The GitHub Release attaches the TypeScript packages as tarballs with a `SHA256SUMS` file.
 
 ### Changes
@@ -70,6 +70,28 @@ document now describes every `/v1` read and its parameters, the sort order
 (events in the same millisecond are ordered by id, not by cause) and paging: a
 cursor carries no window, so send the first page's `range` back, and paging is
 not a snapshot. (#398)
+
+**History horizon.** `GET /v1/project` answers read keys, scoped read keys and
+viewer tokens with `retentionDays` and `oldestEventAt`. `oldestEventAt` is the
+`timestamp` of the oldest event this caller can find through search, within its
+scope, or `null` when it finds none: the first event an ascending search over
+the widest window returns to the same caller. It describes what is stored now,
+not proof of what happened: retention runs delete older events for good,
+raising retention brings none back, and the value can move back when an event
+dated in the past arrives, so read it again before each whole-history pass.
+`retentionDays` is the project's configured policy, the same for every reader
+and the one value new to a scoped reader. It is a policy, not a bound on what a
+search returns: between retention runs (hourly, and right after the policy is
+shortened) older events can still be found. For a whole-history read, search
+from `oldestEventAt` to `2299-12-31T23:59:59.999Z`, the end of the searchable
+range; a `to` from your own clock can miss an event dated up to a day after the
+server received it. Action prefixes have no index, so for a scope whose action
+prefixes match few or none of its tenant's events the route reads those events
+until the first match, within the same budget as a scoped search (#408). During
+a retention run it answers 503, like search. The TypeScript SDK adds
+`readHistoryHorizon(options)` and the .NET read client
+`GetHistoryHorizonAsync()`; against a server older than 0.4.0 they fail with
+`read_http_error` (status 404) and `LogbirdApiException` (`not_found`). (#411)
 
 **Ingest cuts and limits.** Ingest indexes at most 64 targets and 256 changes
 per event, and cuts a change field name to 256 UTF-16 code units (measured after
@@ -415,6 +437,9 @@ images publish. Run the migrate service before starting the new API and worker.
   strict end in a shared pattern, or prefer `addKeys`.
 - The TypeScript SDK does not surface ingest warnings, and the .NET
   `ExportAsync` does not expose the range headers.
+- `oldestEventAt` is what search finds now, not proof of what existed, and a
+  scope with rarely matching action prefixes makes `GET /v1/project` read more
+  (#408).
 - The `actor_email` mask covers the actor's and impersonator's email and name
   only, and does not recognise encoded addresses.
 - Edge cases in TypeScript SDK delivery and transport are tracked in #399, and
