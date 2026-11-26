@@ -83,3 +83,32 @@ test('skips reusable-workflow jobs and refuses a job whose steps it cannot read'
   const unreadable = 'jobs:\n  odd:\n    runs-on: ubuntu-latest\n    steps: [{uses: actions/checkout@v7}]\n';
   assert.match(checkoutOrderViolations(unreadable)[0], /no steps found/);
 });
+
+test('reads past column-0 comments between jobs and quoted job ids and uses values', () => {
+  const text = `on: push
+jobs:
+  first:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+# A comment between jobs.
+
+  'second':
+    runs-on: ubuntu-latest
+    steps:
+      - uses: "actions/download-artifact@v8"
+        with:
+          path: digests
+      # A comment inside the steps.
+      - uses: 'actions/checkout@v7'
+`;
+  assert.deepEqual(
+    workflowJobs(text).map((j) => j.id),
+    ['first', 'second'],
+  );
+  assert.equal(checkoutOrderViolations(text).length, 1);
+});
+
+test('refuses a workflow in which it finds no jobs', () => {
+  assert.match(checkoutOrderViolations('on: push\njobs: {}\n')[0], /no jobs found/);
+});

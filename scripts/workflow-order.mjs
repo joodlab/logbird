@@ -27,6 +27,9 @@ export function workflowJobs(text) {
     step = undefined;
   };
   for (const line of lines) {
+    // Comments and blank lines (at any indent) carry no structure; skipping them keeps a column-0 comment between jobs
+    // from ending the jobs map.
+    if (/^\s*(?:#.*)?$/.test(line)) continue;
     if (/^\S/.test(line)) {
       endStep();
       inSteps = false;
@@ -35,18 +38,18 @@ export function workflowJobs(text) {
       continue;
     }
     if (!inJobs) continue;
-    const jobId = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line);
+    const jobId = /^ {2}(["']?)([A-Za-z0-9_-]+)\1:\s*(?:#.*)?$/.exec(line);
     if (jobId) {
       endStep();
       inSteps = false;
-      job = { id: jobId[1], steps: [], hasSteps: false, reusable: false };
+      job = { id: jobId[2], steps: [], hasSteps: false, reusable: false };
       jobs.push(job);
       continue;
     }
     if (!job) continue;
     if (/^ {4}\S/.test(line)) {
       endStep();
-      inSteps = /^ {4}steps:\s*$/.test(line);
+      inSteps = /^ {4}steps:\s*(?:#.*)?$/.test(line);
       if (inSteps) job.hasSteps = true;
       if (/^ {4}uses:\s*\S/.test(line)) job.reusable = true;
       continue;
@@ -63,7 +66,7 @@ export function workflowJobs(text) {
   return jobs;
 }
 
-const usesOf = (step) => /^\s*(?:- )?uses:\s*([^\s#]+)/m.exec(step)?.[1] ?? '';
+const usesOf = (step) => /^\s*(?:- )?uses:\s*(["']?)([^\s#"']+)\1/m.exec(step)?.[2] ?? '';
 const isCheckout = (step) => /^actions\/checkout@/.test(usesOf(step));
 
 /** Why a step leaves files in the workspace that a later checkout would delete, or undefined when it does not. */
@@ -89,7 +92,9 @@ export function producesFiles(step) {
 /** Every checkout that follows a step which produced files in the same job. */
 export function checkoutOrderViolations(text, file = 'workflow') {
   const violations = [];
-  for (const job of workflowJobs(text)) {
+  const jobs = workflowJobs(text);
+  if (jobs.length === 0) violations.push(`${file}: no jobs found (the order check cannot read this workflow)`);
+  for (const job of jobs) {
     if (job.reusable) continue;
     if (!job.hasSteps || job.steps.length === 0) {
       violations.push(`${file}: job ${job.id}: no steps found (the order check cannot read this job)`);
