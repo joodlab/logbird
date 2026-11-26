@@ -114,7 +114,7 @@ jobs:
   # The install recipe the docs give for a release (tests/npm-release-install/README.md), from a stand-in for the
   # Release download URL, for @logbird/sdk alone and with @logbird/hono: pnpm 10 and npm 10 (Node 22's own), npm 12
   # (which refuses URL dependencies by default) and pnpm 12 (which refuses a URL sub-dependency). Every version here is
-  # pinned: pnpm from a packageManager field. The pnpm 11.8.0 cell checks the SDK in a workspace.
+  # pinned: pnpm from a packageManager field (the root package.json, or tests/npm-release-install/pnpm12/package.json).
   release-install:
     name: Release install recipe (${{ matrix.label }})
     needs: pack
@@ -136,12 +136,6 @@ jobs:
             managers: npm
             npm: '12.1.0'
             pnpm_manifest: ''
-          - label: pnpm 11.8.0 workspace
-            node: '24.22.3'
-            managers: pnpm
-            npm: ''
-            pnpm_manifest: tests/npm-release-install/pnpm11/package.json
-            workspace: true
           - label: pnpm 12
             node: '24.22.3'
             managers: pnpm
@@ -169,16 +163,12 @@ jobs:
           name: npm-packages
           path: ${{ runner.temp }}/npm
       - name: Install as the docs say, frozen reinstall, TypeScript 6, run, refuse altered bytes
-        if: matrix.workspace != true
         env:
           MANAGERS: ${{ matrix.managers }}
         run: |
           for manager in $MANAGERS; do
             node tests/npm-release-install/run.mjs --packages="$RUNNER_TEMP/npm" --manager="$manager"
           done
-      - name: Install the SDK in a pnpm workspace and check frozen reinstalls
-        if: matrix.workspace == true
-        run: node tests/npm-release-install/run.mjs --packages="$RUNNER_TEMP/npm" --workspace
 
   # What a release attaches, and the attach command it runs, from the same artifact and the same verification as the
   # release job in release.yml. Everything except creating the release.

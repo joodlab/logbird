@@ -154,8 +154,7 @@ SDK error objects that may contain sensitive details.
 
 Verify the tarball as above, then commit it under the package that uses it, for example
 `packages/app/vendor/logbird/logbird-sdk-X.Y.Z.tgz`. Use `file:vendor/logbird/logbird-sdk-X.Y.Z.tgz`
-in `packages/app/package.json` and commit the workspace lockfile. A root-level tarball also works
-when the build retains it at the path recorded in the lockfile.
+in `packages/app/package.json` and commit the workspace lockfile.
 
 If Docker installs from a pruned directory that contains only manifests and the lockfile,
 copy the app's `vendor/` directory into the install stage first. With the full workspace as
@@ -167,16 +166,17 @@ COPY packages/app/vendor/ ./packages/app/vendor/
 RUN pnpm install --frozen-lockfile
 ```
 
-A clean frozen install fails with `ENOENT` when that tarball is absent from the path in the lockfile.
+With pnpm 11.8.0, a clean frozen install failed with `ENOENT` when the tarball was missing
+from the path in the lockfile.
 
-When pnpm 11.8.0 reuses an SDK Release URL tarball from the store during workspace resolution,
-it can write the lockfile entry without `integrity`. When adding the SDK or bumping its version,
+In pnpm 11.8.0, workspace resolution has omitted `integrity` from the SDK's lockfile entry
+when reusing the Release URL tarball from the store. When adding the SDK or bumping its version,
 start with the lockfile from before the SDK change, keep the new URL in `package.json`, and run
 `pnpm install --lockfile-only --store-dir <empty temporary directory>` from the workspace root.
 Check for `integrity` in the SDK's lockfile entry, run `pnpm install --frozen-lockfile` with your
 normal store, then delete the temporary store.
 
-A frozen install with a missing hash prints this error.
+With the missing hash, pnpm 11.8.0 reported this error on frozen install.
 
 ```text
 [ERR_PNPM_MISSING_TARBALL_INTEGRITY] Cannot install package "@logbird/sdk@<Release URL>": its lockfile entry has no "integrity" field, so pnpm cannot verify the downloaded tarball.

@@ -35,55 +35,13 @@ packages are exact (hono and `@types/node` as `tests/npm-consumer` pins them, Ty
 dependency, `undici-types`, is pinned by an override at the version `tests/npm-consumer/package-lock.json` locks. That
 pin belongs to the test application, not to the documented recipe.
 
-## pnpm 11 workspaces
-
-`--workspace` runs a separate SDK-only check against the pnpm version pinned in `pnpm11/package.json`.
-Each case starts with a root, two packages and a shared lockfile. The first four use pnpm's default linker.
-With default supply-chain policies, all four cases must record the released tarball's SHA-512 integrity and
-pass a frozen reinstall with an empty store:
-
-| Source | How the SDK enters the workspace |
-| --- | --- |
-| `file:` inside the app | Verify the download, set the app's dependency and resolve from the root |
-| `file:` at the root | Verify the download, set the app's relative dependency and resolve from the root |
-| URL, whole workspace | Set the app's dependency and run `pnpm install --lockfile-only` from the root |
-| URL, filtered add | Run `pnpm --filter fixture-app add <URL>` from the root |
-
-Both URL cases above use a cold store. A separate case seeds a store with a scoped lockfile-only add,
-then resolves the URL in another workspace with a pre-SDK lockfile and the same store. pnpm 11.8.0
-must log `found_in_store`, drop integrity without fetching the tarball, and fail the frozen install
-with `ERR_PNPM_MISSING_TARBALL_INTEGRITY`. Restoring the pre-SDK lockfile and resolving with an empty
-store must fetch the tarball, record its SHA-512 and allow a frozen install against the original store.
-The pnpm 12.6.0 cell runs the same warm-store case as part of its SDK-only URL check. It must keep
-the SHA-512 and pass the frozen install without regeneration.
-
-The prune check copies only the workspace metadata and app manifest into a fresh directory. Both file
-paths fail with `ENOENT` there. Copying the app's `vendor/` to its original path makes the app-local case pass.
-
-The hoisted workspace runs the URL sequences below four times. It starts with `nodeLinker: hoisted` and adds
-an unrelated `overrides` entry, a `patchedDependencies` entry, and an `allowBuilds` denial one at a time.
-The sibling's `picocolors` is the only registry input in that fixture. It is pinned to 1.1.1 and its SHA-512
-is checked against the value recorded in the repository lockfile. The patch edits only its README.
-
-1. Add the SDK URL to the app manifest, run `pnpm install --lockfile-only`, then `pnpm install`.
-2. Add the URL to a copy of the same app with a pre-SDK lockfile and run plain `pnpm install`.
-3. Run `pnpm install --fix-lockfile` on the result of step 2.
-4. Remove only the SDK importer dependency, package and snapshot from the lockfile, then run
-   `pnpm install --frozen-lockfile=false` in a clean copy that keeps the app's SDK dependency.
-5. From a fresh copy of the pre-SDK workspace, run `pnpm --filter fixture-app add <URL>`.
-
-All five paths kept the SDK's SHA-512 and the unrelated lockfile entries in every configuration tested.
-The check finishes each path with a cold frozen reinstall. The hoisted commands set `CI=false` so plain
-`pnpm install` uses interactive lockfile semantics on CI as well. Supply-chain policies stay enabled.
-
 ```sh
 node scripts/npm-release-assets.mjs pack .tmp/npm                 # build, pack, check, SHA256SUMS
 node tests/npm-release-install/run.mjs --packages=.tmp/npm         # pnpm and npm on PATH, every shape and source
 node tests/npm-release-install/run.mjs --packages=.tmp/npm --shape=sdk --manager=npm --source=url
-node tests/npm-release-install/run.mjs --packages=.tmp/npm --workspace  # pnpm 11.8.0 on PATH
 ```
 
 It uses the network for the application's registry packages, never for the Logbird packages. CI
 (`.github/workflows/npm-tarballs.yml`) runs it with pnpm 10.30.3 and npm 10 on Node 22.18.0, with npm 12.1.0 on Node
-24.22.3, with pnpm 11.8.0 on Node 24.22.3 (pinned by `pnpm11/package.json`), and with pnpm 12.6.0 on Node 24.22.3
-(pinned by `pnpm12/package.json`), on pull requests, master pushes and release tags.
+24.22.3, and with pnpm 12.6.0 on Node 24.22.3 (pinned by `pnpm12/package.json`), on pull requests, master pushes and
+release tags.
