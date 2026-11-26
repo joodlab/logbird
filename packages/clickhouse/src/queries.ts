@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   AppliedRange,
   AuditEvent,
@@ -34,13 +34,13 @@ import {
 } from '@logbird/contracts';
 import type { z } from 'zod';
 import {
-  ACTOR_NAME_IS_SENSITIVE_SQL,
   ACTOR_NAME_MASK_PARAMS,
+  facetFlag,
   facetOrderParams,
   facetOrderSql,
-  MASKED_ACTOR_NAME_TEXT_SQL,
+  MASKED_NAME_COLUMNS,
   maskActorNameInFilter,
-  maskedEmail,
+  maskedFacetText,
 } from './actor-name-mask';
 import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
@@ -521,9 +521,49 @@ export async function histogram(
 const TARGET_COLUMNS = ['target_ids', 'target_types', 'target_names'];
 /** Two target-level facets expand ONE (id, type, name) tuple, so an id is never paired with another target's type. */
 const SHARED_TARGETS = 'ARRAY JOIN arrayZip(target_ids,target_types,target_names) AS facet_targets';
+const CHANGE_COLUMNS = ['changes_fields', 'changes_before', 'changes_after'];
+type SharedArrays = { join: string; changeRef?: (column: string) => string };
+/**
+ * The one expansion both facet levels share when both read the same array family, so an element is never paired with
+ * another element of the same event (an id with another target's type, a value with another change's field). Change
+ * levels zip only the columns they read (one column when both levels read the same one).
+ */
+function sharedArrays(field: string, by: string): SharedArrays | undefined {
+  const a = facetColumn(field) ?? '';
+  const b = facetColumn(by) ?? '';
+  if (TARGET_COLUMNS.includes(a) && TARGET_COLUMNS.includes(b)) return { join: SHARED_TARGETS };
+  if (!CHANGE_COLUMNS.includes(a) || !CHANGE_COLUMNS.includes(b)) return undefined;
+  if (a === b) return { join: `ARRAY JOIN ${a} AS facet_change`, changeRef: () => 'facet_change' };
+  return { join: `ARRAY JOIN arrayZip(${a},${b}) AS facet_changes`, changeRef: (column) => `facet_changes.${column === a ? 1 : 2}` };
+}
+/**
+ * How the second facet level selects its parents. Query parameters travel in the URL, so the exact values go as before
+ * unless their parameter would exceed what ClickHouse accepts: `http_max_field_value_size` (128 KiB by default, the
+ * decoded value) and `http_max_uri_size` (1 MiB, the encoded URL); large multipart fields are refused too. A change
+ * value can be 200 KB. Then the parents travel as MD5 digests, compared in SQL, and rows are matched back by exact value.
+ */
+const PARENTS_VALUE_BUDGET = 127 * 1024;
+const PARENTS_URL_BUDGET = 512 * 1024;
+/** A string as @clickhouse/client writes it inside an Array(String) parameter: quoted, with these five escapes. */
+const ESCAPES: Record<string, string> = { '\t': '\\t', '\n': '\\n', '\r': '\\r', "'": "\\'", '\\': '\\\\' };
+const paramLiteral = (text: string) => `'${text.replace(/[\t\n\r'\\]/g, (c) => ESCAPES[c] ?? c)}'`;
+/** The `param_<name>` value the driver would send for `texts` (UTF-8 bytes) and its form-encoded URL entry (bytes). */
+export function parentParamSize(name: string, texts: string[]) {
+  const value = `[${texts.map(paramLiteral).join(',')}]`;
+  return { valueBytes: Buffer.byteLength(value), urlBytes: new URLSearchParams({ [`param_${name}`]: value }).toString().length };
+}
+function parentFilter(texts: string[], expr: string, name: string) {
+  const size = parentParamSize(name, texts);
+  if (size.valueBytes <= PARENTS_VALUE_BUDGET && size.urlBytes <= PARENTS_URL_BUDGET)
+    return { sql: `${expr} IN {${name}:Array(String)}`, params: { [name]: texts } };
+  const digests = texts.map((t) => createHash('md5').update(t, 'utf8').digest('hex'));
+  return { sql: `lower(hex(MD5(${expr}))) IN {${name}Digests:Array(String)}`, params: { [`${name}Digests`]: digests } };
+}
 /** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
-function facetLevel(field: string, n: number, sharedTargets = false, maskName = false) {
+function facetLevel(field: string, n: number, sharedTargets = false, maskName = false, changeRef?: (column: string) => string) {
   const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
+  // impersonator.id gets the same label as impersonator (actor.id keeps its existing label, the id).
+  const canonical = field === 'impersonator.id' ? 'impersonator' : field;
   let expr = col ?? `attributes[{attr${n}:String}]`;
   let join = '';
   let label = expr;
@@ -534,16 +574,22 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     // The caller adds SHARED_TARGETS once for both levels.
     expr = `facet_targets.${TARGET_COLUMNS.indexOf(col) + 1}`;
     label = col === 'target_ids' ? 'facet_targets.3' : expr;
+  } else if (changeRef && col && CHANGE_COLUMNS.includes(col)) {
+    // The caller adds the shared change expansion once for both levels.
+    expr = changeRef(col);
+    label = expr;
   } else if (expr === 'target_ids') {
     join = `ARRAY JOIN arrayZip(target_ids,target_names) AS facet_target${n}`;
     expr = `facet_target${n}.1`;
     label = `facet_target${n}.2`;
-  } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
+  } else if (['target_types', 'target_names', 'changes_fields', 'changes_before', 'changes_after'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
-  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) {
-    label = maskName && field === 'actor' ? MASKED_ACTOR_NAME_TEXT_SQL : `${field}_name`;
-    if (maskName && field === 'actor') labelFlag = ACTOR_NAME_IS_SENSITIVE_SQL;
+  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(canonical)) {
+    // Under the mask, the actor's and the impersonator's labels follow the name rule (#333).
+    const masked = maskName ? MASKED_NAME_COLUMNS[`${canonical}_name`] : undefined;
+    label = masked?.text ?? `${canonical}_name`;
+    if (masked) labelFlag = masked.flag;
   } else if (!col) {
     // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
     // other element types keep their JSON text. An empty array contributes no group.
@@ -558,10 +604,11 @@ function facetLevel(field: string, n: number, sharedTargets = false, maskName = 
     label = expr;
   }
   // Under the actor_email mask a name that is the address leaves SQL as the lower-cased address plus its flag (#333).
-  if (maskName && col === 'actor_name') {
-    expr = MASKED_ACTOR_NAME_TEXT_SQL;
+  const maskedName = maskName && col ? MASKED_NAME_COLUMNS[col] : undefined;
+  if (maskedName) {
+    expr = maskedName.text;
     label = expr;
-    flag = ACTOR_NAME_IS_SENSITIVE_SQL;
+    flag = maskedName.flag;
     labelFlag = flag;
   }
   return { expr, label, flag, labelFlag, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };
@@ -608,15 +655,21 @@ async function facetCounts(
   if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values, otherCount };
   // Second level (#140): the top `byLimit` values of `by` within each returned value, and the count of the rest.
   // One bounded query: the outer filter keeps only the returned first-level values.
-  const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
-  const shared = isTarget(q.field) && isTarget(q.by);
-  const both = shared ? { one: facetLevel(q.field, 1, true), two: facetLevel(q.by, 2, true) } : { one, two: facetLevel(q.by, 2) };
+  const sharedJoin = sharedArrays(q.field, q.by);
+  const both = sharedJoin
+    ? { one: facetLevel(q.field, 1, true, false, sharedJoin.changeRef), two: facetLevel(q.by, 2, true, false, sharedJoin.changeRef) }
+    : { one, two: facetLevel(q.by, 2) };
   const two = both.two;
-  const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
+  const joins = sharedJoin?.join ?? `${one.join} ${two.join}`;
+  const parents = parentFilter(
+    values.map((v) => v.value),
+    'value',
+    'facetValues',
+  );
   const groups = await read<{ value: string; grp: string; label: string; count: number; total: number }>(
     ch,
-    `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE value IN {facetValues:Array(String)} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
-    { ...w.params, ...one.params, ...two.params, facetValues: values.map((v) => v.value), byLimit: q.byLimit ?? 5 },
+    `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE ${parents.sql} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
+    { ...w.params, ...one.params, ...two.params, ...parents.params, byLimit: q.byLimit ?? 5 },
   );
   for (const v of values) {
     const mine = groups.filter((g) => g.value === v.value);
@@ -642,9 +695,13 @@ async function maskedFacets(
   key: Buffer,
 ): Promise<FacetResponse> {
   const params = { ...ACTOR_NAME_MASK_PARAMS, ...facetOrderParams(key, p) };
-  const show = (flag: number | string, text: string) => (Number(flag) ? maskedEmail(p, text, key) : text);
+  const show = (flag: number | string, text: string) => maskedFacetText(p, flag, text, key);
   // The selected label leaves SQL as two scalar columns (never a tuple, whose JSON shape depends on server settings).
-  const label = (flag: number | string, text: string, shown: string) => (text ? show(flag, text) : shown);
+  // The flag is checked even for an empty label, so a malformed flag never passes unseen.
+  const label = (flag: number | string, text: string, shown: string) => {
+    const masked = show(flag, text);
+    return text ? masked : shown;
+  };
   const w = await where(ch, p, q, compiled, scope);
   const one = facetLevel(q.field, 1, false, true);
   type Row = { value: string; masked: number; labf: number; labt: string; count: number; total: number };
@@ -653,7 +710,8 @@ async function maskedFacets(
     `SELECT ${one.expr} value,${one.flag} masked,tupleElement(argMaxIf(tuple(${one.labelFlag},${one.label}),received_at,${one.label}!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value,masked ORDER BY count DESC,${facetOrderSql('masked', 'value')} LIMIT {facetLimit:UInt32}`,
     { ...w.params, ...one.params, ...params, facetLimit: q.limit },
   );
-  const keyOf = (flag: number | string, text: string) => `${Number(flag)}|${text}`;
+  // Group keys use the strictly checked flag, at both levels: a malformed flag throws instead of joining bucket 0.
+  const keyOf = (flag: number | string, text: string) => `${facetFlag(flag)}|${text}`;
   const values = rows.map((r) => {
     const value = show(r.masked, r.value);
     return {
@@ -669,19 +727,26 @@ async function maskedFacets(
   const otherCount = Math.max(total - values.reduce((n, v) => n + v.count, 0), 0);
   const strip = () => values.map(({ key: _key, ...v }) => v);
   if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values: strip(), otherCount };
-  const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
-  const shared = isTarget(q.field) && isTarget(q.by);
-  const both = shared
-    ? { one: facetLevel(q.field, 1, true, true), two: facetLevel(q.by, 2, true, true) }
+  const sharedJoin = sharedArrays(q.field, q.by);
+  const both = sharedJoin
+    ? { one: facetLevel(q.field, 1, true, true, sharedJoin.changeRef), two: facetLevel(q.by, 2, true, true, sharedJoin.changeRef) }
     : { one, two: facetLevel(q.by, 2, false, true) };
   const two = both.two;
-  const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
+  const joins = sharedJoin?.join ?? `${one.join} ${two.join}`;
   type Group = { value: string; masked: number; grp: string; gmasked: number; labf: number; labt: string; count: number; total: number };
+  const parents = parentFilter(
+    values.map((v) => v.key),
+    "concat(toString(masked),'|',value)",
+    'facetKeys',
+  );
   const groups = await read<Group>(
     ch,
-    `SELECT value,masked,grp,gmasked,tupleElement(argMaxIf(tuple(glf,glabel),received_at,glabel!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE concat(toString(masked),'|',value) IN {facetKeys:Array(String)} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
-    { ...w.params, ...one.params, ...two.params, ...params, facetKeys: values.map((v) => v.key), byLimit: q.byLimit ?? 5 },
+    `SELECT value,masked,grp,gmasked,tupleElement(argMaxIf(tuple(glf,glabel),received_at,glabel!='') AS lab,1) labf,tupleElement(lab,2) labt,count() count,sum(count()) OVER (PARTITION BY value,masked) total FROM (SELECT ${both.one.expr} value,${both.one.flag} masked,${two.expr} grp,${two.flag} gmasked,${two.labelFlag} glf,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE ${parents.sql} GROUP BY value,masked,grp,gmasked ORDER BY value,masked,count DESC,${facetOrderSql('gmasked', 'grp')} LIMIT {byLimit:UInt32} BY value,masked`,
+    { ...w.params, ...one.params, ...two.params, ...params, ...parents.params, byLimit: q.byLimit ?? 5 },
   );
+  // Every flag of every second-level row is checked before rows are matched to parents, so a malformed row fails the
+  // request even when it would match no parent.
+  for (const g of groups) for (const flag of [g.masked, g.gmasked, g.labf]) facetFlag(flag);
   for (const v of values) {
     const mine = groups.filter((g) => keyOf(g.masked, g.value) === v.key);
     v.groups = mine.map((g) => {
@@ -980,6 +1045,8 @@ export async function listFields(ch: ClickHouseClient, p: string, q: RangeQuery)
     // envelope field. An event carries it when it has a non-empty target id, exactly what the `target:*` filter matches.
     const array = QUERY_FIELDS.find((f) => f.column === col)?.type === 'array';
     if ((array && key !== 'target') || key === 'env') continue;
+    // Query fields added later are not reported here, so this page keeps its cost (one aggregate per reported field).
+    if (key === 'impersonator.name' || key === 'impersonator.id') continue;
     const value = `toString(${col})`;
     const ids = `arrayFilter(x -> x!='', ${col})`;
     // Each row's share is over its own query's total (`count()`, as in metrics()), so events arriving between two

@@ -1,4 +1,4 @@
-import type { QueryLang, SavedView, SuggestResponse } from '@logbird/contracts';
+import { isUnknownChangesKey, type QueryLang, type SavedView, type SuggestResponse } from '@logbird/contracts';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
@@ -149,6 +149,8 @@ function suggestField(context: QueryCompletion | SqlCompletion): string | null {
   if (/^(attr|attributes)\./.test(context.field)) return context.field;
   const core = coreField(context.field);
   if (core) return core.suggest === 'none' ? null : core.key;
+  // A changes.* key the server refuses has no values to offer (a literal attribute is reached as attr.changes.x).
+  if (isUnknownChangesKey(context.field)) return null;
   return context.field; // bare attribute key (metadata.channel)
 }
 
@@ -591,7 +593,8 @@ function querySuggestions(input: CompletionInput): Suggestion[] {
     });
   }
 
-  if (context.kind === 'value') return [...fix, ...queryValueItems(input, context)];
+  // A refused changes.* key gets no value snippets: every one of them would answer 422 (the hint names the fields).
+  if (context.kind === 'value') return isUnknownChangesKey(context.field) ? fix : [...fix, ...queryValueItems(input, context)];
   return fix;
 }
 

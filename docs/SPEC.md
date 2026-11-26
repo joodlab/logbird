@@ -493,7 +493,8 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
   by an origin on the minting key's `embedOrigins` (other browser origins: 403 `origin_not_allowed`); 401s are
   readable by any origin. Keys never get CORS.
 - **Masks:** `ip`, `user_agent` (emptied), `actor_email` (`masked:<hmac>` per project, HKDF info
-  `logbird-field-mask-v1`). Any mask nulls the detail payload and refuses `jsonl-evidence` (422 `masked_export`); a
+  `logbird-field-mask-v1`; covers the actor's email, the impersonator's email attribute `impersonator.email` (paths
+  below it are removed), and an actor or impersonator name that carries an address). Any mask nulls the detail payload and refuses `jsonl-evidence` (422 `masked_export`); a
   masked scope can't filter or facet on masked columns (422 `invalid_query`, reason `not_allowed`).
 - **Limits:** token reads also count per minting key and tenant (`VIEWER_READ_RATE_LIMIT_PER_MINUTE`, 300); minting per
   key (`VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE`, 600).
@@ -682,7 +683,9 @@ a OR b, (a OR b) c                OR and parentheses; implicit AND binds more ti
                                   max 4096 UTF-8 bytes, 64 terms, 16 nesting levels
 ```
 Parser lives in `packages/clickhouse/src/query` → parameterized SQL (never string-concatenate user input).
-Unknown `field:` prefixes are treated as `attr.<field>`. Ship unit tests for the parser.
+Unknown `field:` prefixes are treated as `attr.<field>`, except a `changes` key that is not `changes.field`,
+`changes.before` or `changes.after` (in any letter case), which is refused (422 `invalid_query`, `unknown_field`):
+the `changes` list is never stored as attributes. Ship unit tests for the parser.
 
 #### 5.1.1 Query language v2 (2026-11-05)
 Additive; every v0 query keeps its meaning. Field catalog (keys, aliases, types, columns): `QUERY_FIELDS` in
@@ -701,7 +704,7 @@ a AND b,  NOT a                   explicit AND / NOT keywords (upper-case), same
 ```
 Attribute values are strings; with comparisons/ranges they are read as numbers
 (`toFloat64OrNull(attributes[k])`), or as dates when the bound is a date. Rows whose value does not convert never
-match. Array fields (`target`, `target.type`, `target.name`, `changes.field`) match when any element matches.
+match. Array fields (`target`, `target.type`, `target.name`, `changes.field`, `changes.before`, `changes.after`) match when any element matches; any other `changes.*` key is refused (422 `invalid_query`, `unknown_field`).
 `record:<type>:<id>` checks a single target for both fields, splitting the value on its first unescaped colon. See [record selector escaping](query-language.md#query-language-langquery-default).
 
 Errors: HTTP 422 `invalid_query`, `details` = `QueryErrorDetails` (`lang`, `reason`, `start`/`end` UTF-16 offsets,

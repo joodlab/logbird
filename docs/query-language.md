@@ -20,9 +20,9 @@ Logbird searches one authorized project within a half-open UTC time range on the
 | Regex | action:/booking\.(created\|cancelled)/ | Whole-value anchored RE2; escape slash as \/; no lookaround/backreferences |
 | Value group | action:(booking.created OR booking.cancelled) | Scalar exact values compile to IN; negation excludes the group |
 | Prefix group | action:(booking.* OR hotel.*) | OR of prefix matches |
-| Attribute | metadata.channel:whatsapp | Unknown keys are attribute lookups; attr. and attributes. prefixes are aliases |
+| Attribute | metadata.channel:whatsapp | Unknown keys are attribute lookups; attr. and attributes. prefixes are aliases (except `changes.*`, below) |
 
-Arrays (target, target.type, target.name, changes.field) match any element. Attribute comparisons convert strings with toFloat64OrNull, or parseDateTime64BestEffortOrNull for date bounds; invalid conversions do not match. String fields do not support ordered comparisons. Quote values containing whitespace or grammar punctuation; quoted strings accept backslash escapes.
+Arrays (target, target.type, target.name, changes.field, changes.before, changes.after) match any element. Attribute comparisons convert strings with toFloat64OrNull, or parseDateTime64BestEffortOrNull for date bounds; invalid conversions do not match. String fields do not support ordered comparisons. Quote values containing whitespace or grammar punctuation; quoted strings accept backslash escapes.
 
 Use `\*` for a literal asterisk in a quoted or unquoted value. For example, `tenant:team\*` and `tenant:"team\*"` both match the exact ID `team*`. An unescaped trailing star remains a wildcard even inside quotes, and unescaped internal stars are literal. An unescaped `*` on its own checks presence. An odd number of consecutive backslashes escapes the following star. In a bare value, only the escaping backslash is removed.
 
@@ -71,6 +71,68 @@ Units are s/m/h/d/w; + and - offsets are supported, optionally followed by `/d`
 (round down to UTC midnight, e.g. now-7d/d). A compilation uses one clock instant;
 resolved dates are parameters. `NOT _exists_:field` means missing.
 
+## Change values and the impersonator name
+
+`changes.field`, `changes.before` and `changes.after` search the event's `changes` list: `changes.after:PUBLISHED`
+finds events where some change ended with the value `PUBLISHED`, and `changes.before:DRAFT` events where some change
+started from `DRAFT`. Like every array field they match any element, and they support exact values, prefixes
+(`changes.after:PUB*`), regexes, value groups, presence and negation, but not ordered comparisons (`changes.after:>x`
+and `changes.after:>*` are refused, as on every field that is not a number or date).
+
+A value matches its stored text, exactly and case-sensitively:
+
+| Sent value | Stored text | Query |
+| --- | --- | --- |
+| a string | the string as sent (not trimmed; an unpaired UTF-16 surrogate becomes U+FFFD) | `changes.after:PUBLISHED`, `changes.after:"In review"` |
+| a number | JavaScript's shortest spelling of the parsed number when that spelling has the same decimal value as the digits sent (`12.50` → `12.5`, `0.10` → `0.1`, `1e2` → `100`); otherwise the digits as sent (`12345678901234567890`) | `changes.after:12.5` |
+| `true` / `false` | `true` / `false` | `changes.after:true` |
+| `null` | `null` (the same as the text "null") | `changes.before:null` |
+| absent (no `before` or no `after`) | empty text (the same as an empty string) | `changes.before:""` |
+| an array or object | compact JSON text | `changes.after:"[\"a\",\"b\"]"` |
+
+Queries match only that text: `null` and the text "null", or an absent value and an empty string, match the same
+terms. A returned change may also carry `beforeKind` and `afterKind` (`absent`, `null`, `string`, `number`,
+`boolean`, `json`), which tell them apart when reading; those kinds are not query fields. Both are optional: they
+are absent on events stored before value kinds existed, and such events cannot tell `null` from the text "null"
+(or an absent value from an empty string).
+
+`changes.before:*` and `changes.after:*` mean some change has a non-empty value on that side. Up to 256 changes per
+event are indexed. Facets on these fields count elements, not events: an event with two changes to the same value
+counts twice. A two-level facet over two of them (`field=changes.field&by=changes.after`) pairs each field with its
+own values.
+
+The three fields are checked independently, like `target` and `target.type`. There is no query yet for "a given field
+changed to a given value". For example, to find when `status` became `PUBLISHED` you write
+`changes.field:status changes.after:PUBLISHED`, and that also matches an event where `status` changed from `DRAFT`
+to `REVIEW` while another field (say `label`) became `PUBLISHED`. Open the matching events and read their `changes`
+to be sure which field took the value. A paired selector is tracked in #410.
+
+Any other `changes` key (`changes.to`, `changes.value`, `changes` alone, or any of these in another letter case such
+as `Changes.field`) is refused with 422 `invalid_query`, reason `unknown_field`: the `changes` list is never stored
+as attributes, so such a key could never match. Use `attr.changes.<x>` to look up a custom attribute with that name
+(an event can carry one as a literal top-level dotted key). As a facet `field` or `by` (`/v1/facets?field=changes.to`)
+such a key is refused earlier, by the request schema, with 422 `validation_error` instead.
+
+Core fields always win over a literal attribute of the same name: `changes.before`, `changes.after`,
+`impersonator.name` and `impersonator.id` read the event's columns, so an attribute literally named `changes.after`
+(sent as a top-level dotted key) is reached only as `attr.changes.after`. Before these fields existed, such a term
+read that attribute.
+
+A refused key fails the whole query, not just its term: `action:invoice.paid OR changes.to:x` and
+`NOT changes.to:x` answer 422, and a webhook endpoint whose stored filter contains such a key is held for an edit.
+Write `attr.changes.to` for a literal attribute, or remove the term.
+
+`impersonator.name` is the display name of the support person acting as the actor, and `impersonator.id` is an alias
+of `impersonator`. Other `impersonator.*` keys are attribute lookups, because ingest keeps any other field sent with
+the impersonator as an attribute (`impersonator.email`, `impersonator.type`); a misspelled key such as
+`impersonator.nmae` therefore matches only events that carry that attribute. An impersonator sent with a name and
+no id is stored by name only: `impersonator.name` finds the event, but the event shows no impersonator (events show
+one only when it has an id; tracked in #409). Under a scope with the
+`actor_email` mask, a name that carries an address reads as an empty name, as for `actor.name`
+([scoped read access](scoped-read-access.md#masks)).
+
+These fields also work in webhook filters.
+
 ## Field catalog
 
 | Field | Aliases | Type | SQL column | Suggest source |
@@ -84,7 +146,8 @@ resolved dates are parameters. `NOT _exists_:field` means missing.
 | actor.type |  | string | actor_type | rollup |
 | actor.name |  | string | actor_name | entities |
 | actor.email |  | string | actor_email | column |
-| impersonator |  | string | impersonator_id | column |
+| impersonator | impersonator.id | string | impersonator_id | column |
+| impersonator.name |  | string | impersonator_name | none |
 | tenant |  | string | tenant_id | entities |
 | tenant.name |  | string | tenant_name | entities |
 | executor |  | string | executor_id | entities |
@@ -97,6 +160,8 @@ resolved dates are parameters. `NOT _exists_:field` means missing.
 | target.name |  | array | target_names | none |
 | record |  | record pair | target_types + target_ids | entities |
 | changes.field |  | array | changes_fields | none |
+| changes.before |  | array | changes_before | none |
+| changes.after |  | array | changes_after | none |
 | operation |  | string | operation_id | none |
 | parent |  | string | parent_event_id | none |
 | request |  | string | request_id | none |
@@ -162,7 +227,7 @@ A free-form SQL console is out of scope for Logbird Cloud; it may come later as 
 
 ## Limits and errors
 
-Query language: 4096 UTF-8 bytes, 64 terms and 16 nesting levels. SQL: 4096 UTF-8 bytes and 64 AST expression levels, plus the ClickHouse parser limits. Invalid expressions return HTTP 422 with code invalid_query and details {lang, reason, start, end, hint}. Offsets are half-open UTF-16 code units; null means no specific source span. Reasons: syntax, unknown_field, not_allowed, type, too_complex, limit. For example attempt:>abc reports type with [9,12) and hint "attempt is a number". Storage resource exhaustion reports limit with a hint to narrow the time range/filter. Infrastructure failures remain 503.
+Query language: 4096 UTF-8 bytes, 64 terms and 16 nesting levels. SQL: 4096 UTF-8 bytes and 64 AST expression levels, plus the ClickHouse parser limits. Invalid expressions return HTTP 422 with code invalid_query and details {lang, reason, start, end, hint}. Offsets are half-open UTF-16 code units; null means no specific source span. Reasons: syntax, unknown_field, not_allowed, type, too_complex, limit. In the query language, unknown_field means a `changes` key that is not `changes.field`, `changes.before` or `changes.after` (other unknown keys are attribute lookups). For example attempt:>abc reports type with [9,12) and hint "attempt is a number". Storage resource exhaustion reports limit with a hint to narrow the time range/filter. Infrastructure failures remain 503.
 
 ## Autocomplete
 

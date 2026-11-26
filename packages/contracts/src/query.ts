@@ -26,7 +26,7 @@ export type QueryLang = z.infer<typeof queryLangSchema>;
  */
 export const QUERY_ERROR_REASONS = [
   'syntax', // cannot be parsed
-  'unknown_field', // sql: identifier not in SQL_ALLOWED_COLUMNS (query lang treats unknown fields as attributes)
+  'unknown_field', // sql: identifier not in SQL_ALLOWED_COLUMNS; query: a `changes.<x>` key that is not a field (other unknown fields are attributes)
   'not_allowed', // sql: function/construct outside the allowlist (subquery, table function, SETTINGS, arrayJoin…)
   'type', // value does not fit the field (e.g. attempt:>abc, bad date, invalid regex)
   'too_complex', // byte/term/nesting limits
@@ -64,7 +64,9 @@ export interface QueryFieldInfo {
 
 /**
  * Core fields. Anything else (`metadata.channel`, `attr.metadata.channel`, `attributes.foo.bar`) is an attribute
- * lookup; attribute values compare as strings, or as numbers/dates when used with comparisons or ranges.
+ * lookup; attribute values compare as strings, or as numbers/dates when used with comparisons or ranges. Except
+ * `changes` and `changes.<x>`: the `changes` list is never flattened into attributes, so such a key could never match;
+ * any of them that is not a field below is refused (`CHANGES_FIELD_HINT`). `attr.changes.<x>` stays an attribute lookup.
  */
 export const QUERY_FIELDS: readonly QueryFieldInfo[] = [
   { key: 'action', type: 'string', column: 'action', description: 'What happened, e.g. booking.cancelled', suggest: 'rollup' },
@@ -76,7 +78,15 @@ export const QUERY_FIELDS: readonly QueryFieldInfo[] = [
   { key: 'actor.type', type: 'string', column: 'actor_type', description: 'user, service, system, api_key…', suggest: 'rollup' },
   { key: 'actor.name', type: 'string', column: 'actor_name', description: 'Actor display name', suggest: 'entities' },
   { key: 'actor.email', type: 'string', column: 'actor_email', description: 'Actor email', suggest: 'column' },
-  { key: 'impersonator', type: 'string', column: 'impersonator_id', description: 'Who acted on behalf of the actor', suggest: 'column' },
+  {
+    key: 'impersonator',
+    aliases: ['impersonator.id'],
+    type: 'string',
+    column: 'impersonator_id',
+    description: 'Who acted on behalf of the actor',
+    suggest: 'column',
+  },
+  { key: 'impersonator.name', type: 'string', column: 'impersonator_name', description: 'Impersonator display name', suggest: 'none' },
   { key: 'tenant', type: 'string', column: 'tenant_id', description: 'Which customer/account it happened in', suggest: 'entities' },
   { key: 'tenant.name', type: 'string', column: 'tenant_name', description: 'Tenant display name', suggest: 'entities' },
   { key: 'executor', type: 'string', column: 'executor_id', description: 'What performed it (API, worker, cron…)', suggest: 'entities' },
@@ -89,6 +99,20 @@ export const QUERY_FIELDS: readonly QueryFieldInfo[] = [
   { key: 'target.name', type: 'array', column: 'target_names', description: 'Record display name', suggest: 'none' },
   { key: 'record', type: 'record', description: 'Record type and id on the same target', suggest: 'entities' },
   { key: 'changes.field', type: 'array', column: 'changes_fields', description: 'Changed field names', suggest: 'none' },
+  {
+    key: 'changes.before',
+    type: 'array',
+    column: 'changes_before',
+    description: 'A changed value before the change, as stored text (any change of the event)',
+    suggest: 'none',
+  },
+  {
+    key: 'changes.after',
+    type: 'array',
+    column: 'changes_after',
+    description: 'A changed value after the change, as stored text (any change of the event)',
+    suggest: 'none',
+  },
   { key: 'operation', type: 'string', column: 'operation_id', description: 'Operation that grouped the work', suggest: 'none' },
   { key: 'parent', type: 'string', column: 'parent_event_id', description: 'Causing event id', suggest: 'none' },
   { key: 'request', type: 'string', column: 'request_id', description: 'Request id', suggest: 'none' },
@@ -101,6 +125,15 @@ export const QUERY_FIELDS: readonly QueryFieldInfo[] = [
   { key: 'receivedAt', type: 'date', column: 'received_at', description: 'When Logbird received it (UTC)', suggest: 'none' },
   { key: 'description', type: 'text', column: 'description', description: 'Human-readable summary', suggest: 'none' },
 ];
+
+/** Whether a bare query key names the never-flattened `changes` list without being one of its fields. */
+export const isUnknownChangesKey = (field: string) => {
+  // In any letter case: `Changes.field` is not a field (keys are case-sensitive) and can never match an attribute.
+  const lower = field.toLowerCase();
+  return (lower === 'changes' || lower.startsWith('changes.')) && !QUERY_FIELDS.some((f) => f.key === field || f.aliases?.includes(field));
+};
+export const CHANGES_FIELD_HINT =
+  'Use changes.field, changes.before or changes.after (lower case). Changes are not attributes, so another changes.* key never matches; use attr.<key> for a literal attribute.';
 
 /** Identifiers SQL mode may reference. `attributes` is Map(String, String): `attributes['metadata.plan'] = 'pro'`. */
 export const SQL_ALLOWED_COLUMNS = [

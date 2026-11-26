@@ -1190,14 +1190,41 @@ delivery. Replace the scope through PATCH to resume processing.
 
 `scope.mask` accepts `ip`, `user_agent` and `actor_email`. The signed event uses
 the same [field masks as scoped reads](scoped-read-access.md#masks), with empty
-IP and user agent, a stable project-keyed actor email hash, and the corresponding
-attribute paths removed. The webhook body is the event projection. It excludes
+IP and user agent, stable project-keyed hashes for the actor's and the
+impersonator's email (and for a name that carries one; the impersonator's are
+keyed by role, so they don't match an actor's), and the corresponding
+attribute paths removed (`context.ip`, `context.userAgent`, `actor.email`, and
+the paths below `impersonator.email`). The webhook body is the event projection. It excludes
 the original document. Create and PATCH reject filters on masked fields with
 HTTP 422 `invalid_query`. Retries and resends apply the endpoint's current scope
-and masks. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
+and masks. A masked endpoint whose stored filter names a field a mask now covers
+(for example `impersonator.email`) sends nothing and is held for a filter edit,
+like any stored filter that no longer compiles. Its pending deliveries were
+chosen by that old filter, and an edit sends those that match the new one, so
+the receiver could tell which events the old filter matched. To avoid that,
+replace such an endpoint instead of editing it: delete the held endpoint (its
+pending deliveries go with it), then create a new one with the corrected filter.
+The new endpoint has a new signing secret, so update the receiver, and its
+cursor starts at creation, so events that arrived while the old one was held
+are not delivered, and the deleted endpoint's pending deliveries (including any
+queued before the hold) are gone. Before deleting, note the earlier of the held
+endpoint's cursor time (the last arrival it scanned) and the arrival time
+(`receivedAt`) of its oldest delivery that is still pending or failed, so an
+event queued but never received is covered. To fill the gap, export with the
+same masked scope, the replacement filter plus `receivedAt:>=<that time>`, and a
+`from` wide enough to include events that occurred earlier but arrived late
+(export ranges select by occurrence time), then skip events the receiver has
+already processed by id. Deleting first also keeps a project at its endpoint
+limit able to create the replacement. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
 even when `WEBHOOK_SECRET_KEY` is configured separately. Upgrade all workers
 before enabling masks, and disable masked endpoints before rolling workers back
-to code that predates masks.
+to code that predates masks. Releases before the impersonator was covered by
+`actor_email` send and return the impersonator's email in clear to masked
+readers: upgrade every API and worker replica together (or drain the old ones)
+before relying on it. Before rolling back past that change, disable masked
+endpoints and masked keys, stop minting viewer tokens with masks (any read key
+can mint one), and keep viewer-token reads on upgraded replicas until the tokens
+already issued have expired (at most one hour, plus 30 seconds of clock skew).
 
 Secret rotation accepts an
 `overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH

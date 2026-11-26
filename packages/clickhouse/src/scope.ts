@@ -41,12 +41,50 @@ export const MASKED_COLUMNS: Record<NonNullable<ReadScope['mask']>[number], stri
   user_agent: 'user_agent',
   actor_email: 'actor_email',
 };
-/** Attribute paths a mask hides too (an event may carry them as literal dotted keys). */
+/**
+ * Attribute paths a mask removes (an event may carry them as literal dotted keys), each with every path below it: a
+ * literal key whose value is an object is flattened into child attributes (`"actor.name": {"en": ...}`). Every
+ * masked path matches attribute keys case-insensitively in ASCII (`impersonator.Email`, `Context.IP`): ingest keeps
+ * a key's case, and a privacy mask must not depend on the producer's spelling. Paths here are written in lower case.
+ */
 export const MASKED_ATTRIBUTES: Record<NonNullable<ReadScope['mask']>[number], string[]> = {
   ip: ['context.ip'],
-  user_agent: ['context.userAgent'],
-  actor_email: ['actor.email'],
+  user_agent: ['context.useragent'],
+  // Literal dotted copies of the masked fields (a top-level `"impersonator.name": ...` key is stored as an attribute):
+  // the name rule cannot judge them against their email, so they go, like `actor.email`.
+  actor_email: ['actor.email', 'actor.name', 'impersonator.name'],
 };
+/**
+ * Attribute paths a mask shows as a pseudonym instead of removing. Every path below one (`impersonator.email.work`, from
+ * an email sent as an object) is removed instead: its key is producer text and can itself be an address. Filters and
+ * facets on the path or below it are refused. Ingest keeps the impersonator's email, which the SDK input accepts, as
+ * the attribute `impersonator.email`.
+ */
+export const PSEUDONYMIZED_ATTRIBUTES: Record<NonNullable<ReadScope['mask']>[number], string[]> = {
+  ip: [],
+  user_agent: [],
+  actor_email: ['impersonator.email'],
+};
+/** ASCII lower case only (A-Z), the same as ClickHouse `lower`: Unicode case tables differ between the runtimes. */
+export const asciiLower = (text: string) => text.replace(/[A-Z]/g, (c) => c.toLowerCase());
+/** Whether `mask` pseudonymizes attribute `key` (the path itself, in any ASCII case). */
+export const pseudonymizedAttribute = (mask: ReadScope['mask'], key: string) =>
+  Boolean(mask?.some((preset) => PSEUDONYMIZED_ATTRIBUTES[preset].includes(asciiLower(key))));
+/** Whether `mask` removes attribute `key` because it lies below a pseudonymized path (in any ASCII case). */
+export const belowPseudonymizedAttribute = (mask: ReadScope['mask'], key: string) =>
+  Boolean(mask?.some((preset) => PSEUDONYMIZED_ATTRIBUTES[preset].some((path) => asciiLower(key).startsWith(`${path}.`))));
+const atOrBelow = (key: string, path: string) => {
+  const k = asciiLower(key);
+  return k === path || k.startsWith(`${path}.`);
+};
+/** Whether `mask` removes attribute `key`: a masked path, a path below one, or a path below a pseudonymized one. */
+export const removedAttribute = (mask: ReadScope['mask'], key: string) =>
+  Boolean(mask?.some((preset) => MASKED_ATTRIBUTES[preset].some((path) => atOrBelow(key, path)))) || belowPseudonymizedAttribute(mask, key);
+/** Whether `mask` hides attribute `key` (removed or pseudonymized), so a filter or facet on it would be an oracle. */
+export const maskedAttribute = (mask: ReadScope['mask'], key: string) =>
+  Boolean(mask?.some((preset) => MASKED_ATTRIBUTES[preset].some((path) => atOrBelow(key, path)))) ||
+  pseudonymizedAttribute(mask, key) ||
+  belowPseudonymizedAttribute(mask, key);
 
 /** Stable identity of a scope within a project, used to bind cursors to the project and scope that minted them. */
 export function scopeFingerprint(scope: ReadScope | null | undefined, projectId: string) {

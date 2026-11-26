@@ -309,3 +309,70 @@ describe('server follow-ups', () => {
     expect(Object.values(compileQuery('description:"x = y && !a:b"').params)).toEqual(['x = y && !a:b']);
   });
 });
+
+describe('change values and the impersonator name', () => {
+  it('matches any element of the before and after arrays, like changes.field', () => {
+    expect(compileQuery('changes.after:PUBLISHED')).toEqual({
+      sql: '(arrayExists(x -> x = {q0:String}, changes_after))',
+      params: { q0: 'PUBLISHED' },
+    });
+    expect(compileQuery('changes.before:DRAFT')).toEqual({ sql: '(arrayExists(x -> x = {q0:String}, changes_before))', params: { q0: 'DRAFT' } });
+    expect(compileQuery('changes.after:PUB*').sql).toBe('(arrayExists(x -> startsWith(x, {q0:String}), changes_after))');
+    expect(compileQuery('changes.before:*').sql).toBe("(arrayExists(x -> x != '', changes_before))");
+    expect(compileQuery('changes.after:(A OR B)').sql).toBe(
+      '((arrayExists(x -> x = {q0:String}, changes_after)) OR (arrayExists(x -> x = {q1:String}, changes_after)))',
+    );
+    // An empty quoted value matches a change whose value was absent (stored as empty text).
+    expect(compileQuery('changes.before:""')).toEqual({ sql: '(arrayExists(x -> x = {q0:String}, changes_before))', params: { q0: '' } });
+    expect(() => compileQuery('changes.after:>2')).toThrow(/does not support comparisons/);
+  });
+
+  it('reads the impersonator name column', () => {
+    expect(compileQuery('impersonator.name:"Rita Support"')).toEqual({ sql: '(impersonator_name = {q0:String})', params: { q0: 'Rita Support' } });
+    expect(compileQuery('impersonator.name:(a OR b)').sql).toBe('(impersonator_name IN ({q0:String},{q1:String}))');
+  });
+
+  it.each([
+    'changes.to:PUBLISHED',
+    'changes.value:x',
+    'changes:x',
+    '_exists_:changes.new',
+    'NOT changes.from:DRAFT',
+    'action:x OR changes.Field:status',
+  ])('refuses %s: changes are never attributes, so it could only ever match nothing', (q) => {
+    try {
+      compileQuery(q);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(QueryError);
+      const details = (error as QueryError).details;
+      expect(details).toMatchObject({ lang: 'query', reason: 'unknown_field' });
+      expect(details.hint).toMatch(/changes\.field, changes\.before or changes\.after/);
+      expect(q.slice(details.start ?? 0, details.end ?? 0)).toMatch(/changes/);
+    }
+  });
+
+  it('refuses the changes namespace in any letter case, and comparisons against * on non-numeric fields', () => {
+    for (const q of ['Changes.field:status', '_exists_:"CHANGES.after"', 'changes.Field:status'])
+      expect(() => compileQuery(q), q).toThrow(/Unknown field/);
+    for (const q of ['changes.after:>*', 'impersonator.name:<=*', 'actor:>*'])
+      expect(() => compileQuery(q), q).toThrow(/does not support comparisons/);
+    // Presence, _exists_ and a fully open range stay presence; numbers and dates keep their comparisons.
+    expect(compileQuery('changes.after:*').sql).toBe("(arrayExists(x -> x != '', changes_after))");
+    expect(compileQuery('_exists_:impersonator.name').sql).toBe("(impersonator_name != '')");
+    for (const q of ['attempt:>*', 'impersonator.type:>*', 'attr.changes.to:<=*', 'occurredAt:<*'])
+      expect(() => compileQuery(q), q).toThrow(/comparison needs a value/);
+    expect(compileQuery('attempt:[2 TO *]').sql).toBe('(job_attempt >= {q0:Float64})');
+  });
+
+  it('reads impersonator.id as the impersonator id', () => {
+    expect(compileQuery('impersonator.id:sup_rita')).toEqual(compileQuery('impersonator:sup_rita'));
+  });
+
+  it('keeps explicit attribute lookups and the other changes fields', () => {
+    expect(compileQuery('attr.changes.to:x').params).toEqual({ q0: 'changes.to', q1: 'x' });
+    expect(compileQuery('changes.field:status').sql).toBe('(arrayExists(x -> x = {q0:String}, changes_fields))');
+    // impersonator.* other than name stays an attribute (impersonator.email, impersonator.type).
+    expect(compileQuery('impersonator.type:user').params).toEqual({ q0: 'impersonator.type', q1: 'user' });
+  });
+});

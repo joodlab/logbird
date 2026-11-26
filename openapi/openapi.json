@@ -826,6 +826,7 @@
                                       "type": "array"
                                     },
                                     "mask": {
+                                      "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                       "example": [
                                         "ip",
                                         "user_agent"
@@ -2569,7 +2570,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -2585,7 +2586,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -3074,7 +3075,7 @@
                                 "type": "string"
                               },
                               "afterKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -3090,7 +3091,7 @@
                                 "type": "string"
                               },
                               "beforeKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -3372,7 +3373,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -3388,7 +3389,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -4043,12 +4044,16 @@
                     "actor.id",
                     "actor.name",
                     "actor.email",
+                    "impersonator.id",
+                    "impersonator.name",
                     "tenant.name",
                     "executor.name",
                     "job",
                     "attempt",
                     "target.name",
                     "changes.field",
+                    "changes.before",
+                    "changes.after",
                     "operation",
                     "parent",
                     "request",
@@ -4109,12 +4114,16 @@
                     "actor.id",
                     "actor.name",
                     "actor.email",
+                    "impersonator.id",
+                    "impersonator.name",
                     "tenant.name",
                     "executor.name",
                     "job",
                     "attempt",
                     "target.name",
                     "changes.field",
+                    "changes.before",
+                    "changes.after",
                     "operation",
                     "parent",
                     "request",
@@ -4984,6 +4993,7 @@
                                     "type": "array"
                                   },
                                   "mask": {
+                                    "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                     "example": [
                                       "ip",
                                       "user_agent"
@@ -5255,6 +5265,7 @@
                         "type": "array"
                       },
                       "mask": {
+                        "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                         "example": [
                           "ip",
                           "user_agent"
@@ -5430,6 +5441,7 @@
                                   "type": "array"
                                 },
                                 "mask": {
+                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                   "example": [
                                     "ip",
                                     "user_agent"
@@ -5944,6 +5956,7 @@
                                   "type": "array"
                                 },
                                 "mask": {
+                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                   "example": [
                                     "ip",
                                     "user_agent"
@@ -6310,7 +6323,7 @@
                               "type": "string"
                             },
                             "afterKind": {
-                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                               "enum": [
                                 "absent",
                                 "null",
@@ -6326,7 +6339,7 @@
                               "type": "string"
                             },
                             "beforeKind": {
-                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                               "enum": [
                                 "absent",
                                 "null",
@@ -6756,7 +6769,7 @@
                               "type": "string"
                             },
                             "afterKind": {
-                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                               "enum": [
                                 "absent",
                                 "null",
@@ -6772,7 +6785,7 @@
                               "type": "string"
                             },
                             "beforeKind": {
-                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                              "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                               "enum": [
                                 "absent",
                                 "null",
@@ -7320,7 +7333,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -7336,7 +7349,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -8548,7 +8561,7 @@
                                         "type": "string"
                                       },
                                       "afterKind": {
-                                        "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                        "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                         "enum": [
                                           "absent",
                                           "null",
@@ -8564,7 +8577,7 @@
                                         "type": "string"
                                       },
                                       "beforeKind": {
-                                        "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                        "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                         "enum": [
                                           "absent",
                                           "null",
@@ -10567,6 +10580,7 @@
                               {
                                 "properties": {
                                   "mask": {
+                                    "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                     "example": [
                                       "ip",
                                       "user_agent"
@@ -10836,6 +10850,7 @@
                         "additionalProperties": false,
                         "properties": {
                           "mask": {
+                            "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                             "example": [
                               "ip",
                               "user_agent"
@@ -11028,6 +11043,7 @@
                             {
                               "properties": {
                                 "mask": {
+                                  "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                                   "example": [
                                     "ip",
                                     "user_agent"
@@ -11669,6 +11685,7 @@
                         {
                           "properties": {
                             "mask": {
+                              "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                               "example": [
                                 "ip",
                                 "user_agent"
@@ -11938,6 +11955,7 @@
                         "additionalProperties": false,
                         "properties": {
                           "mask": {
+                            "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                             "example": [
                               "ip",
                               "user_agent"
@@ -12125,6 +12143,7 @@
                         {
                           "properties": {
                             "mask": {
+                              "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                               "example": [
                                 "ip",
                                 "user_agent"
@@ -13996,7 +14015,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -14012,7 +14031,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -15294,7 +15313,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -15310,7 +15329,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -16147,7 +16166,7 @@
                                 "type": "string"
                               },
                               "afterKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -16163,7 +16182,7 @@
                                 "type": "string"
                               },
                               "beforeKind": {
-                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                 "enum": [
                                   "absent",
                                   "null",
@@ -16445,7 +16464,7 @@
                                   "type": "string"
                                 },
                                 "afterKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -16461,7 +16480,7 @@
                                   "type": "string"
                                 },
                                 "beforeKind": {
-                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.",
+                                  "description": "Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text \"null\".",
                                   "enum": [
                                     "absent",
                                     "null",
@@ -17114,12 +17133,16 @@
                     "actor.id",
                     "actor.name",
                     "actor.email",
+                    "impersonator.id",
+                    "impersonator.name",
                     "tenant.name",
                     "executor.name",
                     "job",
                     "attempt",
                     "target.name",
                     "changes.field",
+                    "changes.before",
+                    "changes.after",
                     "operation",
                     "parent",
                     "request",
@@ -17180,12 +17203,16 @@
                     "actor.id",
                     "actor.name",
                     "actor.email",
+                    "impersonator.id",
+                    "impersonator.name",
                     "tenant.name",
                     "executor.name",
                     "job",
                     "attempt",
                     "target.name",
                     "changes.field",
+                    "changes.before",
+                    "changes.after",
                     "operation",
                     "parent",
                     "request",
@@ -17647,6 +17674,7 @@
                         "type": "array"
                       },
                       "mask": {
+                        "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                         "example": [
                           "ip",
                           "user_agent"
@@ -17743,6 +17771,7 @@
                           "type": "array"
                         },
                         "mask": {
+                          "description": "Field masks applied to every returned event. `ip` and `user_agent` empty `context.ip` and `context.userAgent`. `actor_email` shows `actor.email`, the impersonator email attribute `impersonator.email` and an actor or impersonator name that carries an address (contains `@` or a compatibility form of it, equals the email, or is 511 UTF-16 units or longer) as `masked:<24 hex>` pseudonyms, stable per project (impersonator pseudonyms are keyed by role, so they do not match the actor pseudonym of the same address), and removes attribute paths below `impersonator.email`. Every protected attribute path below covers the paths below it too, which are removed from events, and matches attribute keys in any ASCII letter case (`impersonator.Email`). A masked scope cannot filter or facet on what its masks hide (422 `invalid_query`, reason `not_allowed`): for `ip` the `ip` field and the `context.ip` attribute; for `user_agent` the `context.userAgent` attribute; for `actor_email` the `actor.email` field and attribute, the literal `actor.name` and `impersonator.name` attributes (removed from events too), and the `impersonator.email` attribute (as a facet, `field=attr.impersonator.email`). Other names stay readable: `actor.name` and `impersonator.name` filters read an address-carrying name as empty, and facets on `actor.name`, `actor`, `impersonator` and `impersonator.name` show an address-carrying name (as a value or label) as its pseudonym. Any mask drops the original payload. See docs/scoped-read-access.md#masks.",
                           "example": [
                             "ip",
                             "user_agent"

@@ -231,7 +231,7 @@ const changeText = z
   );
 const changeKind = changeValueKindSchema
   .describe(
-    'Original JSON kind for the corresponding value. Absent means the sender omitted that side. Omitted when the kind is unknown, such as for older events.',
+    'Original JSON kind for the corresponding value. Absent means the sender omitted that side. Optional: omitted when the kind is unknown, as on events stored before value kinds existed, which therefore cannot tell null from the text "null".',
   )
   .optional();
 
