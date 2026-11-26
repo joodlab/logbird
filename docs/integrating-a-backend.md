@@ -176,8 +176,13 @@ pnpm 10.30.3 and 12.6.0, using pnpm's default settings:
 
   The lockfile then pins the integrity even though the usual store holds the tarball, a
   frozen install with the usual store works, and a frozen install from an empty store
-  refuses other bytes. Before you commit
-  the lockfile, check that its entry for the tarball shows `integrity: sha512-…` (the
+  refuses other bytes. This works when the lockfile has no entry for the URL yet. An entry
+  that is already there without `integrity` stays that way: the lockfile is up to date, so
+  that command resolves nothing, and with pnpm 11 neither does `pnpm install --fix-lockfile`
+  from an empty store (with pnpm 10 it does add the integrity). To repair it, remove the dependency
+  from the app's `package.json`, run `pnpm install --lockfile-only` (the entry disappears),
+  add the dependency back and run the empty-store command above. Before you commit the
+  lockfile, check that its entry for the tarball shows `integrity: sha512-…` (the
   `openssl` command above prints the value to compare). Never commit a URL entry without one.
 - **pnpm 10** leaves the integrity out in the same cases without any error: its frozen
   install then installs whatever bytes the URL serves, an altered tarball included.

@@ -17,14 +17,22 @@ import { join } from 'node:path';
 // What each pnpm major did when this check was written. `storedUrl`: when the store already holds the tarball of a URL
 // dependency, does resolving it again write its integrity to the lockfile? `frozenWithout`: what a frozen install does
 // with a URL entry that has no integrity. `addWithStored`: what `pnpm --filter <app> add <URL>` does on such a store.
-// `prunedRoot`: the error of a frozen install in a copy that lacks the workspace root's file: tarball.
+// `prunedRoot`: the error of a frozen install in a copy that lacks the workspace root's file: tarball. `fixRepairs`:
+// whether `pnpm install --fix-lockfile` from an empty store adds the integrity to an entry already written without it.
 const OBSERVED = {
-  10: { storedUrl: 'drops integrity', frozenWithout: 'installs unverified', addWithStored: 'drops integrity', prunedRoot: 'ENOENT' },
+  10: {
+    storedUrl: 'drops integrity',
+    frozenWithout: 'installs unverified',
+    addWithStored: 'drops integrity',
+    prunedRoot: 'ENOENT',
+    fixRepairs: true,
+  },
   11: {
     storedUrl: 'drops integrity',
     frozenWithout: 'ERR_PNPM_MISSING_TARBALL_INTEGRITY',
     addWithStored: 'ERR_PNPM_MISSING_TARBALL_INTEGRITY',
     prunedRoot: 'ENOENT',
+    fixRepairs: false,
   },
   12: { storedUrl: 'keeps integrity', frozenWithout: null, addWithStored: 'keeps integrity', prunedRoot: 'ERR_PNPM_TARBALL_READ_LOCAL_TARBALL' },
 };
@@ -103,7 +111,8 @@ export async function workspaceCheck(ctx) {
   const depend = (ws, spec) => {
     const file = join(api(ws), 'package.json');
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    parsed.dependencies['@logbird/sdk'] = spec;
+    if (spec === null) delete parsed.dependencies['@logbird/sdk'];
+    else parsed.dependencies['@logbird/sdk'] = spec;
     writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
   };
   const lockOf = (ws) => readFileSync(join(ws, 'pnpm-lock.yaml'), 'utf8');
@@ -334,6 +343,50 @@ export async function workspaceCheck(ctx) {
     await reinstalls(ws, `${what}, frozen install with the usual store`, warm);
     await refusesAltered(ws, what, alterServed);
     lines.push(`workspace, ${what}: lockfile pins it with integrity`);
+  }
+  // 5b. A lockfile that already holds the entry without integrity: the same command leaves it as it is (the lockfile is
+  // up to date, so nothing is resolved). Removing the dependency, resolving, adding it back and resolving against an
+  // empty store repairs it. Only where pnpm drops the integrity in the first place.
+  if (observed.storedUrl === 'drops integrity') {
+    const what = 'URL, an existing entry without integrity';
+    const ws = await workspace('url-repair', warm);
+    depend(ws, sdkUrl);
+    await must(ws, ['install', '--no-frozen-lockfile'], warm, `${what}: pnpm install on the store that holds it`);
+    unpinned(ws, sdkUrl, what);
+    await must(
+      ws,
+      ['install', '--lockfile-only', '--no-frozen-lockfile'],
+      newStore(),
+      `${what}: pnpm install --lockfile-only --store-dir <empty folder>`,
+    );
+    unpinned(ws, sdkUrl, `${what}, after the empty-store --lockfile-only`);
+    const integrityless = lockOf(ws);
+    await must(
+      ws,
+      ['install', '--fix-lockfile', '--no-frozen-lockfile'],
+      newStore(),
+      `${what}: pnpm install --fix-lockfile --store-dir <empty folder>`,
+    );
+    if (observed.fixRepairs) pinned(ws, sdkUrl, `${what}, after the empty-store --fix-lockfile`);
+    else unpinned(ws, sdkUrl, `${what}, after the empty-store --fix-lockfile`);
+    // Back to the entry without integrity for the repair below.
+    writeFileSync(join(ws, 'pnpm-lock.yaml'), integrityless);
+    clean(ws);
+    depend(ws, null);
+    await must(ws, ['install', '--lockfile-only', '--no-frozen-lockfile'], warm, `${what}: removed from apps/api, pnpm install --lockfile-only`);
+    check(!lockOf(ws).includes(sdkUrl), `${what}: the lockfile no longer holds the URL`);
+    depend(ws, sdkUrl);
+    await must(
+      ws,
+      ['install', '--lockfile-only', '--no-frozen-lockfile'],
+      newStore(),
+      `${what}: added back, pnpm install --lockfile-only --store-dir <empty folder>`,
+    );
+    pinned(ws, sdkUrl, `${what}, removed and added back`);
+    await reinstalls(ws, `${what}, removed and added back`);
+    lines.push(
+      `workspace, ${what}: kept by an empty-store --lockfile-only; --fix-lockfile ${observed.fixRepairs ? 'repairs' : 'keeps'} it; repaired by removing it, resolving, adding it back`,
+    );
   }
   // 6. Not a workspace effect: a single project on the same store.
   {

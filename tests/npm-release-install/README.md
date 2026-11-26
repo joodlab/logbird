@@ -55,7 +55,10 @@ outcomes are recorded.
   pnpm 10's frozen install succeeds and also installs altered bytes. pnpm 12 pins the integrity every time. A single
   project (`pnpm add <URL>`) on that store behaves the same way.
 - The recipe the docs give for the URL: resolve with an empty `--store-dir` while the usual store holds the tarball. The
-  lockfile pins it, a frozen install with the usual store works, and altered bytes are refused.
+  lockfile pins it, a frozen install with the usual store works, and altered bytes are refused. Where pnpm drops the
+  integrity (10 and 11), an entry already written without it stays without it under that command; `--fix-lockfile`
+  from an empty store adds it with pnpm 10 and not with pnpm 11; removing the dependency, resolving, adding it back and
+  resolving against an empty store pins it with both.
 
 Nothing resolves an unpinned version, so the release workflow runs this check: the test application's registry
 packages are exact (hono and `@types/node` as `tests/npm-consumer` pins them, TypeScript 6.0.3), and `@types/node`'s one

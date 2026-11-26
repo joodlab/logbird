@@ -39,8 +39,10 @@ whatever the store holds, and a build that prunes the workspace per app keeps th
 tarball at the workspace root works too, but a pruned copy without it fails (`ENOENT`). With
 the Release URL, pnpm 11 writes no integrity when its store already holds the tarball, and
 the next frozen install stops with `ERR_PNPM_MISSING_TARBALL_INTEGRITY` (`pnpm --filter <app> add <URL>`
-stops with it itself); resolving once with `pnpm install --lockfile-only --store-dir "$(mktemp -d)"`
-avoids that. Details and the exact errors are in
+stops with it itself). Resolving a new URL dependency once with
+`pnpm install --lockfile-only --store-dir "$(mktemp -d)"` avoids that; an entry already written
+without integrity stays so until you remove the dependency, resolve, and add it back. Details
+and the exact errors are in
 [pnpm 11 workspaces](https://github.com/joodlab/logbird/blob/master/docs/integrating-a-backend.md#pnpm-11-workspaces).
 Publishing to the npm registry would remove this problem; that is planned, but not done.
 
