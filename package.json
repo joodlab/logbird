@@ -40,24 +40,24 @@
     "release:notes:dry": "node scripts/release-notes.mjs --dry"
   },
   "devDependencies": {
-    "@babel/parser": "7.29.13",
-    "@babel/traverse": "7.29.13",
-    "@biomejs/biome": "2.5.11",
+    "@babel/parser": "8.1.3",
+    "@babel/traverse": "8.1.3",
+    "@biomejs/biome": "2.6.8",
     "@logbird/clickhouse": "workspace:*",
     "@logbird/contracts": "workspace:*",
     "@logbird/database": "workspace:*",
     "@logbird/sdk": "workspace:*",
     "@logbird/seed": "workspace:*",
     "@logbird/tsconfig": "workspace:*",
-    "changelogithub": "13.16.1",
-    "tsx": "4.23.13",
-    "turbo": "^2.10.12",
+    "changelogithub": "15.0.5",
+    "tsx": "4.23.15",
+    "turbo": "^2.11.13",
     "typescript": "^7.0.2",
-    "ultracite": "7.10.7",
-    "vitest": "^4.1.11",
+    "ultracite": "8.3.1",
+    "vitest": "^5.1.1",
     "pg": "8.23.1",
     "@types/pg": "^8.23.1",
-    "ioredis": "^6.0.0"
+    "ioredis": "^6.1.0"
   },
   "version": "0.4.1"
 }
