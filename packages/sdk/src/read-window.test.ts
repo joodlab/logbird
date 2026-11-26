@@ -562,7 +562,7 @@ describe('closed check: inherited fields, single pages and wire shapes', () => {
   });
 
   it('refuses a detail whose attributes are a number', async () => {
-    const body = `{"event":${JSON.stringify(event('e1')).replace('"attributes":{}', '"attributes":9007199254740993')},"payload":null,"parents":[],"childCount":0,"operationSize":1}`;
+    const body = `{"event":${JSON.stringify(event('e1')).replace('"attributes":{}', '"attributes":12')},"payload":null,"parents":[],"childCount":0,"operationSize":1}`;
     const fetch = vi.fn(async () => new Response(body, { status: 200 }));
     const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
     await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: 'read_invalid_response' });
@@ -604,5 +604,116 @@ describe('review threads', () => {
       ).rejects.toMatchObject({ code: 'read_invalid_response' });
       expect(seen).toEqual([]);
     }
+  });
+
+  it('refuses attributes that are a number past 2^53: as a shape where digits are kept, as inexact where they cannot be', async () => {
+    const body = `{"event":${JSON.stringify(event('e1')).replace('"attributes":{}', '"attributes":9007199254740993')},"payload":null,"parents":[],"childCount":0,"operationSize":1}`;
+    const fetch = vi.fn(async () => new Response(body, { status: 200 }));
+    const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+    await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: supportsExactJson ? 'read_invalid_response' : 'read_inexact_number' });
+  });
+
+  it('reads a field a Proxy serves with no descriptor anywhere, and still ignores one Object.prototype holds', () => {
+    const virtual = new Proxy({} as Record<string, unknown>, {
+      get: (object, key) => (key === 'tenant' ? 'acme' : key === 'range' ? { from: FROM } : key === 'order' ? 'asc' : Reflect.get(object, key)),
+    });
+    expect(trailQuery(virtual as unknown as TrailQuery)).toMatchObject({ from: FROM, order: 'asc', q: 'tenant:"acme"' });
+    const proto = Object.prototype as Record<string, unknown>;
+    proto.range = { from: FROM };
+    try {
+      const forwarding = new Proxy({} as Record<string, unknown>, { get: (object, key) => (key === 'tenant' ? 'acme' : Reflect.get(object, key)) });
+      expect(() => trailQuery(forwarding as unknown as TrailQuery)).toThrow(/needs a `range`/);
+    } finally {
+      delete proto.range;
+    }
+  });
+
+  it('never takes q, range.from, range.to, limit or cursor from Object.prototype for an ordinary object', () => {
+    const proto = Object.prototype as Record<string, unknown>;
+    Object.assign(proto, { q: 'action:"deleted"', from: '2026-10-01T00:00:00.000Z', to: TO, limit: 5, cursor: 'planted' });
+    try {
+      const query = trailQuery({ tenant: 'acme', range: { from: FROM } });
+      expect(query.q).toBe('tenant:"acme"');
+      expect(query.from).toBe(FROM);
+      for (const key of ['to', 'limit', 'cursor']) expect(Object.hasOwn(query, key)).toBe(false);
+      expect(() => trailQuery({ tenant: 'acme', range: { to: TO } } as unknown as TrailQuery)).toThrow(TrailQueryError);
+    } finally {
+      for (const key of ['q', 'from', 'to', 'limit', 'cursor']) delete proto[key];
+    }
+  });
+
+  it('refuses a detail that does not own its event, parents, child count or operation size', async () => {
+    const own = { event: event('e1'), parents: [], childCount: 0, operationSize: 1 };
+    const proto = Object.prototype as Record<string, unknown>;
+    for (const field of Object.keys(own) as (keyof typeof own)[]) {
+      const { [field]: inherited, ...rest } = own;
+      const fetch = vi.fn(async () => json({ ...rest, payload: null }));
+      const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+      proto[field] = inherited;
+      try {
+        await expect(readAuditEvent(options, 'e1')).rejects.toMatchObject({ code: 'read_invalid_response' });
+      } finally {
+        delete proto[field];
+      }
+    }
+  });
+
+  it('uses the transport it was created with, the default fetch included', async () => {
+    const created = vi.fn(async () => json({ data: [event('a')], nextCursor: null, total: 1, range: { from: FROM, to: TO }, tookMs: 1 }));
+    const later = vi.fn(async () => json({ data: [], nextCursor: null, total: 0, range: { from: FROM, to: TO }, tookMs: 1 }));
+    vi.stubGlobal('fetch', created);
+    try {
+      const pass = iterateAuditTrail({ endpoint: 'https://logbird.test', readKey: 'k' }, { tenant: 'acme', range: { from: FROM } });
+      vi.stubGlobal('fetch', later);
+      const seen: string[] = [];
+      for await (const e of pass) seen.push(e.id);
+      expect(seen).toEqual(['a']);
+      expect(created).toHaveBeenCalledTimes(1);
+      expect(later).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('takes a window only from a page that owns it, with its own from and to', async () => {
+    const proto = Object.prototype as Record<string, unknown>;
+    const drain = async (page: Record<string, unknown>) => {
+      const fetch = vi.fn(async () => json({ data: [event('a')], nextCursor: null, total: 1, tookMs: 1, ...page }));
+      const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+      const seen: string[] = [];
+      await expect(
+        (async () => {
+          for await (const e of iterateAuditTrail(options, { tenant: 'acme', range: { from: FROM } })) seen.push(e.id);
+        })(),
+      ).rejects.toMatchObject({ code: 'read_window_unverified' });
+      expect(seen).toEqual([]);
+    };
+    proto.range = { from: FROM, to: TO };
+    try {
+      await drain({});
+    } finally {
+      delete proto.range;
+    }
+    Object.assign(proto, { from: FROM, to: TO });
+    try {
+      await drain({ range: {} });
+    } finally {
+      delete proto.from;
+      delete proto.to;
+    }
+  });
+
+  it('with `to` omitted, refuses a reported end after what the store can hold', async () => {
+    const fetch = vi.fn(async () =>
+      json({ data: [event('a')], nextCursor: null, total: 1, range: { from: FROM, to: '2300-01-01T00:00:00.000Z' }, tookMs: 1 }),
+    );
+    const options = { endpoint: 'https://logbird.test', readKey: 'k', fetch: fetch as unknown as typeof globalThis.fetch };
+    const seen: string[] = [];
+    await expect(
+      (async () => {
+        for await (const e of iterateAuditTrail(options, { tenant: 'acme', range: { from: FROM } })) seen.push(e.id);
+      })(),
+    ).rejects.toMatchObject({ code: 'read_window_unverified' });
+    expect(seen).toEqual([]);
   });
 });

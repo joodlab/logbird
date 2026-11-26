@@ -274,9 +274,13 @@ function frozen<T extends object>(fields: T): Readonly<T> {
  * A field read once, as the boundary reads any field (own, inherited from a class, or served by a Proxy), except a value
  * that only Object.prototype holds: a window or an order added there must never choose a trail's window for it.
  */
-function notFromObjectPrototype(input: object, key: 'range' | 'order'): unknown {
+function notFromObjectPrototype(input: object, key: string): unknown {
   for (let object: object | null = input; object !== null; object = Object.getPrototypeOf(object)) {
-    if (object === Object.prototype) return undefined;
+    if (object === Object.prototype) {
+      // Ignored only when Object.prototype itself holds the key: that value is not the caller's.
+      if (Object.hasOwn(Object.prototype, key)) return undefined;
+      break;
+    }
     if (Object.getOwnPropertyDescriptor(object, key)) break;
   }
   return (input as Record<string, unknown>)[key];
@@ -300,22 +304,22 @@ export function snapshotTrail(input: TrailInput, where = 'trailQuery'): TrailSna
   const actor = givenActor.present ? selector(where, 'actor', givenActor.value) : undefined;
   const givenTenant = readOnce(input, 'tenant');
   const tenant = givenTenant.present ? selector(where, 'tenant', givenTenant.value) : undefined;
-  const q = optionalText(where, 'q', (input as { q?: unknown }).q);
+  const q = optionalText(where, 'q', notFromObjectPrototype(input, 'q'));
   const givenRange: unknown = notFromObjectPrototype(input, 'range');
   let range: TrailSnapshot['range'];
   if (givenRange === SERVER_DEFAULT_RANGE) range = SERVER_DEFAULT_RANGE;
   else if (givenRange !== undefined) {
     if (!isRecord(givenRange)) return fail(where, '`range` must be an object with `from` and/or `to`.');
-    const from = rangeBound(where, 'range.from', (givenRange as { from?: unknown }).from);
-    const to = rangeBound(where, 'range.to', (givenRange as { to?: unknown }).to);
+    const from = rangeBound(where, 'range.from', notFromObjectPrototype(givenRange, 'from'));
+    const to = rangeBound(where, 'range.to', notFromObjectPrototype(givenRange, 'to'));
     // A range with neither bound (say `{ start, end }`) would fall back to the server's default window.
     if (from === undefined && to === undefined)
       return fail(where, '`range` was given without `from` or `to`; pass `from` (a trail needs it), or `range: SERVER_DEFAULT_RANGE`.');
     range = frozen({ from, to });
   }
   const order = optionalChoice(where, 'order', notFromObjectPrototype(input, 'order'), ['asc', 'desc'] as const);
-  const limit = optionalLimit(where, (input as { limit?: unknown }).limit);
-  const cursor = optionalText(where, 'cursor', (input as { cursor?: unknown }).cursor);
+  const limit = optionalLimit(where, notFromObjectPrototype(input, 'limit'));
+  const cursor = optionalText(where, 'cursor', notFromObjectPrototype(input, 'cursor'));
   return frozen({
     target,
     actor,
@@ -692,6 +696,7 @@ export async function readAuditEvent(options: ReadOptions, id: string, signal?: 
     // Only the detail of the id asked for: never another event (a cache answering for another id) or an error envelope.
     if (
       !detail ||
+      !['event', 'parents', 'childCount', 'operationSize', 'payload'].every((field) => Object.hasOwn(detail, field)) ||
       !isStoredEvent(detail.event) ||
       (detail.event as AuditEvent).id !== eventId ||
       !Array.isArray(detail.parents) ||
@@ -746,6 +751,8 @@ const instant = (value: unknown): value is string =>
 const validRange = (range: unknown): range is { from: string; to: string } =>
   !!range &&
   typeof range === 'object' &&
+  Object.hasOwn(range, 'from') &&
+  Object.hasOwn(range, 'to') &&
   instant((range as { from?: unknown }).from) &&
   instant((range as { to?: unknown }).to) &&
   (range as { from: string }).from < (range as { to: string }).to;
@@ -784,10 +791,11 @@ export function iterateAuditTrail(options: ReadOptions, trail: WholeTrailQuery, 
     throw new LogbirdError('read_request_failed');
   }
   if (transport !== undefined && typeof transport !== 'function') fail('iterateAuditTrail', '`fetch` must be a function.');
+  // The default transport too: a later change to globalThis.fetch does not reach a pass already created.
   const reader: ReadOptions = Object.freeze({
     endpoint: text('iterateAuditTrail', 'endpoint', options.endpoint),
     readKey: text('iterateAuditTrail', 'readKey', options.readKey),
-    ...(transport === undefined ? {} : { fetch: transport as typeof fetch }),
+    fetch: (transport ?? globalThis.fetch) as typeof fetch,
   });
   return pages(reader, first, signal);
 }
@@ -800,9 +808,14 @@ async function* pages(reader: ReadOptions, first: Partial<SearchQuery>, signal?:
   for (;;) {
     // readAuditTrail checks the page's shape (rows, nextCursor null or a string); the window is checked here.
     const page = await readAuditTrail(reader, query, signal);
-    const reported: unknown = page.range;
+    const reported: unknown = Object.hasOwn(page, 'range') ? page.range : undefined;
     if (pinned ? !validRange(reported) || reported.from !== pinned.from || reported.to !== pinned.to : reported !== undefined) {
-      if (pinned || !validRange(reported) || !sameBound(asked.from, reported.from) || (asked.to !== undefined && !sameBound(asked.to, reported.to)))
+      if (
+        pinned ||
+        !validRange(reported) ||
+        !sameBound(asked.from, reported.from) ||
+        (asked.to !== undefined ? !sameBound(asked.to, reported.to) : Date.parse(reported.to) > STORE_MAX)
+      )
         throw new LogbirdError('read_window_unverified');
       pinned = { from: reported.from, to: reported.to };
     }

@@ -190,6 +190,8 @@ const detail = first ? await readAuditEvent(options, first.id) : null; // parent
 
 ### Reading a whole trail
 
+Use `https` for any endpoint that leaves a trusted network: the read key is sent as a bearer header.
+
 The console's record page shows a record's history; `iterateAuditTrail` with that record as `target: { type, id }` (a
 `record:` selector) and an explicit `range` is its programmatic equivalent, and the `range` each page reports is the
 window the server applied.
