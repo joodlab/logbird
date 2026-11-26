@@ -7,7 +7,7 @@
 ### Highlights
 
 - The console shows recorded field changes in record, actor and tenant histories. Queries can search change values (`changes.before`, `changes.after`) and the support person's name (`impersonator.name`), and Logbird keeps the JSON kind of each change value.
-- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trails built with `trailQuery` must name their window, and `iterateAuditTrail` reads every page of one. A new guide, [Read a record's whole history back](docs/reading-history.md), shows how to put these together.
+- Every search, facet and export says which time window it read, and `GET /v1/project` tells a read key how far back its history reaches. TypeScript trails built with `trailQuery` must name their window, and `iterateAuditTrail` reads every page of one. A new guide, [Read a record's whole history back](https://github.com/joodlab/logbird/blob/v0.4.0/docs/reading-history.md), shows how to put these together.
 - The TypeScript SDK redacts common secret keys by default, accounts for every event through `flush()` and `shutdown()`, and refuses redirects. The GitHub Release attaches the TypeScript packages as tarballs with a `SHA256SUMS` file.
 
 ### Changes
