@@ -252,7 +252,17 @@ use "Re-run failed jobs" within that time):
   An alias that points anywhere else belongs to the run that should have moved it: re-run
   that newer release's failed alias jobs (within its seven days), not this one's, which
   leaves it alone on purpose.
-- **More than seven days later**, the digest, receipt and npm artifacts are gone and a
+- **npm registry publish failed after the GitHub Release**: exact images, the
+  GitHub Release and image aliases are already available. Fix any npm setup or
+  network issue, then re-run the failed npm publish job. It downloads the
+  attached tarballs again and skips each version whose registry integrity
+  matches. This recovery uses the published Release assets and still works after
+  the workflow artifacts expire. If a newer release reached npm in the meantime,
+  the re-run publishes what is missing under the `backfill` dist-tag and leaves
+  `latest` alone. If a version exists with different bytes,
+  stop and investigate the discrepancy. If the intended tarball still needs
+  publishing, cut a new release version. npm versions cannot be reused.
+- **For the image, Release and alias jobs more than seven days later**, the digest, receipt and npm artifacts are gone and a
   re-run cannot finish. Do not rebuild under the same version: release the next patch
   version. If the stopped run never published its GitHub Release, the X.Y.Z image tags it
   wrote stay unannounced; if the release did go live, those tags are announced by it, and
@@ -275,10 +285,21 @@ The owner explicitly authorized these PR builds and tag-driven publication.
 
 ## npm tarballs on the GitHub Release
 
-The TypeScript packages are not published to npm: the npm scope and token are still
-an owner decision, and no workflow can publish them. Every release attaches them to its
-GitHub Release instead, so applications install an exact version from there (the recipe
-is in [Install the SDK](integrating-a-backend.md#install-the-sdk)):
+Every release attaches the five public TypeScript packages to its GitHub Release.
+With `NPM_PUBLISH_ENABLED` unset, those tarballs are the only publication. The
+[SDK install guide](integrating-a-backend.md#install-the-sdk) shows how to install
+an exact version from the Release.
+
+With `NPM_PUBLISH_ENABLED` set to `true`, the release also publishes them to npm.
+After the GitHub Release and image aliases succeed, the publish job downloads
+the attached files and verifies all five against `SHA256SUMS`. It publishes the
+SDK first, then the four adapters. Release preflight accepts stable `vX.Y.Z`
+tags only, so a package takes npm's `latest` dist-tag. The one exception is a
+re-run of an older release after a newer one is on npm: a missing package of
+the older version is published under the `backfill` dist-tag, and `latest`
+stays on the newer version. The job uses Node
+24.22.3 and npm 12.1.0 on a GitHub-hosted runner. npm uses GitHub Actions OIDC and
+automatically adds provenance for these public packages from this public repo.
 
 | Asset | Package |
 | --- | --- |
@@ -323,7 +344,7 @@ tarballs, then the aliases) or stops in one of the documented intermediate state
 which moves an alias before the release exists or publishes a release without its exact
 image indexes and tarballs.
 A pull request's run of the npm workflow shows the asset set a release of that commit
-would attach.
+would attach. npm also validates all five tarballs with an offline publish dry run.
 
 **What gates a release.** On a tag, the npm workflow runs with `release: true`, and only
 checks whose inputs the repository pins can fail it: exact Node versions (20.20.2,
@@ -341,6 +362,37 @@ failing check. A registry or network error is fixed by "Re-run failed jobs" (the
 builds need the registry too). A real failure needs a fix on master and a new version;
 never move the tag. For a failure after the npm job, see the recovery list under
 [What the tag workflow does](#what-the-tag-workflow-does).
+
+## One-time npm setup (owner)
+
+1. Create or confirm the npm organization that owns the `@logbird` scope. Use an
+   npm account with permission to publish public packages under that scope.
+2. Check the npm UI for each package that has never been published. The
+   [npm trusted publishing docs](https://docs.npmjs.com/trusted-publishers/)
+   describe setup in a package's Settings. Whether the UI permits setup before
+   the package exists is unverified. If Settings is unavailable, the owner must
+   first publish the public package with an authenticated npm session. Keep the
+   workflow disabled during that first publication. Use the exact GitHub Release
+   tarball if the workflow will later run for that version. Add
+   `--provenance=false` to that manual `npm publish`: the tarballs ask for
+   provenance, and npm generates it only inside a supported CI system. A version
+   published this way has no provenance. Versions the workflow publishes do.
+   The publish job exists only in tags cut after it was added. An earlier
+   release can reach npm only by this manual route.
+3. In each package's Settings, open Trusted publishing and choose GitHub Actions.
+   Under Allowed actions, allow `npm publish`: the job publishes directly and
+   does not stage. For `@logbird/sdk`, `@logbird/hono`, `@logbird/vue`,
+   `@logbird/nuxt` and `@logbird/tanstack-start`, enter owner `joodlab`,
+   repository `logbird` and workflow filename `release.yml`. Leave Environment
+   blank. Time setup for a release that will publish a new version. npm requires
+   a successful publish through a new connection within two days.
+4. In each package's Settings, open Publishing access. Select
+   **Require two-factor authentication and disallow tokens** and save. Trusted
+   publishing still works with this setting.
+5. In GitHub, open this repository's Settings. Under Secrets and variables,
+   choose Actions, then Variables. Create the repository variable `NPM_PUBLISH_ENABLED` with value
+   `true`. Verify that the next release publishes all five packages and shows
+   their [npm provenance](https://docs.npmjs.com/generating-provenance-statements/).
 
 ## NuGet packages (.NET SDK)
 
