@@ -62,6 +62,9 @@ retries of those jobs and every record they changed. `context.parentEventId` lin
 caused it, forming a causation tree inside the operation. Open any event in the Explorer and follow its
 operation to see the whole chain, or search `operation:<id>`.
 
+To read these back as one record's complete timeline with a read key (who, when, what changed and what caused what),
+follow [Read a record's whole history back](reading-history.md).
+
 ## Worked example: a cancellation and its refund
 
 Lina, a user of the Azure Hotels account, cancels booking #1042 through your API. The API server records the
